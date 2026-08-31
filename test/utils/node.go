@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -67,28 +68,42 @@ func UpdateNode(clientSet *kubernetes.Clientset, node *v1.Node) (*v1.Node, error
 }
 
 func AddNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey, labelValue string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Labels == nil {
+			node.Labels = make(map[string]string)
+		}
+		node.Labels[labelKey] = labelValue
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	if node.Labels == nil {
-		node.Labels = make(map[string]string)
-	}
-	node.Labels[labelKey] = labelValue
-
-	return UpdateNode(clientSet, node)
+	time.Sleep(time.Second * 30)
+	return result, nil
 }
 
 func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Labels != nil {
+			delete(node.Labels, labelKey)
+		}
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	if node.Labels != nil {
-		delete(node.Labels, labelKey)
-	}
-
-	return UpdateNode(clientSet, node)
+	time.Sleep(time.Second * 30)
+	return result, nil
 }
