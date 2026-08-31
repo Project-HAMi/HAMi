@@ -69,7 +69,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
-	rootCmd.Flags().IntVar(&config.FilterParallelism, "filter-parallelism", 0, "maximum number of candidate nodes scored concurrently during Filter (0 means runtime.GOMAXPROCS)")
+	rootCmd.Flags().IntVar(&config.FilterParallelism, "filter-parallelism", 0, "maximum number of candidate nodes scored concurrently during Filter (zero or negative means runtime.GOMAXPROCS)")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 

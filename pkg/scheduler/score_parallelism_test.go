@@ -64,13 +64,15 @@ func TestFilterWorkerCount(t *testing.T) {
 			name:        "zero falls back to GOMAXPROCS",
 			parallelism: 0,
 			nodeCount:   1024,
-			want:        gomaxprocs,
+			// The node-count cap applies to the fallback too, so a host with
+			// more than 1024 CPUs is still capped at the candidate count.
+			want: min(gomaxprocs, 1024),
 		},
 		{
 			name:        "negative falls back to GOMAXPROCS",
 			parallelism: -1,
 			nodeCount:   1024,
-			want:        gomaxprocs,
+			want:        min(gomaxprocs, 1024),
 		},
 		{
 			name:        "no candidate nodes needs no workers",
@@ -94,6 +96,19 @@ func TestFilterWorkerCount(t *testing.T) {
 	}
 }
 
+// bareTestNodes builds nodeCount NodeUsage entries carrying nothing but a node
+// name. runNodeWorkers only fans the map out, so its tests need no devices.
+func bareTestNodes(nodeCount int) map[string]*NodeUsage {
+	nodes := make(map[string]*NodeUsage, nodeCount)
+	for i := range nodeCount {
+		name := "node" + strconv.Itoa(i)
+		nodes[name] = &NodeUsage{
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+		}
+	}
+	return nodes
+}
+
 // TestRunNodeWorkersBoundsConcurrency is the regression guard for the bound
 // itself. The equivalence test below only proves the results are unchanged,
 // which stays true if the worker pool is reverted to one goroutine per node,
@@ -106,13 +121,7 @@ func TestFilterWorkerCount(t *testing.T) {
 func TestRunNodeWorkersBoundsConcurrency(t *testing.T) {
 	const nodeCount = 32
 
-	nodes := make(map[string]*NodeUsage, nodeCount)
-	for i := range nodeCount {
-		name := "node" + strconv.Itoa(i)
-		nodes[name] = &NodeUsage{
-			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
-		}
-	}
+	nodes := bareTestNodes(nodeCount)
 
 	for _, workers := range []int{1, 2, 4} {
 		t.Run("workers="+strconv.Itoa(workers), func(t *testing.T) {
@@ -156,14 +165,72 @@ func TestRunNodeWorkersBoundsConcurrency(t *testing.T) {
 }
 
 // TestRunNodeWorkersNoNodes covers the zero-worker path: filterWorkerCount
-// returns 0 for an empty cluster, so no goroutine is started and the send loop
-// never runs. It must return rather than deadlock.
+// returns 0 for an empty cluster, so no goroutine is started and fn is never
+// called. It must return rather than deadlock.
 func TestRunNodeWorkersNoNodes(t *testing.T) {
 	called := atomic.Bool{}
 	runNodeWorkers(map[string]*NodeUsage{}, 0, func(string, *NodeUsage) {
 		called.Store(true)
 	})
 	assert.Equal(t, false, called.Load())
+}
+
+// TestRunNodeWorkersNonPositiveWorkers pins the guard inside runNodeWorkers.
+// Without it a non-positive worker count starts no worker, leaving the first
+// send on the unbuffered jobs channel with no receiver: the helper would hang
+// forever on a non-empty node set. Every node must still be visited exactly
+// once, under the GOMAXPROCS fallback bound.
+//
+// The test would hang rather than fail if the guard were removed, so it runs
+// the fan-out in a goroutine and fails on a timeout instead.
+func TestRunNodeWorkersNonPositiveWorkers(t *testing.T) {
+	const nodeCount = 16
+
+	for _, workers := range []int{0, -1} {
+		t.Run("workers="+strconv.Itoa(workers), func(t *testing.T) {
+			nodes := bareTestNodes(nodeCount)
+
+			var peak atomic.Int64
+			var inFlight atomic.Int64
+
+			visitMutex := sync.Mutex{}
+			visits := map[string]int{}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				runNodeWorkers(nodes, workers, func(nodeID string, node *NodeUsage) {
+					current := inFlight.Add(1)
+					for {
+						observed := peak.Load()
+						if current <= observed || peak.CompareAndSwap(observed, current) {
+							break
+						}
+					}
+
+					visitMutex.Lock()
+					visits[nodeID]++
+					visitMutex.Unlock()
+
+					inFlight.Add(-1)
+				})
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatalf("runNodeWorkers blocked with workers=%d", workers)
+			}
+
+			assert.Equal(t, nodeCount, len(visits))
+			for nodeID, count := range visits {
+				assert.Equal(t, 1, count, "node %s visited %d times", nodeID, count)
+			}
+			assert.Assert(t, peak.Load() <= int64(runtime.GOMAXPROCS(0)),
+				"observed %d concurrent calls, expected at most GOMAXPROCS=%d",
+				peak.Load(), runtime.GOMAXPROCS(0))
+		})
+	}
 }
 
 // parallelismTestContainer builds a container requesting one whole-card slice.

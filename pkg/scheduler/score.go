@@ -417,7 +417,21 @@ func filterWorkerCount(nodeCount int) int {
 
 // runNodeWorkers calls fn once for every node, running at most workers of them
 // at a time. Callers must make fn safe for concurrent use.
+//
+// The worker count is normalised here rather than only in the caller: with no
+// worker no one ever receives from jobs, so a non-positive value handed in by
+// any future caller would block on the first send instead of failing. Such a
+// value falls back to runtime.GOMAXPROCS, the same meaning
+// config.FilterParallelism gives it, and an empty node set returns before any
+// goroutine is started.
 func runNodeWorkers(nodes map[string]*NodeUsage, workers int, fn func(nodeID string, node *NodeUsage)) {
+	if len(nodes) == 0 {
+		return
+	}
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+
 	type nodeJob struct {
 		nodeID string
 		node   *NodeUsage
