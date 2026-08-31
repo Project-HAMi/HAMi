@@ -30,7 +30,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -591,22 +590,37 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 }
 
 // NewClusterManager creates a ClusterManager for the given zone, backs its pod
-// lookups with a shared informer, and registers its collector with reg through
-// a wrapping Registerer that adds the zone as a label.
+// lookups with the container lister's pod informer, and registers its collector
+// with reg through a wrapping Registerer that adds the zone as a label.
+//
+// Both collectors below narrow their pod lookups to this node, so they reuse the
+// informer ContainerLister already runs. It is scoped with a spec.nodeName field
+// selector and is waited on before use, unlike the cluster-wide unsynced informer
+// this used to start on every node in addition to that one.
+//
+// The scheduler writes the hami.io/vgpu-node label the collectors select on, and
+// the kubelet sets spec.nodeName, so between those two writes a pod carries the
+// label without matching the field selector yet. collectPodAndContainerInfo is
+// unaffected because it needs a running container anyway, while
+// collectPodAndContainerMigInfo reads annotations alone and so skips such a pod
+// for the rest of that scrape. It is picked up on the next one.
 func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
+	}
+	if containerLister == nil || containerLister.PodLister() == nil {
+		// NewContainerLister always initializes the informer, so this only
+		// happens if a caller builds a ContainerLister by hand. Fail here
+		// rather than nil panic on the first scrape.
+		klog.Error("container lister has no pod lister; not registering the vGPUmonitor collector")
+		return nil
 	}
 	c := &ClusterManager{
 		Zone:            zone,
 		containerLister: containerLister,
 		LegacyMetrics:   legacyMetrics,
+		PodLister:       containerLister.PodLister(),
 	}
-
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
-	c.PodLister = informerFactory.Core().V1().Pods().Lister()
-	stopCh := make(chan struct{})
-	informerFactory.Start(stopCh)
 
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
