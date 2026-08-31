@@ -67,33 +67,69 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 }
 
+// descVariableLabels extracts the variable label names from a Prometheus
+// Desc's String() representation, e.g. the "node,device_index,..." part of
+// `variableLabels: {node,device_index,...}`. This lets callers check for an
+// exact label name instead of doing a substring match against the whole
+// descriptor string, which can spuriously match (any string containing
+// "node" also contains "node" as a substring, and "node" is itself a
+// substring of "nodeid").
+func descVariableLabels(desc *prometheus.Desc) []string {
+	s := desc.String()
+	const marker = "variableLabels: {"
+	start := strings.Index(s, marker)
+	if start == -1 {
+		return nil
+	}
+	start += len(marker)
+	end := strings.Index(s[start:], "}")
+	if end == -1 {
+		return nil
+	}
+	inner := s[start : start+end]
+	if inner == "" {
+		return nil
+	}
+	labels := strings.Split(inner, ",")
+	for i := range labels {
+		labels[i] = strings.TrimSpace(labels[i])
+	}
+	return labels
+}
+
+// descHasLabel reports whether desc declares label as one of its variable
+// labels (exact match, not a substring check).
+func descHasLabel(desc *prometheus.Desc, label string) bool {
+	for _, l := range descVariableLabels(desc) {
+		if l == label {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 	initLegacyDescriptors()
 
-	hostGPUString := hostGPUdesc.String()
-	if !strings.Contains(hostGPUString, `"node"`) && !strings.Contains(hostGPUString, `node`) {
-		t.Errorf("hostGPUdesc does not contain 'node' label: %s", hostGPUString)
+	if !descHasLabel(hostGPUdesc, "node") {
+		t.Errorf("hostGPUdesc does not contain 'node' label: %s", hostGPUdesc.String())
 	}
 
-	hostGPUUtilString := hostGPUUtilizationdesc.String()
-	if !strings.Contains(hostGPUUtilString, `"node"`) && !strings.Contains(hostGPUUtilString, `node`) {
-		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilString)
+	if !descHasLabel(hostGPUUtilizationdesc, "node") {
+		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilizationdesc.String())
 	}
 
-	hostGPUMemoryUtilString := hostGPUMemoryUtilizationdesc.String()
-	if !strings.Contains(hostGPUMemoryUtilString, `"node"`) && !strings.Contains(hostGPUMemoryUtilString, `node`) {
-		t.Errorf("hostGPUMemoryUtilizationdesc does not contain 'node' label: %s", hostGPUMemoryUtilString)
+	if !descHasLabel(hostGPUMemoryUtilizationdesc, "node") {
+		t.Errorf("hostGPUMemoryUtilizationdesc does not contain 'node' label: %s", hostGPUMemoryUtilizationdesc.String())
 	}
 
 	// Verify legacy host GPU descriptors include "nodeid" label
-	legacyHostGPUString := legacyHostGPUdesc.String()
-	if !strings.Contains(legacyHostGPUString, `"nodeid"`) && !strings.Contains(legacyHostGPUString, `nodeid`) {
-		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUString)
+	if !descHasLabel(legacyHostGPUdesc, "nodeid") {
+		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUdesc.String())
 	}
 
-	legacyHostGPUUtilString := legacyHostGPUUtilizationdesc.String()
-	if !strings.Contains(legacyHostGPUUtilString, `"nodeid"`) && !strings.Contains(legacyHostGPUUtilString, `nodeid`) {
-		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilString)
+	if !descHasLabel(legacyHostGPUUtilizationdesc, "nodeid") {
+		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilizationdesc.String())
 	}
 }
 
