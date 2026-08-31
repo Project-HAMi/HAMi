@@ -12,32 +12,18 @@ import (
 var _ Interface = &InterfaceMock{}
 
 // InterfaceMock is a mock implementation of Interface.
-//
-//	func TestSomethingThatUsesInterface(t *testing.T) {
-//
-//		// make and configure a mocked Interface
-//		mockedInterface := &InterfaceMock{
-//			AdditionalDevicesFunc: func() []string {
-//				panic("mock out the AdditionalDevices method")
-//			},
-//			CreateSpecFileFunc: func() error {
-//				panic("mock out the CreateSpecFile method")
-//			},
-//			QualifiedNameFunc: func(s1 string, s2 string) string {
-//				panic("mock out the QualifiedName method")
-//			},
-//		}
-//
-//		// use mockedInterface in code that requires Interface
-//		// and then make assertions.
-//
-//	}
 type InterfaceMock struct {
 	// AdditionalDevicesFunc mocks the AdditionalDevices method.
 	AdditionalDevicesFunc func() []string
 
+	// CreateMigSpecFileFunc mocks the CreateMigSpecFile method.
+	CreateMigSpecFileFunc func(migUUID string, devicePath string, caps map[string]string) error
+
 	// CreateSpecFileFunc mocks the CreateSpecFile method.
 	CreateSpecFileFunc func() error
+
+	// DeleteMigSpecFileFunc mocks the DeleteMigSpecFile method.
+	DeleteMigSpecFileFunc func(migUUID string) error
 
 	// QualifiedNameFunc mocks the QualifiedName method.
 	QualifiedNameFunc func(s1 string, s2 string) string
@@ -47,8 +33,22 @@ type InterfaceMock struct {
 		// AdditionalDevices holds details about calls to the AdditionalDevices method.
 		AdditionalDevices []struct {
 		}
+		// CreateMigSpecFile holds details about calls to the CreateMigSpecFile method.
+		CreateMigSpecFile []struct {
+			// MigUUID is the migUUID argument value.
+			MigUUID string
+			// DevicePath is the devicePath argument value.
+			DevicePath string
+			// Caps is the caps argument value.
+			Caps map[string]string
+		}
 		// CreateSpecFile holds details about calls to the CreateSpecFile method.
 		CreateSpecFile []struct {
+		}
+		// DeleteMigSpecFile holds details about calls to the DeleteMigSpecFile method.
+		DeleteMigSpecFile []struct {
+			// MigUUID is the migUUID argument value.
+			MigUUID string
 		}
 		// QualifiedName holds details about calls to the QualifiedName method.
 		QualifiedName []struct {
@@ -59,7 +59,9 @@ type InterfaceMock struct {
 		}
 	}
 	lockAdditionalDevices sync.RWMutex
+	lockCreateMigSpecFile sync.RWMutex
 	lockCreateSpecFile    sync.RWMutex
+	lockDeleteMigSpecFile sync.RWMutex
 	lockQualifiedName     sync.RWMutex
 }
 
@@ -80,9 +82,6 @@ func (mock *InterfaceMock) AdditionalDevices() []string {
 }
 
 // AdditionalDevicesCalls gets all the calls that were made to AdditionalDevices.
-// Check the length with:
-//
-//	len(mockedInterface.AdditionalDevicesCalls())
 func (mock *InterfaceMock) AdditionalDevicesCalls() []struct {
 } {
 	var calls []struct {
@@ -90,6 +89,46 @@ func (mock *InterfaceMock) AdditionalDevicesCalls() []struct {
 	mock.lockAdditionalDevices.RLock()
 	calls = mock.calls.AdditionalDevices
 	mock.lockAdditionalDevices.RUnlock()
+	return calls
+}
+
+// CreateMigSpecFile calls CreateMigSpecFileFunc.
+func (mock *InterfaceMock) CreateMigSpecFile(migUUID string, devicePath string, caps map[string]string) error {
+	callInfo := struct {
+		MigUUID    string
+		DevicePath string
+		Caps       map[string]string
+	}{
+		MigUUID:    migUUID,
+		DevicePath: devicePath,
+		Caps:       caps,
+	}
+	mock.lockCreateMigSpecFile.Lock()
+	mock.calls.CreateMigSpecFile = append(mock.calls.CreateMigSpecFile, callInfo)
+	mock.lockCreateMigSpecFile.Unlock()
+	if mock.CreateMigSpecFileFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.CreateMigSpecFileFunc(migUUID, devicePath, caps)
+}
+
+// CreateMigSpecFileCalls gets all the calls that were made to CreateMigSpecFile.
+func (mock *InterfaceMock) CreateMigSpecFileCalls() []struct {
+	MigUUID    string
+	DevicePath string
+	Caps       map[string]string
+} {
+	var calls []struct {
+		MigUUID    string
+		DevicePath string
+		Caps       map[string]string
+	}
+	mock.lockCreateMigSpecFile.RLock()
+	calls = mock.calls.CreateMigSpecFile
+	mock.lockCreateMigSpecFile.RUnlock()
 	return calls
 }
 
@@ -110,9 +149,6 @@ func (mock *InterfaceMock) CreateSpecFile() error {
 }
 
 // CreateSpecFileCalls gets all the calls that were made to CreateSpecFile.
-// Check the length with:
-//
-//	len(mockedInterface.CreateSpecFileCalls())
 func (mock *InterfaceMock) CreateSpecFileCalls() []struct {
 } {
 	var calls []struct {
@@ -120,6 +156,38 @@ func (mock *InterfaceMock) CreateSpecFileCalls() []struct {
 	mock.lockCreateSpecFile.RLock()
 	calls = mock.calls.CreateSpecFile
 	mock.lockCreateSpecFile.RUnlock()
+	return calls
+}
+
+// DeleteMigSpecFile calls DeleteMigSpecFileFunc.
+func (mock *InterfaceMock) DeleteMigSpecFile(migUUID string) error {
+	callInfo := struct {
+		MigUUID string
+	}{
+		MigUUID: migUUID,
+	}
+	mock.lockDeleteMigSpecFile.Lock()
+	mock.calls.DeleteMigSpecFile = append(mock.calls.DeleteMigSpecFile, callInfo)
+	mock.lockDeleteMigSpecFile.Unlock()
+	if mock.DeleteMigSpecFileFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.DeleteMigSpecFileFunc(migUUID)
+}
+
+// DeleteMigSpecFileCalls gets all the calls that were made to DeleteMigSpecFile.
+func (mock *InterfaceMock) DeleteMigSpecFileCalls() []struct {
+	MigUUID string
+} {
+	var calls []struct {
+		MigUUID string
+	}
+	mock.lockDeleteMigSpecFile.RLock()
+	calls = mock.calls.DeleteMigSpecFile
+	mock.lockDeleteMigSpecFile.RUnlock()
 	return calls
 }
 
@@ -145,9 +213,6 @@ func (mock *InterfaceMock) QualifiedName(s1 string, s2 string) string {
 }
 
 // QualifiedNameCalls gets all the calls that were made to QualifiedName.
-// Check the length with:
-//
-//	len(mockedInterface.QualifiedNameCalls())
 func (mock *InterfaceMock) QualifiedNameCalls() []struct {
 	S1 string
 	S2 string

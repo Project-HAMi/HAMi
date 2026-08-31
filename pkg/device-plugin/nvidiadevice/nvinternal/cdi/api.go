@@ -37,6 +37,8 @@ package cdi
 //go:generate moq -rm -fmt=goimports -stub -out api_mock.go . Interface
 type Interface interface {
 	CreateSpecFile() error
+	CreateMigSpecFile(migUUID string, devicePath string, caps map[string]string) error
+	DeleteMigSpecFile(migUUID string) error
 	QualifiedName(string, string) string
 	AdditionalDevices() []string
 }

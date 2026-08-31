@@ -50,9 +50,10 @@ import (
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 )
 
-const (
+var (
 	cdiRoot = "/var/run/cdi"
 )
 
@@ -187,13 +188,11 @@ func (cdi *cdiHandler) CreateSpecFile() error {
 		cdi.logger.Infof("Generating CDI spec for resource: %s/%s", cdi.vendor, class)
 
 		if class == "gpu" {
-			ret := cdi.nvmllib.Init()
-			if ret != nvml.SUCCESS {
-				return fmt.Errorf("failed to initialize NVML: %v", ret)
+			session := rm.GetNVMLSession(cdi.nvmllib)
+			if err := session.Init(); err != nil {
+				return fmt.Errorf("failed to initialize NVML session: %w", err)
 			}
-			defer func() {
-				_ = cdi.nvmllib.Shutdown()
-			}()
+			defer session.Shutdown()
 		}
 
 		spec, err := cdilib.GetSpec()

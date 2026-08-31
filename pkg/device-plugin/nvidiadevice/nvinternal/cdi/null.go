@@ -55,6 +55,16 @@ func (n *null) CreateSpecFile() error {
 	return nil
 }
 
+// CreateMigSpecFile is a no-op for the null handler.
+func (n *null) CreateMigSpecFile(migUUID string, devicePath string, caps map[string]string) error {
+	return nil
+}
+
+// DeleteMigSpecFile is a no-op for the null handler.
+func (n *null) DeleteMigSpecFile(migUUID string) error {
+	return nil
+}
+
 // QualifiedName is a no-op for the null handler. A error message is logged
 // indicating this should never be called for the null handler.
 func (n *null) QualifiedName(class string, id string) string {
