@@ -76,22 +76,17 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
 			}
+		} else if err := s.CheckSchedulingAdmission(); err != nil {
+			klog.ErrorS(err, "Cannot proceed with filtering")
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: err.Error(),
+			}
 		} else {
-			synced := s.WaitForCacheSync(r.Context())
-			if !synced {
-				// Poll may return false when context is cancelled
-				err := fmt.Errorf("context cancelled")
-				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
+			extenderFilterResult, err = s.Filter(extenderArgs)
+			if err != nil {
+				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 				extenderFilterResult = &extenderv1.ExtenderFilterResult{
 					Error: err.Error(),
-				}
-			} else {
-				extenderFilterResult, err = s.Filter(extenderArgs)
-				if err != nil {
-					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
-					extenderFilterResult = &extenderv1.ExtenderFilterResult{
-						Error: err.Error(),
-					}
 				}
 			}
 		}
@@ -126,6 +121,11 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 
 		if err := json.NewDecoder(body).Decode(&extenderBindingArgs); err != nil {
 			klog.ErrorS(err, "Failed to decode extender binding arguments")
+			extenderBindingResult = &extenderv1.ExtenderBindingResult{
+				Error: err.Error(),
+			}
+		} else if err := s.CheckSchedulingAdmission(); err != nil {
+			klog.ErrorS(err, "Cannot proceed with binding")
 			extenderBindingResult = &extenderv1.ExtenderBindingResult{
 				Error: err.Error(),
 			}
@@ -203,10 +203,8 @@ func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
 		if err := json.NewDecoder(body).Decode(&request); err != nil {
 			klog.ErrorS(err, "Failed to decode NUMA refit request")
 			response = device.NumaRefitResponse{FailureReason: err.Error()}
-		} else if !s.WaitForCacheSync(r.Context()) {
-			// Poll may return false when context is cancelled
-			err := fmt.Errorf("context cancelled")
-			klog.ErrorS(err, "Cache not synced, cannot refit")
+		} else if err := s.CheckSchedulingAdmission(); err != nil {
+			klog.ErrorS(err, "Cannot proceed with NUMA refit")
 			response = device.NumaRefitResponse{FailureReason: err.Error()}
 		} else {
 			response = s.RefitNumaAllocation(request)

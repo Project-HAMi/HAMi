@@ -22,14 +22,27 @@ import (
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/tools/cache"
 )
 
 type LeaderCallbacks struct {
-	// OnStartedLeading is called when starts leading
+	// Callbacks run after CurrentState has published the new state. A direct
+	// term-to-term transition calls OnStoppedLeading before OnStartedLeading;
+	// both callbacks observe the new term.
+	// OnStartedLeading is called when starts leading.
 	OnStartedLeading func()
-	// OnStoppedLeading is called when stops leading
+	// OnStoppedLeading is called when stops leading.
 	OnStoppedLeading func()
+}
+
+// LeadershipState is a point-in-time view of local leadership. Term is an
+// opaque, process-local generation that starts at one and advances whenever
+// this instance enters a new observed leadership term. A former leader keeps
+// its last term while IsLeader is false; zero means no term has been observed.
+type LeadershipState struct {
+	IsLeader bool
+	Term     uint64
 }
 
 type LeaderManager interface {
@@ -38,16 +51,24 @@ type LeaderManager interface {
 	cache.ResourceEventHandler
 }
 
-var _ LeaderManager = &leaderManager{}
+type TermAwareLeaderManager interface {
+	LeaderManager
+	CurrentState() LeadershipState
+}
+
+var _ TermAwareLeaderManager = &leaderManager{}
 
 type leaderManager struct {
 	hostname          string
 	resourceName      string
 	resourceNamespace string
 
-	leaseLock     sync.RWMutex
-	observedLease *coordinationv1.Lease
-	observedTime  time.Time
+	leaseLock       sync.RWMutex
+	observedLease   *coordinationv1.Lease
+	observedTime    time.Time
+	term            uint64
+	now             func() time.Time
+	notifiedLeading bool
 
 	callbacks LeaderCallbacks
 
@@ -60,6 +81,7 @@ func NewLeaderManager(hostname, namespace, name string, callbacks LeaderCallback
 		resourceName:      name,
 		resourceNamespace: namespace,
 		callbacks:         callbacks,
+		now:               time.Now,
 	}
 
 	m.FilteringResourceEventHandler = cache.FilteringResourceEventHandler{
@@ -94,13 +116,53 @@ func objectToLease(obj any) *coordinationv1.Lease {
 	return nil
 }
 
-func (m *leaderManager) setObservedRecord(lease *coordinationv1.Lease) {
+func (m *leaderManager) setObservedRecordAt(lease *coordinationv1.Lease, observedAt time.Time) {
 	m.observedLease = lease
 
 	if lease == nil {
 		m.observedTime = time.Time{}
 	} else {
-		m.observedTime = time.Now()
+		m.observedTime = observedAt
+	}
+}
+
+func (m *leaderManager) setObservedRecord(lease *coordinationv1.Lease) {
+	m.setObservedRecordAt(lease, m.now())
+}
+
+func (m *leaderManager) observe(lease *coordinationv1.Lease, forceRefresh bool) {
+	now := m.now()
+	m.leaseLock.Lock()
+	previousState := m.currentStateLocked(now)
+	previousHolder := holderIdentity(m.observedLease)
+	if lease == nil {
+		m.setObservedRecordAt(nil, now)
+	} else if forceRefresh || m.observedLease == nil || !apiequality.Semantic.DeepEqual(m.observedLease.Spec, lease.Spec) {
+		m.setObservedRecordAt(lease, now)
+	} else {
+		// Informer resync and metadata-only updates must not extend the lease.
+		m.observedLease = lease
+	}
+	currentState := m.currentStateLocked(now)
+	currentHolder := holderIdentity(lease)
+
+	// kube-scheduler includes a UUID in HolderIdentity. A changed full
+	// identity for the same hostname is therefore a new leadership term.
+	holderChanged := previousState.IsLeader && currentState.IsLeader && previousHolder != currentHolder
+	termChanged := currentState.IsLeader && (!previousState.IsLeader || holderChanged)
+	if termChanged {
+		m.term++
+	}
+	stoppedLeading := m.notifiedLeading && (!currentState.IsLeader || termChanged)
+	startedLeading := currentState.IsLeader && (!m.notifiedLeading || termChanged)
+	m.notifiedLeading = currentState.IsLeader
+	m.leaseLock.Unlock()
+
+	if stoppedLeading && m.callbacks.OnStoppedLeading != nil {
+		m.callbacks.OnStoppedLeading()
+	}
+	if startedLeading && m.callbacks.OnStartedLeading != nil {
+		m.callbacks.OnStartedLeading()
 	}
 }
 
@@ -110,63 +172,44 @@ func (m *leaderManager) onAdd(obj any) {
 	if !ok {
 		return
 	}
-
-	m.leaseLock.Lock()
-	m.setObservedRecord(lease)
-	var callback func()
-	if m.isHolderOf(lease) {
-		callback = m.callbacks.OnStartedLeading
-	}
-	m.leaseLock.Unlock()
-
-	if callback != nil {
-		callback()
-	}
+	m.observe(lease, true)
 }
 
-// onUpdate notifies when we have been elected as leader.
+// onUpdate notifies when leadership changes or an expired lease becomes valid
+// again. oldObj is validated because informer update handlers must receive two
+// Lease objects, but the manager's locked observed state is authoritative.
 func (m *leaderManager) onUpdate(oldObj, newObj any) {
+	if _, ok := oldObj.(*coordinationv1.Lease); !ok {
+		return
+	}
 	newLease, ok := newObj.(*coordinationv1.Lease)
 	if !ok {
 		return
 	}
-	oldLease, ok := oldObj.(*coordinationv1.Lease)
-	if !ok {
-		return
-	}
-
-	m.leaseLock.Lock()
-	m.setObservedRecord(newLease)
-	var callback func()
-	if !m.isHolderOf(oldLease) && m.isHolderOf(newLease) {
-		callback = m.callbacks.OnStartedLeading
-	} else if m.isHolderOf(oldLease) && !m.isHolderOf(newLease) {
-		callback = m.callbacks.OnStoppedLeading
-	}
-	m.leaseLock.Unlock()
-
-	if callback != nil {
-		callback()
-	}
+	m.observe(newLease, false)
 }
 
 func (m *leaderManager) onDelete(obj any) {
-	m.leaseLock.Lock()
-	m.setObservedRecord(nil)
-	callback := m.callbacks.OnStoppedLeading
-	m.leaseLock.Unlock()
-
-	if callback != nil {
-		callback()
+	if objectToLease(obj) == nil {
+		return
 	}
+	m.observe(nil, true)
 }
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
-	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
+	// Only kube-scheduler's `hostname + "_" + UUID` identity format is
+	// supported; requiring the separator avoids hostname-prefix collisions.
 	if lease == nil || lease.Spec.HolderIdentity == nil {
 		return false
 	}
-	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
+	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname+"_")
+}
+
+func holderIdentity(lease *coordinationv1.Lease) string {
+	if lease == nil || lease.Spec.HolderIdentity == nil {
+		return ""
+	}
+	return *lease.Spec.HolderIdentity
 }
 
 func (m *leaderManager) isLeaseValid(now time.Time) bool {
@@ -176,15 +219,21 @@ func (m *leaderManager) isLeaseValid(now time.Time) bool {
 	return m.observedTime.Add(time.Second * time.Duration(*m.observedLease.Spec.LeaseDurationSeconds)).After(now)
 }
 
-func (m *leaderManager) IsLeader() bool {
+func (m *leaderManager) currentStateLocked(now time.Time) LeadershipState {
+	return LeadershipState{
+		IsLeader: m.isHolderOf(m.observedLease) && m.isLeaseValid(now),
+		Term:     m.term,
+	}
+}
+
+func (m *leaderManager) CurrentState() LeadershipState {
 	m.leaseLock.RLock()
 	defer m.leaseLock.RUnlock()
+	return m.currentStateLocked(m.now())
+}
 
-	if m.observedLease == nil {
-		return false
-	}
-
-	return m.isHolderOf(m.observedLease) && m.isLeaseValid(time.Now())
+func (m *leaderManager) IsLeader() bool {
+	return m.CurrentState().IsLeader
 }
 
 type dummyLeaderManager struct {
@@ -192,7 +241,7 @@ type dummyLeaderManager struct {
 	cache.ResourceEventHandlerFuncs
 }
 
-var _ LeaderManager = &dummyLeaderManager{}
+var _ TermAwareLeaderManager = &dummyLeaderManager{}
 
 // NewDummyLeaderManager creates a dummy leader manager which will not change its elected state during its lifetime.
 // It will always return the elected state passed in the constructor when calling IsLeader() and you will never get notified by it's channel.
@@ -206,4 +255,11 @@ func NewDummyLeaderManager(elected bool) *dummyLeaderManager {
 
 func (d *dummyLeaderManager) IsLeader() bool {
 	return d.elected
+}
+
+func (d *dummyLeaderManager) CurrentState() LeadershipState {
+	if !d.elected {
+		return LeadershipState{}
+	}
+	return LeadershipState{IsLeader: true, Term: 1}
 }

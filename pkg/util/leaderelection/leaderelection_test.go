@@ -17,6 +17,7 @@ limitations under the License.
 package leaderelection
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +131,127 @@ func acquireLeaseWithNewHost(lease *coordinationv1.Lease, hostname string) *coor
 	new := lease.DeepCopy()
 	new.Spec.HolderIdentity = &holderIdentity
 	return new
+}
+
+func TestLeadershipTermTransitions(t *testing.T) {
+	baseTime := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name          string
+		advance       time.Duration
+		newHolder     bool
+		noRenewal     bool
+		wantLeader    bool
+		wantNewTerm   bool
+		wantStarted   int
+		wantStopped   int
+		wantCallbacks string
+	}{
+		{
+			name:          "ordinary renewal keeps term",
+			advance:       time.Second,
+			wantLeader:    true,
+			wantStarted:   1,
+			wantCallbacks: "start",
+		},
+		{
+			name:          "same holder after expiry starts new term",
+			advance:       16 * time.Second,
+			wantLeader:    true,
+			wantNewTerm:   true,
+			wantStarted:   2,
+			wantStopped:   1,
+			wantCallbacks: "start,stop,start",
+		},
+		{
+			name:          "resync update does not revive expired lease",
+			advance:       16 * time.Second,
+			noRenewal:     true,
+			wantStarted:   1,
+			wantStopped:   1,
+			wantCallbacks: "start,stop",
+		},
+		{
+			name:          "new identity on same host starts new term",
+			advance:       time.Second,
+			newHolder:     true,
+			wantLeader:    true,
+			wantNewTerm:   true,
+			wantStarted:   2,
+			wantStopped:   1,
+			wantCallbacks: "start,stop,start",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := baseTime
+			started := 0
+			stopped := 0
+			var callbacks []string
+			m := NewLeaderManager("dev", "kube-system", "hami-scheduler", LeaderCallbacks{
+				OnStartedLeading: func() {
+					started++
+					callbacks = append(callbacks, "start")
+				},
+				OnStoppedLeading: func() {
+					stopped++
+					callbacks = append(callbacks, "stop")
+				},
+			})
+			m.now = func() time.Time { return now }
+
+			lease := generateLease("dev", "kube-system", "hami-scheduler")
+			m.OnAdd(lease, true)
+			initialState := m.CurrentState()
+			if !initialState.IsLeader || initialState.Term == 0 {
+				t.Fatalf("expected initial leadership term, got %+v", initialState)
+			}
+
+			now = now.Add(tt.advance)
+			if tt.advance > 15*time.Second && m.IsLeader() {
+				t.Fatal("expected the observed lease to expire")
+			}
+
+			renewed := renewLeaseAtNow(lease)
+			if tt.noRenewal {
+				renewed = lease.DeepCopy()
+				renewed.ResourceVersion = "resync"
+			} else if tt.newHolder {
+				renewed = acquireLeaseWithNewHost(lease, "dev")
+			}
+			m.OnUpdate(lease, renewed)
+			currentState := m.CurrentState()
+			if currentState.IsLeader != tt.wantLeader {
+				t.Fatalf("leadership mismatch: got %+v, want leader=%t", currentState, tt.wantLeader)
+			}
+			if tt.wantNewTerm != (currentState.Term > initialState.Term) {
+				t.Fatalf("term transition mismatch: initial=%d current=%d", initialState.Term, currentState.Term)
+			}
+			if started != tt.wantStarted || stopped != tt.wantStopped {
+				t.Fatalf("callbacks mismatch: started=%d stopped=%d", started, stopped)
+			}
+			if got := strings.Join(callbacks, ","); got != tt.wantCallbacks {
+				t.Fatalf("callback order mismatch: got %q, want %q", got, tt.wantCallbacks)
+			}
+		})
+	}
+}
+
+func TestHolderIdentityRequiresHostnameSeparator(t *testing.T) {
+	m := NewLeaderManager("dev", "kube-system", "hami-scheduler", LeaderCallbacks{})
+	valid := "dev_uuid"
+	prefixCollision := "dev2_uuid"
+	plainHostname := "dev"
+
+	if !m.isHolderOf(&coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &valid}}) {
+		t.Fatal("expected canonical kube-scheduler holder identity to match")
+	}
+	if m.isHolderOf(&coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &prefixCollision}}) {
+		t.Fatal("hostname prefix collision must not match")
+	}
+	if m.isHolderOf(&coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: &plainHostname}}) {
+		t.Fatal("plain holder identity without kube-scheduler separator must not match")
+	}
 }
 
 var _ = ginkgo.Describe("LeaderManager", func() {
@@ -488,5 +610,8 @@ var _ = ginkgo.Describe("DummyLeaderManager", func() {
 
 	ginkgo.It("should always be leader but not notified", func() {
 		assertElectedWithoutNotifying(lm, leaderNotify)
+		termAware, ok := lm.(TermAwareLeaderManager)
+		g.Expect(ok).Should(g.BeTrue())
+		g.Expect(termAware.CurrentState()).Should(g.Equal(LeadershipState{IsLeader: true, Term: 1}))
 	})
 })

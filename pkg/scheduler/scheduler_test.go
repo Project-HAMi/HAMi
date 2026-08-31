@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,6 +51,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
@@ -1384,6 +1386,180 @@ func (m *registerMockDevice) AddResourceUsage(_ *corev1.Pod, _ *device.DeviceUsa
 }
 func (m *registerMockDevice) Fit(_ []*device.DeviceUsage, _ device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	return false, nil, ""
+}
+
+type mutableLeaderManager struct {
+	leader atomic.Bool
+	term   atomic.Uint64
+	cache.ResourceEventHandlerFuncs
+}
+
+func (m *mutableLeaderManager) IsLeader() bool {
+	return m.leader.Load()
+}
+
+func (m *mutableLeaderManager) CurrentState() leaderelection.LeadershipState {
+	return leaderelection.LeadershipState{IsLeader: m.leader.Load(), Term: m.term.Load()}
+}
+
+func TestRegisterLeadershipLossCannotRestoreSynced(t *testing.T) {
+	const testTimeout = 5 * time.Second
+
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	registerEntered := make(chan struct{})
+	releaseRegister := make(chan struct{})
+	registerDone := make(chan struct{})
+	registerLaunched := false
+	var releaseOnce sync.Once
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseRegister) })
+		if registerLaunched {
+			select {
+			case <-registerDone:
+			case <-time.After(testTimeout):
+				t.Error("register goroutine did not stop during cleanup")
+			}
+		}
+	})
+
+	nodeDevices := []*device.DeviceInfo{{
+		ID:           "mock-device-0",
+		Count:        1,
+		Devmem:       1024,
+		Devcore:      100,
+		Health:       true,
+		DeviceVendor: "mock-vendor",
+	}}
+	mockDev := &registerMockDevice{
+		health:     true,
+		needUpdate: true,
+		getNodeDevicesFunc: func(_ corev1.Node) ([]*device.DeviceInfo, error) {
+			close(registerEntered)
+			<-releaseRegister
+			return nodeDevices, nil
+		},
+	}
+	device.DevicesMap = map[string]device.Devices{"mock-vendor": mockDev}
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-a")
+	stoppedCallbackEntered := make(chan struct{})
+
+	manager := leaderelection.NewLeaderManager(
+		"scheduler-a",
+		"default",
+		"hami-scheduler",
+		leaderelection.LeaderCallbacks{
+			OnStartedLeading: s.onStartedLeading,
+			OnStoppedLeading: func() {
+				close(stoppedCallbackEntered)
+				s.onStoppedLeading()
+			},
+		},
+	)
+	s.leaderManager = manager
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}
+	informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), time.Hour)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+
+	duration := int32(30)
+	oldHolder := "scheduler-a_lease-id"
+	oldLease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: "hami-scheduler", Namespace: "default"},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       &oldHolder,
+			LeaseDurationSeconds: &duration,
+		},
+	}
+	manager.OnAdd(oldLease, true)
+	initialState := manager.CurrentState()
+	require.True(t, initialState.IsLeader)
+	require.NotZero(t, initialState.Term)
+	s.syncedTerm.Store(initialState.Term)
+	require.True(t, s.IsSynced())
+	require.True(t, s.IsReadyToSchedule())
+
+	registerLaunched = true
+	go func() {
+		defer close(registerDone)
+		s.register(labels.Everything(), map[string]bool{})
+	}()
+
+	select {
+	case <-registerEntered:
+	case <-time.After(testTimeout):
+		t.Fatal("register did not reach the blocking device discovery")
+	}
+
+	newHolder := "scheduler-b_lease-id"
+	newLease := oldLease.DeepCopy()
+	newLease.Spec.HolderIdentity = &newHolder
+	leaderUpdateDone := make(chan struct{})
+	go func() {
+		defer close(leaderUpdateDone)
+		manager.OnUpdate(oldLease, newLease)
+	}()
+
+	require.Eventually(t, func() bool { return !manager.CurrentState().IsLeader }, testTimeout, 10*time.Millisecond)
+	select {
+	case <-stoppedCallbackEntered:
+	case <-time.After(testTimeout):
+		t.Fatal("leadership callback did not start")
+	}
+	select {
+	case <-leaderUpdateDone:
+	case <-time.After(testTimeout):
+		t.Fatal("leadership callback was blocked by the in-progress refresh")
+	}
+	require.False(t, s.IsSynced(), "leadership loss must invalidate readiness immediately")
+	require.False(t, s.IsReadyToSchedule())
+
+	reacquiredHolder := "scheduler-a_reacquired-lease-id"
+	reacquiredLease := newLease.DeepCopy()
+	reacquiredLease.Spec.HolderIdentity = &reacquiredHolder
+	manager.OnUpdate(newLease, reacquiredLease)
+	reacquiredState := manager.CurrentState()
+	require.True(t, reacquiredState.IsLeader)
+	require.Greater(t, reacquiredState.Term, initialState.Term)
+	require.False(t, s.IsReadyToSchedule(), "a new leadership term must require a fresh cache sync")
+
+	releaseOnce.Do(func() { close(releaseRegister) })
+	select {
+	case <-registerDone:
+	case <-time.After(testTimeout):
+		t.Fatal("register did not finish")
+	}
+
+	require.False(t, s.IsSynced(), "the old-term refresh must not restore readiness after A-B-A")
+	require.False(t, s.IsReadyToSchedule())
+
+	mockDev.getNodeDevicesFunc = func(_ corev1.Node) ([]*device.DeviceInfo, error) {
+		return nodeDevices, nil
+	}
+	s.register(labels.Everything(), map[string]bool{})
+	require.True(t, s.IsReadyToSchedule(), "the new term must become ready after its own refresh")
+	require.Equal(t, reacquiredState.Term, s.syncedTerm.Load())
+
+	// Lease validity can expire without an update callback. The final live
+	// leadership check must still prevent register from publishing synced=true.
+	expiringManager := &mutableLeaderManager{}
+	expiringManager.leader.Store(true)
+	expiringManager.term.Store(reacquiredState.Term + 1)
+	s.leaderManager = expiringManager
+	s.syncedTerm.Store(0)
+	mockDev.getNodeDevicesFunc = func(_ corev1.Node) ([]*device.DeviceInfo, error) {
+		expiringManager.leader.Store(false)
+		return nodeDevices, nil
+	}
+	s.register(labels.Everything(), map[string]bool{})
+	require.False(t, s.IsSynced(), "an expired lease must not publish a completed cache sync")
 }
 
 func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
@@ -3477,10 +3653,29 @@ func Test_lockAllDevices_Transactional(t *testing.T) {
 }
 
 func TestSchedulerIsSynced(t *testing.T) {
-	s := &Scheduler{}
+	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	assert.Equal(t, false, s.IsSynced())
 
-	s.synced.Store(true)
+	s.syncedTerm.Store(s.currentLeadershipState().Term)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+func TestSchedulerIsReadyToSchedule(t *testing.T) {
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+	s.syncedTerm.Store(s.currentLeadershipState().Term)
+	require.True(t, s.IsReadyToSchedule())
+
+	newTerm := &mutableLeaderManager{}
+	newTerm.leader.Store(true)
+	newTerm.term.Store(2)
+	s.leaderManager = newTerm
+	require.False(t, s.IsSynced(), "an older term's cache sync is not current readiness")
+	require.ErrorContains(t, s.CheckSchedulingAdmission(), "scheduler cache is not synced")
+
+	s.leaderManager = leaderelection.NewDummyLeaderManager(false)
+	require.False(t, s.IsSynced())
+	require.ErrorContains(t, s.CheckSchedulingAdmission(), "scheduler is not leader")
 }

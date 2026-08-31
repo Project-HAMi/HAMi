@@ -61,7 +61,7 @@ type Scheduler struct {
 	*nodeManager
 	podManager    *device.PodManager
 	quotaManager  *device.QuotaManager
-	leaderManager leaderelection.LeaderManager
+	leaderManager leaderelection.TermAwareLeaderManager
 
 	stopCh       chan struct{}
 	nodeNotify   chan struct{}
@@ -77,8 +77,9 @@ type Scheduler struct {
 	eventRecorder  record.EventRecorder
 	started        uint32 // 0 = false, 1 = true
 
-	lock   sync.RWMutex
-	synced atomic.Bool
+	lock          sync.RWMutex
+	syncStateLock sync.Mutex
+	syncedTerm    atomic.Uint64
 
 	// allocLock serializes reservation mutations between Filter and the
 	// NUMA refit (RefitNumaAllocation). kube-scheduler already serializes
@@ -103,20 +104,32 @@ func NewScheduler() *Scheduler {
 	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
-			OnStartedLeading: func() {
-				select {
-				case s.leaderNotify <- struct{}{}:
-				default:
-				}
-			},
-			OnStoppedLeading: func() {
-				s.synced.Store(false)
-			},
+			OnStartedLeading: s.onStartedLeading,
+			OnStoppedLeading: s.onStoppedLeading,
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) onStartedLeading() {
+	s.syncStateLock.Lock()
+	s.syncedTerm.Store(0)
+	s.syncStateLock.Unlock()
+
+	select {
+	case s.leaderNotify <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Scheduler) onStoppedLeading() {
+	// Serialize only with register's final live-leader check and publication.
+	// Lease callbacks must not wait for the full cache refresh.
+	s.syncStateLock.Lock()
+	defer s.syncStateLock.Unlock()
+	s.syncedTerm.Store(0)
 }
 
 func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
@@ -129,6 +142,33 @@ func (s *Scheduler) GetPodManager() *device.PodManager {
 
 func (s *Scheduler) GetLeaderManager() leaderelection.LeaderManager {
 	return s.leaderManager
+}
+
+func (s *Scheduler) currentLeadershipState() leaderelection.LeadershipState {
+	if s.leaderManager == nil {
+		return leaderelection.LeadershipState{}
+	}
+	return s.leaderManager.CurrentState()
+}
+
+// CheckSchedulingAdmission atomically checks that the current leadership term
+// has completed a cache sync. It does not fence operations already in flight.
+func (s *Scheduler) CheckSchedulingAdmission() error {
+	s.syncStateLock.Lock()
+	defer s.syncStateLock.Unlock()
+
+	state := s.currentLeadershipState()
+	if !state.IsLeader {
+		return fmt.Errorf("scheduler is not leader")
+	}
+	if state.Term == 0 || s.syncedTerm.Load() != state.Term {
+		return fmt.Errorf("scheduler cache is not synced")
+	}
+	return nil
+}
+
+func (s *Scheduler) IsReadyToSchedule() bool {
+	return s.CheckSchedulingAdmission() == nil
 }
 
 func (s *Scheduler) doNodeNotify() {
@@ -457,15 +497,14 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 }
 
 func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[string]bool) {
-	// Lock here to avoid setting s.synced to false, when we lost leadership, while doing register.
-	// 1. lost leadership before register: synced will set to false in callbacks, and register will be skipped because IsLeader() returns false
-	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
+	// Keep overview updates consistent with metrics reads and node cleanup.
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Only do registration when we are leader.
-	isLeader := s.leaderManager.IsLeader()
-	if isLeader {
+	// Capture the term for readiness publication. Reconciliation already in
+	// flight is not transactionally fenced by this check.
+	registerState := s.currentLeadershipState()
+	if registerState.IsLeader && registerState.Term != 0 {
 		s.updateSchedulerLabel()
 	} else {
 		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
@@ -567,8 +606,17 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	}
 	s.overviewstatus = *overallnodeMap
 
-	// Set synced to true only after getNodeUsage() succeeds
-	s.synced.Store(true)
+	// Keep the final live-leader check and readiness publication atomic with
+	// leadership-loss invalidation without blocking callbacks on the refresh.
+	s.syncStateLock.Lock()
+	currentState := s.currentLeadershipState()
+	if !currentState.IsLeader || currentState.Term != registerState.Term {
+		s.syncStateLock.Unlock()
+		klog.V(4).InfoS("Discarding cache sync because the leadership term changed", "registerTerm", registerState.Term, "currentTerm", currentState.Term)
+		return
+	}
+	s.syncedTerm.Store(registerState.Term)
+	s.syncStateLock.Unlock()
 }
 
 func (s *Scheduler) updateSchedulerLabel() {
@@ -628,17 +676,17 @@ func (s *Scheduler) updateSchedulerLabel() {
 	}
 }
 
-// IsSynced returns true when the scheduler's internal node/device cache has
-// completed at least one successful sync cycle and is ready to serve requests.
-// It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
-// without contending on the scheduler's write lock during cache refreshes.
+// IsSynced returns true when the current leadership term has completed a cache
+// sync and is ready to admit scheduling requests.
 func (s *Scheduler) IsSynced() bool {
-	return s.synced.Load()
+	return s.IsReadyToSchedule()
 }
 
+// WaitForCacheSync waits until this instance is both the active leader and
+// cache-synced, or until the context is cancelled.
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		return s.synced.Load(), nil
+		return s.IsReadyToSchedule(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
