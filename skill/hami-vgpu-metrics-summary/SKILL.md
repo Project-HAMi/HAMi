@@ -109,7 +109,7 @@ Repository-backed defaults and relationships:
 - Container metrics port name: `metrics`
 - Service port name: `monitor`
 - Default Service `monitor` port: `31993`
-- Default Service targetPort: `9395`
+- Default Service targetPort: `metrics` (the named container port, which follows `scheduler.metricsBindAddress`)
 - Metrics path: `/metrics`
 
 **F. Port-forward the scheduler Service and fetch metrics**

@@ -139,7 +139,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.service.httpPort` | HTTP port | `443` |
 | `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
-| `scheduler.service.monitorTargetPort` | Monitor target port | `9395` |
+| `scheduler.service.monitorTargetPort` | Monitor target port | `metrics` |
 
 ## Device Plugin Configuration
 
