@@ -120,7 +120,7 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+              GOLANG_IMAGE=golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
               HAMICORE_IMAGE=${{ steps.meta.outputs.tags }}
               DEST_DIR=/usr/local
             tags: ${{ steps.meta1.outputs.tags }}
@@ -136,4 +136,3 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "${REGISTRY}/${IMAGE_REPO}@${DIGEST}"
-

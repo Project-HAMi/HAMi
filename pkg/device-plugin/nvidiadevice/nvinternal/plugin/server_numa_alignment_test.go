@@ -39,6 +39,7 @@ import (
 const (
 	numaTestGPUA = "GPU-aaaaaaaa-1111-2222-3333-444444444444"
 	numaTestGPUB = "GPU-bbbbbbbb-1111-2222-3333-444444444444"
+	numaTestGPUC = "GPU-cccccccc-1111-2222-3333-444444444444"
 )
 
 func TestSelectPreferredMismatchErrorIsTyped(t *testing.T) {

@@ -1,12 +1,12 @@
 module github.com/Project-HAMi/HAMi
 
-go 1.26.6
+go 1.27.0
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.12.0
 	github.com/NVIDIA/go-nvml v0.13.3-1
-	github.com/NVIDIA/k8s-device-plugin v0.19.3
+	github.com/NVIDIA/k8s-device-plugin v0.20.0
 	github.com/NVIDIA/nvidia-container-toolkit v1.20.0
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/fsnotify/fsnotify v1.10.1
@@ -17,12 +17,13 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
-	github.com/sirupsen/logrus v1.10.0
+	github.com/sirupsen/logrus v1.10.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/net v0.58.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	golang.org/x/tools v0.49.0
 	google.golang.org/grpc v1.83.1
@@ -33,7 +34,7 @@ require (
 	k8s.io/apimachinery v0.36.4
 	k8s.io/client-go v0.36.4
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-scheduler v0.36.3
+	k8s.io/kube-scheduler v0.36.4
 	k8s.io/kubelet v0.36.4
 	sigs.k8s.io/controller-runtime v0.24.1
 	tags.cncf.io/container-device-interface v1.1.0
@@ -63,11 +64,12 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/moby/sys/capability v0.4.0 // indirect
+	github.com/moby/sys/devices v0.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/cgroups v0.0.7 // indirect
-	github.com/opencontainers/runc v1.4.3 // indirect
+	github.com/opencontainers/runc v1.5.0 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -81,10 +83,9 @@ require (
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
@@ -94,7 +95,7 @@ require (
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
+	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 

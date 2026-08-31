@@ -598,7 +598,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
-		GetPreferredAllocationAvailable: true,
+		GetPreferredAllocationAvailable: enableGetPreferredAllocation,
 	}
 	return options, nil
 }
@@ -796,9 +796,39 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 		return nil, errors.New("device number not matched")
 	}
 
-	aligned := append(device.ContainerDevices(nil), devreq...)
+	// Kubelet reports device IDs in its own order, so pair each ID with the
+	// annotated entry for the same physical device. Positional pairing kept
+	// the annotation order for Usedmem and Usedcores, which attached the
+	// per device CUDA memory limit to the wrong GPU whenever the orders
+	// diverged on devices with different requested memory.
+	aligned := make(device.ContainerDevices, len(deviceIDs))
+	matched := make([]bool, len(deviceIDs))
+	used := make([]bool, len(devreq))
+	for i, id := range deviceIDs {
+		phys := physicalDeviceID(id)
+		for j := range devreq {
+			if !used[j] && physicalDeviceID(devreq[j].UUID) == phys {
+				aligned[i] = devreq[j]
+				aligned[i].UUID = phys
+				matched[i] = true
+				used[j] = true
+				break
+			}
+		}
+	}
+	// Entries without a UUID match keep the previous behavior: adopt the
+	// kubelet selected device in annotation order.
+	next := 0
 	for i := range aligned {
+		if matched[i] {
+			continue
+		}
+		for used[next] {
+			next++
+		}
+		aligned[i] = devreq[next]
 		aligned[i].UUID = physicalDeviceID(deviceIDs[i])
+		used[next] = true
 	}
 
 	return aligned, nil
@@ -833,7 +863,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		// error out if more than one resource is being allocated.
 
 		if strings.Contains(req.DevicesIds[0], "MIG") {
-			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
+			if failRequestsGreaterThanOne := plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne; failRequestsGreaterThanOne != nil && *failRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
 				if len(req.DevicesIds) > 1 {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
@@ -911,8 +941,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 				os.MkdirAll(cacheFileHostDirectory, 0777)
 				os.Chmod(cacheFileHostDirectory, 0777)
-				os.MkdirAll("/tmp/vgpulock", 0777)
-				os.Chmod("/tmp/vgpulock", 0777)
+				if err := prepareHostPIDLockParentForAllocation(); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf(
+						"failed to prepare host PID lock parent: %w", err)
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
@@ -920,10 +953,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 						HostPath: cacheFileHostDirectory,
 						ReadOnly: false},
-					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
-						HostPath: "/tmp/vgpulock",
-						ReadOnly: false},
 				)
+				configureHostPIDLockParentMount(response)
+				configureHostPIDBroker(response)
 				found := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
