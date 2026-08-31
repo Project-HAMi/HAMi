@@ -166,7 +166,7 @@ func TestGetAPIDevicesShutsDownAfterNVMLInit(t *testing.T) {
 	}
 }
 
-func TestGetAPIDevicesSkipsOnPerDeviceNVMLFailures(t *testing.T) {
+func TestGetAPIDevicesErrorsOnPerDeviceNVMLFailures(t *testing.T) {
 	originalInit := nvmlInit
 	originalShutdown := nvml.Shutdown
 	originalGetHandleByUUID := nvml.DeviceGetHandleByUUID
@@ -236,11 +236,11 @@ func TestGetAPIDevicesSkipsOnPerDeviceNVMLFailures(t *testing.T) {
 				return rm.Devices{testUUID: &rm.Device{}}
 			}}}
 			devices, err := plugin.getAPIDevices()
-			if err != nil {
-				t.Fatalf("getAPIDevices returned unexpected error on per-device failure: %v", err)
+			if err == nil {
+				t.Fatalf("getAPIDevices did not return an error on per-device failure")
 			}
-			if devices == nil || len(*devices) != 0 {
-				t.Fatalf("getAPIDevices() = %v on per-device NVML failure, want empty list", devices)
+			if devices != nil {
+				t.Fatalf("getAPIDevices() = %v on per-device NVML failure, want nil", devices)
 			}
 		})
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -37,6 +38,11 @@ import (
 type ClusterManager struct {
 	Zone          string
 	LegacyMetrics bool
+
+	// health records scrape duration, per-phase collection errors and the
+	// last scrape timestamp; nil in unit tests that construct the collector
+	// directly.
+	health *versionmetrics.CollectorHealthRecorder
 }
 
 type schedulerMetricsProvider interface {
@@ -99,14 +105,23 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect creates constant metrics for each host on the fly based on the returned data.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
+
+	start := time.Now()
+
 	legacy := cc.ClusterManager.LegacyMetrics
-	// A single snapshot is shared by the node- and container-level collectors so
-	// they observe a consistent cluster state within one scrape.
 	nu := cc.metricsProvider.InspectAllNodesUsage()
 	cc.collectNodeMetrics(ch, nu, legacy)
 	cc.collectQuotaMetrics(ch, legacy)
 	cc.collectContainerMetrics(ch, nu, legacy)
 	cc.collectSchedulerStateMetrics(ch)
+
+	// Always record duration; stamp last_run unconditionally for the scheduler
+	// since per-phase errors are already tracked separately.
+	if cc.ClusterManager != nil && cc.ClusterManager.health != nil {
+		cc.ClusterManager.health.ObserveDuration(versionmetrics.ComponentScheduler, start)
+		cc.ClusterManager.health.StampLastRun(versionmetrics.ComponentScheduler)
+		cc.ClusterManager.health.Collect(ch)
+	}
 }
 
 // collectNodeMetrics emits node-level GPU metrics (memory/core limits and
@@ -221,7 +236,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 						"gpuInstanceID", allocation.GPUInstanceID,
 						"computeInstanceID", allocation.ComputeInstanceID,
 						"migUUID", allocation.MigUUID)
-					if err := sendMetric(
+					if err := cc.sendMetric(
 						ch,
 						nodeGPUMigInstance,
 						prometheus.GaugeValue,
@@ -239,7 +254,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 						klog.V(4).Infof("Failed to send nodeGPUMigInstance metric: %v", err)
 					}
 					if legacy {
-						sendLegacyMetric(
+						cc.sendLegacyMetric(
 							ch,
 							legacyMigInstance,
 							prometheus.GaugeValue,
@@ -250,40 +265,40 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 				}
 			}
 
-			if err := sendMetric(ch, nodevGPUMemoryLimitDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodevGPUMemoryLimitDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUMemoryLimitDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodevGPUCoreLimitDesc, prometheus.GaugeValue, coreLimit, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodevGPUCoreLimitDesc, prometheus.GaugeValue, coreLimit, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUCoreLimitDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodevGPUMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodevGPUMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUMemoryAllocatedDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodevGPUSharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodevGPUSharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUSharedNumDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodeGPUCoreAllocatedDesc, prometheus.GaugeValue, coreAllocated, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodeGPUCoreAllocatedDesc, prometheus.GaugeValue, coreAllocated, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodeGPUCoreAllocatedDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodeGPUOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type); err != nil {
+			if err := cc.sendMetric(ch, nodeGPUOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodeGPUOverview metric: %v", err)
 			}
 
 			if devs.Device.Totalmem > 0 {
-				if err := sendMetric(ch, nodeGPUMemoryAllocatedRatioDesc, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+				if err := cc.sendMetric(ch, nodeGPUMemoryAllocatedRatioDesc, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 					klog.V(4).Infof("Failed to send nodeGPUMemoryAllocatedRatioDesc metric: %v", err)
 				}
 			}
 
 			if legacy {
-				sendLegacyMetric(ch, legacyMemoryLimitDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
-				sendLegacyMetric(ch, legacyCoreLimitDesc, prometheus.GaugeValue, float64(devs.Device.Totalcore), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
-				sendLegacyMetric(ch, legacyMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type)
-				sendLegacyMetric(ch, legacySharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
-				sendLegacyMetric(ch, legacyCoreAllocatedDesc, prometheus.GaugeValue, float64(devs.Device.Usedcores), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
-				sendLegacyMetric(ch, legacyOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacyMemoryLimitDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacyCoreLimitDesc, prometheus.GaugeValue, float64(devs.Device.Totalcore), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacyMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacySharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacyCoreAllocatedDesc, prometheus.GaugeValue, float64(devs.Device.Usedcores), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
+				cc.sendLegacyMetric(ch, legacyOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type)
 				if devs.Device.Totalmem > 0 {
-					sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index))
+					cc.sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index))
 				}
 			}
 		}
@@ -312,16 +327,16 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 	}
 	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
-			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
+			if err := cc.sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
 				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
 			}
 			if q.LimitSet {
-				if err := sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
+				if err := cc.sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
 					klog.V(4).Infof("Failed to send quotaLimitDesc metric: %v", err)
 				}
 			}
 			if legacy {
-				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))
+				cc.sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))
 			}
 		}
 	}
@@ -363,7 +378,16 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 		)
 	}
-	schedpods, _ := cc.metricsProvider.GetPodManager().GetScheduledPods()
+	schedpods, err := cc.metricsProvider.GetPodManager().GetScheduledPods()
+	if err != nil {
+		// Record a collection-phase error if we fail to list pods; the existing code ignored it.
+		if cc.ClusterManager != nil && cc.ClusterManager.health != nil {
+			cc.ClusterManager.health.RecordError(versionmetrics.ComponentScheduler, versionmetrics.PhaseListScheduledPods)
+		}
+		klog.Errorf("Failed to get scheduled pods: %v", err)
+		// Continue with an empty set to avoid panic.
+		schedpods = map[k8stypes.UID]*device.PodInfo{}
+	}
 	for _, val := range schedpods {
 		for _, podSingleDevice := range val.Devices {
 			for ctridx, ctrdevs := range podSingleDevice {
@@ -394,17 +418,17 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 					)
 					containerLabels := []string{val.Namespace, val.NodeID, val.Name, ctrdevval.UUID}
 					usedMemBytes := mibToBytes(ctrdevval.Usedmem)
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, usedMemBytes, containerLabels...); err != nil {
+					if err := cc.sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, usedMemBytes, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
 					}
 					_, ctrCoreAllocated := normalizeAMDCoreMetrics(deviceType, totalcore, ctrdevval.Usedcores)
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrCoreAllocated, containerLabels...); err != nil {
+					if err := cc.sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrCoreAllocated, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
 					}
 					if legacy {
 						legacyLabels := []string{val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID}
-						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, legacyLabels...)
-						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), legacyLabels...)
+						cc.sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, legacyLabels...)
+						cc.sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), legacyLabels...)
 					}
 				}
 			}
@@ -436,19 +460,21 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 		isSyncedVal = 1.0
 	}
 
-	if err := sendMetric(ch, isLeaderDesc, prometheus.GaugeValue, isLeaderVal); err != nil {
+	if err := cc.sendMetric(ch, isLeaderDesc, prometheus.GaugeValue, isLeaderVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_is_leader metric: %v", err)
 	}
-	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
+	if err := cc.sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
 	}
 }
 
 // NewClusterManager creates a ClusterManager and registers its collector.
 func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider schedulerMetricsProvider, legacyMetrics bool) *ClusterManager {
+	health := versionmetrics.NewCollectorHealthRecorder()
 	c := &ClusterManager{
 		Zone:          zone,
 		LegacyMetrics: legacyMetrics,
+		health:        health,
 	}
 	cc := ClusterManagerCollector{
 		ClusterManager:  c,
@@ -476,18 +502,21 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 	log.Fatal(server.ListenAndServe())
 }
 
-func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {
+func (cc ClusterManagerCollector) sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {
 	if desc == nil {
 		return
 	}
-	if err := sendMetric(ch, desc, valueType, value, labels...); err != nil {
+	if err := cc.sendMetric(ch, desc, valueType, value, labels...); err != nil {
 		klog.V(4).Infof("Failed to send legacy metric: %v", err)
 	}
 }
 
-func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) error {
+func (cc ClusterManagerCollector) sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) error {
 	metric, err := prometheus.NewConstMetric(desc, valueType, value, labels...)
 	if err != nil {
+		if cc.ClusterManager != nil && cc.ClusterManager.health != nil {
+			cc.ClusterManager.health.RecordError(versionmetrics.ComponentScheduler, versionmetrics.PhaseSendMetric)
+		}
 		return fmt.Errorf("failed to create metric: %w", err)
 	}
 	ch <- metric

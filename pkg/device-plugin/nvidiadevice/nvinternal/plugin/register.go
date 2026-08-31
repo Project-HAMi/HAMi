@@ -95,13 +95,13 @@ var calculateGPUScore = nvidia.CalculateGPUScore
 func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error) {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
+	res := make([]*device.DeviceInfo, 0, len(devs))
 	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return nil, fmt.Errorf("nvml init failed: %v", nvret)
 	}
 	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
 	defer nvml.Shutdown()
-	res := make([]*device.DeviceInfo, 0, len(devs))
 
 	// Log mode-related warnings once per scan instead of per device
 	isMigMode := plugin.operatingMode == nvidia.MigMode
@@ -112,13 +112,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
-			klog.Errorf("skipping device uuid=%s: nvml DeviceGetHandleByUUID failed: %v", UUID, ret)
-			continue
+			return nil, fmt.Errorf("nvml DeviceGetHandleByUUID failed for uuid=%s: %v", UUID, ret)
 		}
 		idx, ret := ndev.GetIndex()
 		if ret != nvml.SUCCESS {
-			klog.Errorf("skipping device uuid=%s: nvml GetIndex failed: %v", UUID, ret)
-			continue
+			return nil, fmt.Errorf("nvml GetIndex failed for uuid=%s: %v", UUID, ret)
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
@@ -133,19 +131,18 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 				klog.Warningf("GetMemoryInfo not supported for device %s, using configured PreConfiguredDeviceMemory: %d MB",
 					UUID, *plugin.schedulerConfig.PreConfiguredDeviceMemory)
 			} else {
+				// Don't error out on ERROR_NOT_SUPPORTED without config, just skip. It's an unsupported device type.
 				klog.Errorf("GetMemoryInfo not supported for device %s (unified memory architecture) "+
 					"and PreConfiguredDeviceMemory not configured. Skipping this device. "+
 					"Set 'preConfiguredDeviceMemory' in nvidia config to the total GPU memory in MB.", UUID)
 				continue
 			}
 		default:
-			klog.Errorf("skipping device uuid=%s: nvml GetMemoryInfo failed: %v", UUID, ret)
-			continue
+			return nil, fmt.Errorf("nvml GetMemoryInfo failed for uuid=%s: %v", UUID, ret)
 		}
 		Model, ret := ndev.GetName()
 		if ret != nvml.SUCCESS {
-			klog.Errorf("skipping device uuid=%s: nvml GetName failed: %v", UUID, ret)
-			continue
+			return nil, fmt.Errorf("nvml GetName failed for uuid=%s: %v", UUID, ret)
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
