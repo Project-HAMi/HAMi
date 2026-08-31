@@ -794,8 +794,8 @@ func Test_MutateAdmission_EmptyResourceMemoryName(t *testing.T) {
 			CommonWord:         "Ascend910A",
 			ResourceName:       "huawei.com/Ascend910A",
 			ResourceMemoryName: "",
-			MemoryCapacity:     32768,
-			MemoryAllocatable:  32768,
+			MemoryCapacity:     0,
+			MemoryAllocatable:  0,
 		},
 	}
 	ctr := corev1.Container{
