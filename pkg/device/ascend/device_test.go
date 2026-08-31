@@ -2528,6 +2528,7 @@ func TestDevices_Fit_910C(t *testing.T) {
   memoryCapacity: 65536
   aiCore: 20
   aiCPU: 7
+  superPod: true
 `
 
 	var config []VNPUConfig
