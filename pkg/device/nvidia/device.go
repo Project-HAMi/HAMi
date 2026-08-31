@@ -569,23 +569,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 			if ok {
 				mempnums, ok := mem.AsInt64()
-				if !ok {
-					// Fractional or invalid quantity: pass an out-of-range percentage so Fit rejects the request rather than silently ignoring the GPU.
-					klog.ErrorS(nil, "fractional or invalid memory percentage request", "container", ctr.Name, "requested", mem.String())
-					mempnum = math.MaxInt32
-				} else if mempnums < 0 || mempnums > 100 {
-					klog.ErrorS(nil, "memory percentage request out of range", "container", ctr.Name, "requested", mem.String())
-					if mempnums == 101 {
-						// 101 is the internal sentinel for "unset", so use an explicit out-of-range value to ensure rejection.
-						mempnum = 102
-					} else if mempnums < 0 {
-						mempnum = -1
-					} else if mempnums > math.MaxInt32 {
-						mempnum = math.MaxInt32
-					} else {
-						mempnum = int32(mempnums)
-					}
-				} else if mempnums > 0 {
+				if !ok || mempnums < 0 || mempnums > 100 {
+					klog.ErrorS(nil, "nvidia memory percentage request is out of range", "container", ctr.Name, "request", mem.String())
+					return device.ContainerDeviceRequest{}
+				}
+				if mempnums > 0 {
 					mempnum = int32(mempnums)
 				} else {
 					// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.

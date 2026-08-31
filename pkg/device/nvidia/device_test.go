@@ -19,7 +19,6 @@ package nvidia
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 	"time"
@@ -1931,13 +1930,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 150,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "gpu count + memory percentage beyond int32 range — rejected",
@@ -1949,13 +1942,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: math.MaxInt32,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "gpu count + memory percentage equal to sentinel 101 — rejected",
@@ -1967,13 +1954,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 102,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "gpu count + explicit cores 0",
@@ -2161,13 +2142,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: -1,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "memory percentage of 0 + explicit memory — explicit memory wins",
@@ -3311,70 +3286,63 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
 		},
 	}
 	tests := []struct {
-		name       string
-		rawPct     string
-		wantNums   int32
-		wantMemPct int32
+		name    string
+		rawPct  string
+		wantOk  bool
+		wantVal int32
 	}{
 		{
-			name:       "percentage 0 is accepted and ignored (defaults to 100)",
-			rawPct:     "0",
-			wantNums:   1,
-			wantMemPct: 100,
+			name:    "percentage 0 is accepted and ignored (defaults to 100)",
+			rawPct:  "0",
+			wantOk:  true,
+			wantVal: 100,
 		},
 		{
-			name:       "percentage 50 is accepted",
-			rawPct:     "50",
-			wantNums:   1,
-			wantMemPct: 50,
+			name:    "percentage 50 is accepted",
+			rawPct:  "50",
+			wantOk:  true,
+			wantVal: 50,
 		},
 		{
-			name:       "percentage 100 is accepted",
-			rawPct:     "100",
-			wantNums:   1,
-			wantMemPct: 100,
+			name:    "percentage 100 is accepted",
+			rawPct:  "100",
+			wantOk:  true,
+			wantVal: 100,
 		},
 		{
-			name:       "fractional percentage 50m is rejected",
-			rawPct:     "50m",
-			wantNums:   1,
-			wantMemPct: math.MaxInt32,
+			name:   "fractional percentage 50m is rejected",
+			rawPct: "50m",
+			wantOk: false,
 		},
 		{
-			name:       "fractional percentage 50.5 is rejected",
-			rawPct:     "50.5",
-			wantNums:   1,
-			wantMemPct: math.MaxInt32,
+			name:   "fractional percentage 50.5 is rejected",
+			rawPct: "50.5",
+			wantOk: false,
 		},
 		{
-			name:       "fractional percentage 99.1 is rejected",
-			rawPct:     "99.1",
-			wantNums:   1,
-			wantMemPct: math.MaxInt32,
+			name:   "fractional percentage 99.1 is rejected",
+			rawPct: "99.1",
+			wantOk: false,
 		},
 		{
-			name:       "percentage 101 is rejected",
-			rawPct:     "101",
-			wantNums:   1,
-			wantMemPct: 102,
+			name:   "percentage 101 is rejected",
+			rawPct: "101",
+			wantOk: false,
 		},
 		{
-			name:       "percentage 150 is rejected",
-			rawPct:     "150",
-			wantNums:   1,
-			wantMemPct: 150,
+			name:   "percentage 150 is rejected",
+			rawPct: "150",
+			wantOk: false,
 		},
 		{
-			name:       "negative percentage is rejected",
-			rawPct:     "-1",
-			wantNums:   1,
-			wantMemPct: -1,
+			name:   "negative percentage is rejected",
+			rawPct: "-1",
+			wantOk: false,
 		},
 		{
-			name:       "excessively large percentage is rejected",
-			rawPct:     "99999999999999999999",
-			wantNums:   1,
-			wantMemPct: math.MaxInt32,
+			name:   "excessively large percentage is rejected",
+			rawPct: "99999999999999999999",
+			wantOk: false,
 		},
 	}
 	for _, test := range tests {
@@ -3389,8 +3357,12 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
 				},
 			}
 			req := gpuDevices.GenerateResourceRequests(ctr)
-			assert.Equal(t, test.wantNums, req.Nums)
-			assert.Equal(t, test.wantMemPct, req.MemPercentagereq)
+			if test.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.MemPercentagereq, test.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
 		})
 	}
 }
@@ -3410,13 +3382,13 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation_Requests(t *testin
 		},
 	}
 	tests := []struct {
-		name       string
-		rawPct     string
-		wantNums   int32
-		wantMemPct int32
+		name    string
+		rawPct  string
+		wantOk  bool
+		wantVal int32
 	}{
-		{name: "percentage 50 via Requests is accepted", rawPct: "50", wantNums: 1, wantMemPct: 50},
-		{name: "fractional 50.5 via Requests is rejected", rawPct: "50.5", wantNums: 1, wantMemPct: math.MaxInt32},
+		{name: "percentage 50 via Requests is accepted", rawPct: "50", wantOk: true, wantVal: 50},
+		{name: "fractional 50.5 via Requests is rejected", rawPct: "50.5", wantOk: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -3430,8 +3402,12 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation_Requests(t *testin
 				},
 			}
 			req := gpuDevices.GenerateResourceRequests(ctr)
-			assert.Equal(t, test.wantNums, req.Nums)
-			assert.Equal(t, test.wantMemPct, req.MemPercentagereq)
+			if test.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.MemPercentagereq, test.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
 		})
 	}
 }
@@ -3469,34 +3445,27 @@ func TestFit_MemoryPercentageValidation(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		rawPct     string
+		memPct     int32
 		wantFit    bool
 		wantMemReq int32
 	}{
-		{name: "50% memory fits", rawPct: "50", wantFit: true, wantMemReq: 4096},
-		{name: "100% memory fits", rawPct: "100", wantFit: true, wantMemReq: 8192},
-		{name: "0% memory defaults to 100%", rawPct: "0", wantFit: true, wantMemReq: 8192},
-		{name: "101% memory is rejected", rawPct: "101", wantFit: false},
-		{name: "150% memory is rejected", rawPct: "150", wantFit: false},
-		{name: "negative memory percentage is rejected", rawPct: "-1", wantFit: false},
-		{name: "fractional 50m memory percentage is rejected", rawPct: "50m", wantFit: false},
-		{name: "fractional 99.1 memory percentage is rejected", rawPct: "99.1", wantFit: false},
-		{name: "excessively large memory percentage is rejected", rawPct: "99999999999999999999", wantFit: false},
+		{name: "50% memory fits", memPct: 50, wantFit: true, wantMemReq: 4096},
+		{name: "100% memory fits", memPct: 100, wantFit: true, wantMemReq: 8192},
+		{name: "0% memory fits", memPct: 0, wantFit: true, wantMemReq: 0},
+		{name: "101 (unset sentinel) memory fits", memPct: 101, wantFit: true, wantMemReq: 0},
+		{name: "102% memory is rejected", memPct: 102, wantFit: false},
+		{name: "150% memory is rejected", memPct: 150, wantFit: false},
+		{name: "negative memory percentage is rejected", memPct: -1, wantFit: false},
+		{name: "negative memory percentage -50 is rejected", memPct: -50, wantFit: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctr := &corev1.Container{
-				Name: "test",
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/gpu":               resource.MustParse("1"),
-						"nvidia.com/gpumem-percentage": resource.MustParse(tt.rawPct),
-					},
-				},
+			req := device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				MemPercentagereq: tt.memPct,
 			}
-			req := nv.GenerateResourceRequests(ctr)
-			assert.Equal(t, req.Nums, int32(1))
 			fit, result, reason := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 			assert.Equal(t, fit, tt.wantFit)
 			if tt.wantFit {
