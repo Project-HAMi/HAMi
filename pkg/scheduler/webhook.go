@@ -74,13 +74,6 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Denied(err.Error())
 	}
-	// Validate device-scoring weights at admission so malformed workload input
-	// is reported before scheduling. The scheduler retains the same validation
-	// as a defense-in-depth check.
-	if _, err := util.GetDeviceScoringWeightsByPod(pod); err != nil {
-		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
-		return admission.Denied(err.Error())
-	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
@@ -108,6 +101,15 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
 			hasResource = hasResource || found
+		}
+	}
+	// Validate device-scoring weights for HAMi workloads so malformed input is
+	// reported before scheduling. The scheduler retains the same validation as
+	// a defense-in-depth check.
+	if hasResource {
+		if _, err := util.GetDeviceScoringWeightsByPod(pod); err != nil {
+			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			return admission.Denied(err.Error())
 		}
 	}
 	if hasPrivileged && hasResource {

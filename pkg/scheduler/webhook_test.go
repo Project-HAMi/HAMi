@@ -1278,16 +1278,24 @@ func TestHandleNumaAlignmentAnnotation(t *testing.T) {
 }
 
 func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		t.Fatal("NVIDIA device is not registered")
+	}
+	resourceName := corev1.ResourceName(nvidiaDevice.GetResourceNames().ResourceCountName)
+
 	tests := []struct {
 		name              string
 		annotationPresent bool
 		value             string
+		hasResource       bool
 		wantDenied        bool
 	}{
-		{name: "missing annotation is admitted", wantDenied: false},
-		{name: "valid weights are admitted", annotationPresent: true, value: "slot=1,core=1,memory=3", wantDenied: false},
-		{name: "missing dimension is denied", annotationPresent: true, value: "slot=1,core=1", wantDenied: true},
-		{name: "non-integer weight is denied", annotationPresent: true, value: "slot=1,core=high,memory=3", wantDenied: true},
+		{name: "missing annotation is admitted", hasResource: true, wantDenied: false},
+		{name: "valid weights with HAMi resource are admitted", annotationPresent: true, value: "slot=1,core=1,memory=3", hasResource: true, wantDenied: false},
+		{name: "missing dimension with HAMi resource is denied", annotationPresent: true, value: "slot=1,core=1", hasResource: true, wantDenied: true},
+		{name: "non-integer weight with HAMi resource is denied", annotationPresent: true, value: "slot=1,core=high,memory=3", hasResource: true, wantDenied: true},
+		{name: "invalid weights without HAMi resource are admitted", annotationPresent: true, value: "slot=1,core=1", wantDenied: false},
 	}
 
 	for _, test := range tests {
@@ -1296,20 +1304,19 @@ func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
 			if test.annotationPresent {
 				annotations = map[string]string{util.DeviceScoringWeightsAnnotationKey: test.value}
 			}
+			container := corev1.Container{Name: "container1"}
+			if test.hasResource {
+				container.Resources = corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{resourceName: resource.MustParse("1")},
+				}
+			}
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "weights-pod",
 					Namespace:   "default",
 					Annotations: annotations,
 				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{
-						Name: "container1",
-						Resources: corev1.ResourceRequirements{
-							Limits: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
-						},
-					}},
-				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{container}},
 			}
 
 			scheme := runtime.NewScheme()
