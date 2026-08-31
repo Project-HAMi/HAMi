@@ -530,7 +530,6 @@ devices:
     tolerations: []
     runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
     hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
-    deviceCoreScaling: 1  # hami-core Fit budget = 100 * deviceCoreScaling
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory

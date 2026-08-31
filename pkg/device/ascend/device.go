@@ -55,7 +55,6 @@ type Devices struct {
 	noUseUUIDAnno    string
 	handshakeAnno    string
 	hamiVnpuCore     bool
-	coreScaling      float64
 }
 
 type RuntimeInfo struct {
@@ -84,10 +83,6 @@ func InitDevices(vnpus VNPUs) []*Devices {
 	if !enableAscend {
 		return devs
 	}
-	coreScaling := vnpus.DeviceCoreScaling
-	if coreScaling <= 0 {
-		coreScaling = 1
-	}
 	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
@@ -97,7 +92,6 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
 			hamiVnpuCore:     vnpus.HamiVnpuCore,
-			coreScaling:      coreScaling,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -109,17 +103,9 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			util.HandshakeAnnos[commonWord] = dev.handshakeAnno
 		}
 		devs = append(devs, dev)
-		klog.Infof("load ascend vnpu config %s coreScaling=%.2f: %v", commonWord, coreScaling, dev.config)
+		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
 	}
 	return devs
-}
-
-func (npu *Devices) hamiCoreBudget() int32 {
-	scale := npu.coreScaling
-	if scale <= 0 {
-		scale = 1
-	}
-	return int32(math.Round(100 * scale))
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -535,15 +521,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// hami-core uses a 100-point percentage scale, optionally oversold by coreScaling.
-		effectiveTotalCore := dev.Totalcore
-		if isHAMiCore {
-			effectiveTotalCore = npu.hamiCoreBudget()
-		}
-
-		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
+		// Use the core capacity advertised by the device plugin (NVIDIA path).
+		if dev.Totalcore-dev.Usedcores < k.Coresreq {
 			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		// Coresreq=100 means exclusive. Keep that after the budget is scaled,
@@ -559,7 +540,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if effectiveTotalCore != 0 && dev.Usedcores == effectiveTotalCore && k.Coresreq == 0 {
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue

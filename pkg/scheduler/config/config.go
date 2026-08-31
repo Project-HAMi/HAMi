@@ -353,7 +353,6 @@ amd:
   resourceCountName: "amd.com/gpu"
 vnpus:
   hamiVnpuCore: false
-  deviceCoreScaling: 1
   configs:
   - chipName: "910A"
     commonWord: "Ascend910A"

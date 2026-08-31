@@ -2529,13 +2529,12 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 		MemoryAllocatable:  65536,
 		Templates:          []Template{{Name: "vir05", Memory: 16384}},
 	}}
-	card := []*device.DeviceUsage{{
+	base := device.DeviceUsage{
 		ID: "dev-0", Index: 0, Type: "Ascend910B3",
 		Used: 3, Count: 4,
 		Usedmem: 3072, Totalmem: 65536,
-		Usedcores: 90, Totalcore: 20,
-		Health: true,
-	}}
+		Usedcores: 90, Health: true,
+	}
 	req := device.ContainerDeviceRequest{
 		Nums: 1, Type: "Ascend910B3",
 		Memreq: 1024, MemPercentagereq: 0, Coresreq: 20,
@@ -2550,8 +2549,9 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 		}}},
 	}
 
-	t.Run("R=1 rejects 90+20", func(t *testing.T) {
-		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1, Configs: cfg})[0]
+	t.Run("plugin advertises 100 rejects 90+20", func(t *testing.T) {
+		card := []*device.DeviceUsage{func() *device.DeviceUsage { c := base; c.Totalcore = 100; return &c }()}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
 		fit, _, reason := dev.Fit(card, req, pod, nodeInfo, &device.PodDevices{})
 		if fit {
 			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
@@ -2560,8 +2560,9 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 			t.Fatalf("expected CardInsufficientCore, got %s", reason)
 		}
 	})
-	t.Run("R=1.5 admits 90+20", func(t *testing.T) {
-		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1.5, Configs: cfg})[0]
+	t.Run("plugin advertises 150 admits 90+20", func(t *testing.T) {
+		card := []*device.DeviceUsage{func() *device.DeviceUsage { c := base; c.Totalcore = 150; return &c }()}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
 		fit, result, reason := dev.Fit(card, req, pod, nodeInfo, &device.PodDevices{})
 		if !fit {
 			t.Fatalf("expected admit at 110<=150, got reason=%s", reason)
@@ -2575,14 +2576,14 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 			ID: "dev-0", Index: 0, Type: "Ascend910B3",
 			Used: 1, Count: 8,
 			Usedmem: 8192, Totalmem: 65536,
-			Usedcores: 100, Totalcore: 20,
+			Usedcores: 100, Totalcore: 150,
 			Health: true,
 		}}
 		share := device.ContainerDeviceRequest{
 			Nums: 1, Type: "Ascend910B3",
 			Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
 		}
-		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1.5, Configs: cfg})[0]
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
 		fit, _, reason := dev.Fit(exclusive, share, pod, nodeInfo, &device.PodDevices{})
 		if fit {
 			t.Fatalf("expected exclusive occupant to reject 50-core share, got reason=%s", reason)
