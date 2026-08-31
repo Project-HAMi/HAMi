@@ -193,6 +193,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	var migMgr *MigInstanceManager
 	if mode == "mig" {
 		migMgr = NewMigInstanceManager()
+		migMgr.SetCDIHandler(o.cdiHandler)
 		if err := migMgr.Init(); err != nil {
 			return nil, fmt.Errorf("init MIG instance manager: %w", err)
 		}
@@ -343,6 +344,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		// reconcile the manager with live Pods so completed or deleted Pods
 		// release their exact profile+placement allocation.
 		go plugin.runMigAnnotationReconciler(5 * time.Second)
+		go plugin.runMigIdleReclaimer(10*time.Second, 5*time.Minute)
 		// The manager's NVML session is owned by the plugin's lifetime, not
 		// by individual Start/Stop cycles (Stop only restarts the gRPC
 		// server); release it once when the plugin is finally torn down.
@@ -353,6 +355,21 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 
 	return nil
+}
+
+func (plugin *NvidiaDevicePlugin) runMigIdleReclaimer(checkInterval, ttl time.Duration) {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-plugin.ctx.Done():
+			return
+		case <-ticker.C:
+			if err := plugin.migMgr.ReclaimExpiredIdleInstances(ttl); err != nil {
+				klog.InfoS("idle MIG reclamation check completed with error", "err", err)
+			}
+		}
+	}
 }
 
 func activeMigAllocationKeys(pods []corev1.Pod) (map[migAllocationKey]struct{}, error) {
