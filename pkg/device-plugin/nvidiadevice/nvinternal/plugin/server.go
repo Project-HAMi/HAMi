@@ -195,7 +195,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 			return nil, fmt.Errorf("init MIG instance manager: %w", err)
 		}
 	}
-	return o.newNvidiaDevicePlugin(ctx, nvconfig, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
+	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
 }
 
 // newNvidiaDevicePlugin assembles an NvidiaDevicePlugin from the options and the
@@ -204,19 +204,16 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 // channels) be unit tested without initializing devices, MIG, or NVML.
 func (o *options) newNvidiaDevicePlugin(
 	ctx context.Context,
-	nvconfig *nvidia.DeviceConfig,
 	resourceManager rm.ResourceManager,
 	deviceListStrategies spec.DeviceListStrategies,
 	schedulerConfig nvidia.NvidiaConfig,
 	mode string,
 	migMgr *MigInstanceManager,
 ) *NvidiaDevicePlugin {
-	_, name := resourceManager.Resource().Split()
-
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
 		rm:                         resourceManager,
-		config:                     nvconfig,
+		config:                     o.config,
 		deviceListEnvvar:           "NVIDIA_VISIBLE_DEVICES",
 		deviceListStrategies:       deviceListStrategies,
 		applyMutex:                 sync.Mutex{},
@@ -224,7 +221,7 @@ func (o *options) newNvidiaDevicePlugin(
 		ackDisableHealthChecks:     nil,
 		disableWatchAndRegister:    nil,
 		ackDisableWatchAndRegister: nil,
-		socket:                     kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
+		socket:                     getPluginSocketPath(resourceManager.Resource()),
 		cdiHandler:                 o.cdiHandler,
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:            schedulerConfig,

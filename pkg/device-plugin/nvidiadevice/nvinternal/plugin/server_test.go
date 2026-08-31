@@ -237,7 +237,6 @@ func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
 
 	plugin := o.newNvidiaDevicePlugin(
 		context.Background(),
-		o.config,
 		resourceManager,
 		deviceListStrategies,
 		nvidia.NvidiaConfig{},
@@ -247,6 +246,25 @@ func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
 
 	require.Equal(t, channels, plugin.imexChannels,
 		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+}
+
+// TestUpdateResponseForImexChannelsEnvVarExposesChannels covers the container-facing
+// half of the IMEX wiring: once the channels are on the plugin, the allocate response
+// must expose them to the container through the IMEX channel env var. With
+// TestNewNvidiaDevicePluginPropagatesImexChannels (options into the plugin) this pins
+// the full path the #2892 regression broke.
+func TestUpdateResponseForImexChannelsEnvVarExposesChannels(t *testing.T) {
+	plugin := NvidiaDevicePlugin{
+		imexChannels: imex.Channels{{ID: "0"}, {ID: "3"}},
+	}
+
+	response := kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+		Envs: map[string]string{},
+	}
+	plugin.updateResponseForImexChannelsEnvVar(&response)
+
+	require.Equal(t, "0,3", response.Envs[v1.ImexChannelEnvVar],
+		"updateResponseForImexChannelsEnvVar must expose the plugin's IMEX channels to the container")
 }
 
 func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
