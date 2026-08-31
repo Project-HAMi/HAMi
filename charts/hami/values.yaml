@@ -77,6 +77,14 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
+  # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
+  # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
+  # writes can be throttled by the default limits.
+  kubeQPS: ""
+  kubeBurst: ""
+  # kubeTimeout is in seconds; 0 means no timeout.
+  kubeTimeout: ""
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
