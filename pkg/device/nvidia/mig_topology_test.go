@@ -33,6 +33,15 @@ func a100TopologyProfiles() []device.MigProfile {
 	}
 }
 
+// a100NoSlotSevenProfiles is an A100 allowlist where no profile reaches slot 7, so the table ends at 7.
+func a100NoSlotSevenProfiles() []device.MigProfile {
+	return []device.MigProfile{
+		{Name: "1g.5gb", Placements: []device.MigPlacement{{Start: 0, Size: 1}, {Start: 1, Size: 1}, {Start: 2, Size: 1}, {Start: 3, Size: 1}, {Start: 4, Size: 1}, {Start: 5, Size: 1}, {Start: 6, Size: 1}}},
+		{Name: "2g.10gb", Placements: []device.MigPlacement{{Start: 0, Size: 2}, {Start: 2, Size: 2}, {Start: 4, Size: 2}}},
+		{Name: "4g.20gb", Placements: []device.MigPlacement{{Start: 0, Size: 4}}},
+	}
+}
+
 // a30TopologyProfiles has four memory slices and four compute slices.
 func a30TopologyProfiles() []device.MigProfile {
 	return []device.MigProfile{
@@ -63,6 +72,20 @@ func straddlingProfiles() []device.MigProfile {
 	return []device.MigProfile{
 		{Name: "1g", Placements: []device.MigPlacement{{Start: 0, Size: 1}, {Start: 1, Size: 1}, {Start: 2, Size: 1}, {Start: 3, Size: 1}}},
 		{Name: "2g", Placements: []device.MigPlacement{{Start: 1, Size: 2}}},
+	}
+}
+
+// slidingWindowProfiles is a synthetic table of two-slice placements offset by
+// one slot each, so every placement overlaps its neighbours. The tail placement
+// stretches the card to a final slot no window can reach.
+func slidingWindowProfiles(slots int) []device.MigProfile {
+	windows := make([]device.MigPlacement, 0, slots-2)
+	for start := range slots - 2 {
+		windows = append(windows, device.MigPlacement{Start: uint32(start), Size: 2})
+	}
+	return []device.MigProfile{
+		{Name: "window", Placements: windows},
+		{Name: "tail", Placements: []device.MigPlacement{{Start: uint32(slots - 2), Size: 2}}},
 	}
 }
 
@@ -105,6 +128,8 @@ func TestMigRegionsSplitTheCardInHalves(t *testing.T) {
 		want     []migRegion
 	}{
 		{name: "A100", profiles: a100TopologyProfiles(), want: []migRegion{{start: 0, end: 4}, {start: 4, end: 8}}},
+		// The allowlist ends at slot 7, but the halves still meet at 4.
+		{name: "A100 allowlist without slot 7", profiles: a100NoSlotSevenProfiles(), want: []migRegion{{start: 0, end: 4}, {start: 4, end: 7}}},
 		{name: "A30", profiles: a30TopologyProfiles(), want: []migRegion{{start: 0, end: 2}, {start: 2, end: 4}}},
 		{name: "H100 with 4g and double-memory 1g", profiles: h100TopologyProfiles(), want: []migRegion{{start: 0, end: 4}, {start: 4, end: 8}}},
 		{name: "straddling placement keeps one region", profiles: straddlingProfiles(), want: []migRegion{{start: 0, end: 4}}},
@@ -121,12 +146,14 @@ func TestMigRegionsSplitTheCardInHalves(t *testing.T) {
 }
 
 func TestMigReservedRegionIsTheUpperHalf(t *testing.T) {
-	// A100 and H100: [4,8) holds fewer placements than [0,4). A30: both halves tie, so the upper one wins.
+	// A100 and H100: [4,8) holds fewer placements than [0,4), and so does [4,7) when the
+	// allowlist ends at slot 7. A30: both halves tie, so the upper one wins.
 	for _, tc := range []struct {
 		name     string
 		profiles []device.MigProfile
 	}{
 		{name: "A100", profiles: a100TopologyProfiles()},
+		{name: "A100 allowlist without slot 7", profiles: a100NoSlotSevenProfiles()},
 		{name: "A30", profiles: a30TopologyProfiles()},
 		{name: "H100", profiles: h100TopologyProfiles()},
 	} {
@@ -399,11 +426,14 @@ func TestPlaceMigProfilesBacktracksWhenGreedyFails(t *testing.T) {
 }
 
 func TestPlaceMigProfilesGivesUpWithinBudget(t *testing.T) {
-	// Eight 1g add up to eight slices, but slice 7 is unreachable by a 1g, so no layout
-	// exists. The search must report that within its budget instead of running unbounded.
-	requested := []string{"1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb"}
-	if _, ok := placeMigProfiles(a100TopologyProfiles(), nil, requested); ok {
-		t.Fatal("eight 1g must not fit an A100")
+	// Sixteen slots and eight requests for the sliding window: the slice count and the
+	// placement count both allow the request, but only seven windows fit without
+	// overlap, and identical requests make the search retry every order. Unbounded,
+	// it visits about 66,000 candidates; the budget stops it at migSearchBudget and
+	// reports that no layout exists.
+	requested := []string{"window", "window", "window", "window", "window", "window", "window", "window"}
+	if _, ok := placeMigProfiles(slidingWindowProfiles(16), nil, requested); ok {
+		t.Fatal("eight windows must not fit fifteen usable slots")
 	}
 }
 
@@ -557,6 +587,17 @@ func TestPlaceMigProfilesReportsInfeasible(t *testing.T) {
 	// 2+2+2+1+1 adds up to eight slices, but slice 7 is only reachable by a 3g.
 	if _, ok := placeMigProfiles(allowed, nil, []string{"2g.10gb", "2g.10gb", "2g.10gb", "1g.5gb", "1g.5gb"}); ok {
 		t.Fatal("three 2g plus two 1g must not fit an A100")
+	}
+	// Eight 1g add up to eight slices, but only seven 1g placements exist, so the
+	// request is rejected before any search.
+	if _, ok := placeMigProfiles(allowed, nil, []string{"1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb"}); ok {
+		t.Fatal("eight 1g must not fit an A100")
+	}
+	// The media-extension 1g shares the plain 1g placements, so both names count
+	// against the same seven placements.
+	h100 := h100TopologyProfiles()
+	if _, ok := placeMigProfiles(h100, nil, []string{"1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb+me", "1g.10gb+me"}); ok {
+		t.Fatal("six 1g.10gb plus two 1g.10gb+me must not fit an H100")
 	}
 	if got, ok := placeMigProfiles(allowed, nil, nil); !ok || len(got) != 0 {
 		t.Fatalf("empty request = %+v, %v; want empty success", got, ok)

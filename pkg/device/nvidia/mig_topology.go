@@ -44,15 +44,18 @@ func (r migRegion) free(occupied []device.MigPlacement) bool {
 	return !migPlacementConflicts(device.MigPlacement{Start: r.start, Size: r.size()}, occupied)
 }
 
-// migRegions splits the card at the midpoint. If any placement other than the
-// full-card one straddles the midpoint, the whole card is a single region and
-// scoring degrades to first-fit rather than misplacing on an unknown table.
+// migRegions splits the card into two halves. The midpoint rounds up because
+// the table ends where the furthest allowed placement ends: an A100 allowlist
+// without 3g or 7g reaches slot 6 only, yet the card is still eight slices
+// wide with its halves at 4. If any placement other than the full-card one
+// straddles the midpoint, the whole card is a single region and scoring
+// degrades to first-fit rather than misplacing on an unknown table.
 func migRegions(profiles []device.MigProfile, sliceCount int) []migRegion {
 	whole := []migRegion{{start: 0, end: uint32(sliceCount)}}
 	if sliceCount < 2 {
 		return whole
 	}
-	mid := uint32(sliceCount / 2)
+	mid := uint32((sliceCount + 1) / 2)
 	for _, profile := range profiles {
 		for _, p := range profile.Placements {
 			if p.Size == 0 || p.Size >= uint32(sliceCount) {
@@ -115,6 +118,44 @@ func (l migLayout) freeSliceCount(occupied []device.MigPlacement) int {
 		}
 	}
 	return free
+}
+
+// fits rejects a request before any search when it cannot be satisfied: the
+// footprints exceed the free slices, or a placement table is requested more
+// times than it has free placements. Profiles that share a table, such as the
+// media-extension variant of a 1g, are counted together.
+func (l migLayout) fits(occupied []device.MigPlacement, requested []device.MigProfile) bool {
+	needed := 0
+	for _, profile := range requested {
+		needed += int(migProfileFootprint(profile))
+	}
+	if needed > l.freeSliceCount(occupied) {
+		return false
+	}
+	for _, profile := range requested {
+		demand := 0
+		for _, other := range requested {
+			if sameMigPlacements(profile.Placements, other.Placements) {
+				demand++
+			}
+		}
+		if demand > len(freeMigPlacements(profile, occupied)) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameMigPlacements(a, b []device.MigPlacement) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // migPlacementScore ranks one candidate placement; fields are compared in order.
@@ -190,34 +231,37 @@ func (l migLayout) rank(occupied []device.MigPlacement, profile device.MigProfil
 }
 
 // place assigns every requested profile without overlap. result[i] belongs to
-// requested[i]. The ranked greedy path is tried first: pickiest request first,
-// best-scored placement first. Only when that path fails, although the free
-// slices could hold the request, does it backtrack over the same ranked
-// candidates within migSearchBudget, so a valid layout is never rejected just
-// because the greedy choice filled the wrong half first. When the greedy path
-// succeeds the result is exactly the greedy result.
+// requested[i]. Requests are placed pickiest first, best-scored placement
+// first; when that greedy path succeeds the result is exactly the greedy
+// result. When it fails although fits allowed the request, the same ranked
+// candidates are searched by backtracking, so the greedy choice filling the
+// wrong half first does not by itself reject the request. Every level checks
+// fits for the requests still unplaced, so a run of identical requests that
+// can no longer fit is rejected once rather than in every order. The search
+// tries at most migSearchBudget candidates in total and rejects the request
+// once the budget is spent; on the supported placement tables the exhaustive
+// search never comes near it.
 func (l migLayout) place(occupied []device.MigPlacement, requested []device.MigProfile) ([]device.MigPlacement, bool) {
-	needed := 0
-	for _, profile := range requested {
-		needed += int(migProfileFootprint(profile))
-	}
-	if needed > l.freeSliceCount(occupied) {
-		return nil, false
-	}
 	used := make([]device.MigPlacement, 0, len(occupied)+len(requested))
 	used = append(used, occupied...)
 	result := make([]device.MigPlacement, len(requested))
 	placed := make([]bool, len(requested))
 	budget := migSearchBudget
-	var search func(remaining int) bool
-	search = func(remaining int) bool {
-		if remaining == 0 {
+	var search func() bool
+	search = func() bool {
+		remaining := make([]device.MigProfile, 0, len(requested))
+		for i, profile := range requested {
+			if !placed[i] {
+				remaining = append(remaining, profile)
+			}
+		}
+		if len(remaining) == 0 {
 			return true
 		}
-		idx := nextMigRequest(used, requested, placed)
-		if idx < 0 {
+		if !l.fits(used, remaining) {
 			return false
 		}
+		idx := nextMigRequest(used, requested, placed)
 		placed[idx] = true
 		for _, candidate := range l.rank(used, requested[idx]) {
 			if budget == 0 {
@@ -226,7 +270,7 @@ func (l migLayout) place(occupied []device.MigPlacement, requested []device.MigP
 			budget--
 			used = append(used, candidate)
 			result[idx] = candidate
-			if search(remaining - 1) {
+			if search() {
 				return true
 			}
 			used = used[:len(used)-1]
@@ -234,7 +278,7 @@ func (l migLayout) place(occupied []device.MigPlacement, requested []device.MigP
 		placed[idx] = false
 		return false
 	}
-	if !search(len(requested)) {
+	if !search() {
 		return nil, false
 	}
 	return result, true
