@@ -331,29 +331,35 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 // pods. AMD core allocations are normalized to a percentage via
 // normalizeAMDCoreMetrics (issue #2518); legacy metrics keep raw values.
 func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, nu *map[string]*schedulerpkg.NodeUsage, legacy bool) {
+	// PodManager only ever stores the pod's collapsed device usage, a single
+	// entry per device type, so there is no per-container breakdown to label
+	// with. See device.CollapseInitContainerUsage and SteadyStateDeviceUsage.
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"hami_vgpu_memory_allocated_bytes",
-		"vGPU memory allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		"vGPU memory allocated from a pod",
+		[]string{"namespace", "node", "pod", "device_uuid"}, nil,
 	)
 	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
 		"hami_vgpu_core_allocated_ratio",
-		"vGPU core allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		"vGPU core allocated from a pod",
+		[]string{"namespace", "node", "pod", "device_uuid"}, nil,
 	)
 	var (
 		legacyAllocatedMemory *prometheus.Desc
 		legacyAllocatedCore   *prometheus.Desc
 	)
 	if legacy {
+		// Legacy metrics exist to keep pre-existing dashboards working, so
+		// containeridx stays even though it is always "0". Only the new
+		// hami_vgpu_* pair drops it.
 		legacyAllocatedMemory = prometheus.NewDesc(
 			"vGPUMemoryAllocated",
-			"vGPU memory allocated from a container",
+			"vGPU memory allocated from a pod",
 			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 		)
 		legacyAllocatedCore = prometheus.NewDesc(
 			"vGPUCoreAllocated",
-			"vGPU core allocated from a container",
+			"vGPU core allocated from a pod",
 			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 		)
 	}
@@ -386,7 +392,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 						"found", found,
 						"nodeID", val.NodeID,
 					)
-					containerLabels := []string{val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID}
+					containerLabels := []string{val.Namespace, val.NodeID, val.Name, ctrdevval.UUID}
 					usedMemBytes := mibToBytes(ctrdevval.Usedmem)
 					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, usedMemBytes, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
@@ -396,8 +402,9 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
 					}
 					if legacy {
-						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, containerLabels...)
-						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), containerLabels...)
+						legacyLabels := []string{val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID}
+						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, legacyLabels...)
+						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), legacyLabels...)
 					}
 				}
 			}
