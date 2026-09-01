@@ -429,16 +429,16 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		if isMutex && dev.Used > 0 {
-			reason[common.ExclusiveDeviceAllocateConflict]++
-			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
-			continue
-		}
 		// The whole profile has to fit: a 3 slice profile needs 3 free slices,
 		// not just one.
 		if dev.Count-dev.Used < profileSlices {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used, "request slices", profileSlices)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		if dev.Totalmem-dev.Usedmem < profileMemoryMiB {
