@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,12 +101,7 @@ func descVariableLabels(desc *prometheus.Desc) []string {
 // descHasLabel reports whether desc declares label as one of its variable
 // labels (exact match, not a substring check).
 func descHasLabel(desc *prometheus.Desc, label string) bool {
-	for _, l := range descVariableLabels(desc) {
-		if l == label {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(descVariableLabels(desc), label)
 }
 
 // TestHostGPUMetricsDescriptorsIncludeNodeLabel verifies that the host GPU
