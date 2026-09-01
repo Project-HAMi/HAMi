@@ -54,8 +54,10 @@ func numaRefitTestPod(mode string) *corev1.Pod {
 	}
 }
 
-// numaRefitTestServer serves /refit with the given response and captures the
-// last request.
+// numaRefitTestServer serves /refit over HTTP with the given response and
+// captures the last request. NOTE: after the fail-closed token change, plain
+// HTTP callers get an early error and never reach this server; prefer
+// numaRefitTestServerTLS for authenticated callers.
 func numaRefitTestServer(t *testing.T, response device.NumaRefitResponse) (*httptest.Server, *device.NumaRefitRequest) {
 	t.Helper()
 	var lastRequest device.NumaRefitRequest
@@ -70,9 +72,30 @@ func numaRefitTestServer(t *testing.T, response device.NumaRefitResponse) (*http
 	return server, &lastRequest
 }
 
+// numaRefitTestServerTLS wraps numaRefitTestServer in TLS and wires the test
+// token so the client always presents a valid bearer credential.
+func numaRefitTestServerTLS(t *testing.T, response device.NumaRefitResponse) (*httptest.Server, *device.NumaRefitRequest) {
+	t.Helper()
+	var lastRequest device.NumaRefitRequest
+	server, caPath := numaRefitTLSTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, numaRefitPath, r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&lastRequest))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	})
+	t.Setenv(SchedulerCAFileEnvName, caPath)
+	t.Setenv(SchedulerTLSInsecureEnvName, "")
+	setupTestToken(t, "test-sa-token")
+	return server, &lastRequest
+}
+
 func TestRequestNumaRefitRoundTrip(t *testing.T) {
+	// Isolate from any projected SA token in the environment: requestNumaRefit
+	// always reads serviceAccountTokenFile now (fail-closed), so we use the
+	// TLS helper which installs a deterministic token and a matching CA.
 	refitted := device.ContainerDevices{{UUID: numaTestGPUB, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
-	server, lastRequest := numaRefitTestServer(t, device.NumaRefitResponse{
+	server, lastRequest := numaRefitTestServerTLS(t, device.NumaRefitResponse{
 		Succeeded:        true,
 		ContainerDevices: device.EncodeContainerDevices(refitted),
 	})
@@ -98,7 +121,7 @@ func TestRequestNumaRefitRoundTrip(t *testing.T) {
 }
 
 func TestRequestNumaRefitRefused(t *testing.T) {
-	server, _ := numaRefitTestServer(t, device.NumaRefitResponse{Succeeded: false, FailureReason: "no allowed device fits"})
+	server, _ := numaRefitTestServerTLS(t, device.NumaRefitResponse{Succeeded: false, FailureReason: "no allowed device fits"})
 	t.Setenv(SchedulerEndpointEnvName, server.URL)
 
 	plugin := &NvidiaDevicePlugin{}
@@ -109,10 +132,12 @@ func TestRequestNumaRefitRefused(t *testing.T) {
 }
 
 func TestRequestNumaRefitBadStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	setupTestToken(t, "test-sa-token")
+	server, caPath := numaRefitTLSTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
+	})
+	t.Setenv(SchedulerCAFileEnvName, caPath)
+	t.Setenv(SchedulerTLSInsecureEnvName, "")
 	t.Setenv(SchedulerEndpointEnvName, server.URL)
 
 	plugin := &NvidiaDevicePlugin{}
@@ -120,6 +145,32 @@ func TestRequestNumaRefitBadStatus(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status 500")
+}
+
+// TestRequestNumaRefitMissingToken verifies the fail-closed behavior added in
+// issue #2878: when the projected SA token file cannot be read, requestNumaRefit
+// returns an immediate error rather than silently degrading to unauthenticated.
+func TestRequestNumaRefitMissingToken(t *testing.T) {
+	// Point to a guaranteed-nonexistent token file so we do not accidentally
+	// inherit a projected SA token from the test environment.
+	origTokenFile := serviceAccountTokenFile
+	serviceAccountTokenFile = filepath.Join(t.TempDir(), "nonexistent-token")
+	t.Cleanup(func() { serviceAccountTokenFile = origTokenFile })
+
+	// Use an HTTPS endpoint so the only reason for failure is the missing token.
+	server, caPath := numaRefitTLSTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	t.Setenv(SchedulerEndpointEnvName, server.URL)
+	t.Setenv(SchedulerCAFileEnvName, caPath)
+	t.Setenv(SchedulerTLSInsecureEnvName, "")
+	t.Setenv(util.NodeNameEnvName, "node-a")
+
+	plugin := &NvidiaDevicePlugin{}
+	_, err := plugin.requestNumaRefit(context.Background(), numaRefitTestPod("strict"), 0, []string{numaTestGPUB})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot read service account token for refit authentication")
 }
 
 func TestAllowedPhysicalDeviceIDs(t *testing.T) {
@@ -133,7 +184,7 @@ func TestAllowedPhysicalDeviceIDs(t *testing.T) {
 // scheduler that refits onto GPU-B — kubelet receives GPU-B replicas.
 func TestGetPreferredAllocationRefitBestEffort(t *testing.T) {
 	refitted := device.ContainerDevices{{UUID: numaTestGPUB, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
-	server, lastRequest := numaRefitTestServer(t, device.NumaRefitResponse{
+	server, lastRequest := numaRefitTestServerTLS(t, device.NumaRefitResponse{
 		Succeeded:        true,
 		ContainerDevices: device.EncodeContainerDevices(refitted),
 	})
@@ -160,7 +211,7 @@ func TestGetPreferredAllocationRefitBestEffort(t *testing.T) {
 
 // Strict pod with a scheduler that refuses: the allocation must fail.
 func TestGetPreferredAllocationRefitStrictFailure(t *testing.T) {
-	server, _ := numaRefitTestServer(t, device.NumaRefitResponse{Succeeded: false, FailureReason: "no allowed device fits"})
+	server, _ := numaRefitTestServerTLS(t, device.NumaRefitResponse{Succeeded: false, FailureReason: "no allowed device fits"})
 	t.Setenv(SchedulerEndpointEnvName, server.URL)
 	t.Setenv(util.NodeNameEnvName, "node-a")
 	setupInRequestDevices(t)
@@ -233,7 +284,7 @@ func TestNumaRefitTLSConfigInsecureOptOut(t *testing.T) {
 // accounting and runtime divergent.
 func TestGetPreferredAllocationRefitCommittedButUnmappable(t *testing.T) {
 	refitted := device.ContainerDevices{{UUID: numaTestGPUA, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
-	server, _ := numaRefitTestServer(t, device.NumaRefitResponse{
+	server, _ := numaRefitTestServerTLS(t, device.NumaRefitResponse{
 		Succeeded:        true,
 		ContainerDevices: device.EncodeContainerDevices(refitted),
 	})
@@ -277,7 +328,7 @@ func TestNumaRefitTLSConfigRejectsUnusableCA(t *testing.T) {
 // kubelet builds AvailableDeviceIDs as a superset of it.
 func TestGetPreferredAllocationRefitUsesAvailableSuperset(t *testing.T) {
 	refitted := device.ContainerDevices{{UUID: numaTestGPUB, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
-	server, lastRequest := numaRefitTestServer(t, device.NumaRefitResponse{
+	server, lastRequest := numaRefitTestServerTLS(t, device.NumaRefitResponse{
 		Succeeded:        true,
 		ContainerDevices: device.EncodeContainerDevices(refitted),
 	})

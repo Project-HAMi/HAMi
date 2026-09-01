@@ -221,7 +221,7 @@ func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Cache not synced, cannot refit")
 			response = device.NumaRefitResponse{FailureReason: err.Error()}
 		} else {
-			response = s.RefitNumaAllocation(request, bearerToken(r))
+			response = s.RefitNumaAllocation(r.Context(), request, bearerToken(r))
 		}
 
 		resultBody, err := json.Marshal(response)

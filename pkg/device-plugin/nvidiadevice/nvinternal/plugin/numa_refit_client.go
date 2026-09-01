@@ -113,8 +113,11 @@ func numaRefitHTTPClient(authenticated bool) (*http.Client, error) {
 		Transport: &http.Transport{
 			TLSClientConfig: tlsConfig,
 		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			req.Header.Del("Authorization")
+		// Never follow redirects: the bearer token must not be forwarded to
+		// an unvalidated redirect destination. Returning a non-nil error here
+		// is sufficient; no header manipulation is needed because the redirect
+		// request is never sent.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return errors.New("redirects are not permitted for refit requests")
 		},
 	}, nil
@@ -176,17 +179,17 @@ func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *cor
 		return nil, fmt.Errorf("invalid scheduler endpoint URL: %w", err)
 	}
 
-	var token string
-	if tokenBytes, tokenErr := os.ReadFile(serviceAccountTokenFile); tokenErr != nil {
-		// Older scheduler versions accept unauthenticated refits, so degrade
-		// to that behavior rather than failing the allocation outright.
-		klog.InfoS("cannot read service account token; sending refit without caller authentication", "err", tokenErr)
-	} else {
-		token = strings.TrimSpace(string(tokenBytes))
+	// Always authenticate: the scheduler requires a valid device-plugin token
+	// for /refit (see issue #2878). Fail immediately if the token is missing so
+	// the caller gets a clear error rather than a server-side authentication
+	// rejection after a full round trip.
+	tokenBytes, tokenErr := os.ReadFile(serviceAccountTokenFile)
+	if tokenErr != nil {
+		return nil, fmt.Errorf("cannot read service account token for refit authentication: %w", tokenErr)
 	}
+	token := strings.TrimSpace(string(tokenBytes))
 
-	authenticated := token != ""
-	if authenticated && parsedURL.Scheme != "https" {
+	if parsedURL.Scheme != "https" {
 		return nil, fmt.Errorf("authenticated refit requires HTTPS, endpoint scheme is %q", parsedURL.Scheme)
 	}
 
@@ -211,11 +214,9 @@ func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *cor
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if authenticated {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 
-	httpClient, err := numaRefitHTTPClient(authenticated)
+	httpClient, err := numaRefitHTTPClient(true)
 	if err != nil {
 		return nil, err
 	}

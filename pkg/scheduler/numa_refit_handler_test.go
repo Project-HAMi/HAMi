@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"strings"
@@ -214,7 +215,7 @@ func TestRefitNumaAllocationMovesReservation(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	captured, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 	devices, err := device.DecodeContainerDevices(response.ContainerDevices)
@@ -244,7 +245,7 @@ func TestRefitNumaAllocationNoOpWhenAlreadyAllowed(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-a", "GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-a", "GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true)
 	devices, err := device.DecodeContainerDevices(response.ContainerDevices)
@@ -258,7 +259,7 @@ func TestRefitNumaAllocationInsufficientCapacity(t *testing.T) {
 	s, _ := refitFixture(t, 16000)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "no allowed device fits"), "reason: %s", response.FailureReason)
@@ -270,7 +271,7 @@ func TestRefitNumaAllocationUnmatchedAllowedSet(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-a-0", "GPU-a-1"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-a-0", "GPU-a-1"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, AllowedSetUnmatched), "reason: %s", response.FailureReason)
@@ -280,7 +281,7 @@ func TestRefitNumaAllocationPatchFailureLeavesStateUntouched(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	_, calls := stubRefitPatch(t, errors.New("apiserver unavailable"))
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "apiserver unavailable"))
@@ -295,7 +296,7 @@ func TestRefitNumaAllocationConsumedAllocation(t *testing.T) {
 	pod.Annotations[device.InRequestDevices[nvidia.NvidiaGPUDevice]] = device.EncodePodSingleDevice(device.PodSingleDevice{{}})
 	s.podManager.UpdatePod(pod)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "no pending"), "reason: %s", response.FailureReason)
@@ -367,7 +368,7 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 			if token == "" {
 				token = validRefitToken
 			}
-			response := s.RefitNumaAllocation(request, token)
+			response := s.RefitNumaAllocation(context.Background(), request, token)
 
 			assert.Equal(t, response.Succeeded, false)
 			assert.Assert(t, strings.Contains(response.FailureReason, test.wantReason),
@@ -412,7 +413,7 @@ func TestRefitNumaAllocationSeedsExistingAllocations(t *testing.T) {
 
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerIndex = 1
-	response := s.RefitNumaAllocation(request, validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 	toAllocate := captured[device.InRequestDevices[nvidia.NvidiaGPUDevice]]
@@ -479,10 +480,10 @@ func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 		}
 	}
 
-	firstResponse := s.RefitNumaAllocation(requestFor("pod-1-uid", "pod-1"), validRefitToken)
+	firstResponse := s.RefitNumaAllocation(context.Background(), requestFor("pod-1-uid", "pod-1"), validRefitToken)
 	assert.Equal(t, firstResponse.Succeeded, true, "first refit failed: %s", firstResponse.FailureReason)
 
-	secondResponse := s.RefitNumaAllocation(requestFor("pod-2-uid", "pod-2"), validRefitToken)
+	secondResponse := s.RefitNumaAllocation(context.Background(), requestFor("pod-2-uid", "pod-2"), validRefitToken)
 	assert.Equal(t, secondResponse.Succeeded, false)
 	assert.Assert(t, strings.Contains(secondResponse.FailureReason, "no allowed device fits"),
 		"reason: %s", secondResponse.FailureReason)
@@ -498,7 +499,7 @@ func TestRefitNumaAllocationContainerNameMismatch(t *testing.T) {
 
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerName = "sidecar"
-	response := s.RefitNumaAllocation(request, validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, `is "main", not "sidecar"`), "reason: %s", response.FailureReason)
@@ -506,7 +507,7 @@ func TestRefitNumaAllocationContainerNameMismatch(t *testing.T) {
 
 	// The matching name is accepted.
 	request.ContainerName = "main"
-	response = s.RefitNumaAllocation(request, validRefitToken)
+	response = s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 }
 
@@ -537,7 +538,7 @@ func TestRefitNumaAllocationRejectsMigDevice(t *testing.T) {
 	setupRefitAuth(t, s)
 	stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "MIG"), "reason: %s", response.FailureReason)
@@ -577,7 +578,7 @@ func TestRefitNumaAllocationHeterogeneousReservation(t *testing.T) {
 	setupRefitAuth(t, s)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-c", "GPU-d"), validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-c", "GPU-d"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "heterogeneous"), "reason: %s", response.FailureReason)
@@ -626,7 +627,7 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerIndex = 1
 	request.ContainerName = "main"
-	response := s.RefitNumaAllocation(request, validRefitToken)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 
 	pi, ok := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
@@ -659,7 +660,7 @@ func TestRefitNumaAllocationCallerAuthentication(t *testing.T) {
 			s, _ := refitFixture(t, 40000)
 			_, calls := stubRefitPatch(t, nil)
 
-			response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"), test.token)
+			response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), test.token)
 
 			assert.Equal(t, response.Succeeded, false)
 			assert.Assert(t, strings.Contains(response.FailureReason, "caller authentication"), "reason: %s", response.FailureReason)

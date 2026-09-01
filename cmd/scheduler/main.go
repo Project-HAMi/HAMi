@@ -132,6 +132,18 @@ func start() error {
 		return fmt.Errorf("empty hostname returned")
 	}
 
+	// Refuse to start with an unusable /refit identity: empty namespace or
+	// service-account means every TokenReview will fail, but silently – the
+	// scheduler would appear healthy while all refit calls are rejected.
+	if config.DevicePluginNamespace == "" || config.DevicePluginServiceAccount == "" {
+		return fmt.Errorf(
+			"--device-plugin-namespace and --device-plugin-service-account must both be set; "+
+				"they identify the ServiceAccount whose token is accepted on the /refit endpoint "+
+				"(see issue #2878). Got namespace=%q service-account=%q",
+			config.DevicePluginNamespace, config.DevicePluginServiceAccount,
+		)
+	}
+
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
 	err = sher.Start()

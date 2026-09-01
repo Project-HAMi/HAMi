@@ -80,11 +80,13 @@ const refitPatchTimeout = 2 * time.Second
 // then moves the in-memory reservation. Failures are reported in-band and
 // leave both annotations and accounting untouched.
 //
+// ctx is the HTTP request context; it is propagated into the TokenReview so
+// client disconnection or a timeout cancels the authentication call.
 // token is the bearer token the caller presented (from the request's
 // Authorization header, see routes.NumaRefit); it must belong to the
 // device-plugin pod running on req.NodeName, see issue #2878.
-func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest, token string) device.NumaRefitResponse {
-	if err := s.authenticateRefitCaller(context.Background(), token, req.NodeName); err != nil {
+func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefitRequest, token string) device.NumaRefitResponse {
+	if err := s.authenticateRefitCaller(ctx, token, req.NodeName); err != nil {
 		return numaRefitFailure(nil, "refit request failed caller authentication: %v", err)
 	}
 	if req.PodUID == "" || req.PodNamespace == "" || req.PodName == "" || req.NodeName == "" {
