@@ -73,6 +73,9 @@ on the metrics port; the scheduler and the vGPU monitor each expose a subset):
 | `hami_container_device_utilization_ratio` | vGPU monitor | Per-container utilization (0-100). |
 | `hami_scheduler_is_leader` | scheduler | 1 when this instance is the active leader, 0 otherwise. |
 | `hami_scheduler_cache_synced` | scheduler | 1 when the internal node/device cache is fully synced, 0 otherwise. |
+| `hami_host_gpu_temperature_celsius` | vGPU monitor | GPU die temperature in °C. |
+| `hami_host_gpu_power_usage_watts` | vGPU monitor | GPU board power draw in watts. |
+| `hami_host_gpu_ecc_errors_total` | vGPU monitor | Lifetime ECC errors (corrected/uncorrected). |
 
 > Utilization and core-allocation metrics are reported on a 0-100 scale. The
 > node memory-allocation ratio is reported on a 0-1 scale and uses Grafana's
