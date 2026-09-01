@@ -378,7 +378,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
+          "expr": "hami_host_gpu_memory_used_bytes{node=~\"$node\"}",
           "legendFormat": "host used {{node}} idx{{device_index}} ({{device_uuid}})",
           "refId": "B"
         }

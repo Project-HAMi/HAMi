@@ -119,7 +119,7 @@ func TestPhysicalGPUAllocatedVsHostUsedPanelComparesDeviceMemory(t *testing.T) {
 	if got.Targets[0].Expr != `hami_gpu_memory_allocated_bytes{node=~"$node"}` {
 		t.Errorf("allocated expr = %q", got.Targets[0].Expr)
 	}
-	if got.Targets[1].Expr != `hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~"$node"}` {
+	if got.Targets[1].Expr != `hami_host_gpu_memory_used_bytes{node=~"$node"}` {
 		t.Errorf("host used expr = %q", got.Targets[1].Expr)
 	}
 }
