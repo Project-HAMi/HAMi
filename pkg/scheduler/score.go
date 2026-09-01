@@ -99,7 +99,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 		if int(k.Nums) > len(typeDevices) && !isMIGRequest(k, typeDevices, pod) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod),
 				"request devices nums", k.Nums, "node device nums (type)", len(typeDevices), "type", k.Type)
-			return false, common.NodeInsufficientDevice
+			// Report it in the same form every device backend uses. common.ParseReason
+			// reads only "<count>/<total> <Reason>", so the bare constant this used to
+			// return was dropped and the pod got no event naming why the node was rejected.
+			return false, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(typeDevices)}, int(k.Nums))
 		}
 
 		fit, tmpDevs, reason := devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
