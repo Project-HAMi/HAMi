@@ -73,6 +73,9 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
+| `scheduler.kubeQPS` | QPS to use while talking with the kube-apiserver; empty keeps the binary default (`5`) | `""` |
+| `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
+| `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
 | `scheduler.forceOverwriteDefaultScheduler` | Whether to force overwrite default scheduler | `true` |
 | `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
 | `scheduler.leaderElect` | Whether to enable leader election | `true` |
