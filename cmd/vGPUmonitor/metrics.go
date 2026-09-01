@@ -388,6 +388,8 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 	return nil
 }
 
+// collectGPUUtilizationMetrics emits the GPU core and memory-controller
+// utilization gauges for hdev, labeled with node/device identity.
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
 	utilRates, nvret := hdev.GetUtilizationRates()
 	if nvret == nvml.ERROR_NOT_SUPPORTED {

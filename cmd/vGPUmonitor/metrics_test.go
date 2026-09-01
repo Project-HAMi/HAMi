@@ -108,6 +108,9 @@ func descHasLabel(desc *prometheus.Desc, label string) bool {
 	return false
 }
 
+// TestHostGPUMetricsDescriptorsIncludeNodeLabel verifies that the host GPU
+// descriptors declare the node label expected by per-node aggregation
+// (current descriptors use "node", legacy ones use "nodeid").
 func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 	initLegacyDescriptors()
 
