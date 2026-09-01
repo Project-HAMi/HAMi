@@ -175,11 +175,18 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
-| `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
+| `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
+| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
+
+When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
+`/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
+host-installed driver and uses `/` for both the driver and device roots. When
+HAMi starts before GPU Operator validation completes, wait for GPU Operator to
+become ready and restart the HAMi device plugin DaemonSet.
 
 ### Device Plugin Service Configuration
 
