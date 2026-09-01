@@ -255,10 +255,7 @@ func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 				continue
 			}
 			chosen := ctrDevices[0]
-			slice := clampToInt32(readCustomInfoInt(chosen.CustomInfo, "drsSlice"))
-			if slice <= 0 {
-				slice = 1
-			}
+			slice := sliceCount(&chosen)
 			ctrName := containerNameByIndex(pod, ctridx)
 			profileName := readCustomInfoString(chosen.CustomInfo, "profileName")
 			profileID := readCustomInfoString(chosen.CustomInfo, "profileID")
@@ -368,12 +365,24 @@ func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 	return 0
 }
 
-func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	slice := clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
-	if slice <= 0 {
-		slice = 1
+// sliceCount returns the DRS slices an entry occupies. Slots is authoritative;
+// CustomInfo is the fallback for entries built before Fit recorded Slots.
+func sliceCount(ctr *device.ContainerDevice) int32 {
+	if ctr == nil {
+		return 1
 	}
-	n.Used = clampToInt32(int(n.Used) + int(slice))
+	slice := ctr.Slots
+	if slice <= 0 {
+		slice = clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
+	}
+	if slice <= 0 {
+		return 1
+	}
+	return slice
+}
+
+func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	n.Used = clampToInt32(int(n.Used) + int(sliceCount(ctr)))
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil

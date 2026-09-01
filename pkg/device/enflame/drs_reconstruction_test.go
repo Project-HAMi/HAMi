@@ -17,6 +17,7 @@ limitations under the License.
 package enflame
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,6 +107,41 @@ func TestDRSSlice_PartialCapacityRejectsFullProfile(t *testing.T) {
 	assert.Equal(t, fit, true)
 	assert.Equal(t, reason, "")
 	assert.Equal(t, result[EnflameVGCUDevice][0].Slots, int32(1))
+}
+
+// TestDRSSlice_SliceCountPrefersSlots checks that Slots is authoritative and
+// that CustomInfo only fills in for entries built before Fit recorded Slots.
+func TestDRSSlice_SliceCountPrefersSlots(t *testing.T) {
+	InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
+	enf := &EnflameDevices{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+
+	tests := []struct {
+		name string
+		ctr  device.ContainerDevice
+		want int32
+	}{
+		{"slots wins over a stale CustomInfo", device.ContainerDevice{Slots: 3, CustomInfo: map[string]any{"drsSlice": 1}}, 3},
+		{"custominfo fills in when slots is unset", device.ContainerDevice{CustomInfo: map[string]any{"drsSlice": 3}}, 3},
+		{"neither set counts as one slice", device.ContainerDevice{}, 1},
+		{"annotation round trip keeps the count", device.ContainerDevice{Slots: 3}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, sliceCount(&tt.ctr), tt.want)
+
+			// AddResourceUsage and PatchAnnotations must agree on the same entry.
+			card := drsCard(400000, 0)
+			assert.NilError(t, enf.AddResourceUsage(pod, card, &tt.ctr))
+			assert.Equal(t, card.Used, tt.want)
+
+			annos := map[string]string{}
+			enf.PatchAnnotations(pod, &annos, device.PodDevices{
+				EnflameVGCUDevice: {device.ContainerDevices{tt.ctr}},
+			})
+			assert.Equal(t, annos[PodRequestGCUSize], strconv.FormatInt(int64(tt.want), 10))
+		})
+	}
 }
 
 // TestDRSSlice_ReconstructionRejectsSliceOversubscription checks that a card
