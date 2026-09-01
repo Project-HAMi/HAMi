@@ -85,6 +85,13 @@ scheduler:
   kubeBurst: ""
   # kubeTimeout is in seconds; 0 means no timeout.
   kubeTimeout: ""
+  # How long Bind retries LockNode when another PodGroup member holds the node
+  # lock. Empty keeps the binary default (28s); 0 disables retry entirely.
+  nodeLockRetryTimeout: ""
+  # httpTimeout the generated KubeSchedulerConfiguration gives the HAMi extender,
+  # in seconds. Keep it above nodeLockRetryTimeout, otherwise kube-scheduler cuts
+  # the bind call off while the extender is still retrying the node lock.
+  extenderHTTPTimeout: 30
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
