@@ -47,6 +47,18 @@ type Devices interface {
 	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
+// AppendEnvIfAbsent appends env only when the same literal name and value are
+// not already present. Entries with the same name but a different value are
+// retained to preserve the admission handler's existing overwrite behavior.
+func AppendEnvIfAbsent(ctr *corev1.Container, env corev1.EnvVar) {
+	for _, existing := range ctr.Env {
+		if existing.Name == env.Name && existing.Value == env.Value && existing.ValueFrom == nil && env.ValueFrom == nil {
+			return
+		}
+	}
+	ctr.Env = append(ctr.Env, env)
+}
+
 type MigPlacement struct {
 	Start uint32 `json:"start"`
 	Size  uint32 `json:"size"`

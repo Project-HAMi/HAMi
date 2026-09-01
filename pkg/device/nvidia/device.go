@@ -340,7 +340,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
+		device.AppendEnvIfAbsent(ctr, corev1.EnvVar{
 			Name:  util.TaskPriority,
 			Value: fmt.Sprint(priority.Value()),
 		})
@@ -348,7 +348,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 
 	if dev.config.GPUCorePolicy != "" &&
 		dev.config.GPUCorePolicy != DefaultCorePolicy {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
+		device.AppendEnvIfAbsent(ctr, corev1.EnvVar{
 			Name:  util.CoreLimitSwitch,
 			Value: string(dev.config.GPUCorePolicy),
 		})
@@ -367,7 +367,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	}
 
 	if !hasResource && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
+		device.AppendEnvIfAbsent(ctr, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "none",
 		})

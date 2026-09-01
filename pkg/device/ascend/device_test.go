@@ -707,6 +707,28 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_IsIdempotent(t *testing.T) {
+	dev := Devices{config: VNPUConfig{
+		ResourceName: "huawei.com/Ascend910A",
+		OverwriteEnv: true,
+	}}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: "ASCEND_VISIBLE_DEVICES", Value: "0"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{},
+		},
+	}
+	pod := &corev1.Pod{}
+
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	afterFirstMutation := ctr.DeepCopy()
+
+	_, err = dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, ctr, afterFirstMutation)
+}
+
 func Test_MutateAdmission_NilRequests(t *testing.T) {
 	// Regression test: a pod that declares only limits (no requests block)
 	// must not panic when MutateAdmission writes the trimmed memory request.
