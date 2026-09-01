@@ -543,17 +543,14 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			Usedmem:   int32(devmem),
 			Usedcores: int32(devcores),
 		}
-		// The 5th field is optional and only written for multi-slot entries,
-		// so annotations produced by older versions stay readable.
+		// The 5th field is optional. An unusable value is ignored rather than
+		// rejected: dropping the whole annotation undercounts far more than one slot.
 		if len(tmpstr) >= 5 {
-			devslots, err := strconv.ParseInt(tmpstr[4], 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid slots field: %w", err)
+			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
+				tmpdev.Slots = int32(devslots)
+			} else {
+				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
 			}
-			if devslots < 0 {
-				return nil, fmt.Errorf("slots field must not be negative: %d", devslots)
-			}
-			tmpdev.Slots = int32(devslots)
 		}
 		contdev = append(contdev, tmpdev)
 	}

@@ -139,16 +139,29 @@ func TestDecodeContainerDevices(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "invalid non-numeric slots",
+			name:        "invalid non-numeric slots is ignored",
 			input:       "GPU-1,NVIDIA,1000,10,invalid:",
-			want:        nil,
-			expectError: true,
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			expectError: false,
 		},
 		{
-			name:        "negative slots value",
+			name:        "negative slots value is ignored",
 			input:       "GPU-1,NVIDIA,1000,10,-1:",
-			want:        nil,
-			expectError: true,
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			expectError: false,
+		},
+		{
+			name:  "existing valid fields preserved with extra optional fields",
+			input: "GPU-1,NVIDIA,1000,10,extra1,extra2:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+				},
+			},
+			expectError: false,
 		},
 		{
 			name:        "malformed segment without comma",
