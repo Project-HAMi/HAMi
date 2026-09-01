@@ -787,6 +787,40 @@ func Test_MutateAdmission_NilRequests(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_EmptyResourceMemoryName(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			ChipName:           "Ascend910A",
+			CommonWord:         "Ascend910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "",
+			MemoryCapacity:     0,
+			MemoryAllocatable:  0,
+		},
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910A": resource.MustParse("1"),
+			},
+		},
+	}
+	pod := corev1.Pod{}
+	result, err := dev.MutateAdmission(&ctr, &pod)
+	if err != nil {
+		t.Fatalf("MutateAdmission returned unexpected error: %v", err)
+	}
+	if !result {
+		t.Fatalf("MutateAdmission expected true, got false")
+	}
+	if _, ok := ctr.Resources.Limits[corev1.ResourceName("")]; ok {
+		t.Fatalf("MutateAdmission should not inject empty resource name into Limits")
+	}
+	if _, ok := ctr.Resources.Requests[corev1.ResourceName("")]; ok {
+		t.Fatalf("MutateAdmission should not inject empty resource name into Requests")
+	}
+}
+
 func Test_MutateAdmission910C(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2528,6 +2562,7 @@ func TestDevices_Fit_910C(t *testing.T) {
   memoryCapacity: 65536
   aiCore: 20
   aiCPU: 7
+  superPod: true
 `
 
 	var config []VNPUConfig

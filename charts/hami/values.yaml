@@ -77,6 +77,14 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
+  # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
+  # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
+  # writes can be throttled by the default limits.
+  kubeQPS: ""
+  kubeBurst: ""
+  # kubeTimeout is in seconds; 0 means no timeout.
+  kubeTimeout: ""
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
@@ -273,7 +281,7 @@ scheduler:
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
-    monitorTargetPort: 9395
+    monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
     httpTargetPort: 443
     labels: {}
     annotations: {}
@@ -433,10 +441,13 @@ devicePlugin:
   createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
-  passDeviceSpecsEnabled: false
+  passDeviceSpecsEnabled: true
   deviceListStrategy: "envvar"
   nvidiaHookPath: null
-  nvidiaDriverRoot: null
+  # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
+  # and device roots from GPU Operator's driver-ready contract. If the
+  # contract is absent, both roots default to / for a host-installed driver.
+  nvidiaDriverRoot: "auto"
   gdrcopyEnabled: null
   gdsEnabled: null
   mofedEnabled: null

@@ -279,9 +279,9 @@ func TestAMDCoreAllocatedRatioNormalization(t *testing.T) {
 # HELP hami_gpu_core_allocated_ratio Device core allocated for a certain GPU
 # TYPE hami_gpu_core_allocated_ratio gauge
 hami_gpu_core_allocated_ratio{device_index="0",device_type="AMDGPU",device_uuid="AMD-1",node="node-1"} 50
-# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a container
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
 # TYPE hami_vgpu_core_allocated_ratio gauge
-hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
 `
 	if err := promtestutil.CollectAndCompare(
 		newCollector,
@@ -302,7 +302,7 @@ hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace
 		},
 	}
 	legacyWant := `
-# HELP vGPUCoreAllocated vGPU core allocated from a container
+# HELP vGPUCoreAllocated vGPU core allocated from a pod
 # TYPE vGPUCoreAllocated gauge
 vGPUCoreAllocated{containeridx="0",deviceuuid="AMD-1",nodename="node-1",podname="amd-pod",podnamespace="default"} 32
 `

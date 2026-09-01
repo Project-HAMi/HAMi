@@ -207,6 +207,66 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 }
 
+// TestNewNvidiaDevicePluginPropagatesImexChannels guards the wiring from options
+// into the plugin: WithImexChannels stores the channels on options, and the
+// plugin the constructor builds must carry them, otherwise updateResponseForCDI,
+// updateResponseForImexChannelsEnvVar, updateResponseForDeviceMounts, and
+// apiDeviceSpecs all see an empty list and IMEX channels are never exposed to the
+// container.
+func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
+	channels := imex.Channels{{ID: "0"}, {ID: "1"}}
+	o := &options{
+		imexChannels: channels,
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							CDIAnnotationPrefix: ptr("cdi.k8s.io/"),
+						},
+					},
+				},
+			},
+		},
+	}
+	resourceManager := &rm.ResourceManagerMock{
+		ResourceFunc: func() v1.ResourceName { return "nvidia.com/gpu" },
+	}
+	deviceListStrategies, err := v1.NewDeviceListStrategies([]string{"envvar"})
+	require.NoError(t, err)
+
+	plugin := o.newNvidiaDevicePlugin(
+		context.Background(),
+		resourceManager,
+		deviceListStrategies,
+		nvidia.NvidiaConfig{},
+		"hami-core",
+		nil,
+	)
+
+	require.Equal(t, channels, plugin.imexChannels,
+		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+}
+
+// TestUpdateResponseForImexChannelsEnvVarExposesChannels covers the container-facing
+// half of the IMEX wiring: once the channels are on the plugin, the allocate response
+// must expose them to the container through the IMEX channel env var. With
+// TestNewNvidiaDevicePluginPropagatesImexChannels (options into the plugin) this pins
+// the full path the #2892 regression broke.
+func TestUpdateResponseForImexChannelsEnvVarExposesChannels(t *testing.T) {
+	plugin := NvidiaDevicePlugin{
+		imexChannels: imex.Channels{{ID: "0"}, {ID: "3"}},
+	}
+
+	response := kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+		Envs: map[string]string{},
+	}
+	plugin.updateResponseForImexChannelsEnvVar(&response)
+
+	require.Equal(t, "0,3", response.Envs[v1.ImexChannelEnvVar],
+		"updateResponseForImexChannelsEnvVar must expose the plugin's IMEX channels to the container")
+}
+
 func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
 	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx

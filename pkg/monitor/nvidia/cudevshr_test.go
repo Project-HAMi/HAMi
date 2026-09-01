@@ -110,6 +110,7 @@ func Test_ContainerLister_Accessors(t *testing.T) {
 	}
 	assert.Equal(t, len(l.ListContainers()), 1)
 	assert.Assert(t, l.Clientset() == nil)
+	assert.Assert(t, l.PodLister() == nil)
 
 	l.Lock()
 	l.UnLock()

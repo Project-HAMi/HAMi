@@ -139,6 +139,15 @@ spec:
             {{- if .Values.legacyMetrics }}
             - --legacy-metrics=true
             {{- end }}
+            {{- if .Values.scheduler.kubeQPS }}
+            - --kube-qps={{ .Values.scheduler.kubeQPS }}
+            {{- end }}
+            {{- if .Values.scheduler.kubeBurst }}
+            - --kube-burst={{ .Values.scheduler.kubeBurst }}
+            {{- end }}
+            {{- if .Values.scheduler.kubeTimeout }}
+            - --kube-timeout={{ .Values.scheduler.kubeTimeout }}
+            {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}

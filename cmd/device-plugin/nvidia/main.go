@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,6 +51,13 @@ type options struct {
 	configFile    string
 	kubeletSocket string
 }
+
+const (
+	autoNvidiaDriverRoot = "auto"
+	hostNvidiaDriverRoot = "/"
+)
+
+var gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
 
 func main() {
 	c := cli.NewApp()
@@ -374,6 +382,9 @@ func startPlugins(c *cli.Context, o *options,
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to load config: %v", err)
 	}
+	if err := resolveNvidiaDriverRoot(config); err != nil {
+		return nil, false, fmt.Errorf("unable to resolve NVIDIA driver root: %v", err)
+	}
 	disableResourceRenamingInConfig(config)
 
 	/*Loading config files*/
@@ -436,6 +447,76 @@ func startPlugins(c *cli.Context, o *options,
 	}
 
 	return plugins, false, nil
+}
+
+// resolveNvidiaDriverRoot resolves the special "auto" driver root from the
+// contract written by the GPU Operator validator. If the contract does not
+// exist, no GPU Operator installation is assumed and host driver roots are
+// used. An explicitly configured NVIDIA_DEV_ROOT is always preserved.
+func resolveNvidiaDriverRoot(config *spec.Config) error {
+	if config.Flags.NvidiaDriverRoot == nil || *config.Flags.NvidiaDriverRoot != autoNvidiaDriverRoot {
+		return nil
+	}
+
+	driverRoot, devRoot, err := readGPUOperatorDriverRoots(gpuOperatorDriverReadyFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		driverRoot = hostNvidiaDriverRoot
+		devRoot = hostNvidiaDriverRoot
+		klog.InfoS("GPU Operator driver-ready contract not found; using host NVIDIA driver roots",
+			"path", gpuOperatorDriverReadyFile,
+			"driverRoot", driverRoot,
+			"devRoot", devRoot)
+	} else {
+		klog.InfoS("Automatically resolved NVIDIA driver roots from GPU Operator",
+			"path", gpuOperatorDriverReadyFile,
+			"driverRoot", driverRoot,
+			"devRoot", devRoot)
+	}
+
+	// Assign distinct pointers because the NVIDIA configuration loader makes
+	// NvidiaDevRoot point to NvidiaDriverRoot when no dev root is specified.
+	config.Flags.NvidiaDriverRoot = &driverRoot
+	if config.Flags.NvidiaDevRoot != nil && *config.Flags.NvidiaDevRoot == autoNvidiaDriverRoot {
+		config.Flags.NvidiaDevRoot = &devRoot
+	}
+	return nil
+}
+
+func readGPUOperatorDriverRoots(path string) (string, string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+
+	values := make(map[string]string)
+	for lineNumber, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || key == "" || value == "" {
+			return "", "", fmt.Errorf("invalid GPU Operator driver-ready entry at line %d", lineNumber+1)
+		}
+		values[key] = value
+	}
+
+	driverRoot, ok := values["NVIDIA_DRIVER_ROOT"]
+	if !ok {
+		return "", "", fmt.Errorf("GPU Operator driver-ready contract is missing NVIDIA_DRIVER_ROOT")
+	}
+	devRoot, ok := values["NVIDIA_DEV_ROOT"]
+	if !ok {
+		return "", "", fmt.Errorf("GPU Operator driver-ready contract is missing NVIDIA_DEV_ROOT")
+	}
+	if !filepath.IsAbs(driverRoot) || !filepath.IsAbs(devRoot) {
+		return "", "", fmt.Errorf("GPU Operator driver roots must be absolute: driverRoot=%q devRoot=%q", driverRoot, devRoot)
+	}
+
+	return filepath.Clean(driverRoot), filepath.Clean(devRoot), nil
 }
 
 func startPluginServers(plugins []plugin.Interface, kubeletSocket string,
