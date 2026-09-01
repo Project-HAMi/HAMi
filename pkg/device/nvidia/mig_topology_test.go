@@ -24,12 +24,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
-// a100TopologyProfiles is the A100-40GB allowlist: eight memory slices, seven compute slices.
+// a100TopologyProfiles is the A100-40GB table with 4g allowed: eight memory slices, seven compute slices.
 func a100TopologyProfiles() []device.MigProfile {
 	return []device.MigProfile{
 		{Name: "1g.5gb", Placements: []device.MigPlacement{{Start: 0, Size: 1}, {Start: 1, Size: 1}, {Start: 2, Size: 1}, {Start: 3, Size: 1}, {Start: 4, Size: 1}, {Start: 5, Size: 1}, {Start: 6, Size: 1}}},
 		{Name: "2g.10gb", Placements: []device.MigPlacement{{Start: 0, Size: 2}, {Start: 2, Size: 2}, {Start: 4, Size: 2}}},
 		{Name: "3g.20gb", Placements: []device.MigPlacement{{Start: 0, Size: 4}, {Start: 4, Size: 4}}},
+		{Name: "4g.20gb", Placements: []device.MigPlacement{{Start: 0, Size: 4}}},
 		{Name: "7g.40gb", Placements: []device.MigPlacement{{Start: 0, Size: 8}}},
 	}
 }
