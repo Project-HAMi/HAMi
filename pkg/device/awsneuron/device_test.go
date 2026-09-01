@@ -867,7 +867,7 @@ func Test_graphSelect(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1 := graphSelect(test.args.d, test.args.c)
+			result1 := graphSelect(test.args.d, test.args.c, nil)
 			assert.DeepEqual(t, result1, test.want1)
 		})
 	}

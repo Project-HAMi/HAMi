@@ -301,12 +301,18 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		return false, tmpDevs, "core limit out of range"
 	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type)

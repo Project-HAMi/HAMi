@@ -477,6 +477,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	// same gate MutateAdmission uses. Split mode carves vNPUs out of single
 	// devices and must not be forced onto whole physical cards.
 	pair910C := k.Type == Ascend910CType && originReq > 1 && npu.config.SuperPod
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -484,6 +485,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)

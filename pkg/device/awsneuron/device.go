@@ -389,7 +389,11 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 	}
 	return res
 }
-func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
+
+// continuousDeviceAvailable reports the indices of a run of `count` allocatable
+// devices starting at `start`. A cordoned device is treated as unavailable, so
+// a run is only reported when it steps over none of them.
+func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int, cordoned map[string]struct{}) []int {
 	if len(devices) < start+count {
 		return []int{}
 	}
@@ -399,13 +403,16 @@ func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count i
 		if devices[iterator].Used > 0 || !devices[iterator].Health {
 			return []int{}
 		}
+		if _, isCordoned := cordoned[devices[iterator].ID]; isCordoned {
+			return []int{}
+		}
 		res = append(res, iterator)
 		iterator++
 	}
 	return res
 }
 
-func graphSelect(devices []*device.DeviceUsage, count int) []int {
+func graphSelect(devices []*device.DeviceUsage, count int, cordoned map[string]struct{}) []int {
 	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
 		return []int{}
 	}
@@ -417,7 +424,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 		//Deal with ring
 		start := 0
 		for start < len(devices) {
-			res := continuousDeviceAvailable(devices, start, count)
+			res := continuousDeviceAvailable(devices, start, count, cordoned)
 			if len(res) > 0 {
 				return res
 			}
@@ -430,7 +437,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 		{
 			start := 0
 			for start < len(devices) {
-				res := continuousDeviceAvailable(devices, start, count)
+				res := continuousDeviceAvailable(devices, start, count, cordoned)
 				if len(res) > 0 {
 					return res
 				}
@@ -449,11 +456,25 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	cordoned := device.CordonedDevices(nodeinfo)
 	if k.Nums > 1 {
-		alloc := graphSelect(devices, int(request.Nums))
+		// graphSelect reads topology from slice positions, so cordoned devices are
+		// rejected inside its availability check rather than filtered out here.
+		alloc := graphSelect(devices, int(request.Nums), cordoned)
 		if len(alloc) == 0 {
-			reason[common.NumaNotFit]++
-			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+			cordonedCount := 0
+			for _, dev := range devices {
+				if _, isCordoned := cordoned[dev.ID]; isCordoned {
+					cordonedCount++
+					klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
+				}
+			}
+			if cordonedCount > 0 {
+				reason[common.CardCordoned] += cordonedCount
+			} else {
+				reason[common.NumaNotFit]++
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+			}
 			return false, tmpDevs, common.GenReason(reason, len(devices))
 		}
 		for _, dev := range alloc {
@@ -484,6 +505,11 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)

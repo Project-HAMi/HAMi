@@ -147,12 +147,18 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		if !gcuDev.checkType(k) {

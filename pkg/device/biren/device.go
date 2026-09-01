@@ -185,11 +185,17 @@ func (br *BirenDevices) Fit(devices []*device.DeviceUsage, request device.Contai
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		_, found, _ := br.checkType(pod.GetAnnotations(), *dev, k)

@@ -1714,6 +1714,64 @@ func TestCheckUUID(t *testing.T) {
 	}
 }
 
+func TestCordonedDevices(t *testing.T) {
+	nodeWithAnnos := func(annos map[string]string) *NodeInfo {
+		return &NodeInfo{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}}
+	}
+	tests := []struct {
+		name     string
+		nodeInfo *NodeInfo
+		want     []string
+	}{
+		{
+			name:     "nil NodeInfo means nothing cordoned",
+			nodeInfo: nil,
+			want:     nil,
+		},
+		{
+			name:     "nil Node means nothing cordoned",
+			nodeInfo: &NodeInfo{},
+			want:     nil,
+		},
+		{
+			name:     "annotation absent means nothing cordoned",
+			nodeInfo: nodeWithAnnos(map[string]string{}),
+			want:     nil,
+		},
+		{
+			name:     "empty annotation means nothing cordoned",
+			nodeInfo: nodeWithAnnos(map[string]string{DeviceCordonAnnotation: ""}),
+			want:     nil,
+		},
+		{
+			name:     "whitespace-only annotation means nothing cordoned",
+			nodeInfo: nodeWithAnnos(map[string]string{DeviceCordonAnnotation: "   "}),
+			want:     nil,
+		},
+		{
+			name:     "single uuid",
+			nodeInfo: nodeWithAnnos(map[string]string{DeviceCordonAnnotation: "dev-0"}),
+			want:     []string{"dev-0"},
+		},
+		{
+			name:     "several uuids with stray whitespace and empty entries",
+			nodeInfo: nodeWithAnnos(map[string]string{DeviceCordonAnnotation: " dev-0 ,, dev-1,"}),
+			want:     []string{"dev-0", "dev-1"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := CordonedDevices(test.nodeInfo)
+			assert.Equal(t, len(test.want), len(got))
+			for _, uuid := range test.want {
+				_, ok := got[uuid]
+				assert.Equal(t, true, ok)
+			}
+		})
+	}
+}
+
 func TestCheckType(t *testing.T) {
 	useKey := "example.com/use-gputype"
 	noUseKey := "example.com/nouse-gputype"

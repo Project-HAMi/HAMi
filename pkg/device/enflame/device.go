@@ -409,12 +409,18 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
 	profileCorePercent := int32(profile.CorePercent)
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		_, found, _ := enf.checkType(pod.GetAnnotations(), *dev, k)

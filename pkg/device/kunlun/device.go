@@ -190,10 +190,17 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	reason := make(map[string]int)
 
 	// graghSelect decides topology from the position of a device in the slice,
-	// so the uuid constraint has to be applied through fitFn rather than by
-	// filtering the slice first.
+	// so the uuid and cordon constraints have to be applied through fitFn rather
+	// than by filtering the slice first.
+	cordoned := device.CordonedDevices(nodeInfo)
+	cordonedHits := make(map[string]bool)
 	uuidMismatches := make(map[string]bool)
 	fitFn := func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
+		if _, isCordoned := cordoned[d.ID]; isCordoned {
+			cordonedHits[d.ID] = true
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", d.ID)
+			return false
+		}
 		if !device.CheckUUID(pod.GetAnnotations(), d.ID, UseUUIDAnno, NoUseUUIDAnno, kl.CommonWord()) ||
 			!device.CheckUUID(pod.GetAnnotations(), d.ID, KunlunUseUUID, KunlunNoUseUUID, kl.CommonWord()) {
 			uuidMismatches[d.ID] = true
@@ -205,10 +212,13 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 
 	alloc := graghSelect(devices, request, fitFn)
 	if len(alloc) == 0 {
+		if cordonedCount := len(cordonedHits); cordonedCount > 0 {
+			reason[common.CardCordoned] += cordonedCount
+		}
 		uuidMismatch := len(uuidMismatches)
 		if uuidMismatch > 0 {
 			reason[common.CardUUIDMismatch] += uuidMismatch
-		} else {
+		} else if len(reason) == 0 {
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
 		}

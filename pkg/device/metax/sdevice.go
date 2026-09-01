@@ -323,6 +323,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	// filter device
 	reason := make(map[string]int)
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	cordoned := device.CordonedDevices(nodeInfo)
 	candidateDevices := []*device.DeviceUsage{}
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -336,6 +337,12 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		if !dev.Health {
 			reason[CardUnhealthy]++
 			klog.V(5).InfoS(CardUnhealthy, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 

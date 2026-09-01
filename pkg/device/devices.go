@@ -707,6 +707,34 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 	return counts
 }
 
+// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
+// device UUIDs to exclude from new allocations, without affecting pods already
+// running on those devices. It's a live, per-device equivalent of `kubectl
+// cordon`; unlike a device-plugin register filter it takes effect immediately
+// and needs no device-plugin restart.
+const DeviceCordonAnnotation = "hami.io/device-cordon"
+
+// CordonedDevices parses the DeviceCordonAnnotation off the node into a UUID
+// lookup set. Missing node, missing annotation, or an empty value all mean
+// "nothing cordoned". Malformed entries (stray whitespace/commas) are
+// tolerated by trimming and skipping empties, same as CheckUUID's parsing.
+func CordonedDevices(nodeInfo *NodeInfo) map[string]struct{} {
+	cordoned := make(map[string]struct{})
+	if nodeInfo == nil || nodeInfo.Node == nil {
+		return cordoned
+	}
+	raw, ok := nodeInfo.Node.Annotations[DeviceCordonAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return cordoned
+	}
+	for uuid := range strings.SplitSeq(raw, ",") {
+		if uuid = strings.TrimSpace(uuid); uuid != "" {
+			cordoned[uuid] = struct{}{}
+		}
+	}
+	return cordoned
+}
+
 func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
 	match := func(list string) bool {
 		return slices.ContainsFunc(strings.Split(list, ","), func(u string) bool {

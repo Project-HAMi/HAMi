@@ -51,12 +51,10 @@ const (
 	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
-	// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
-	// GPU UUIDs to exclude from new allocations, without affecting pods already
-	// running on those devices. It's a live, per-GPU equivalent of `kubectl cordon`;
-	// unlike FilterDeviceToRegister, it takes effect immediately and needs no
-	// device-plugin restart.
-	DeviceCordonAnnotation = "hami.io/device-cordon"
+	// DeviceCordonAnnotation is an alias of the shared device.DeviceCordonAnnotation,
+	// which every backend honors. Kept so existing NVIDIA-scoped references keep
+	// resolving.
+	DeviceCordonAnnotation = device.DeviceCordonAnnotation
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
@@ -704,27 +702,6 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
 }
 
-// cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID
-// lookup set. Missing node, missing annotation, or an empty value all mean
-// "nothing cordoned". Malformed entries (stray whitespace/commas) are
-// tolerated by trimming and skipping empties, same as CheckUUID's parsing.
-func cordonedDevices(nodeInfo *device.NodeInfo) map[string]struct{} {
-	cordoned := make(map[string]struct{})
-	if nodeInfo == nil || nodeInfo.Node == nil {
-		return cordoned
-	}
-	raw, ok := nodeInfo.Node.Annotations[DeviceCordonAnnotation]
-	if !ok || strings.TrimSpace(raw) == "" {
-		return cordoned
-	}
-	for uuid := range strings.SplitSeq(raw, ",") {
-		if uuid = strings.TrimSpace(uuid); uuid != "" {
-			cordoned[uuid] = struct{}{}
-		}
-	}
-	return cordoned
-}
-
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -736,7 +713,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
-	cordoned := cordonedDevices(nodeInfo)
+	cordoned := device.CordonedDevices(nodeInfo)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
