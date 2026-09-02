@@ -54,12 +54,10 @@ func (m OverwriteEnvMode) String() string {
 	}
 }
 
-// parseOverwriteEnvAnnotation parses an annotation value into a mode using
+// parseOverwriteEnvValue parses a single annotation value into a mode using
 // strconv.ParseBool semantics (accepts true/True/1/t/T and false/False/0/f/F).
-// The second return is false when the value is not a valid bool, so callers
-// can decide whether to fall back to a lower-priority layer or treat the
-// annotation as absent.
-func parseOverwriteEnvAnnotation(val string) (OverwriteEnvMode, bool) {
+// The second return is false when the value is not a valid bool.
+func parseOverwriteEnvValue(val string) (OverwriteEnvMode, bool) {
 	b, err := strconv.ParseBool(val)
 	if err != nil {
 		return OverwriteEnvUnset, false
@@ -70,18 +68,75 @@ func parseOverwriteEnvAnnotation(val string) (OverwriteEnvMode, bool) {
 	return OverwriteEnvOff, true
 }
 
-// OverwriteEnvDecision resolves the OverwriteEnv opt-out for a container by
-// inspecting pod-level (hami.io/overwrite-env) and container-level
-// (hami.io/overwrite-env-containers) annotations. Priority: container-level JSON
-// entry > pod-level single value > Unset (the caller falls back to
-// dev.config.OverwriteEnv). A container listed in the JSON overrides the pod
-// level for that container only; unlisted containers fall back to the pod level.
-// There is NO wildcard — "*" is a literal container name, not "all containers".
+// ParsePodOverwriteEnv parses the pod-level annotation value (hami.io/overwrite-env)
+// into a mode. An empty or absent value returns (Unset, false). An invalid value
+// returns (Unset, false) and is logged so a typo doesn't silently no-op.
+// Exported so backends that cache decoded annotations (ascend's per-chip loop)
+// can parse the pod-level value once and reuse it across chips.
+func ParsePodOverwriteEnv(podVal string) (OverwriteEnvMode, bool) {
+	mode, parsed := parseOverwriteEnvValue(podVal)
+	if podVal != "" && !parsed {
+		klog.Warningf("OverwriteEnv: invalid pod-level annotation value %q, falling back to global config", podVal)
+	}
+	return mode, parsed
+}
+
+// DecodeContainerOverwriteEnvJSON decodes the container-level annotation
+// (hami.io/overwrite-env-containers) into a name→mode map. Each JSON value is
+// parsed with strconv.ParseBool; invalid values are skipped (that container
+// falls back to pod-level) and logged. The empty string returns (nil, nil).
+// A malformed JSON is logged here and returns (nil, err) so the caller can
+// decide its fallback; the warning lives in this single place so the cached
+// and uncached paths cannot diverge.
 //
-// Value vocabulary is strconv.ParseBool at both levels (true/false/1/0/t/f).
-// A malformed JSON or an invalid bool value is logged (klog warning) and treated
-// as absent — the affected container falls back to the lower layer. Admission is
-// never denied for a malformed annotation.
+// Backends that the webhook calls multiple times per pod (ascend's per-chip
+// loop) should cache this by the raw JSON string to avoid re-decoding 7×.
+func DecodeContainerOverwriteEnvJSON(rawJSON string) (map[string]OverwriteEnvMode, error) {
+	if rawJSON == "" {
+		return nil, nil
+	}
+	raw := map[string]string{}
+	if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+		klog.Warningf("OverwriteEnv: could not parse container-level annotation %q as JSON map[string]string (values must be quoted bool strings like \"true\"), falling back to pod-level decision: %v", rawJSON, err)
+		return nil, err
+	}
+	entries := make(map[string]OverwriteEnvMode, len(raw))
+	for name, val := range raw {
+		mode, parsed := parseOverwriteEnvValue(val)
+		if !parsed {
+			klog.Warningf("OverwriteEnv: invalid container-level value %q for container %q, falling back to pod-level decision", val, name)
+			continue
+		}
+		entries[name] = mode
+	}
+	return entries, nil
+}
+
+// ResolveOverwriteEnv combines a pod-level mode with a (possibly nil) decoded
+// container-level entries map for a specific container. A listed container
+// overrides the pod level; an unlisted one keeps the pod level. There is no
+// wildcard — "*" is a literal container name. This is a pure lookup with no
+// logging (warnings are emitted during DecodeContainerOverwriteEnvJSON).
+func ResolveOverwriteEnv(podMode OverwriteEnvMode, entries map[string]OverwriteEnvMode, ctr *corev1.Container) OverwriteEnvMode {
+	if entries == nil || ctr == nil {
+		return podMode
+	}
+	if mode, ok := entries[ctr.Name]; ok {
+		return mode
+	}
+	return podMode
+}
+
+// OverwriteEnvDecision is the composed (uncached) resolver for backends that
+// call once per container (nvidia). Ascend, which the webhook calls once per
+// chip, should cache DecodeContainerOverwriteEnvJSON + ParsePodOverwriteEnv and
+// call ResolveOverwriteEnv to avoid re-decoding the same JSON 7×.
+//
+// Priority: container-level JSON entry > pod-level single value > Unset (the
+// caller falls back to dev.config.OverwriteEnv). Value vocabulary is
+// strconv.ParseBool at both levels. A malformed JSON or invalid value is logged
+// (klog warning) and treated as absent — the affected container falls back to
+// the lower layer. Admission is never denied for a malformed annotation.
 //
 // Nil pod / nil ctr / nil Annotations are all treated as "no annotations"
 // and return Unset.
@@ -89,29 +144,11 @@ func OverwriteEnvDecision(pod *corev1.Pod, ctr *corev1.Container) OverwriteEnvMo
 	if pod == nil || ctr == nil || pod.Annotations == nil {
 		return OverwriteEnvUnset
 	}
-	// An invalid pod-level value is intentionally treated as Unset (the caller
-	// then applies its global config); warn so a typo doesn't silently no-op.
-	podVal := pod.Annotations[OverwriteEnvAnnotationKey]
-	podMode, podParsed := parseOverwriteEnvAnnotation(podVal)
-	if podVal != "" && !podParsed {
-		klog.Warningf("OverwriteEnv: invalid pod-level annotation value %q, falling back to global config", podVal)
+	podMode, _ := ParsePodOverwriteEnv(pod.Annotations[OverwriteEnvAnnotationKey])
+	rawJSON := pod.Annotations[OverwriteEnvContainersAnnotationKey]
+	entries, err := DecodeContainerOverwriteEnvJSON(rawJSON)
+	if err != nil {
+		return podMode
 	}
-	mode := podMode
-	// Container-level JSON overrides pod-level for listed containers only.
-	rawJSON, hasContainerAnno := pod.Annotations[OverwriteEnvContainersAnnotationKey]
-	if hasContainerAnno {
-		entries := map[string]string{}
-		if err := json.Unmarshal([]byte(rawJSON), &entries); err != nil {
-			klog.Warningf("OverwriteEnv: could not parse container-level annotation %q as JSON map[string]string (values must be quoted bool strings like \"true\"), falling back to pod-level decision: %v", rawJSON, err)
-			return mode
-		}
-		if val, ok := entries[ctr.Name]; ok {
-			if ctrMode, parsed := parseOverwriteEnvAnnotation(val); parsed {
-				mode = ctrMode
-			} else {
-				klog.Warningf("OverwriteEnv: invalid container-level value %q for container %q, falling back to pod-level decision", val, ctr.Name)
-			}
-		}
-	}
-	return mode
+	return ResolveOverwriteEnv(podMode, entries, ctr)
 }

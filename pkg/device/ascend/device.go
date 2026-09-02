@@ -152,8 +152,11 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		if dev.containerRequestsAnyAscendResource(ctr) {
 			return false, nil
 		}
+		// The container-level JSON is decoded once and cached.
+		podMode := cachedPodOverwriteEnv(p.Annotations[util.OverwriteEnvAnnotationKey])
+		entries := cachedContainerOverwriteEnv(p.Annotations[util.OverwriteEnvContainersAnnotationKey])
 		inject := false
-		switch util.OverwriteEnvDecision(p, ctr) {
+		switch util.ResolveOverwriteEnv(podMode, entries, ctr) {
 		case util.OverwriteEnvOn:
 			inject = true
 		case util.OverwriteEnvOff:
