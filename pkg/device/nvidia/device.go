@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -615,6 +616,13 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage) bool {
 	if devusage.Mode == MigMode {
 		occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
+		// Plan every slice of this container on this card together; reject only when no layout exists.
+		memories := queuedMigMemories(toAllocate, devusage.ID)
+		memories = append(memories, request.Memreq)
+		if _, _, ok := planMigAllocations(devusage.MigProfiles, occupied, memories); ok {
+			return true
+		}
+		// Fall back to the sequential path, which may upgrade a request to a larger profile.
 		for _, existing := range toAllocate {
 			if existing.UUID != devusage.ID {
 				continue
@@ -631,7 +639,19 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 	return true
 }
 
-func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32) (device.MigProfile, device.MigPlacement, bool) {
+// queuedMigMemories returns the memory requests already queued for this container on the given card.
+func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int32 {
+	memories := make([]int32, 0, len(toAllocate)+1)
+	for _, existing := range toAllocate {
+		if existing.UUID == uuid {
+			memories = append(memories, existing.Usedmem)
+		}
+	}
+	return memories
+}
+
+// migProfilesByMemory returns the profiles ordered smallest first.
+func migProfilesByMemory(profiles []device.MigProfile) []device.MigProfile {
 	candidates := append([]device.MigProfile(nil), profiles...)
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].MemoryMB != candidates[j].MemoryMB {
@@ -639,7 +659,22 @@ func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlace
 		}
 		return candidates[i].SliceCount < candidates[j].SliceCount
 	})
-	for _, profile := range candidates {
+	return candidates
+}
+
+// migProfileForMemory returns the smallest profile whose memory covers the request.
+func migProfileForMemory(profiles []device.MigProfile, memory int32) (device.MigProfile, bool) {
+	for _, profile := range migProfilesByMemory(profiles) {
+		if profile.MemoryMB >= memory {
+			return profile, true
+		}
+	}
+	return device.MigProfile{}, false
+}
+
+// selectMigCandidate picks the smallest covering profile that still has a free placement, and its best placement.
+func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32) (device.MigProfile, device.MigPlacement, bool) {
+	for _, profile := range migProfilesByMemory(profiles) {
 		if profile.MemoryMB < memory {
 			continue
 		}
@@ -651,13 +686,103 @@ func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlace
 	return device.MigProfile{}, device.MigPlacement{}, false
 }
 
+// planMigAllocations maps each request to its smallest covering profile and places them all jointly.
+// The returned slices are aligned with memories.
+func planMigAllocations(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32) ([]device.MigProfile, []device.MigPlacement, bool) {
+	chosen := make([]device.MigProfile, len(memories))
+	requested := make([]string, len(memories))
+	for i, memory := range memories {
+		profile, ok := migProfileForMemory(profiles, memory)
+		if !ok {
+			return nil, nil, false
+		}
+		chosen[i] = profile
+		requested[i] = profile.Name
+	}
+	placements, ok := placeMigProfiles(profiles, occupied, requested)
+	if !ok {
+		return nil, nil, false
+	}
+	return chosen, placements, true
+}
+
+// recordMigPlans stores the jointly planned profile and placement on each tentative slice so AddResourceUsage commits that layout.
+// Slices on a card with no joint plan have any stale plan removed.
+func recordMigPlans(devices []*device.DeviceUsage, tentative device.ContainerDevices) {
+	usageByID := make(map[string]*device.DeviceUsage, len(devices))
+	for _, dev := range devices {
+		if dev.Mode == MigMode {
+			usageByID[dev.ID] = dev
+		}
+	}
+	grouped := make(map[string][]int)
+	order := make([]string, 0, len(tentative))
+	for idx, ctr := range tentative {
+		if _, ok := usageByID[ctr.UUID]; !ok {
+			continue
+		}
+		if _, seen := grouped[ctr.UUID]; !seen {
+			order = append(order, ctr.UUID)
+		}
+		grouped[ctr.UUID] = append(grouped[ctr.UUID], idx)
+	}
+	for _, id := range order {
+		indices := grouped[id]
+		usage := usageByID[id]
+		memories := make([]int32, len(indices))
+		for i, idx := range indices {
+			memories[i] = tentative[idx].Usedmem
+		}
+		profiles, placements, ok := planMigAllocations(usage.MigProfiles, occupiedMigPlacements(usage.MigAllocationsInUse), memories)
+		for i, idx := range indices {
+			ctr := &tentative[idx]
+			if !ok {
+				if ctr.CustomInfo != nil {
+					delete(ctr.CustomInfo, MigProfileCustomInfo)
+					delete(ctr.CustomInfo, MigPlacementCustomInfo)
+				}
+				continue
+			}
+			if ctr.CustomInfo == nil {
+				ctr.CustomInfo = make(map[string]any)
+			}
+			ctr.CustomInfo[MigProfileCustomInfo] = profiles[i].Name
+			ctr.CustomInfo[MigPlacementCustomInfo] = placements[i]
+		}
+	}
+}
+
+// plannedMigAllocation returns the plan recorded on ctr if it is still legal and conflict-free.
+func plannedMigAllocation(profiles []device.MigProfile, occupied []device.MigPlacement, ctr *device.ContainerDevice) (device.MigProfile, device.MigPlacement, bool) {
+	if ctr.CustomInfo == nil {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	name, nameOK := ctr.CustomInfo[MigProfileCustomInfo].(string)
+	placement, placementOK := ctr.CustomInfo[MigPlacementCustomInfo].(device.MigPlacement)
+	if !nameOK || !placementOK {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	profile, ok := findMigProfile(profiles, name)
+	if !ok || profile.MemoryMB < ctr.Usedmem {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	if !slices.Contains(profile.Placements, placement) || migPlacementConflicts(placement, occupied) {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	return profile, placement, true
+}
+
 func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
 func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	if n.Mode == MigMode {
-		profile, placement, ok := selectMigCandidate(n.MigProfiles, occupiedMigPlacements(n.MigAllocationsInUse), ctr.Usedmem)
+		occupied := occupiedMigPlacements(n.MigAllocationsInUse)
+		profile, placement, ok := plannedMigAllocation(n.MigProfiles, occupied, ctr)
+		if !ok {
+			profile, placement, ok = selectMigCandidate(n.MigProfiles, occupied, ctr.Usedmem)
+		}
 		if !ok {
 			return errors.New("MIG profile and placement allocation failed")
 		}
@@ -854,6 +979,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		if k.Nums == 0 && !needTopology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			recordMigPlans(devices, tmpDevs[k.Type])
 			return true, tmpDevs, ""
 		}
 		if dev.Mode == "mig" {
@@ -863,6 +989,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	if needTopology {
 		if len(tmpDevs[k.Type]) == int(originReq) {
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			recordMigPlans(devices, tmpDevs[k.Type])
 			return true, tmpDevs, ""
 		}
 		if len(tmpDevs[k.Type]) > int(originReq) {
@@ -884,6 +1011,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				tmpDevs[k.Type] = combination
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			}
+			recordMigPlans(devices, tmpDevs[k.Type])
 			return true, tmpDevs, ""
 		}
 	}
