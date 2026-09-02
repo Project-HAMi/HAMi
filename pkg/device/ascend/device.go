@@ -430,19 +430,25 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 	}
 }
 
-// hamiCoreFitBudget is the 0-100 percentage capacity used by hami-core Fit.
-// Coresreq is a percentage, not physical AI cores. Existing plugins may still
-// register Devcore as the hardware AICore count (20/24/32). Keep today's 100-point
-// budget in that case so admission does not change.
+// hamiCorePercentBase is the fixed 0-100 percentage scale hami-core Coresreq
+// is expressed in.
+const hamiCorePercentBase = 100
+
+// hamiCoreFitBudget is the percentage capacity used by hami-core Fit.
 //
-// Coupled plugin change (https://github.com/Project-HAMi/ascend-device-plugin/pull/132)
-// advertises Devcore = round(100 * deviceCoreScaling) for hami-core, which is >= 100.
-// Honor that advertised percentage when it is larger than 100.
+// Coresreq is a percentage, not physical AI cores, so dev.Totalcore cannot be
+// used directly: a plugin that has not enabled hami-core registers Devcore as
+// the hardware AICore count (8/20/24/30). Keep the percentage base for any
+// advertised value at or below it so admission does not change.
+//
+// The coupled plugin change (Project-HAMi/ascend-device-plugin#132) advertises
+// Devcore = round(100 * deviceCoreScaling) for hami-core and never reports less
+// than the base, so any higher value is an intentional oversell budget.
 func hamiCoreFitBudget(advertisedTotalcore int32) int32 {
-	if advertisedTotalcore > 100 {
+	if advertisedTotalcore > hamiCorePercentBase {
 		return advertisedTotalcore
 	}
-	return 100
+	return hamiCorePercentBase
 }
 
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
@@ -545,12 +551,15 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// hami-core Coresreq is a 0-100 percentage. Do not treat physical AICore
-		// (dev.Totalcore) as that budget. Default remains 100; honor plugin
-		// oversell only when advertised Devcore > 100.
+		// hami-core Coresreq is a percentage. Do not treat physical AICore
+		// (dev.Totalcore) as that budget; honor plugin oversell only when the
+		// advertised Devcore is above the percentage base.
 		effectiveTotalCore := dev.Totalcore
 		if isHAMiCore {
 			effectiveTotalCore = hamiCoreFitBudget(dev.Totalcore)
+			if effectiveTotalCore != dev.Totalcore {
+				klog.V(5).InfoS("hami-core budget clamped to the percentage base", "pod", klog.KObj(pod), "device", dev.ID, "advertised total core", dev.Totalcore, "budget", effectiveTotalCore)
+			}
 		}
 
 		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
@@ -558,14 +567,20 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
-		// Coresreq=100 stays exclusive for hami-core even when the plugin
-		// advertises a budget above 100 (deviceCoreScaling > 1).
-		if k.Coresreq == 100 && dev.Used > 0 && (isHAMiCore || effectiveTotalCore == 100) {
+		// Coresreq at the percentage base stays exclusive for hami-core even when
+		// the plugin advertises an oversold budget.
+		if k.Coresreq == hamiCorePercentBase && dev.Used > 0 && (isHAMiCore || effectiveTotalCore == hamiCorePercentBase) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
-		if isHAMiCore && dev.Used == 1 && dev.Usedcores >= 100 {
+		// A card held by a single full-core occupant rejects every later request.
+		// Oversell lifts the budget above that occupant's share, so neither the
+		// capacity check above nor CardComputeUnitsExhausted below still catches
+		// this. The requesting pod's own mode is irrelevant: only hami-core pods on
+		// non-hami-core nodes are filtered out, so a legacy vNPU pod still reaches
+		// an oversold card.
+		if dev.Used == 1 && dev.Usedcores >= hamiCorePercentBase {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
 			continue
