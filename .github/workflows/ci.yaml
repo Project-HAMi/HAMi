@@ -131,7 +131,7 @@ jobs:
     name: Compile
     needs: [ test, get_info ]
     runs-on: ubuntu-22.04
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     steps:
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
@@ -205,7 +205,7 @@ jobs:
   package_chart:
     runs-on: ubuntu-22.04
     needs: [ test, get_info ]
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     env:
       HELM_VERSION: v3.8.1
     steps:
@@ -266,7 +266,7 @@ jobs:
   e2e_test:
     uses: ./.github/workflows/call-e2e.yaml
     needs: [ package_chart, get_info, build ]
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || (github.repository == 'Project-HAMi/HAMi' && github.ref == 'refs/heads/master')
     with:
       ref: ${{ needs.get_info.outputs.version }}
       type: "pullrequest"
@@ -275,7 +275,7 @@ jobs:
   e2e_mig_test:
     uses: ./.github/workflows/call-e2e-mig.yaml
     needs: [ package_chart, get_info, build, e2e_test ]
-    if: needs.get_info.outputs.e2e_run == 'true' && vars.ENABLE_MIG_E2E == 'true'
+    if: (needs.get_info.outputs.e2e_run == 'true' || (github.repository == 'Project-HAMi/HAMi' && github.ref == 'refs/heads/master')) && vars.ENABLE_MIG_E2E == 'true'
     with:
       ref: ${{ needs.get_info.outputs.version }}
       type: "smoke"
