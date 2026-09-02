@@ -90,9 +90,6 @@ func GetRandom() string {
 
 // KubectlExecInPod executes a shell command in a specified Pod using kubectl exec.
 func KubectlExecInPod(namespace, podName, command string) ([]byte, error) {
-	// Wait for the container to stabilize
-	time.Sleep(30 * time.Second)
-
 	// Build the kubectl exec command
 	cmd := exec.Command("kubectl", "exec", "-n", namespace, podName, "--", "/bin/bash", "-c", command)
 

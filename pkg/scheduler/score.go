@@ -40,11 +40,16 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
+// deviceTypeMatches preserves HAMi's case-insensitive substring matching for
+// mapping a registered request type to the corresponding node devices.
+func deviceTypeMatches(availableType, requestedType string) bool {
+	return strings.Contains(strings.ToLower(availableType), strings.ToLower(requestedType))
+}
+
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
-	targetType := strings.ToLower(t)
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(strings.ToLower(val.Device.Type), targetType) {
+		if deviceTypeMatches(val.Device.Type, t) {
 			l = append(l, val.Device)
 		}
 	}
@@ -99,7 +104,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 		if int(k.Nums) > len(typeDevices) && !isMIGRequest(k, typeDevices, pod) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod),
 				"request devices nums", k.Nums, "node device nums (type)", len(typeDevices), "type", k.Type)
-			return false, common.NodeInsufficientDevice
+			// Report it in the same form every device backend uses. common.ParseReason
+			// reads only "<count>/<total> <Reason>", so the bare constant this used to
+			// return was dropped and the pod got no event naming why the node was rejected.
+			return false, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(typeDevices)}, int(k.Nums))
 		}
 
 		fit, tmpDevs, reason := devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
@@ -136,10 +144,19 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
+// resolveNodeSchedulerPolicy returns the node scheduling policy to apply to
+// task, preferring its NodeSchedulerPolicyAnnotationKey annotation over
+// config.NodeSchedulerPolicy. An annotation that does not name a known policy
+// is ignored with a warning, so the configured policy stands. The accepted
+// value is trimmed, because NodeScoreList.Less compares the whole string.
 func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
-			return value
+			if util.IsValidNodeSchedulerPolicy(value) {
+				return strings.TrimSpace(value)
+			}
+			klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
+				util.NodeSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, config.NodeSchedulerPolicy)
 		}
 	}
 	return config.NodeSchedulerPolicy

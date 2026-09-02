@@ -28,7 +28,7 @@ import (
 )
 
 // GetGPUNode returns the name of the first node that has nvidia.com/gpu capacity.
-// It falls back to the first node in the cluster if no GPU node is found.
+// It returns an error if no GPU node is found, failing fast instead of falling back to a non-GPU node.
 func GetGPUNode(clientSet *kubernetes.Clientset) (string, error) {
 	nodes, err := clientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
@@ -39,10 +39,7 @@ func GetGPUNode(clientSet *kubernetes.Clientset) (string, error) {
 			return node.Name, nil
 		}
 	}
-	if len(nodes.Items) > 0 {
-		return nodes.Items[0].Name, nil
-	}
-	return "", fmt.Errorf("no nodes found in the cluster")
+	return "", fmt.Errorf("no GPU node found: no nodes with nvidia.com/gpu capacity in the cluster")
 }
 
 func GetNodes(clientSet *kubernetes.Clientset) (*v1.NodeList, error) {

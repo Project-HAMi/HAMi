@@ -17,8 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"strings"
-
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -58,7 +56,7 @@ func restrictNodeUsage(node *NodeUsage, deviceType string, allowedUUIDs []string
 		if deviceList == nil || deviceList.Device == nil {
 			continue
 		}
-		if strings.Contains(strings.ToLower(deviceList.Device.Type), strings.ToLower(deviceType)) {
+		if deviceTypeMatches(deviceList.Device.Type, deviceType) {
 			if _, ok := allowed[deviceList.Device.ID]; !ok {
 				continue
 			}

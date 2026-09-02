@@ -64,7 +64,6 @@ func GetPods(clientSet *kubernetes.Clientset, namespace string) (*corev1.PodList
 }
 
 func CreatePod(clientSet *kubernetes.Clientset, pod *corev1.Pod, namespace string) (*corev1.Pod, error) {
-	time.Sleep(15 * time.Second)
 	createdPod, err := clientSet.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	if err != nil {
 		klog.Errorf("Failed to create Pod %s in namespace %s: %v", pod.Name, namespace, err)

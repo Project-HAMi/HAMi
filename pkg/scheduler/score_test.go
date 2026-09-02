@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -3986,7 +3987,8 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &device.PodDevices{},
 			},
 			want1: false,
-			want2: "NodeInsufficientDevice",
+			// One of the two requested GPUs is present on the node.
+			want2: common.GenReason(map[string]int{common.NodeInsufficientDevice: 1}, 2),
 		},
 		{
 			name: "device type the different from request type",
@@ -4055,6 +4057,62 @@ func TestCalcScoreRejectsInvalidDeviceScoringWeights(t *testing.T) {
 
 	assert.Assert(t, result == nil)
 	assert.ErrorContains(t, err, `"core" weight must not be negative`)
+}
+
+// TestCalcScoreRecordsNodeInsufficientDeviceReason covers the rejection
+// fitInDevices raises before any device backend runs. It used to be reported as a
+// bare constant rather than through GenReason, so common.ParseReason dropped it
+// and the pod got no event naming why the node was rejected.
+func TestCalcScoreRecordsNodeInsufficientDeviceReason(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	nodes := map[string]*NodeUsage{
+		"node1": {
+			Node:     node,
+			NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+			Devices: policy.DeviceUsageList{
+				Policy: util.GPUSchedulerPolicyBinpack.String(),
+				DeviceLists: []*policy.DeviceListsScore{
+					{Device: &device.DeviceUsage{
+						ID: "gpu-a", Index: 0, Type: nvidia.NvidiaGPUDevice, Health: true,
+						Count: 10, Totalcore: 100, Totalmem: 100,
+					}},
+				},
+			},
+		},
+	}
+	// The node registers one GPU, so a four-GPU request is rejected by the
+	// device-count check rather than by a backend's Fit().
+	requests := device.PodDeviceRequests{
+		{
+			"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
+				Nums: 4,
+				Type: nvidia.NvidiaGPUDevice,
+			},
+		},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "insufficient-devices", Namespace: "default",
+	}}
+
+	recorder := record.NewFakeRecorder(10)
+	s := &Scheduler{eventRecorder: recorder}
+	failedNodes := map[string]string{}
+
+	result, err := s.calcScoreWithOptions(&nodes, requests, pod, failedNodes, true, false)
+
+	assert.NilError(t, err)
+	assert.Equal(t, len(result.NodeList), 0)
+	// One of the four requested GPUs is present on the node.
+	assert.Equal(t, failedNodes["node1"], common.GenReason(map[string]int{common.NodeInsufficientDevice: 1}, 4))
+
+	select {
+	case event := <-recorder.Events:
+		assert.Assert(t, strings.Contains(event, EventReasonFilteringFailed), "event %q", event)
+		assert.Assert(t, strings.Contains(event, common.NodeInsufficientDevice), "event %q", event)
+		assert.Assert(t, strings.Contains(event, "node1"), "event %q", event)
+	default:
+		t.Fatalf("no %s event recorded naming %s", EventReasonFilteringFailed, common.NodeInsufficientDevice)
+	}
 }
 
 func newDeviceScoringWeightTestNodes() *map[string]*NodeUsage {

@@ -23,9 +23,13 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -1035,4 +1039,95 @@ func TestPatchNodeAnnotations_NilClient(t *testing.T) {
 	client.KubeClient = nil
 	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
 	assert.ErrorContains(t, err, "kubernetes client is not initialized")
+}
+
+func TestGetNode(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupClient func() kubernetes.Interface
+		nodeName    string
+		wantErr     bool
+		checkNode   func(*testing.T, *corev1.Node)
+	}{
+		{
+			name: "empty node name",
+			setupClient: func() kubernetes.Interface {
+				return fake.NewClientset()
+			},
+			nodeName: "",
+			wantErr:  true,
+		},
+		{
+			name: "client not initialized",
+			setupClient: func() kubernetes.Interface {
+				return nil
+			},
+			nodeName: "test-node",
+			wantErr:  true,
+		},
+		{
+			name: "node not found",
+			setupClient: func() kubernetes.Interface {
+				return fake.NewClientset()
+			},
+			nodeName: "non-existent-node",
+			wantErr:  true,
+		},
+		{
+			name: "success",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				}, metav1.CreateOptions{})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  false,
+			checkNode: func(t *testing.T, node *corev1.Node) {
+				assert.Equal(t, node.Name, "test-node")
+			},
+		},
+		{
+			name: "unauthorized",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+					return false, nil, apierrors.NewUnauthorized("get nodes")
+				})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  true,
+		},
+		{
+			name: "generic error",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+					return false, nil, apierrors.NewBadRequest("generic error")
+				})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousClient := client.KubeClient
+			client.KubeClient = tt.setupClient()
+			t.Cleanup(func() { client.KubeClient = previousClient })
+
+			got, err := GetNode(tt.nodeName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetNode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && tt.checkNode != nil {
+				tt.checkNode(t, got)
+			}
+		})
+	}
 }

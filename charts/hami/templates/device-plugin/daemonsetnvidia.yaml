@@ -1,3 +1,6 @@
+{{- if and .Values.devicePlugin.enabled .Values.devicePlugin.hostPIDBroker.enabled (not .Values.devicePlugin.hostPID) }}
+{{- fail "devicePlugin.hostPIDBroker requires devicePlugin.hostPID" }}
+{{- end }}
 {{- if .Values.devicePlugin.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -42,6 +45,11 @@ spec:
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
+      {{- if .Values.devicePlugin.hostNetwork }}
+      # Cluster DNS is required for the default NUMA refit endpoint, which is
+      # a Service name.
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
@@ -126,6 +134,10 @@ spec:
               value: {{ .Values.devicePlugin.deviceListStrategy }}
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
+            {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
+            - name: LIBVGPU_HOSTPID_BROKER
+              value: "1"
+            {{- end }}
             {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
@@ -196,12 +208,21 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
+            - name: nvidia-validations
+              mountPath: /run/nvidia/validations
+              readOnly: true
+            {{- end }}
             {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
             - name: numa-refit-ca
               mountPath: /etc/hami/numa-refit-ca
               readOnly: true
             {{- end }}
-            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
+            - name: hostpid-broker
+              mountPath: /var/run/hami/hostpid
+            {{- end }}
+            {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
             - name: driver-root
@@ -300,13 +321,13 @@ spec:
             {{- if .Values.selinux.enabled }}
             type: DirectoryOrCreate
             {{- end }}
-        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+        {{- if or .Values.devicePlugin.gpuOperatorToolkitReady.enabled (eq .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: nvidia-validations
           hostPath:
-            path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
+            path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | default "/run/nvidia/validations" }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+        {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: driver-root
           hostPath:
             path: {{ .Values.devicePlugin.nvidiaDriverRoot }}
@@ -316,6 +337,12 @@ spec:
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
+        {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
+        - name: hostpid-broker
+          hostPath:
+            path: /var/run/hami/hostpid
+            type: DirectoryOrCreate
+        {{- end }}
         - name: usrbin
           hostPath:
             path: /usr/bin

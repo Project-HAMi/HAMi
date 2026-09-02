@@ -91,7 +91,7 @@ func (r *resourceManager) ValidateRequest(ids AnnotatedIDs) error {
 	numRequestedDevices := len(ids)
 	switch r.config.Sharing.SharingStrategy() {
 	case spec.SharingStrategyTimeSlicing:
-		if includesReplicas && numRequestedDevices > 1 && r.config.Sharing.ReplicatedResources().FailRequestsGreaterThanOne {
+		if failRequestsGreaterThanOne := r.config.Sharing.ReplicatedResources().FailRequestsGreaterThanOne; includesReplicas && numRequestedDevices > 1 && failRequestsGreaterThanOne != nil && *failRequestsGreaterThanOne {
 			return fmt.Errorf("%w: maximum request size for shared resources is 1; found %d", errInvalidRequest, numRequestedDevices)
 		}
 	case spec.SharingStrategyMPS:
