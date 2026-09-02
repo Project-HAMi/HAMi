@@ -77,7 +77,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
 | `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
 | `scheduler.nodeLockRetryTimeout` | How long Bind retries LockNode when another PodGroup member holds the node lock; empty keeps the binary default (`28s`), `0` disables retry | `""` |
-| `scheduler.extenderHTTPTimeout` | `httpTimeout` given to the HAMi extender in the generated KubeSchedulerConfiguration, in seconds; keep it above `scheduler.nodeLockRetryTimeout` | `30` |
+| `scheduler.extenderHTTPTimeout` | `httpTimeout` given to the HAMi extender in the generated scheduler configuration, in seconds. Applies to both the KubeSchedulerConfiguration used on Kubernetes 1.22+ and the legacy Policy format used below it. Keep it above `scheduler.nodeLockRetryTimeout` | `30` |
 | `scheduler.forceOverwriteDefaultScheduler` | Whether to force overwrite default scheduler | `true` |
 | `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
 | `scheduler.leaderElect` | Whether to enable leader election | `true` |
