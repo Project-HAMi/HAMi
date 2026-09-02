@@ -813,8 +813,10 @@ func Test_InitDevicesWithConfig_TypeAssertionSafety(t *testing.T) {
 	}
 
 	// Should return error, not panic
-	err := InitDevicesWithConfig(cfg)
-	assert.Assert(t, err != nil, "Expected error from zero-value NVIDIA config")
+	var err error
+	assertDoesNotPanic(t, func() {
+		err = InitDevicesWithConfig(cfg)
+	})
 	assert.ErrorContains(t, err, "nvidia")
 }
 
@@ -835,7 +837,7 @@ func Test_InitDevicesWithConfig_MultipleFailures(t *testing.T) {
 	assert.ErrorContains(t, err, "enflame")
 
 	// DevicesMap should be empty (all failed)
-	assert.Assert(t, len(device.DevicesMap) == 0)
+	assert.Assert(t, len(device.DevicesMap) == 0, "Expected no devices initialized")
 }
 
 // Test_InitDevicesWithConfig_AscendFailure tests that invalid VNPUs config
@@ -849,10 +851,11 @@ func Test_InitDevicesWithConfig_AscendFailure(t *testing.T) {
 		},
 	}
 
-	// Should handle gracefully - just verify no panic by attempting the call
-	err := InitDevicesWithConfig(cfg)
-	// Error handling is implementation-specific; just ensure no panic
-	_ = err
+	// Should handle gracefully (no panic)
+	assertDoesNotPanic(t, func() {
+		InitDevicesWithConfig(cfg)
+	})
+	// Other devices (if configured) should still work
 }
 
 func Test_InitDevicesWithConfig_IluvatarFailure(t *testing.T) {
@@ -862,7 +865,18 @@ func Test_InitDevicesWithConfig_IluvatarFailure(t *testing.T) {
 		},
 	}
 
-	// Should handle gracefully - just verify no panic
-	err := InitDevicesWithConfig(cfg)
-	_ = err
+	// Should handle gracefully (no panic)
+	assertDoesNotPanic(t, func() {
+		InitDevicesWithConfig(cfg)
+	})
+}
+
+func assertDoesNotPanic(t *testing.T, action func()) {
+	t.Helper()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("unexpected panic: %v", recovered)
+		}
+	}()
+	action()
 }
