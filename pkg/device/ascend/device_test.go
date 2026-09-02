@@ -147,6 +147,40 @@ func Test_InitDevices(t *testing.T) {
 			},
 			want: []*Devices{},
 		},
+		{
+			// Multi-chip config: allAscendResourceNames must be collected from every
+			// chip and shared across all returned Devices instances, so a container
+			// requesting one chip's resource is recognized as an Ascend container by
+			// every other chip's MutateAdmission.
+			name:         "multi-chip shares allAscendResourceNames",
+			enableAscend: true,
+			args: []VNPUConfig{
+				{
+					ChipName:           "910A",
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					AICore:             int32(30),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				},
+				{
+					ChipName:           "910B4",
+					CommonWord:         "Ascend910B4",
+					ResourceName:       "huawei.com/Ascend910B4",
+					ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					AICore:             int32(20),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				},
+			},
+			want: []*Devices{
+				{config: VNPUConfig{ChipName: "910A", CommonWord: "Ascend910A", ResourceName: "huawei.com/Ascend910A", ResourceMemoryName: "huawei.com/Ascend910A-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(30), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
+				{config: VNPUConfig{ChipName: "910B4", CommonWord: "Ascend910B4", ResourceName: "huawei.com/Ascend910B4", ResourceMemoryName: "huawei.com/Ascend910B4-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(20), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -157,9 +191,20 @@ func Test_InitDevices(t *testing.T) {
 				for k, v := range devices {
 					assert.Equal(t, v, devices[k], "load ascend vnpu config %s: %v", devices[k].config.CommonWord, devices[k].config)
 				}
+				// Multi-chip: every Devices instance must share the full resource-name
+				// list collected from all chips, so containerRequestsAnyAscendResource
+				// works across sibling chips in the webhook loop.
+				if len(test.args) > 1 {
+					wantNames := []corev1.ResourceName{"huawei.com/Ascend910A", "huawei.com/Ascend910B4"}
+					for _, d := range devices {
+						assert.DeepEqual(t, d.allAscendResourceNames, wantNames)
+					}
+				}
 				assert.Equal(t, "hami.io/Ascend910A-devices-to-allocate", device.InRequestDevices[test.args[0].CommonWord])
 				assert.Equal(t, "hami.io/Ascend910A-devices-allocated", device.SupportDevices[test.args[0].CommonWord])
-				assert.Equal(t, test.want[0].handshakeAnno, util.HandshakeAnnos[test.args[0].CommonWord])
+				if len(test.args) == 1 && len(test.want) > 0 {
+					assert.Equal(t, test.want[0].handshakeAnno, util.HandshakeAnnos[test.args[0].CommonWord])
+				}
 			}
 		})
 	}
@@ -982,6 +1027,117 @@ func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
 		}
 	}
 	assert.Assert(t, foundEmpty, "expected an empty literal ASCEND_VISIBLE_DEVICES to be injected despite the ValueFrom entry")
+}
+
+// hasInjectedEmptyAVD reports whether ctr.Env contains a literal empty
+// ASCEND_VISIBLE_DEVICES entry (the clearing injection).
+func hasInjectedEmptyAVD(env []corev1.EnvVar) bool {
+	for _, e := range env {
+		if e.Name == "ASCEND_VISIBLE_DEVICES" && e.ValueFrom == nil && e.Value == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Test_MutateAdmission_OverwriteEnvOptOut covers the universal opt-out annotation
+// (hami.io/overwrite-env pod-level + hami.io/overwrite-env-containers JSON container-level)
+// resolved via util.OverwriteEnvDecision, with the backend's dev.config.OverwriteEnv
+// as the Unset fallback. The three-state decision: On forces injection, Off skips,
+// Unset falls back to config. Container-level overrides pod-level (both directions).
+func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	mkDev := func(overwriteEnv bool) *Devices {
+		return &Devices{
+			config: VNPUConfig{
+				ResourceName:       "huawei.com/Ascend910A",
+				ResourceMemoryName: "huawei.com/Ascend910A-memory",
+				MemoryAllocatable:  int64(32768),
+				MemoryCapacity:     int64(32768),
+				OverwriteEnv:       overwriteEnv,
+				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+			},
+			allAscendResourceNames: allResNames,
+		}
+	}
+	mkPod := func(ann map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: ann}}
+	}
+	// nonAscendCtr requests no Ascend resource → eligible for the clearing injection.
+	nonAscendCtr := func() corev1.Container {
+		return corev1.Container{
+			Name:      "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		}
+	}
+
+	type tc struct {
+		name        string
+		configOn    bool // dev.config.OverwriteEnv
+		annotations map[string]string
+		wantInject  bool
+	}
+	cases := []tc{
+		// Unset (no annotations) → fall back to config.
+		{name: "unset config true injects", configOn: true, wantInject: true},
+		{name: "unset config false skips", configOn: false, wantInject: false},
+		// Pod-level annotation forces the decision regardless of config.
+		{name: "pod false skips despite config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false"}, wantInject: false},
+		{name: "pod true injects despite config false", configOn: false, annotations: map[string]string{"hami.io/overwrite-env": "true"}, wantInject: true},
+		// Container-level overrides pod-level (both directions).
+		{name: "container false overrides pod true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "true", "hami.io/overwrite-env-containers": `{"main":"false"}`}, wantInject: false},
+		{name: "container true reverse-overrides pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"true"}`}, wantInject: true},
+		// Invalid annotation value is treated as absent → falls back to lower layer.
+		{name: "invalid pod value falls back to config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "yes"}, wantInject: true},
+		{name: "invalid container value falls back to pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"maybe"}`}, wantInject: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dev := mkDev(c.configOn)
+			ctr := nonAscendCtr()
+			_, err := dev.MutateAdmission(&ctr, mkPod(c.annotations))
+			assert.NilError(t, err)
+			assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), c.wantInject)
+		})
+	}
+
+	// Ascend container opt-out is a no-op: a container requesting an Ascend resource
+	// never enters the injection branch, so opt-out annotations have no effect.
+	t.Run("ascend container opt-out is no-op regardless of annotation", func(t *testing.T) {
+		dev := mkDev(true)
+		ctr := corev1.Container{
+			Name: "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"huawei.com/Ascend910B4": resource.MustParse("1"),
+			}},
+		}
+		// 910A device sees !ok for a 910B4 container; opt-out true would force inject
+		// for a non-ascend container, but an ascend container must be left untouched.
+		_, err := dev.MutateAdmission(&ctr, mkPod(map[string]string{"hami.io/overwrite-env": "true"}))
+		assert.NilError(t, err)
+		assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), false, "ascend container must not be injected even with opt-out true")
+	})
+
+	// Requests-only (no Limits) Ascend container is still recognized as an Ascend
+	// container and must not be injected (containerRequestsAnyAscendResource checks
+	// both Limits and Requests).
+	t.Run("requests-only ascend container is not injected", func(t *testing.T) {
+		dev := mkDev(true)
+		ctr := corev1.Container{
+			Name: "main",
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910B4": resource.MustParse("1"),
+				},
+			},
+		}
+		_, err := dev.MutateAdmission(&ctr, mkPod(nil))
+		assert.NilError(t, err)
+		assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), false, "requests-only ascend container must not be injected")
+	})
 }
 
 func Test_MutateAdmission910C(t *testing.T) {

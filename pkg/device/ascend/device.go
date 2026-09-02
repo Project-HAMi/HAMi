@@ -149,8 +149,19 @@ func lastEnvValueEquals(env []corev1.EnvVar, name, value string) bool {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
-		if dev.config.OverwriteEnv && !dev.containerRequestsAnyAscendResource(ctr) &&
-			!lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
+		if dev.containerRequestsAnyAscendResource(ctr) {
+			return false, nil
+		}
+		inject := false
+		switch util.OverwriteEnvDecision(p, ctr) {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.config.OverwriteEnv
+		}
+		if inject && !lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
 				Name:  "ASCEND_VISIBLE_DEVICES",
 				Value: "",
