@@ -2553,6 +2553,131 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	base := device.DeviceUsage{
+		ID: "dev-0", Index: 0, Type: "Ascend910B3",
+		Used: 3, Count: 4,
+		Usedmem: 3072, Totalmem: 65536,
+		Usedcores: 90, Health: true,
+	}
+	req := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 1024, MemPercentagereq: 0, Coresreq: 20,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+
+	t.Run("physical aiCore 20 still admits Coresreq 30", func(t *testing.T) {
+		c := base
+		c.Used = 0
+		c.Usedmem = 0
+		c.Usedcores = 0
+		c.Totalcore = 20
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		req30 := req
+		req30.Coresreq = 30
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, req30, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit against 100-point budget with physical Totalcore=20, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("physical aiCore 20 still rejects 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 20
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 110>100 with physical Totalcore=20, got fit reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 100 rejects 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 100
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 150 admits 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 150
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit at 110<=150, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("advertised 150 exclusive occupant rejects later share", func(t *testing.T) {
+		exclusive := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 150,
+			Health: true,
+		}}
+		share := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(exclusive, share, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected exclusive occupant to reject 50-core share, got reason=%s", reason)
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+}
+
+func TestHamiCoreFitBudget(t *testing.T) {
+	cases := []struct {
+		in   int32
+		want int32
+	}{
+		{0, 100},
+		{20, 100},
+		{32, 100},
+		{100, 100},
+		{150, 150},
+		{200, 200},
+	}
+	for _, tc := range cases {
+		if got := hamiCoreFitBudget(tc.in); got != tc.want {
+			t.Fatalf("hamiCoreFitBudget(%d)=%d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestDevices_Fit_910C(t *testing.T) {
 	configStr := `- chipName: Ascend910
   commonWord: Ascend910C

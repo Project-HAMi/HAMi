@@ -430,6 +430,21 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 	}
 }
 
+// hamiCoreFitBudget is the 0-100 percentage capacity used by hami-core Fit.
+// Coresreq is a percentage, not physical AI cores. Existing plugins may still
+// register Devcore as the hardware AICore count (20/24/32). Keep today's 100-point
+// budget in that case so admission does not change.
+//
+// Coupled plugin change (https://github.com/Project-HAMi/ascend-device-plugin/pull/132)
+// advertises Devcore = round(100 * deviceCoreScaling) for hami-core, which is >= 100.
+// Honor that advertised percentage when it is larger than 100.
+func hamiCoreFitBudget(advertisedTotalcore int32) int32 {
+	if advertisedTotalcore > 100 {
+		return advertisedTotalcore
+	}
+	return 100
+}
+
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -530,10 +545,12 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// Set dev.Totalcore to 100 if vnpuMode is hami-core
+		// hami-core Coresreq is a 0-100 percentage. Do not treat physical AICore
+		// (dev.Totalcore) as that budget. Default remains 100; honor plugin
+		// oversell only when advertised Devcore > 100.
 		effectiveTotalCore := dev.Totalcore
 		if isHAMiCore {
-			effectiveTotalCore = 100
+			effectiveTotalCore = hamiCoreFitBudget(dev.Totalcore)
 		}
 
 		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
@@ -541,10 +558,16 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
-		// Coresreq=100 indicates it want this card exclusively
-		if effectiveTotalCore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+		// Coresreq=100 stays exclusive for hami-core even when the plugin
+		// advertises a budget above 100 (deviceCoreScaling > 1).
+		if k.Coresreq == 100 && dev.Used > 0 && (isHAMiCore || effectiveTotalCore == 100) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+			continue
+		}
+		if isHAMiCore && dev.Used == 1 && dev.Usedcores >= 100 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
