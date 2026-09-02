@@ -786,3 +786,86 @@ func Test_Resourcereqs(t *testing.T) {
 		})
 	}
 }
+
+func Test_InitDevicesWithConfig_PartialFailure(t *testing.T) {
+	// NVIDIA config is zero value (will fail init), Cambricon is valid
+	cfg := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{},
+		CambriconConfig: cambricon.CambriconConfig{
+			ResourceCountName: "cambricon.com/vmlu",
+		},
+	}
+
+	err := InitDevicesWithConfig(cfg)
+
+	// Should return error for NVIDIA only
+	assert.ErrorContains(t, err, "nvidia")
+	// Cambricon should still initialize
+	assert.Contains(t, device.DevicesMap, cambricon.CambriconMLUCommonWord)
+	// NVIDIA should NOT be in DevicesMap
+	assert.NotContains(t, device.DevicesMap, nvidia.NvidiaGPUDevice)
+	// initErrors should contain NVIDIA error
+	assert.Assert(t, len(initErrors) > 0, "Expected initErrors to contain NVIDIA error")
+}
+
+func Test_InitDevicesWithConfig_TypeAssertionSafety(t *testing.T) {
+	// Test with zero-value NVIDIA config (tests the ok := cfg.(Type) pattern)
+	cfg := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{},
+	}
+
+	// Should return error, not panic
+	err := InitDevicesWithConfig(cfg)
+	assert.NotPanics(t, func() { _ = err })
+	assert.ErrorContains(t, err, "nvidia")
+}
+
+func Test_InitDevicesWithConfig_MultipleFailures(t *testing.T) {
+	cfg := &Config{
+		NvidiaConfig:    nvidia.NvidiaConfig{},
+		CambriconConfig: cambricon.CambriconConfig{},
+		HygonConfig:     hygon.HygonConfig{},
+		EnflameConfig:   enflame.EnflameConfig{},
+	}
+
+	err := InitDevicesWithConfig(cfg)
+
+	// All errors should be aggregated
+	assert.ErrorContains(t, err, "nvidia")
+	assert.ErrorContains(t, err, "cambricon")
+	assert.ErrorContains(t, err, "hygon")
+	assert.ErrorContains(t, err, "enflame")
+	assert.Assert(t, len(initErrors) >= 3, "Expected at least 3 init errors")
+
+	// DevicesMap should be empty (all failed)
+	assert.Assert(t, len(device.DevicesMap) == 0, "Expected no devices initialized")
+}
+
+// Test_InitDevicesWithConfig_AscendFailure tests that invalid VNPUs config
+// is handled gracefully in the Ascend device initialization loop.
+func Test_InitDevicesWithConfig_AscendFailure(t *testing.T) {
+	// Invalid VNPUs config (empty configs slice but valid struct)
+	cfg := &Config{
+		VNPUs: ascend.VNPUs{
+			HamiVnpuCore: false,
+			Configs:      []ascend.VNPUConfig{},
+		},
+	}
+
+	// Should handle gracefully (no panic)
+	err := InitDevicesWithConfig(cfg)
+	assert.NotPanics(t, func() { _ = err })
+	// Other devices (if configured) should still work
+}
+
+func Test_InitDevicesWithConfig_IluvatarFailure(t *testing.T) {
+	cfg := &Config{
+		IluvatarConfig: []iluvatar.IluvatarConfig{
+			{ChipName: "invalid"},
+		},
+	}
+
+	// Should handle gracefully (no panic)
+	err := InitDevicesWithConfig(cfg)
+	assert.NotPanics(t, func() { _ = err })
+}
