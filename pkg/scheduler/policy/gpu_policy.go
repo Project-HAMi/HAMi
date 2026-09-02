@@ -191,16 +191,57 @@ func (ds *DeviceListsScore) DeepCopy() *DeviceListsScore {
 	}
 }
 
+// mostSpecificMatchingType returns the request type in requests that applies to
+// a device of deviceType, and whether any does.
+//
+// A device is served by exactly one backend, so at most one request *type* may
+// be scored against it. Comparing types for equality gave that for free. A
+// substring match does not, because registered types nest: the chart ships both
+// "Ascend910B4" and "Ascend910B4-1" as Ascend common words, and the longer type
+// contains the shorter one, so a pod requesting both would otherwise have such a
+// device scored twice. The longest matching type is the most specific one; ties
+// break on the string itself so the choice is deterministic.
+//
+// This selects the type only. ComputeScore still sums every request carrying it,
+// which is the existing behaviour for a pod whose containers request the same
+// device type more than once.
+func mostSpecificMatchingType(deviceType string, requests device.ContainerDeviceRequests) (string, bool) {
+	best := ""
+	found := false
+	for _, container := range requests {
+		if !device.MatchesRequestType(deviceType, container.Type) {
+			continue
+		}
+		if !found || len(container.Type) > len(best) ||
+			(len(container.Type) == len(best) && container.Type < best) {
+			best = container.Type
+			found = true
+		}
+	}
+	return best, found
+}
+
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests, weights util.DeviceScoringWeights) {
 	if ds.Device == nil || ds.Device.Count == 0 || ds.Device.Totalcore == 0 || ds.Device.Totalmem == 0 {
 		ds.Score = 0
 		return
 	}
 	request, core, mem := int32(0), int32(0), int32(0)
-	// Here we are required to use the same type device
+	// Here we are required to use the same type device.
+	// A node registers model-specific device types ("NVIDIA A100-SXM4-40GB",
+	// "MLU370-X8") while a request carries the vendor common word ("NVIDIA",
+	// "MLU"), so match the way getNodeResources selects candidate devices.
+	// Comparing for equality dropped the request from the score entirely on
+	// those backends, leaving devices ranked by current usage instead of usage
+	// after placement.
+	//
+	// Only one request type may be scored against a device, which equality
+	// gave for free and a substring match does not: registered types nest, and
+	// the shipped Ascend config carries both "Ascend910B4" and "Ascend910B4-1".
+	// Requests sharing that one type still accumulate, as they did before.
+	matchType, matched := mostSpecificMatchingType(ds.Device.Type, requests)
 	for _, container := range requests {
-
-		if container.Type != ds.Device.Type {
+		if !matched || container.Type != matchType {
 			continue
 		}
 
