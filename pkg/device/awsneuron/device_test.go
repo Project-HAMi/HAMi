@@ -1102,3 +1102,38 @@ func TestDevices_Fit(t *testing.T) {
 		})
 	}
 }
+
+// Test_graphSelect_ScoreSortedInput covers the order the scheduler actually
+// hands to Fit. DeviceUsageList sorts by score, so a busy device can sit at
+// position zero while its Index is elsewhere. graphSelect must reason about
+// physical adjacency and report indexes, because Fit matches its result
+// against DeviceUsage.Index. Every device carries the node type here, as
+// GetNodeDevices sets CustomInfo on all of them.
+func Test_graphSelect_ScoreSortedInput(t *testing.T) {
+	devices := makeDeviceUsages("trn", map[int]int32{5: 1}, true)
+	for _, d := range devices {
+		d.CustomInfo = map[string]any{AWSNodeType: "trn"}
+	}
+
+	// Move the busy device to the front, as a score sort would.
+	scoreOrdered := []*device.DeviceUsage{devices[5]}
+	for i, d := range devices {
+		if i != 5 {
+			scoreOrdered = append(scoreOrdered, d)
+		}
+	}
+
+	got := graphSelect(scoreOrdered, 4)
+	assert.DeepEqual(t, got, []int{0, 1, 2, 3})
+
+	// Every returned value has to name a free device.
+	byIndex := map[uint]*device.DeviceUsage{}
+	for _, d := range devices {
+		byIndex[d.Index] = d
+	}
+	for _, idx := range got {
+		d, ok := byIndex[uint(idx)]
+		assert.Assert(t, ok, "graphSelect returned %d, which is not a device index", idx)
+		assert.Assert(t, d.Used == 0, "graphSelect returned busy device index %d", idx)
+	}
+}

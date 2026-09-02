@@ -389,6 +389,10 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 	}
 	return res
 }
+
+// continuousDeviceAvailable reports the device indexes of a free run of count
+// devices starting at slice position start. It returns indexes rather than
+// positions because Fit matches its result against DeviceUsage.Index.
 func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
 		return []int{}
@@ -399,14 +403,29 @@ func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count i
 		if devices[iterator].Used > 0 || !devices[iterator].Health {
 			return []int{}
 		}
-		res = append(res, iterator)
+		res = append(res, int(devices[iterator].Index))
 		iterator++
 	}
 	return res
 }
 
 func graphSelect(devices []*device.DeviceUsage, count int) []int {
-	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
+	if len(devices) == 0 {
+		return []int{}
+	}
+	// The ring and power of two groupings below read adjacency from slice
+	// positions, but the scheduler sorts devices by score before calling Fit.
+	// Restore index order on a copy so position math matches the physical
+	// layout, the same way kunlun's topology selector does. Ordering first
+	// also puts the device carrying the node type back at position zero.
+	sorted := make([]*device.DeviceUsage, len(devices))
+	copy(sorted, devices)
+	slices.SortFunc(sorted, func(a, b *device.DeviceUsage) int {
+		return int(a.Index) - int(b.Index)
+	})
+	devices = sorted
+
+	if devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
 		return []int{}
 	}
 	AWSNodetype := ""
