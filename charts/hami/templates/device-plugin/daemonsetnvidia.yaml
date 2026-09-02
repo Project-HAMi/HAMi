@@ -285,7 +285,7 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
-            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
             - name: driver-root
               mountPath: /driver-root
               readOnly: true
