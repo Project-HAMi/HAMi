@@ -35,17 +35,20 @@ var errTemporaryClosed = errors.New("temporary closed")
 //	mtime      uint64
 //}
 
-type UtilizationPerDevice []int
+// UtilizationPerDevice counts the containers running on one device, grouped by
+// task priority. The priority is keyed rather than used as a slice index: it is
+// read from the shared memory region the device plugin mounts into the
+// container read-write, so it can be any int32 and must never size an
+// allocation. Keying also keeps every priority class distinct, which is what
+// the checks below compare.
+type UtilizationPerDevice map[int]int
 
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
 		uuid := c.Info.DeviceUUID(i)
-		_, ok := utSwitchOn[uuid]
-		if ok {
-			for i := range min(p, len(utSwitchOn[uuid])) {
-				if utSwitchOn[uuid][i] > 0 {
-					return true
-				}
+		for priority, count := range utSwitchOn[uuid] {
+			if priority < p && count > 0 {
+				return true
 			}
 		}
 	}
@@ -56,14 +59,14 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
 		uuid := c.Info.DeviceUUID(i)
-		_, ok := utSwitchOn[uuid]
+		counts, ok := utSwitchOn[uuid]
 		if ok {
-			for i := range min(p, len(utSwitchOn[uuid])) {
-				if utSwitchOn[uuid][i] > 0 {
+			for priority, count := range counts {
+				if priority < p && count > 0 {
 					return true
 				}
 			}
-			if p >= 0 && p < len(utSwitchOn[uuid]) && utSwitchOn[uuid][p] > 1 {
+			if counts[p] > 1 {
 				return true
 			}
 		}
@@ -91,8 +94,8 @@ func Observe(lister *nvidia.ContainerLister) {
 					if p < 0 {
 						continue
 					}
-					for p >= len(utSwitchOn[uuid]) {
-						utSwitchOn[uuid] = append(utSwitchOn[uuid], 0)
+					if utSwitchOn[uuid] == nil {
+						utSwitchOn[uuid] = UtilizationPerDevice{}
 					}
 					utSwitchOn[uuid][p]++
 				}
