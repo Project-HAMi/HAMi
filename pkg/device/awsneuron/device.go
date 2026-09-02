@@ -17,6 +17,7 @@ limitations under the License.
 package awsneuron
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"slices"
@@ -421,7 +422,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 	sorted := make([]*device.DeviceUsage, len(devices))
 	copy(sorted, devices)
 	slices.SortFunc(sorted, func(a, b *device.DeviceUsage) int {
-		return int(a.Index) - int(b.Index)
+		return cmp.Compare(a.Index, b.Index)
 	})
 	devices = sorted
 
