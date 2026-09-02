@@ -31,10 +31,35 @@ jobs:
     outputs:
       tag: ${{ env.RUN_TAG }}
     steps:
+    - name: Get Ref
+      # the dispatch input reaches the script through the environment rather
+      # than through expression interpolation, so its contents cannot become
+      # part of the command
+      env:
+        INPUT_TAG: ${{ github.event.inputs.tag }}
+      run: |
+        if [ -n "$INPUT_TAG" ] ; then
+          echo "RUN_TAG=$INPUT_TAG" >> $GITHUB_ENV
+        else
+          echo "RUN_TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+        fi
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        ref: ${{ env.RUN_TAG }}
+        persist-credentials: false
     - name: Check Version
       run: |
-        TagVersion="${{ env.RUN_TAG }}"
-        RecordVersion=` cat VERSION  | tr -d ' ' | tr -d '\n' `
+        # RUN_TAG is already in the environment, so read it there rather than
+        # interpolating it into the script
+        TagVersion="$RUN_TAG"
+        if [ -z "$TagVersion" ] ; then
+          echo "error, failed to resolve the tag being released"
+          exit 1
+        fi
+        # read the file directly rather than through a pipeline, whose exit
+        # status would be the last command's and would hide a missing file
+        RecordVersion=` tr -d ' \n' < VERSION `
         if [ "$RecordVersion" != "$TagVersion" ] ; then
           echo "error, version $RecordVersion of '/VERSION' is different with Tag $TagVersion "
           exit 1
