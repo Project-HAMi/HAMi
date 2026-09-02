@@ -574,21 +574,21 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
-		// A card held by a single full-core occupant rejects every later request.
-		// Oversell lifts the budget above that occupant's share, so neither the
-		// capacity check above nor CardComputeUnitsExhausted below still catches
-		// this. The requesting pod's own mode is irrelevant: only hami-core pods on
-		// non-hami-core nodes are filtered out, so a legacy vNPU pod still reaches
-		// an oversold card.
-		if dev.Used == 1 && dev.Usedcores >= hamiCorePercentBase {
-			reason[common.ExclusiveDeviceAllocateConflict]++
-			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
-			continue
-		}
 		// You can't allocate core=0 job to an already full GPU
 		if effectiveTotalCore != 0 && dev.Usedcores == effectiveTotalCore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
+			continue
+		}
+		// A card held by a single full-core occupant rejects every later request.
+		// Oversell lifts the budget above that occupant's share, so the check above
+		// no longer recognizes the card as full. Running after it keeps the
+		// non-oversold rejection reason as CardComputeUnitsExhausted. The requesting
+		// pod's own mode is irrelevant: only hami-core pods on non-hami-core nodes
+		// are filtered out, so a legacy vNPU pod still reaches an oversold card.
+		if dev.Used == 1 && dev.Usedcores >= hamiCorePercentBase {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
 			continue
 		}
 		if k.Nums > 0 {

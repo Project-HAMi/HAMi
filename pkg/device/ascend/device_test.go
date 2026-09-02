@@ -2636,6 +2636,27 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 			t.Fatalf("unexpected result %#v", result)
 		}
 	})
+	t.Run("default budget 100 keeps CardComputeUnitsExhausted for a full card", func(t *testing.T) {
+		full := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 100,
+			Health: true,
+		}}
+		zeroCore := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 1024, MemPercentagereq: 0, Coresreq: 0,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(full, zeroCore, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected a full card to reject the request")
+		}
+		if reason != "1/1 CardComputeUnitsExhausted" {
+			t.Fatalf("expected CardComputeUnitsExhausted without oversell, got %s", reason)
+		}
+	})
 	t.Run("advertised 150 admits a second tenant below the exclusive threshold", func(t *testing.T) {
 		partial := []*device.DeviceUsage{{
 			ID: "dev-0", Index: 0, Type: "Ascend910B3",
