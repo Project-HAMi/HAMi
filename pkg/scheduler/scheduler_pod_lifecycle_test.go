@@ -18,10 +18,13 @@ package scheduler
 
 import (
 	"maps"
+	"strconv"
+	"sync"
 	"testing"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
@@ -110,10 +113,21 @@ func newMalformedAllocatedPod(uid, name, namespace, nodeName string) *corev1.Pod
 			},
 		},
 		Spec: corev1.PodSpec{
-			NodeName:   nodeName,
-			Containers: []corev1.Container{{Name: "app"}},
+			NodeName: nodeName,
+			Containers: []corev1.Container{{
+				Name: "app",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{"hami.io/gpu": resource.MustParse("1")},
+				},
+			}},
 		},
-		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{
+				Type:   corev1.PodScheduled,
+				Status: corev1.ConditionTrue,
+			}},
+		},
 	}
 }
 
@@ -128,6 +142,26 @@ func validAllocatedAnnotations() map[string]string {
 			}},
 		},
 	})
+}
+
+func TestPodAllocationDecodeFailuresConcurrentAccess(t *testing.T) {
+	var failures podAllocationDecodeFailures
+	var wg sync.WaitGroup
+	for i := range 100 {
+		uid := k8stypes.UID("pod-" + strconv.Itoa(i))
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			failures.record(uid, "node1")
+			failures.clearPod(uid)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = failures.nodes()
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, len(failures.nodes()), 0)
 }
 
 // After a scheduler restart the informer's initial sync replays every pod as
@@ -231,6 +265,64 @@ func Test_onAddPod_DecodeFailureDoesNotBlockFromAnnotationAlone(t *testing.T) {
 	pod.Spec.NodeName = ""
 
 	s.onAddPod(pod)
+
+	nodes := []string{"node1"}
+	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+	_, ok := (*candidates)["node1"]
+	assert.Equal(t, ok, true)
+}
+
+func Test_onAddPod_DecodeFailureRequiresScheduledHAMiPod(t *testing.T) {
+	initReplayDevices(t)
+	tests := []struct {
+		name   string
+		mutate func(*corev1.Pod)
+	}{
+		{
+			name: "manually bound pod",
+			mutate: func(pod *corev1.Pod) {
+				pod.Status.Conditions = nil
+			},
+		},
+		{
+			name: "scheduled pod without HAMi resource",
+			mutate: func(pod *corev1.Pod) {
+				pod.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			addReplayNode(s, "node1")
+			pod := newMalformedAllocatedPod("decode-untrusted-uid", "decode-untrusted", "decode-untrusted-ns", "node1")
+			test.mutate(pod)
+
+			s.onAddPod(pod)
+
+			nodes := []string{"node1"}
+			candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+			assert.NilError(t, err)
+			assert.Equal(t, len(failedNodes), 0)
+			_, ok := (*candidates)["node1"]
+			assert.Equal(t, ok, true)
+		})
+	}
+}
+
+func Test_onUpdatePod_RemovedAssignmentClearsDecodeFailure(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	addReplayNode(s, "node1")
+	pod := newMalformedAllocatedPod("decode-unassigned-uid", "decode-unassigned", "decode-unassigned-ns", "node1")
+	s.onAddPod(pod)
+
+	updated := pod.DeepCopy()
+	delete(updated.Annotations, util.AssignedNodeAnnotations)
+	s.onUpdatePod(pod, updated)
 
 	nodes := []string{"node1"}
 	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)

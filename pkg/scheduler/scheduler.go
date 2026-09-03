@@ -192,13 +192,32 @@ func (s *Scheduler) doNodeNotify() {
 }
 
 func (s *Scheduler) recordAllocationDecodeFailure(pod *corev1.Pod, nodeID string) bool {
-	// Do not let the assigned-node annotation alone quarantine a node. Require
-	// it to agree with the pod's binding recorded in spec.nodeName.
 	if pod.Spec.NodeName == "" || pod.Spec.NodeName != nodeID {
 		return false
 	}
-	s.allocationDecodeFailures.record(pod.UID, nodeID)
-	return pod.UID != ""
+
+	// A Pod author can set spec.nodeName and HAMi annotations directly. Only
+	// quarantine the node when Kubernetes confirms that the Pod was scheduled
+	// and the Pod actually requests a device managed by this scheduler.
+	scheduled := false
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodScheduled &&
+			condition.Status == corev1.ConditionTrue {
+			scheduled = true
+			break
+		}
+	}
+	if !scheduled {
+		return false
+	}
+	for _, dev := range device.GetDevices() {
+		if device.PodRequiresDevice(dev, pod) {
+			s.allocationDecodeFailures.record(pod.UID, nodeID)
+			return pod.UID != ""
+		}
+	}
+
+	return false
 }
 
 func (s *Scheduler) onAddPod(obj any) {
@@ -270,6 +289,7 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+		s.allocationDecodeFailures.clearPod(newPod.UID)
 		return
 	}
 
