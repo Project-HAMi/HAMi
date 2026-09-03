@@ -357,7 +357,7 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 				userGPUPolicy = normalizeSchedulerPolicy(value)
 			} else {
 				klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
-					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, defaultPolicy)
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, userGPUPolicy)
 			}
 		}
 	}
