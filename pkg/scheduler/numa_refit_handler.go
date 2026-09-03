@@ -342,14 +342,6 @@ func containerNameAt(pod *corev1.Pod, index int) (string, bool) {
 	return "", false
 }
 
-// effectivePodDeviceUsage mirrors the accounting shape stored by PodManager.
-func effectivePodDeviceUsage(pod *corev1.Pod, raw device.PodDevices, initReleased bool) device.PodDevices {
-	if initReleased {
-		return device.SteadyStateDeviceUsage(pod, raw)
-	}
-	return device.CollapseInitContainerUsage(pod, raw)
-}
-
 // aggregateDeviceUsage returns one usage total per physical device.
 func aggregateDeviceUsage(single device.PodSingleDevice) map[string]device.ContainerDevice {
 	usage := make(map[string]device.ContainerDevice)
