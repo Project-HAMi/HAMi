@@ -36,12 +36,12 @@ This document provides detailed descriptions of all configurable values paramete
 | `mluResourceMem` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
 | `mluResourceCores` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
 
-### Hygon DCU Resources
+### Hygon HCU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `dcuResourceName` | DCU resource name | `"hygon.com/dcunum"` |
-| `dcuResourceMem` | DCU memory resource name | `"hygon.com/dcumem"` |
-| `dcuResourceCores` | DCU core resource name | `"hygon.com/dcucores"` |
+| `hcuResourceName` | HCU resource name | `"hygon.com/hcunum"` |
+| `hcuResourceMem` | HCU memory resource name | `"hygon.com/hcumem"` |
+| `hcuResourceCores` | HCU core resource name | `"hygon.com/hcucores"` |
 
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
