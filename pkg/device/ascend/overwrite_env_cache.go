@@ -26,42 +26,24 @@ import (
 	"k8s.io/apimachinery/pkg/util/cache"
 )
 
-// overwriteEnv decode caches. The webhook calls MutateAdmission once per
-// registered Ascend chip (7 on a typical node), so without these caches the
-// same pod-level value and container-level JSON would be re-parsed 7× per
-// non-Ascend container — and, for invalid inputs, the same klog warning would
-// fire 7×.
+// overwriteEnvEntriesCache memoizes the decoded container-level OverwriteEnv
+// JSON (hami.io/overwrite-env-containers). The webhook calls MutateAdmission
+// once per registered Ascend chip (7 on a typical node), so without the cache
+// the same JSON would be decoded 7× per container — and, for a malformed
+// value, its warning logged 7×. The pod-level annotation is deliberately not
+// cached: strconv.ParseBool is cheaper than a cache lookup, so an invalid
+// pod-level value may log its warning per chip.
 //
-// Keys are the raw annotation content (not a pod identity): identical values
-// across pods share one entry, a changed annotation is a different key (no
-// stale risk, no TTL needed), and the LRU capacity bounds memory. Entries
-// never expire (ttl = math.MaxInt64). Error results (nil) are cached too, so a
-// malformed JSON is decoded and logged exactly once per distinct value.
-var (
-	overwriteEnvPodCache     = cache.NewLRUExpireCache(256)
-	overwriteEnvEntriesCache = cache.NewLRUExpireCache(256)
-)
+// The key is the raw JSON content (not a pod identity): identical values
+// across pods share one entry, and a changed annotation is a different key —
+// the same key always decodes to the same result, so expiry cannot improve
+// correctness and the LRU capacity is the only bound needed. The TTL is the
+// maximum duration solely because LRUExpireCache's API requires one. Error
+// results (nil) are cached too, so a malformed JSON is decoded and logged
+// exactly once per distinct value.
+var overwriteEnvEntriesCache = cache.NewLRUExpireCache(256)
 
 const overwriteEnvCacheTTL = time.Duration(math.MaxInt64)
-
-// cachedPodOverwriteEnv parses the pod-level annotation value once and caches
-// the result (including Unset for an invalid value) by the raw string, so the
-// 7× per-chip calls don't re-parse or re-warn. strconv.ParseBool is cheap, but
-// an invalid value would otherwise log the same warning 7×.
-func cachedPodOverwriteEnv(podVal string) util.OverwriteEnvMode {
-	if podVal == "" {
-		return util.OverwriteEnvUnset
-	}
-	if v, ok := overwriteEnvPodCache.Get(podVal); ok {
-		if mode, ok := v.(util.OverwriteEnvMode); ok {
-			return mode
-		}
-		// Wrong type stored: unreachable, but recompute rather than panic.
-	}
-	mode, _ := util.ParsePodOverwriteEnv(podVal)
-	overwriteEnvPodCache.Add(podVal, mode, overwriteEnvCacheTTL)
-	return mode
-}
 
 // cachedContainerOverwriteEnv decodes the container-level JSON once and caches
 // the result (including nil for a malformed JSON) by the raw string, so the 7×
