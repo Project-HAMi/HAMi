@@ -25,28 +25,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// Test_cachedPodOverwriteEnv covers hit/miss, invalid-value caching, and empty
-// short-circuit. The cache is package-global, so each case uses a distinct
-// input to avoid cross-case interference.
-func Test_cachedPodOverwriteEnv(t *testing.T) {
-	// miss → parse + cache
-	got := cachedPodOverwriteEnv("true")
-	assert.Equal(t, got, util.OverwriteEnvOn)
-	// hit (same value) → returns cached without re-parse
-	got = cachedPodOverwriteEnv("true")
-	assert.Equal(t, got, util.OverwriteEnvOn)
-
-	// invalid value caches Unset so repeated calls don't re-warn
-	got = cachedPodOverwriteEnv("not-a-bool")
-	assert.Equal(t, got, util.OverwriteEnvUnset)
-	got = cachedPodOverwriteEnv("not-a-bool") // hit
-	assert.Equal(t, got, util.OverwriteEnvUnset)
-
-	// empty short-circuits (no cache entry)
-	got = cachedPodOverwriteEnv("")
-	assert.Equal(t, got, util.OverwriteEnvUnset)
-}
-
 // Test_cachedContainerOverwriteEnv covers hit/miss, malformed-JSON nil caching,
 // and empty short-circuit. Distinct JSON per case avoids cross-case sharing.
 func Test_cachedContainerOverwriteEnv(t *testing.T) {
@@ -76,7 +54,7 @@ func Test_cachedContainerOverwriteEnv(t *testing.T) {
 }
 
 // Test_cachedOverwriteEnv_DecisionEquivalence confirms the cached ascend path
-// (cachedPodOverwriteEnv + cachedContainerOverwriteEnv + ResolveOverwriteEnv)
+// (util.ParsePodOverwriteEnv + cachedContainerOverwriteEnv + ResolveOverwriteEnv)
 // produces the same decision as the uncached util.OverwriteEnvDecision for
 // representative inputs.
 func Test_cachedOverwriteEnv_DecisionEquivalence(t *testing.T) {
@@ -105,7 +83,7 @@ func Test_cachedOverwriteEnv_DecisionEquivalence(t *testing.T) {
 			}
 			ctr := &corev1.Container{Name: c.ctrName}
 			want := util.OverwriteEnvDecision(pod, ctr)
-			podMode := cachedPodOverwriteEnv(c.podVal)
+			podMode, _ := util.ParsePodOverwriteEnv(c.podVal)
 			entries := cachedContainerOverwriteEnv(c.rawJSON)
 			got := util.ResolveOverwriteEnv(podMode, entries, ctr)
 			assert.Equal(t, got, want, "cached path must match uncached decision")
