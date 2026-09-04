@@ -314,6 +314,16 @@ func IsValidGPUSchedulerPolicy(policy string) bool {
 	return true
 }
 
+// normalizeSchedulerPolicy trims every comma-separated token so consumers
+// that compare whole strings or split without trimming see canonical values.
+func normalizeSchedulerPolicy(policy string) string {
+	parts := strings.Split(policy, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, ",")
+}
+
 // IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
 // policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
 // single name is meaningful here. The value is trimmed before it is compared,
@@ -333,14 +343,21 @@ func IsValidNodeSchedulerPolicy(policy string) bool {
 // defaultPolicy. An annotation that does not name a known policy is ignored
 // with a warning, so defaultPolicy stands.
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
-	userGPUPolicy := defaultPolicy
+	// --gpu-scheduler-policy is a free-form string that nothing validates, so
+	// a padded cluster default reaches DeviceUsageList.Less the same way a
+	// padded annotation would.
+	userGPUPolicy := normalizeSchedulerPolicy(defaultPolicy)
 	if task != nil && task.Annotations != nil {
 		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
 			if IsValidGPUSchedulerPolicy(value) {
-				userGPUPolicy = value
+				// The validator trims each token, but DeviceUsageList.Less
+				// compares the whole string and its chain dispatch splits on
+				// commas, so store the canonical form. An accepted padded
+				// value would otherwise silently sort as the spread default.
+				userGPUPolicy = normalizeSchedulerPolicy(value)
 			} else {
 				klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
-					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, defaultPolicy)
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, userGPUPolicy)
 			}
 		}
 	}

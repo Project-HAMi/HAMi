@@ -80,11 +80,11 @@ type Scheduler struct {
 	lock   sync.RWMutex
 	synced atomic.Bool
 
-	// allocLock serializes reservation mutations between Filter and the
-	// NUMA refit (RefitNumaAllocation). kube-scheduler already serializes
-	// Filter calls per scheduling cycle, so in the common path this adds no
-	// contention; it exists so a refit cannot interleave with Filter's
-	// take-fit-readd span and observe or produce half-applied accounting.
+	// allocLock serializes reservation mutations between Filter, the NUMA
+	// refit (RefitNumaAllocation), and pod updates that release init-container
+	// usage. kube-scheduler already serializes Filter calls per scheduling
+	// cycle, so in the common path this adds no contention; it exists so these
+	// paths cannot observe or produce half-applied accounting.
 	allocLock sync.Mutex
 }
 
@@ -209,6 +209,13 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 		s.podManager.UpdatePod(newPod)
 		return
 	}
+
+	// RefitNumaAllocation reads the release flag, devices, and quota as one
+	// accounting snapshot. Keep the normal update and the one-time init-usage
+	// transition in the same critical section so a refit cannot commit from a
+	// stale pre-release snapshot after this handler records steady-state usage.
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 
 	pi, exists := s.podManager.GetPod(newPod)
 	if !exists {
