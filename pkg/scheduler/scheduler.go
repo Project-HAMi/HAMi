@@ -1121,6 +1121,14 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
 	}
+	if args.NodeNames == nil {
+		// The live filter path has no candidate list to work with, and running it
+		// anyway would drop the pod from the scheduling caches for nothing.
+		err := fmt.Errorf("extender args contain neither Nodes nor NodeNames")
+		klog.ErrorS(err, "Rejecting filter request", "pod", klog.KObj(args.Pod))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		return &extenderv1.ExtenderFilterResult{Error: err.Error()}, nil
+	}
 
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
@@ -1144,7 +1152,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", nodeNamesLen(args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -1183,7 +1191,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}
 	}
 
-	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
+	successMsg := genSuccessMsg(nodeNamesLen(args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
