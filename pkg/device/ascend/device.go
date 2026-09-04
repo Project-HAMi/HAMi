@@ -45,7 +45,7 @@ const (
 	Ascend910NetworkWeight     = 10
 	VNPUModeAnnotation         = "huawei.com/vnpu-mode"
 	VNPUModeHamiCore           = "hami-core"
-	VNPUModeTemplate           = "template" 
+	VNPUModeTemplate           = "template"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
