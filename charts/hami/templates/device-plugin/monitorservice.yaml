@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: hami-device-plugin
     {{- include "hami-vgpu.labels" . | nindent 4 }}
     {{- if .Values.devicePlugin.service.labels }}  # Use devicePlugin instead of scheduler
-    {{ toYaml .Values.devicePlugin.service.labels | indent 4 }}
+    {{- toYaml .Values.devicePlugin.service.labels | nindent 4 }}
     {{- end }}
   {{- if .Values.devicePlugin.service.annotations }}  # Use devicePlugin instead of scheduler
   annotations: {{ toYaml .Values.devicePlugin.service.annotations | nindent 4 }}
