@@ -77,12 +77,25 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
+  # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
+  # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
+  # writes can be throttled by the default limits.
+  kubeQPS: ""
+  kubeBurst: ""
+  # kubeTimeout is in seconds; 0 means no timeout.
+  kubeTimeout: ""
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
   replicas: 1
+  # podDisruptionBudget only renders when leaderElect is true and replicas > 1;
+  # with a single replica it would block all voluntary node drains.
+  podDisruptionBudget:
+    minAvailable: 1
+    # maxUnavailable: 1
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
@@ -268,7 +281,7 @@ scheduler:
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
-    monitorTargetPort: 9395
+    monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
     httpTargetPort: 443
     labels: {}
     annotations: {}
@@ -351,6 +364,27 @@ devicePlugin:
   # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
   # admission behavior when topologyManagerPolicy is single-numa-node.
   enableNumaTopology: false
+  # NUMA alignment refit (#2080): when enabled, the device plugin asks the
+  # scheduler to re-run its fit over the NUMA-restricted device set kubelet
+  # allows, keeping scheduler accounting authoritative. Requires
+  # enableNumaTopology plus the per-node enablegetpreferredallocation node
+  # configuration; pods opt in with the hami.io/numa-alignment annotation
+  # (best-effort or strict). Disabled by default: mismatches are only logged.
+  numaRefit:
+    enabled: false
+    # Scheduler base URL override. Defaults to the in-cluster scheduler
+    # service, https://<release>-scheduler.<namespace>.svc:<httpPort>.
+    schedulerEndpoint: ""
+    # The scheduler serves the admission webhook's self-signed certificate,
+    # so verification is skipped by default with the same posture as the
+    # extender configmap (tlsConfig.insecure). Set false to verify, and use
+    # caFile to point at a CA bundle mounted into the device plugin.
+    tlsInsecure: true
+    # Path to a CA bundle already present inside the device-plugin container.
+    caFile: ""
+    # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
+    # when caFile is empty.
+    caSecret: ""
   # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
@@ -387,10 +421,13 @@ devicePlugin:
   createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
-  passDeviceSpecsEnabled: false
+  passDeviceSpecsEnabled: true
   deviceListStrategy: "envvar"
   nvidiaHookPath: null
-  nvidiaDriverRoot: null
+  # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
+  # and device roots from GPU Operator's driver-ready contract. If the
+  # contract is absent, both roots default to / for a host-installed driver.
+  nvidiaDriverRoot: "auto"
   gdrcopyEnabled: null
   gdsEnabled: null
   mofedEnabled: null
@@ -409,6 +446,10 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
+  # Let HAMi core ask the device plugin for its host PID.
+  # This requires hostPID to be true.
+  hostPIDBroker:
+    enabled: false
   hostNetwork: false
   securityContext:
     privileged: true

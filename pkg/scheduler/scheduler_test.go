@@ -1857,7 +1857,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	require.NoError(t, err)
 	cachedDevs, ok := nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, true, ok, "cached mock-vendor devices should be preserved despite transient discovery error")
-	require.Equal(t, 1, len(cachedDevs))
+	require.Len(t, cachedDevs, 1)
 	assert.Equal(t, "MOCK-0", cachedDevs[0].ID, "cached device ID MOCK-0 should remain unchanged")
 
 	// Cycle 2: Vendor recovers — GetNodeDevices succeeds and returns updated device (MOCK-RECOVERED).
@@ -1884,7 +1884,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	require.NoError(t, err)
 	cachedDevs, ok = nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, true, ok, "mock-vendor devices should be present after recovery")
-	require.Equal(t, 1, len(cachedDevs))
+	require.Len(t, cachedDevs, 1)
 	// Cycle 3: Vendor subsequently reports zero devices successfully.
 	// Verify zero-device cleanup removes stale cached vendor entry (scheduler.go:509-516).
 	mockDev.getNodeErr = nil
@@ -2588,7 +2588,7 @@ func TestFilterTemplateNodesDoesNotTouchSchedulingCaches(t *testing.T) {
 
 	pods, err := s.podManager.ListPodsUID()
 	require.NoError(t, err)
-	require.Len(t, pods, 0)
+	require.Empty(t, pods)
 
 	quotas := s.quotaManager.GetResourceQuota()
 	require.Contains(t, quotas, "default")
@@ -2707,7 +2707,7 @@ func Test_SchedulerTerminatingPodRetainsCache(t *testing.T) {
 	podDevces := device.PodDevices{
 		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 			[]device.ContainerDevice{
-				{Idx: 0, UUID: "GPU0", Usedmem: 1000, Usedcores: 10},
+				{Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000, Usedcores: 10},
 			},
 		},
 	}
@@ -2808,11 +2808,11 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 			// Init container (index 0)
 			{{
-				Idx: 0, UUID: "GPU0", Usedmem: 20000, Usedcores: 10,
+				Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 10,
 			}},
 			// App container (index 1)
 			{{
-				Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5,
+				Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 10000, Usedcores: 5,
 			}},
 		},
 	}
@@ -2996,7 +2996,7 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	require.Contains(t, err.Error(), "not found")
 
 	podsAfter, _ := s.podManager.ListPodsUID()
-	require.Len(t, podsAfter, 0)
+	require.Empty(t, podsAfter)
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3051,7 +3051,7 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	require.Contains(t, res.Error, "not found")
 
 	podsAfter, _ := s.podManager.ListPodsUID()
-	require.Len(t, podsAfter, 0)
+	require.Empty(t, podsAfter)
 }
 
 type bindLockMockDevice struct {
@@ -3474,4 +3474,13 @@ func Test_lockAllDevices_Transactional(t *testing.T) {
 			"lock:backend2",
 		})
 	})
+}
+
+func TestSchedulerIsSynced(t *testing.T) {
+	s := &Scheduler{}
+	assert.Equal(t, false, s.IsSynced())
+
+	s.synced.Store(true)
+
+	assert.Equal(t, true, s.IsSynced())
 }

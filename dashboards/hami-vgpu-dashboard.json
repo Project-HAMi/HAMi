@@ -273,7 +273,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
+          "expr": "hami_host_gpu_memory_used_bytes{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
@@ -319,7 +319,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_utilization_ratio and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
+          "expr": "hami_host_gpu_utilization_ratio{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
@@ -417,17 +417,17 @@
             "thresholdsStyle": { "mode": "dashed" }
           },
           "mappings": [],
-          "max": 100,
+          "max": 1,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 75 },
-              { "color": "red", "value": 90 }
+              { "color": "yellow", "value": 0.75 },
+              { "color": "red", "value": 0.9 }
             ]
           },
-          "unit": "percent"
+          "unit": "percentunit"
         },
         "overrides": []
       },

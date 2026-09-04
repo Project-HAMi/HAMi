@@ -42,11 +42,15 @@ import (
 const (
 	CambriconMLUDevice     = "MLU"
 	CambriconMLUCommonWord = "MLU"
-	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
-	MluMemSplitIndex       = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
-	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
-	MLUInUse               = "cambricon.com/use-mlutype"
-	MLUNoUse               = "cambricon.com/nouse-mlutype"
+	// MLUModelLabel is published by cambricon-k8s-device-plugin v2.0.20 and later
+	// when --node-label is enabled. See:
+	// https://github.com/Cambricon/cambricon-k8s-device-plugin/blob/v2.0.20/device-plugin/README.md#mlu-device-label-management
+	MLUModelLabel     = "Model"
+	MluMemSplitLimit  = "CAMBRICON_SPLIT_MEMS"
+	MluMemSplitIndex  = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
+	MluMemSplitEnable = "CAMBRICON_SPLIT_ENABLE"
+	MLUInUse          = "cambricon.com/use-mlutype"
+	MLUNoUse          = "cambricon.com/nouse-mlutype"
 	// MLUUseUUID annotation specifies a comma-separated list of MLU UUIDs to use.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
 	// MLUNoUseUUID annotation specifies a comma-separated list of MLU UUIDs to exclude.
@@ -123,14 +127,7 @@ func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 }
 
 func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	if _, ok := n.Annotations[DsmluLockTime]; !ok {
@@ -214,6 +211,10 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", MLUResourceCores)
 	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
+	mluType := strings.TrimSpace(n.Labels[MLUModelLabel])
+	if !strings.Contains(strings.ToUpper(mluType), CambriconMLUDevice) {
+		mluType = CambriconMLUDevice
+	}
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
@@ -221,7 +222,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Count:        100,
 			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
 			Devcore:      100,
-			Type:         CambriconMLUDevice,
+			Type:         mluType,
 			Numa:         0,
 			Health:       true,
 			DeviceVendor: CambriconMLUCommonWord,
@@ -242,7 +243,12 @@ func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 
 func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, CambriconMLUDevice) == 0 {
-		return true, true, false
+		model := strings.TrimSpace(d.Type)
+		constrained := strings.TrimSpace(annos[MLUInUse]) != "" || strings.TrimSpace(annos[MLUNoUse]) != ""
+		if constrained && (model == "" || strings.EqualFold(model, CambriconMLUDevice)) {
+			return true, false, false
+		}
+		return true, device.CheckType(annos, d.Type, MLUInUse, MLUNoUse), false
 	}
 	return false, false, false
 }
@@ -261,6 +267,10 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "cambricon device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found cambricon devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
@@ -285,9 +295,11 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 			if ok {
 				corenums, ok := core.AsInt64()
-				if ok {
-					corenum = int32(corenums)
+				if !ok || corenums < 0 || corenums > 100 {
+					klog.ErrorS(nil, "cambricon core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}
 				}
+				corenum = int32(corenums)
 			}
 
 			mempnum := 0
@@ -383,6 +395,10 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -423,11 +439,6 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
-		}
-		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Coresreq = 100
-			//return false, tmpDevs
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

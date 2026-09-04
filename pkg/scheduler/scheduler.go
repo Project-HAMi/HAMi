@@ -78,7 +78,14 @@ type Scheduler struct {
 	started        uint32 // 0 = false, 1 = true
 
 	lock   sync.RWMutex
-	synced bool
+	synced atomic.Bool
+
+	// allocLock serializes reservation mutations between Filter, the NUMA
+	// refit (RefitNumaAllocation), and pod updates that release init-container
+	// usage. kube-scheduler already serializes Filter calls per scheduling
+	// cycle, so in the common path this adds no contention; it exists so these
+	// paths cannot observe or produce half-applied accounting.
+	allocLock sync.Mutex
 }
 
 func NewScheduler() *Scheduler {
@@ -89,7 +96,6 @@ func NewScheduler() *Scheduler {
 		nodeNotify:     make(chan struct{}, 1),
 		leaderNotify:   make(chan struct{}, 1),
 		started:        0,
-		synced:         false,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -104,9 +110,7 @@ func NewScheduler() *Scheduler {
 				}
 			},
 			OnStoppedLeading: func() {
-				s.lock.Lock()
-				defer s.lock.Unlock()
-				s.synced = false
+				s.synced.Store(false)
 			},
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
@@ -152,9 +156,15 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodTerminating(pod) {
-		klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
-		s.podManager.UpdatePod(pod)
-		return
+		// A terminating pod still holds its devices. When it is already
+		// cached, refresh the object; when it is not (the informer's initial
+		// sync after a scheduler restart replays it as an add), fall through
+		// so its usage is accounted instead of silently dropped.
+		if _, cached := s.podManager.GetPod(pod); cached {
+			klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
+			s.podManager.UpdatePod(pod)
+			return
+		}
 	}
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
@@ -190,9 +200,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	if util.IsPodTerminating(newPod) {
+		// Same as onAddPod: a resync update for a terminating pod that is
+		// missing from the cache must be accounted, not dropped.
+		if _, cached := s.podManager.GetPod(newPod); !cached {
+			s.onAddPod(newPod)
+			return
+		}
 		s.podManager.UpdatePod(newPod)
 		return
 	}
+
+	// RefitNumaAllocation reads the release flag, devices, and quota as one
+	// accounting snapshot. Keep the normal update and the one-time init-usage
+	// transition in the same critical section so a refit cannot commit from a
+	// stale pre-release snapshot after this handler records steady-state usage.
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 
 	pi, exists := s.podManager.GetPod(newPod)
 	if !exists {
@@ -202,22 +225,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	s.podManager.UpdatePod(newPod)
 
-	if !pi.InitContainerResourceReleased && util.AllInitContainersSucceeded(newPod) {
+	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
 			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
 			return
 		}
 
-		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
+		steadyStateDevices := device.SteadyStateDeviceUsage(newPod, rawDevices)
 
-		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, appOnlyDevices)
+		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, steadyStateDevices)
 		if ok {
-			s.quotaManager.ReplaceUsage(newPod, oldDevices, appOnlyDevices)
-			klog.InfoS("Init containers completed, shrunk usage",
+			s.quotaManager.ReplaceUsage(newPod, oldDevices, steadyStateDevices)
+			klog.InfoS("Non-sidecar init containers completed, shrunk usage to steady state",
 				"pod", klog.KObj(newPod),
 				"oldUsage", oldDevices,
-				"newUsage", appOnlyDevices,
+				"newUsage", steadyStateDevices,
 			)
 		}
 	}
@@ -552,7 +575,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	s.overviewstatus = *overallnodeMap
 
 	// Set synced to true only after getNodeUsage() succeeds
-	s.synced = true
+	s.synced.Store(true)
 }
 
 func (s *Scheduler) updateSchedulerLabel() {
@@ -612,11 +635,17 @@ func (s *Scheduler) updateSchedulerLabel() {
 	}
 }
 
+// IsSynced returns true when the scheduler's internal node/device cache has
+// completed at least one successful sync cycle and is ready to serve requests.
+// It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
+// without contending on the scheduler's write lock during cache refreshes.
+func (s *Scheduler) IsSynced() bool {
+	return s.synced.Load()
+}
+
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		s.lock.RLock()
-		defer s.lock.RUnlock()
-		return s.synced, nil
+		return s.synced.Load(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
@@ -1079,7 +1108,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 
 	if !hasHAMiResource {
 		klog.V(1).InfoS("Pod does not request any resources", "pod", args.Pod.Name)
+		// Simulation callers such as the cluster autoscaler send Nodes
+		// instead of NodeNames; echo both back so a pod without HAMi
+		// resources keeps every candidate node on either protocol shape.
 		return &extenderv1.ExtenderFilterResult{
+			Nodes:       args.Nodes,
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
 			Error:       "",
@@ -1088,6 +1121,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
 	}
+
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)

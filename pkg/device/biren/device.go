@@ -19,6 +19,7 @@ package biren
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -96,28 +97,14 @@ func (dev *BirenDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (
 }
 
 func (dev *BirenDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *BirenDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
@@ -147,6 +134,10 @@ func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "biren device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found biren devices")
 			memnum := 0
 			corenum := int32(0)

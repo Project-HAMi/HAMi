@@ -645,6 +645,42 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "cores 101 out of range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum":   resource.MustParse("1"),
+						"hygon.com/dcucores": resource.MustParse("101"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "cores 150 out of range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum":   resource.MustParse("1"),
+						"hygon.com/dcucores": resource.MustParse("150"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "cores 200 out of range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum":   resource.MustParse("1"),
+						"hygon.com/dcucores": resource.MustParse("200"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -697,11 +733,37 @@ func TestDevices_LockNode(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with regular container resource requests",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with init container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with init and regular container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},
@@ -746,21 +808,23 @@ func TestDevices_LockNode(t *testing.T) {
 
 func TestDevices_ReleaseNodeLock(t *testing.T) {
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		pod         *corev1.Pod
-		hasLock     bool
-		expectError bool
+		name           string
+		node           *corev1.Node
+		pod            *corev1.Pod
+		lockAnnotation string
+		hasLock        bool
+		expectError    bool
 	}{
 		{
-			name:        "Test with no containers",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
-			hasLock:     true,
-			expectError: false,
+			name:           "Test with no containers",
+			node:           &corev1.Node{},
+			pod:            &corev1.Pod{Spec: corev1.PodSpec{}},
+			lockAnnotation: "lock-values,default,nozerorr",
+			hasLock:        true,
+			expectError:    false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with regular container resource requests",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 				Name:      "nozerorr",
@@ -768,8 +832,22 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
-			hasLock:     false,
-			expectError: false,
+			lockAnnotation: "lock-values,default,nozerorr",
+			hasLock:        false,
+			expectError:    false,
+		},
+		{
+			name: "Test with init container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "init-dcunum",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+			}}}}}},
+			lockAnnotation: "lock-values,default,init-dcunum",
+			hasLock:        false,
+			expectError:    false,
 		},
 	}
 
@@ -780,7 +858,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values,default,nozerorr"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: tt.lockAnnotation},
 				},
 			}
 
@@ -1040,7 +1118,7 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 CardTimeSlicingExhausted",
 		},
 		{
-			name: "fit success: but core limit can't exceed 100",
+			name: "fit fail: core limit out of range",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
@@ -1062,10 +1140,10 @@ func TestDevices_Fit(t *testing.T) {
 				Type:             HygonDCUDevice,
 			},
 			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
-			wantReason: "",
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "core limit out of range",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -1358,6 +1436,150 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				if tt.deviceUsage.Used != tt.wantUsage.Used {
 					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
 				}
+			}
+		})
+	}
+}
+
+func TestFit_CoresValidation(t *testing.T) {
+	dev := &DCUDevices{}
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      HygonDCUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		coresreq int32
+		wantOk   bool
+	}{
+		{
+			name:     "cores 0 is accepted",
+			coresreq: 0,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 50 is accepted",
+			coresreq: 50,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 100 is accepted",
+			coresreq: 100,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 101 is rejected",
+			coresreq: 101,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 150 is rejected and not converted to 100",
+			coresreq: 150,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 200 is rejected",
+			coresreq: 200,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -1 is rejected",
+			coresreq: -1,
+			wantOk:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     HygonDCUDevice,
+				Memreq:   1000,
+				Coresreq: tt.coresreq,
+			}
+			ok, _, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, ok, tt.wantOk)
+		})
+	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     HygonDCUDevice,
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     HygonDCUDevice,
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := &DCUDevices{}
+	for _, tt := range []struct {
+		name    string
+		cores   string
+		wantOk  bool
+		wantVal int32
+	}{
+		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
+		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
+		{name: "100 cores", cores: "100", wantOk: true, wantVal: 100},
+		{name: "101 cores", cores: "101", wantOk: false},
+		{name: "150 cores", cores: "150", wantOk: false},
+		{name: "200 cores", cores: "200", wantOk: false},
+		{name: "-1 cores", cores: "-1", wantOk: false},
+		{name: "fractional 50m", cores: "50m", wantOk: false},
+		{name: "fractional 99.1", cores: "99.1", wantOk: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(HygonResourceCount): resource.MustParse("1"),
+						corev1.ResourceName(HygonResourceCores): resource.MustParse(tt.cores),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Coresreq, tt.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
 			}
 		})
 	}

@@ -30,7 +30,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -73,6 +72,23 @@ var (
 		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
+	hostGPUTemperaturedesc = prometheus.NewDesc(
+		"hami_host_gpu_temperature_celsius",
+		"GPU temperature in degrees Celsius",
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUPowerUsagedesc = prometheus.NewDesc(
+		"hami_host_gpu_power_usage_watts",
+		"GPU power draw in watts",
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUEccErrorsdesc = prometheus.NewDesc(
+		"hami_host_gpu_ecc_errors_total",
+		"Lifetime aggregate ECC errors",
+		[]string{"node", "device_index", "device_uuid", "device_type", "error_type"}, nil,
+	)
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
 		"vGPU device memory usage in bytes",
@@ -195,6 +211,9 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
 	ch <- hostGPUMemoryUtilizationdesc
+	ch <- hostGPUTemperaturedesc
+	ch <- hostGPUPowerUsagedesc
+	ch <- hostGPUEccErrorsdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceLastKernelDesc
@@ -278,24 +297,79 @@ func (cc ClusterManagerCollector) getDeviceCount() (int, error) {
 	return devnum, nil
 }
 
+// gpuDeviceIdentity holds the per-device labels shared by every metric
+// collector for one GPU: the node name, and the UUID/name NVML reports for
+// the device. Resolved once per device per scrape by resolveGPUDeviceIdentity
+// and passed down, instead of each collector independently calling
+// hdev.GetUUID()/hdev.GetName() and re-checking the node name env var.
+type gpuDeviceIdentity struct {
+	nodeName   string
+	uuid       string
+	deviceName string
+}
+
+func (cc ClusterManagerCollector) resolveGPUDeviceIdentity(hdev nvml.Device) (gpuDeviceIdentity, error) {
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return gpuDeviceIdentity{}, fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
+	uuid, nvret := hdev.GetUUID()
+	if nvret != nvml.SUCCESS {
+		return gpuDeviceIdentity{}, fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return gpuDeviceIdentity{}, fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	return gpuDeviceIdentity{
+		nodeName:   nodeName,
+		uuid:       uuid,
+		deviceName: "NVIDIA-" + deviceName,
+	}, nil
+}
+
 func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, index int) error {
 	hdev, nvret := nvml.DeviceGetHandleByIndex(index)
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml DeviceGetHandleByIndex err: %s", nvml.ErrorString(nvret))
 	}
 
-	if err := cc.collectGPUMemoryMetrics(ch, hdev, index); err != nil {
+	identity, err := cc.resolveGPUDeviceIdentity(hdev)
+	if err != nil {
 		return err
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, hdev, index); err != nil {
-		return err
+	// Each collector below is independent: a failure in one (e.g.
+	// temperature, which not every GPU/driver combination supports) must not
+	// prevent the others (e.g. power, ECC) from being collected for this
+	// device, so failures are logged rather than returned.
+	if err := cc.collectGPUMemoryMetrics(ch, hdev, index, identity); err != nil {
+		klog.Errorf("Failed to collect GPU memory metrics for device %d: %v", index, err)
+	}
+
+	if err := cc.collectGPUUtilizationMetrics(ch, hdev, index, identity); err != nil {
+		klog.Errorf("Failed to collect GPU utilization metrics for device %d: %v", index, err)
+	}
+
+	if err := cc.collectGPUTemperatureMetrics(ch, hdev, index, identity); err != nil {
+		klog.Errorf("Failed to collect GPU temperature metrics for device %d: %v", index, err)
+	}
+
+	if err := cc.collectGPUPowerMetrics(ch, hdev, index, identity); err != nil {
+		klog.Errorf("Failed to collect GPU power metrics for device %d: %v", index, err)
+	}
+
+	if err := cc.collectGPUEccErrorMetrics(ch, hdev, index, identity); err != nil {
+		klog.Errorf("Failed to collect GPU ECC error metrics for device %d: %v", index, err)
 	}
 
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
 	memory, ret := hdev.GetMemoryInfo()
 	if ret == nvml.ERROR_NOT_SUPPORTED {
 		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
@@ -305,76 +379,97 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		return fmt.Errorf("nvml get memory error ret=%d", ret)
 	}
 
-	uuid, nvret := hdev.GetUUID()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	if err := sendMetric(ch, hostGPUdesc, prometheus.GaugeValue, float64(memory.Used), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUdesc metric: %v", err)
 	}
 
-	deviceName, nvret := hdev.GetName()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
-	}
-
-	deviceName = "NVIDIA-" + deviceName
-
-	nodeName := os.Getenv(util.NodeNameEnvName)
-	if nodeName == "" {
-		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
-	}
-
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUdesc,
-		prometheus.GaugeValue,
-		float64(memory.Used),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
-
-	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName)
 
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
-	nodeName := os.Getenv(util.NodeNameEnvName)
-	if nodeName == "" {
-		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
-	}
-
+func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
 	utilRates, nvret := hdev.GetUtilizationRates()
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("GPU utilization metrics not supported for device %d, skipping", index)
+		return nil
+	}
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
 	}
 
-	uuid, nvret := hdev.GetUUID()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	if err := sendMetric(ch, hostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUUtilizationdesc metric: %v", err)
 	}
 
-	deviceName, nvret := hdev.GetName()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
-	}
-
-	deviceName = "NVIDIA-" + deviceName
-
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUUtilizationdesc,
-		prometheus.GaugeValue,
-		float64(utilRates.Gpu),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
-
-	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName)
 
 	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
 		float64(utilRates.Memory),
-		fmt.Sprint(index), uuid, deviceName,
+		fmt.Sprint(index), identity.uuid, identity.deviceName,
 	); err != nil {
 		return fmt.Errorf("nvml send memory controller utilization: %w", err)
+	}
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUTemperatureMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
+	temp, nvret := hdev.GetTemperature(nvml.TEMPERATURE_GPU)
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Temperature metrics not supported for device %d, skipping", index)
+		return nil
+	}
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetTemperature err: %s", nvml.ErrorString(nvret))
+	}
+
+	if err := sendMetric(ch, hostGPUTemperaturedesc, prometheus.GaugeValue, float64(temp), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUTemperaturedesc metric: %v", err)
+	}
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUPowerMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
+	// GetPowerUsage returns milliwatts; convert to watts.
+	powerMilliwatts, nvret := hdev.GetPowerUsage()
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Power usage metrics not supported for device %d, skipping", index)
+		return nil
+	}
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetPowerUsage err: %s", nvml.ErrorString(nvret))
+	}
+
+	if err := sendMetric(ch, hostGPUPowerUsagedesc, prometheus.GaugeValue, float64(powerMilliwatts)/1000.0, identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUPowerUsagedesc metric: %v", err)
+	}
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int, identity gpuDeviceIdentity) error {
+	for _, entry := range []struct {
+		errorType nvml.MemoryErrorType
+		label     string
+	}{
+		{nvml.MEMORY_ERROR_TYPE_CORRECTED, "corrected"},
+		{nvml.MEMORY_ERROR_TYPE_UNCORRECTED, "uncorrected"},
+	} {
+		count, nvret := hdev.GetTotalEccErrors(entry.errorType, nvml.AGGREGATE_ECC)
+		if nvret == nvml.ERROR_NOT_SUPPORTED {
+			klog.V(3).Infof("ECC %s error metrics not supported for device %d, skipping", entry.label, index)
+			continue
+		}
+		if nvret != nvml.SUCCESS {
+			klog.Errorf("nvml GetTotalEccErrors (%s) err for device %d: %s", entry.label, index, nvml.ErrorString(nvret))
+			continue
+		}
+
+		if err := sendMetric(ch, hostGPUEccErrorsdesc, prometheus.CounterValue, float64(count), identity.nodeName, fmt.Sprint(index), identity.uuid, identity.deviceName, entry.label); err != nil {
+			klog.Errorf("Failed to send hostGPUEccErrorsdesc metric: %v", err)
+		}
 	}
 
 	return nil
@@ -421,8 +516,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 		klog.V(5).Infof("Processing Pod %s/%s", pod.Namespace, pod.Name)
 
-		// Iterate through each container in the Pod
-		for _, ctr := range pod.Spec.Containers {
+		// Iterate through each container in the Pod (both regular and init containers)
+		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+		allContainers = append(allContainers, pod.Spec.InitContainers...)
+		allContainers = append(allContainers, pod.Spec.Containers...)
+		for _, ctr := range allContainers {
 			// Find the matching container
 			for _, c := range podContainers {
 				if c.ContainerName == ctr.Name {
@@ -594,22 +692,37 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 }
 
 // NewClusterManager creates a ClusterManager for the given zone, backs its pod
-// lookups with a shared informer, and registers its collector with reg through
-// a wrapping Registerer that adds the zone as a label.
+// lookups with the container lister's pod informer, and registers its collector
+// with reg through a wrapping Registerer that adds the zone as a label.
+//
+// Both collectors below narrow their pod lookups to this node, so they reuse the
+// informer ContainerLister already runs. It is scoped with a spec.nodeName field
+// selector and is waited on before use, unlike the cluster-wide unsynced informer
+// this used to start on every node in addition to that one.
+//
+// The scheduler writes the hami.io/vgpu-node label the collectors select on, and
+// the kubelet sets spec.nodeName, so between those two writes a pod carries the
+// label without matching the field selector yet. collectPodAndContainerInfo is
+// unaffected because it needs a running container anyway, while
+// collectPodAndContainerMigInfo reads annotations alone and so skips such a pod
+// for the rest of that scrape. It is picked up on the next one.
 func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
+	}
+	if containerLister == nil || containerLister.PodLister() == nil {
+		// NewContainerLister always initializes the informer, so this only
+		// happens if a caller builds a ContainerLister by hand. Fail here
+		// rather than nil panic on the first scrape.
+		klog.Error("container lister has no pod lister; not registering the vGPUmonitor collector")
+		return nil
 	}
 	c := &ClusterManager{
 		Zone:            zone,
 		containerLister: containerLister,
 		LegacyMetrics:   legacyMetrics,
+		PodLister:       containerLister.PodLister(),
 	}
-
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
-	c.PodLister = informerFactory.Core().V1().Pods().Lister()
-	stopCh := make(chan struct{})
-	informerFactory.Start(stopCh)
 
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)

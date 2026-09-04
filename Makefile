@@ -114,3 +114,11 @@ local-deploy: docker
 .PHONY: e2e-test
 e2e-test:
 	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
+
+.PHONY: e2e-mig-test
+e2e-mig-test:
+	./hack/e2e-mig-test.sh "${KUBE_CONF}"
+
+.PHONY: e2e-mig-smoke-test
+e2e-mig-smoke-test:
+	./hack/e2e-mig-smoke-test.sh "${KUBE_CONF}"

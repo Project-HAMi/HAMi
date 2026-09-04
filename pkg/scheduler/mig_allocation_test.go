@@ -259,7 +259,7 @@ func TestFitInDevicesRetainsPhysicalCountCheckForNonMigGPU(t *testing.T) {
 	allocated := make(device.PodDevices)
 
 	fit, reason := fitInDevices(&node, requests, pod, node.NodeInfo, &allocated, util.DefaultDeviceScoringWeights())
-	if fit || reason != common.NodeInsufficientDevice {
+	if fit || common.ParseReason(reason)[common.NodeInsufficientDevice] != 1 {
 		t.Fatalf("fitInDevices() = %v, reason = %q, devices = %+v; want physical-device-count rejection", fit, reason, allocated)
 	}
 }

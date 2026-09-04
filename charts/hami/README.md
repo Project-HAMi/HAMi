@@ -73,10 +73,15 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
+| `scheduler.kubeQPS` | QPS to use while talking with the kube-apiserver; empty keeps the binary default (`5`) | `""` |
+| `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
+| `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
 | `scheduler.forceOverwriteDefaultScheduler` | Whether to force overwrite default scheduler | `true` |
 | `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
 | `scheduler.leaderElect` | Whether to enable leader election | `true` |
 | `scheduler.replicas` | Number of replicas | `1` |
+| `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
+| `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
 
 ### Kube Scheduler Configuration
 
@@ -137,7 +142,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.service.httpPort` | HTTP port | `443` |
 | `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
-| `scheduler.service.monitorTargetPort` | Monitor target port | `9395` |
+| `scheduler.service.monitorTargetPort` | Monitor target port | `metrics` |
 
 ## Device Plugin Configuration
 
@@ -173,11 +178,18 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
-| `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
+| `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
+| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
+
+When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
+`/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
+host-installed driver and uses `/` for both the driver and device roots. When
+HAMi starts before GPU Operator validation completes, wait for GPU Operator to
+become ready and restart the HAMi device plugin DaemonSet.
 
 ### Device Plugin Service Configuration
 
@@ -192,6 +204,8 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `devicePlugin.pluginPath` | Plugin path | `/var/lib/kubelet/device-plugins` |
 | `devicePlugin.libPath` | Library path | `/usr/local/vgpu` |
+| `devicePlugin.hostPID` | Use the host PID namespace for the device plugin | `true` |
+| `devicePlugin.hostPIDBroker.enabled` | Let HAMi core ask the device plugin for its host PID. This requires `devicePlugin.hostPID`. See [Host PID broker](../../docs/develop/hostpid-broker.md) | `false` |
 | `devicePlugin.nvidiaNodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
 | `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
 | `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |

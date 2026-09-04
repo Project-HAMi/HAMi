@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -45,6 +46,9 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "vGPUmonitor",
 		Short: "Hami vgpu vGPUmonitor",
+		// start() now returns runtime failures, which are not usage errors;
+		// without this cobra would print the whole flag help on every one.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
 			return start()
@@ -120,23 +124,35 @@ func start() error {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// A signal is a normal shutdown, an error is not: return it so main exits
+	// non-zero and the container reports the failure instead of Completed.
+	var runErr error
 	select {
 	case sig := <-signalCh:
 		klog.Infof("Received signal: %s", sig)
-		cancel()
 	case err := <-errCh:
 		klog.Errorf("Received error: %v", err)
-		cancel()
+		runErr = err
 	}
+	cancel()
 
 	// Wait for all goroutines to complete
 	wg.Wait()
 	close(errCh)
-	return nil
+	return runErr
 }
 
 func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) error {
 	klog.V(4).Info("Initializing metrics for vGPUmonitor")
+
+	// Bind before anything else. ListenAndServe fails almost exclusively on the
+	// initial bind, and that is a startup misconfiguration that never heals, so
+	// take it before the collectors are wired up and report it to the caller.
+	listener, err := net.Listen("tcp", metricsBindAddress)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", metricsBindAddress, err)
+	}
+
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
 
@@ -154,15 +170,22 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	server := &http.Server{Addr: metricsBindAddress, Handler: mux, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 60 * time.Second}
 
-	// Starting the HTTP server in a goroutine
+	// Starting the HTTP server in a goroutine. Serving can still stop on its own
+	// later, on a fatal accept error, and the vGPUmonitor container carries no
+	// probe that would notice, so surface that too instead of only logging it.
+	serveErr := make(chan error, 1)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			klog.Errorf("Failed to serve metrics: %v", err)
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 		}
 	}()
 
 	// Graceful shutdown on context cancellation
-	<-ctx.Done()
+	select {
+	case err := <-serveErr:
+		return fmt.Errorf("metrics server on %s stopped: %w", metricsBindAddress, err)
+	case <-ctx.Done():
+	}
 	klog.V(4).Info("Shutting down metrics server")
 	if err := server.Shutdown(context.Background()); err != nil {
 		return err

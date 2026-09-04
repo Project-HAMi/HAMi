@@ -404,6 +404,67 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(0),
 			},
 		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(2147483647),
+				Type:             BirenDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(100),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -423,18 +484,44 @@ func TestDevices_LockNode(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name:        "Test with no containers",
+			name:        "no containers — skip lock",
 			node:        &corev1.Node{},
 			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
 			hasLock:     false,
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "regular-container GPU request — acquires lock",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"birentech.com/gpu": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init-container-only GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init+regular GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},

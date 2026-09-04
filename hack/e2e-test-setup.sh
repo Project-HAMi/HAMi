@@ -40,7 +40,10 @@ function setup_e2e_env() {
     gpu_nodes=$(kubectl --kubeconfig "${kubeconf}" get nodes \
         -l 'nvidia.com/gpu.present=true' --no-headers 2>/dev/null | wc -l)
     if [[ "${gpu_nodes}" -eq 0 ]]; then
-        echo "Warning: no nodes with label nvidia.com/gpu.present=true found"
+        echo "FAIL: no nodes with label nvidia.com/gpu.present=true found"
+        echo "E2E tests require at least one GPU node."
+        echo "Please ensure a GPU node is available and labeled with nvidia.com/gpu.present=true"
+        exit 1
     else
         echo "found ${gpu_nodes} GPU node(s)"
     fi

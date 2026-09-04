@@ -44,7 +44,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.12.2
+          version: v2.13.1
           install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
@@ -177,7 +177,7 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+            GOLANG_IMAGE=golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
             NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
@@ -270,3 +270,13 @@ jobs:
     with:
       ref: ${{ needs.get_info.outputs.version }}
       type: "pullrequest"
+
+  # execute MIG smoke test when hami code merge
+  e2e_mig_test:
+    uses: ./.github/workflows/call-e2e-mig.yaml
+    needs: [ package_chart, get_info, build, e2e_test ]
+    if: needs.get_info.outputs.e2e_run == 'true' && vars.ENABLE_MIG_E2E == 'true'
+    with:
+      ref: ${{ needs.get_info.outputs.version }}
+      type: "smoke"
+      deploy-type: "pullrequest"

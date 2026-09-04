@@ -145,6 +145,7 @@ func start() error {
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(sher))
 	router.POST("/bind", routes.Bind(sher))
+	router.POST("/refit", routes.NumaRefit(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
 	router.GET("/readyz", routes.ReadyzRoute(sher))

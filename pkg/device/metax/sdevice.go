@@ -171,16 +171,7 @@ func (sdev *MetaxSDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 }
 
 func (sdev *MetaxSDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-
-	for _, val := range p.Spec.Containers {
-		if (sdev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if !device.PodRequiresDevice(sdev, p) {
 		return nil
 	}
 
@@ -188,16 +179,7 @@ func (sdev *MetaxSDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (sdev *MetaxSDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-
-	for _, val := range p.Spec.Containers {
-		if (sdev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if !device.PodRequiresDevice(sdev, p) {
 		return nil
 	}
 
@@ -237,14 +219,16 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 
 	core := int64(100)
 	coreQuantity, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCore)]
+	if !ok {
+		coreQuantity, ok = ctr.Resources.Requests[corev1.ResourceName(MetaxResourceNameVCore)]
+	}
 	if ok {
-		if v, ok := coreQuantity.AsInt64(); ok {
-			if v < 0 || v > math.MaxInt32 {
-				klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
-				return device.ContainerDeviceRequest{}
-			}
-			core = v
+		v, valid := coreQuantity.AsInt64()
+		if !valid || v < 0 || v > 100 {
+			klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
+			return device.ContainerDeviceRequest{}
 		}
+		core = v
 	}
 
 	mem := int64(0)
@@ -331,6 +315,10 @@ func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 
 func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.Infof("pod[%v] container request[%v] devices fit", klog.KObj(pod), request)
+	if request.Coresreq > 100 || request.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", request.Coresreq)
+		return false, map[string]device.ContainerDevices{}, "core limit out of range"
+	}
 
 	// filter device
 	reason := make(map[string]int)

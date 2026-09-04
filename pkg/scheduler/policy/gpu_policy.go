@@ -75,21 +75,27 @@ func gpuSortKeyChain(policy string) []util.SchedulerPolicyName {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
+	// The annotation validator accepts padded values and Policy is also set
+	// straight from --gpu-scheduler-policy, so compare against a trimmed copy.
+	// Without it a padded single value matches no branch below and silently
+	// sorts as spread. The chain path trims each token for itself.
+	policy := strings.TrimSpace(l.Policy)
+
 	// Comma-separated policy: chain binpack/spread/numa as sort keys in the
 	// order the caller wrote them. mutex/topology-aware are filters applied
 	// in each device backend's Fit(), not sort keys, so they don't appear here.
 	// Bare "numa" also routes here: it's a chain token, not a legacy value.
-	if strings.Contains(l.Policy, ",") || l.Policy == util.GPUSchedulerPolicyNuma.String() {
+	if strings.Contains(policy, ",") || policy == util.GPUSchedulerPolicyNuma.String() {
 		return l.lessByChain(i, j)
 	}
 
 	// Single policy value: unchanged behavior.
 	si, sj := l.DeviceLists[i].Score, l.DeviceLists[j].Score
 	ni, nj := l.DeviceLists[i].Device.Numa, l.DeviceLists[j].Device.Numa
-	binpack := l.Policy == util.GPUSchedulerPolicyBinpack.String()
+	binpack := policy == util.GPUSchedulerPolicyBinpack.String()
 
 	// mutex: busy GPUs first, idle GPUs at tail so Fit picks idle ones.
-	if l.Policy == util.GPUSchedulerPolicyMutex.String() {
+	if policy == util.GPUSchedulerPolicyMutex.String() {
 		ui, uj := l.DeviceLists[i].Device.Used, l.DeviceLists[j].Device.Used
 		if ui != uj {
 			return ui > uj

@@ -131,28 +131,14 @@ func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]s
 }
 
 func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, NodeLockAMD, p)
 }
 
 func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, NodeLockAMD, p, false)
@@ -241,6 +227,9 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			// allocated GPU. This also keeps memory-only AMD requests valid.
 			corePercentageNum := int32(100)
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
+			if !corePercentageOK {
+				corePercentage, corePercentageOK = ctr.Resources.Requests[amdResourceCore]
+			}
 			if corePercentageOK {
 				corePercentageNums, ok := corePercentage.AsInt64()
 				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
@@ -282,6 +271,10 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -347,14 +340,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 
 		if k.Nums > 0 {
 			k.Nums--
+			// Keep the map keyed by the logical AMD device type, but retain the
+			// registered product type in the allocation annotation. Consumers of
+			// the annotation (for example workload GPU reporting) need the latter
+			// to identify the actual AMD model. The registered type comes from an
+			// external node annotation and can be empty; DecodeContainerDevices
+			// rejects an empty type, so fall back to the logical type to keep
+			// the allocation annotation readable.
+			allocType := dev.Type
+			if allocType == "" {
+				allocType = k.Type
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
-				Idx:  int(dev.Index),
-				UUID: dev.ID,
-				// Keep the map keyed by the logical AMD device type, but retain the
-				// registered product type in the allocation annotation. Consumers of
-				// the annotation (for example workload GPU reporting) need the latter
-				// to identify the actual AMD model.
-				Type:      dev.Type,
+				Idx:       int(dev.Index),
+				UUID:      dev.ID,
+				Type:      allocType,
 				Usedmem:   memReq,
 				Usedcores: coreReq,
 			})

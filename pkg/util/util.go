@@ -137,6 +137,13 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}
@@ -151,7 +158,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	if err != nil {
 		return err
 	}
-	_, err = client.GetClient().CoreV1().Nodes().
+	_, err = c.CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
@@ -159,12 +166,22 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	}
 	return err
 }
-func AllInitContainersSucceeded(pod *corev1.Pod) bool {
-	if len(pod.Status.InitContainerStatuses) == 0 {
+
+func AllNonSidecarInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Spec.InitContainers) == 0 {
 		return false
 	}
+	statusByName := make(map[string]corev1.ContainerStatus, len(pod.Status.InitContainerStatuses))
 	for _, s := range pod.Status.InitContainerStatuses {
-		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+		statusByName[s.Name] = s
+	}
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		if IsSidecarContainer(c) {
+			continue
+		}
+		s, ok := statusByName[c.Name]
+		if !ok || s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
 			return false
 		}
 	}
@@ -249,6 +266,9 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 }
 
 func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
 	annos := make(map[string]any, len(annotationKeys))
 	for _, key := range annotationKeys {
 		annos[key] = nil
@@ -274,11 +294,71 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
 	return err
 }
 
+// IsValidGPUSchedulerPolicy reports whether policy names GPU scheduling
+// policies HAMi recognizes. The value is read as a comma-separated ordered
+// list, the same way PolicyContains and the sort-key chain read it, so
+// "binpack,numa" and "mutex,topology-aware" are both accepted. An empty or
+// blank value is not.
+func IsValidGPUSchedulerPolicy(policy string) bool {
+	if strings.TrimSpace(policy) == "" {
+		return false
+	}
+	for p := range strings.SplitSeq(policy, ",") {
+		switch SchedulerPolicyName(strings.TrimSpace(p)) {
+		case GPUSchedulerPolicyBinpack, GPUSchedulerPolicySpread, GPUSchedulerPolicyNuma,
+			GPUSchedulerPolicyMutex, GPUSchedulerPolicyTopology:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeSchedulerPolicy trims every comma-separated token so consumers
+// that compare whole strings or split without trimming see canonical values.
+func normalizeSchedulerPolicy(policy string) string {
+	parts := strings.Split(policy, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, ",")
+}
+
+// IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
+// policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
+// single name is meaningful here. The value is trimmed before it is compared,
+// so surrounding whitespace is read the same way IsValidGPUSchedulerPolicy
+// reads it.
+func IsValidNodeSchedulerPolicy(policy string) bool {
+	switch SchedulerPolicyName(strings.TrimSpace(policy)) {
+	case NodeSchedulerPolicyBinpack, NodeSchedulerPolicySpread:
+		return true
+	default:
+		return false
+	}
+}
+
+// GetGPUSchedulerPolicyByPod returns the GPU scheduling policy to apply to
+// task, preferring its GPUSchedulerPolicyAnnotationKey annotation over
+// defaultPolicy. An annotation that does not name a known policy is ignored
+// with a warning, so defaultPolicy stands.
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
-	userGPUPolicy := defaultPolicy
+	// --gpu-scheduler-policy is a free-form string that nothing validates, so
+	// a padded cluster default reaches DeviceUsageList.Less the same way a
+	// padded annotation would.
+	userGPUPolicy := normalizeSchedulerPolicy(defaultPolicy)
 	if task != nil && task.Annotations != nil {
 		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
-			userGPUPolicy = value
+			if IsValidGPUSchedulerPolicy(value) {
+				// The validator trims each token, but DeviceUsageList.Less
+				// compares the whole string and its chain dispatch splits on
+				// commas, so store the canonical form. An accepted padded
+				// value would otherwise silently sort as the spread default.
+				userGPUPolicy = normalizeSchedulerPolicy(value)
+			} else {
+				klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, userGPUPolicy)
+			}
 		}
 	}
 	return userGPUPolicy
@@ -316,6 +396,11 @@ func AllContainersCreated(pod *corev1.Pod) bool {
 		return false
 	}
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
+}
+
+func IsSidecarContainer(c *corev1.Container) bool {
+	return c != nil && c.RestartPolicy != nil &&
+		*c.RestartPolicy == corev1.ContainerRestartPolicyAlways
 }
 
 // EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.

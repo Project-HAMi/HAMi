@@ -74,12 +74,8 @@ func countbubble(t []int) int {
 }
 
 func calcscore(p []int, c []int) float32 {
-	sort.Slice(p, func(i, j int) bool {
-		return i < j
-	})
-	sort.Slice(c, func(i, j int) bool {
-		return i < j
-	})
+	slices.Sort(p)
+	slices.Sort(c)
 	prev := countbubble(p)
 	cur := countbubble(c)
 	klog.V(5).Infoln("Score kunlun num prev=", prev, "cur=", cur)
@@ -220,6 +216,15 @@ func devicepick(devices []*device.DeviceUsage, start int, request device.Contain
 }
 
 func graghSelect(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, fitFn FitFn) []int {
+	// Wing classification and devicepick read topology from slice positions,
+	// but the scheduler sorts devices by score before calling Fit. Restore
+	// index order on a copy so position math matches the physical layout.
+	sorted := make([]*device.DeviceUsage, len(devices))
+	copy(sorted, devices)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Index < sorted[j].Index
+	})
+	devices = sorted
 	count := int(request.Nums)
 	leftwing := 0
 	rightwing := 0

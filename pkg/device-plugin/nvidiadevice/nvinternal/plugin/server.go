@@ -177,8 +177,6 @@ func getPluginSocketPath(resource spec.ResourceName) string {
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
 func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.DeviceConfig, resourceManager rm.ResourceManager, sConfig *config.Config, mode string) (Interface, error) {
-	_, name := resourceManager.Resource().Split()
-
 	deviceListStrategies, _ := spec.NewDeviceListStrategies(*nvconfig.Flags.Plugin.DeviceListStrategy)
 
 	klog.Infoln("reading config=", nvconfig, "resourceName", nvconfig.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
@@ -197,10 +195,25 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 			return nil, fmt.Errorf("init MIG instance manager: %w", err)
 		}
 	}
+	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
+}
+
+// newNvidiaDevicePlugin assembles an NvidiaDevicePlugin from the options and the
+// values devicePluginForResource resolves at startup. Keeping the assembly in its
+// own method lets the wiring from options into the plugin (for example the IMEX
+// channels) be unit tested without initializing devices, MIG, or NVML.
+func (o *options) newNvidiaDevicePlugin(
+	ctx context.Context,
+	resourceManager rm.ResourceManager,
+	deviceListStrategies spec.DeviceListStrategies,
+	schedulerConfig nvidia.NvidiaConfig,
+	mode string,
+	migMgr *MigInstanceManager,
+) *NvidiaDevicePlugin {
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
 		rm:                         resourceManager,
-		config:                     nvconfig,
+		config:                     o.config,
 		deviceListEnvvar:           "NVIDIA_VISIBLE_DEVICES",
 		deviceListStrategies:       deviceListStrategies,
 		applyMutex:                 sync.Mutex{},
@@ -208,12 +221,13 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		ackDisableHealthChecks:     nil,
 		disableWatchAndRegister:    nil,
 		ackDisableWatchAndRegister: nil,
-		socket:                     kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
+		socket:                     getPluginSocketPath(resourceManager.Resource()),
 		cdiHandler:                 o.cdiHandler,
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
-		schedulerConfig:            sConfig.NvidiaConfig,
+		schedulerConfig:            schedulerConfig,
 		operatingMode:              mode,
 		migMgr:                     migMgr,
+		imexChannels:               o.imexChannels,
 		deviceCache:                "",
 
 		// These will be reinitialized every
@@ -221,7 +235,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		server: nil,
 		health: nil,
 		stop:   nil,
-	}, nil
+	}
 }
 
 func (plugin *NvidiaDevicePlugin) initialize() {
@@ -598,7 +612,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
-		GetPreferredAllocationAvailable: true,
+		GetPreferredAllocationAvailable: enableGetPreferredAllocation,
 	}
 	return options, nil
 }
@@ -632,10 +646,12 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
 
 	var annotatedRequests device.PodSingleDevice
+	var pendingPod *corev1.Pod
 	nodename := os.Getenv(util.NodeNameEnvName)
 	if nodename != "" {
 		current, err := getPendingPod(ctx, nodename)
 		if err == nil && current != nil {
+			pendingPod = current
 			if podRequests, decodeErr := device.DecodePodDevices(device.InRequestDevices, current.Annotations); decodeErr == nil {
 				annotatedRequests = podRequests[nvidia.NvidiaGPUDevice]
 			}
@@ -645,10 +661,14 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	// Filter out empty annotations to match kubelet's ContainerRequests order.
 	// Kubelet only sends requests for containers that need GPUs, but annotations
 	// include all containers (init + regular), some of which may be empty.
+	// annotationIndices keeps each entry's original PodDevices container
+	// position, which the NUMA refit protocol requires.
 	var nonEmptyAnnotations []device.ContainerDevices
-	for _, ann := range annotatedRequests {
+	var annotationIndices []int
+	for i, ann := range annotatedRequests {
 		if len(ann) > 0 {
 			nonEmptyAnnotations = append(nonEmptyAnnotations, ann)
+			annotationIndices = append(annotationIndices, i)
 		}
 	}
 
@@ -662,10 +682,61 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 				})
 			} else {
 				klog.Warningf("err: %v", err)
+				refitDevices, refitErr := plugin.tryNumaRefit(ctx, pendingPod, annotationIndices[idx], req, err)
+				switch {
+				case refitErr != nil:
+					// Strict mode, or a committed refit kubelet cannot
+					// honor: fail the pod's admission rather than running
+					// misaligned or diverging from accounting. Mark the
+					// bind failed so the node lock is released instead of
+					// blocking the node until the lock timeout.
+					if nodename != "" && pendingPod != nil {
+						PodAllocationFailed(nodename, pendingPod, NodeLockNvidia)
+					}
+					return nil, refitErr
+				case len(refitDevices) > 0:
+					response.ContainerResponses = append(response.ContainerResponses, &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
+						DeviceIDs: refitDevices,
+					})
+				default:
+					plugin.reportAnnotatedDeviceMismatch(pendingPod, idx, err)
+				}
 			}
 		}
 	}
 	return response, nil
+}
+
+// errAnnotatedDeviceUnavailable indicates kubelet's available device set
+// contains no replica of a scheduler-annotated GPU, typically because the
+// Topology Manager restricted the allocation to a different NUMA node.
+var errAnnotatedDeviceUnavailable = errors.New("no available slice device found for annotated GPU")
+
+// reportAnnotatedDeviceMismatch surfaces an annotated-GPU mismatch for Pods
+// that opt into NUMA alignment via the hami.io/numa-alignment annotation.
+// Detection only: the preferred allocation response is left unchanged, so
+// kubelet still falls back to its own device selection. The NUMA refit that
+// acts on this condition is tracked in issue #2080.
+func (plugin *NvidiaDevicePlugin) reportAnnotatedDeviceMismatch(pod *corev1.Pod, containerRequest int, err error) {
+	if pod == nil || plugin.operatingMode == nvidia.MigMode || !errors.Is(err, errAnnotatedDeviceUnavailable) {
+		return
+	}
+
+	mode, parseErr := util.GetNumaAlignmentModeByPod(pod)
+	if parseErr != nil {
+		klog.Warningf("ignoring invalid numa-alignment annotation on pod %s/%s: %v", pod.Namespace, pod.Name, parseErr)
+		return
+	}
+	if mode == util.NumaAlignmentNone {
+		return
+	}
+
+	const message = "scheduler-annotated GPU has no replica in kubelet's available devices and the NUMA refit did not handle it, so kubelet will select a device on its own"
+	if mode == util.NumaAlignmentStrict {
+		klog.ErrorS(err, message, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
+		return
+	}
+	klog.InfoS(message, "err", err, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
 }
 
 func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(available, required []string, desired device.ContainerDevices, allocationSize int) ([]string, error) {
@@ -699,13 +770,17 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 		}
 		candidates := availableByPhysical[physicalID]
 		if len(candidates) == 0 {
-			return nil, fmt.Errorf("no available slice device found for annotated GPU %s", physicalID)
+			return nil, fmt.Errorf("%w %s", errAnnotatedDeviceUnavailable, physicalID)
 		}
 		selected = append(selected, candidates[0])
 		availableByPhysical[physicalID] = candidates[1:]
 	}
 
 	if len(selected) != allocationSize {
+		// This can also indicate kubelet-vs-scheduler divergence, for
+		// example MustIncludeDeviceIDs carrying replicas of a GPU the
+		// scheduler never annotated. Classifying that case is deferred to
+		// the NUMA refit (issue #2080).
 		return nil, fmt.Errorf("preferred allocation selected %d devices, want %d", len(selected), allocationSize)
 	}
 
@@ -735,9 +810,39 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 		return nil, errors.New("device number not matched")
 	}
 
-	aligned := append(device.ContainerDevices(nil), devreq...)
+	// Kubelet reports device IDs in its own order, so pair each ID with the
+	// annotated entry for the same physical device. Positional pairing kept
+	// the annotation order for Usedmem and Usedcores, which attached the
+	// per device CUDA memory limit to the wrong GPU whenever the orders
+	// diverged on devices with different requested memory.
+	aligned := make(device.ContainerDevices, len(deviceIDs))
+	matched := make([]bool, len(deviceIDs))
+	used := make([]bool, len(devreq))
+	for i, id := range deviceIDs {
+		phys := physicalDeviceID(id)
+		for j := range devreq {
+			if !used[j] && physicalDeviceID(devreq[j].UUID) == phys {
+				aligned[i] = devreq[j]
+				aligned[i].UUID = phys
+				matched[i] = true
+				used[j] = true
+				break
+			}
+		}
+	}
+	// Entries without a UUID match keep the previous behavior: adopt the
+	// kubelet selected device in annotation order.
+	next := 0
 	for i := range aligned {
+		if matched[i] {
+			continue
+		}
+		for used[next] {
+			next++
+		}
+		aligned[i] = devreq[next]
 		aligned[i].UUID = physicalDeviceID(deviceIDs[i])
+		used[next] = true
 	}
 
 	return aligned, nil
@@ -772,7 +877,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		// error out if more than one resource is being allocated.
 
 		if strings.Contains(req.DevicesIds[0], "MIG") {
-			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
+			if failRequestsGreaterThanOne := plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne; failRequestsGreaterThanOne != nil && *failRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
 				if len(req.DevicesIds) > 1 {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
@@ -850,8 +955,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 				os.MkdirAll(cacheFileHostDirectory, 0777)
 				os.Chmod(cacheFileHostDirectory, 0777)
-				os.MkdirAll("/tmp/vgpulock", 0777)
-				os.Chmod("/tmp/vgpulock", 0777)
+				if err := prepareHostPIDLockParentForAllocation(); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf(
+						"failed to prepare host PID lock parent: %w", err)
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
@@ -859,10 +967,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 						HostPath: cacheFileHostDirectory,
 						ReadOnly: false},
-					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
-						HostPath: "/tmp/vgpulock",
-						ReadOnly: false},
 				)
+				configureHostPIDLockParentMount(response)
+				configureHostPIDBroker(response)
 				found := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {

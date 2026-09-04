@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -156,9 +157,9 @@ func TestGetScheduledPods(t *testing.T) {
 
 	scheduledPods, err := podManager.GetScheduledPods()
 
-	assert.NoError(t, err, "GetScheduledPods should not return an error")
+	require.NoError(t, err, "GetScheduledPods should not return an error")
 	assert.NotNil(t, scheduledPods, "The result should not be nil")
-	assert.Equal(t, 2, len(scheduledPods), "The number of scheduled pods should be 2")
+	assert.Len(t, scheduledPods, 2, "The number of scheduled pods should be 2")
 
 	expectedPods := map[k8stypes.UID]*PodInfo{
 		pod1.UID: pod1,
@@ -361,7 +362,7 @@ func TestListPodsUID(t *testing.T) {
 	podManager := NewPodManager()
 
 	uids, err := podManager.ListPodsUID()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, uids, "expected no pods when the manager is empty")
 
 	pod1 := &corev1.Pod{
@@ -382,7 +383,7 @@ func TestListPodsUID(t *testing.T) {
 	podManager.AddPod(pod2, "node2", PodDevices{"device2": {{}}})
 
 	uids, err = podManager.ListPodsUID()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, uids, 2, "expected one entry per tracked pod")
 
 	gotUIDs := make(map[k8stypes.UID]bool, len(uids))
@@ -581,7 +582,7 @@ func TestPodDevicesDeepCopy(t *testing.T) {
 
 	_, exists := original["AMD"]
 	assert.False(t, exists, "original should not have AMD key")
-	assert.Equal(t, original["NVIDIA"][0][0].UUID, "GPU-0")
+	assert.Equal(t, "GPU-0", original["NVIDIA"][0][0].UUID)
 }
 
 func TestPodSingleDeviceDeepCopy(t *testing.T) {
@@ -602,7 +603,7 @@ func TestPodSingleDeviceDeepCopy(t *testing.T) {
 	// 2. Mutating the copy must not affect the original.
 	copy[0][0].UUID = "mutated-gpu"
 
-	assert.Equal(t, original[0][0].UUID, "GPU-0")
+	assert.Equal(t, "GPU-0", original[0][0].UUID)
 }
 
 func TestContainerDevicesDeepCopy(t *testing.T) {
@@ -619,7 +620,7 @@ func TestContainerDevicesDeepCopy(t *testing.T) {
 	// 2. Mutating the copy must not affect the original.
 	copy[0].UUID = "mutated-gpu"
 
-	assert.Equal(t, original[0].UUID, "GPU-0")
+	assert.Equal(t, "GPU-0", original[0].UUID)
 }
 
 func TestContainerDeviceDeepCopy(t *testing.T) {
@@ -641,7 +642,7 @@ func TestContainerDeviceDeepCopy(t *testing.T) {
 	copy.UUID = "mutated-gpu"
 	copy.CustomInfo["key2"] = "value2"
 
-	assert.Equal(t, original.UUID, "GPU-0")
+	assert.Equal(t, "GPU-0", original.UUID)
 	_, exists := original.CustomInfo["key2"]
 	assert.False(t, exists, "original CustomInfo should not have key2")
 }
@@ -739,7 +740,7 @@ func TestGetScheduledPodsReturnsDetachedEntries(t *testing.T) {
 	})
 
 	scheduled, err := pm.GetScheduledPods()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	scheduled["detach-uid"].Devices["NVIDIA"][0][0].Usedmem = 999
 	scheduled["detach-uid"].NodeID = "tampered"
 

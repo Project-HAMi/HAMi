@@ -109,7 +109,7 @@ Repository-backed defaults and relationships:
 - Container metrics port name: `metrics`
 - Service port name: `monitor`
 - Default Service `monitor` port: `31993`
-- Default Service targetPort: `9395`
+- Default Service targetPort: `metrics` (the named container port, which follows `scheduler.metricsBindAddress`)
 - Metrics path: `/metrics`
 
 **F. Port-forward the scheduler Service and fetch metrics**
@@ -151,12 +151,17 @@ These are the primary metrics if `--legacy-metrics=false`:
 - `hami_node_gpu_overview`
 - `hami_node_gpu_mig_instance_info`
 
-**Pod/container-level allocation**
+**Pod-level allocation**
 - `hami_vgpu_core_allocated_ratio`
 - `hami_vgpu_memory_allocated_bytes`
 
 **Namespace/quota-level aggregation**
 - `hami_resource_quota_used`
+- `hami_resource_quota_limit`
+
+**Scheduler state**
+- `hami_scheduler_is_leader`
+- `hami_scheduler_cache_synced`
 
 **Build metadata**
 - `hami_build_info`
@@ -177,21 +182,52 @@ If the scheduler is started with `--legacy-metrics=true`, the same allocation st
 - `nodeGPUOverview`
 - `nodeGPUMigInstance`
 
-**Pod/container-level allocation**
+**Pod-level allocation**
 - `vGPUCoreAllocated`
 - `vGPUMemoryAllocated`
 
 **Namespace/quota-level aggregation**
 - `QuotaUsed`
 
-#### C. Runtime-only vGPU monitor metrics
+#### C. Runtime-only vGPU monitor metrics (current names)
 These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
-- `hami_host_gpu_memory_used_bytes`
-- `hami_host_gpu_utilization_ratio`
-- `hami_vgpu_memory_used_bytes`
-- `hami_vgpu_memory_limit_bytes`
+
+**Host device runtime metrics**
+- `hami_host_gpu_memory_used_bytes` — physical GPU memory usage
+- `hami_host_gpu_utilization_ratio` — physical GPU core utilization (0-100)
+- `hami_host_gpu_memory_controller_utilization_ratio` — GPU memory controller utilization
+
+**Per-container vGPU runtime metrics**
+- `hami_vgpu_memory_used_bytes` — vGPU memory usage per container
+- `hami_vgpu_memory_limit_bytes` — vGPU memory limit per container
+- `hami_container_device_memory_bytes` — container device memory usage
+- `hami_container_device_utilization_ratio` — container device SM utilization
+- `hami_container_last_kernel_elapsed_seconds` — seconds since last kernel execution
+- `hami_vgpu_memory_context_bytes` — memory context size
+- `hami_vgpu_memory_module_bytes` — memory module size
+- `hami_vgpu_memory_buffer_bytes` — memory buffer size
+
+**MIG runtime identity**
+- `hami_mig_device_info` — MIG runtime identity per container
 
 Use them only as **runtime complements**. They do not replace scheduler allocation metrics for namespace/device allocation summaries.
+
+#### D. Backward-compatible legacy vGPU monitor metrics
+If the vGPU monitor is started with `--legacy-metrics=true`, the same runtime state is also emitted under older names:
+
+**Host device runtime metrics**
+- `HostGPUMemoryUsage` — physical GPU memory usage
+- `HostCoreUtilization` — physical GPU core utilization
+
+**Per-container vGPU runtime metrics**
+- `vGPU_device_memory_usage_in_bytes` — vGPU memory usage per container
+- `vGPU_device_memory_limit_in_bytes` — vGPU memory limit per container
+- `Device_memory_desc_of_container` — container device memory description
+- `Device_utilization_desc_of_container` — container device utilization
+- `Device_last_kernel_of_container` — last kernel execution time
+
+**MIG runtime identity**
+- `MigInfo` — MIG runtime identity per container
 
 Ignore unrelated generic Prometheus metrics unless they help with context.
 
@@ -380,7 +416,6 @@ Use:
 Join records by:
 - `podnamespace`
 - `podname`
-- `containeridx`
 - `deviceuuid`
 - `nodename`
 
@@ -560,7 +595,7 @@ For every pod identified in Step 7 that has a GPU allocation, exec into the pod 
 
 #### A. Identify the correct container
 
-Each pod may have multiple containers. The GPU-using container is usually identified by `containeridx` from `vGPUCoreAllocated` / `vGPUMemoryAllocated`. Prefer to exec into the container at `containeridx`. If the index is not directly mappable to a container name, use the first non-sidecar container, or try each container.
+Each pod may have multiple containers. `vGPUCoreAllocated` / `vGPUMemoryAllocated` are reported per pod and device, so `containeridx` is always `0` and cannot point at one container. Use the first non-sidecar container, or try each container.
 
 **List containers for a pod:**
 ```bash
@@ -730,12 +765,24 @@ If the user asks in English, answer in English.
 | `hami_node_gpu_memory_allocated_ratio` / `nodeGPUMemoryPercentage` | Memory allocation ratio on the GPU | device |
 | `hami_node_gpu_overview` / `nodeGPUOverview` | Combined single-device overview | device |
 | `hami_node_gpu_mig_instance_info` / `nodeGPUMigInstance` | MIG/MPS sharing-mode instance information | device |
-| `hami_vgpu_core_allocated_ratio` / `vGPUCoreAllocated` | GPU core share allocated to a container | pod/container |
-| `hami_vgpu_memory_allocated_bytes` / `vGPUMemoryAllocated` | GPU memory allocated to a container | pod/container |
+| `hami_vgpu_core_allocated_ratio` / `vGPUCoreAllocated` | GPU core share allocated to a pod on one device | pod/device |
+| `hami_vgpu_memory_allocated_bytes` / `vGPUMemoryAllocated` | GPU memory allocated to a pod on one device | pod/device |
 | `hami_resource_quota_used` / `QuotaUsed` | Namespace-level quota usage | namespace |
-| `hami_host_gpu_memory_used_bytes` | Runtime physical GPU memory used from vGPU monitor | runtime/device |
-| `hami_host_gpu_utilization_ratio` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
-| `hami_vgpu_memory_used_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
+| `hami_resource_quota_limit` | Namespace-level quota limit | namespace |
+| `hami_host_gpu_memory_used_bytes` / `HostGPUMemoryUsage` | Runtime physical GPU memory used from vGPU monitor | runtime/device |
+| `hami_host_gpu_utilization_ratio` / `HostCoreUtilization` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
+| `hami_host_gpu_memory_controller_utilization_ratio` | Runtime GPU memory controller utilization from vGPU monitor | runtime/device |
+| `hami_vgpu_memory_used_bytes` / `vGPU_device_memory_usage_in_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
+| `hami_vgpu_memory_limit_bytes` / `vGPU_device_memory_limit_in_bytes` | Runtime per-container vGPU memory limit from vGPU monitor | runtime/container |
+| `hami_container_device_memory_bytes` / `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor | runtime/container |
+| `hami_container_device_utilization_ratio` / `Device_utilization_desc_of_container` | Container device SM utilization from vGPU monitor | runtime/container |
+| `hami_container_last_kernel_elapsed_seconds` / `Device_last_kernel_of_container` | Seconds since last kernel execution from vGPU monitor | runtime/container |
+| `hami_vgpu_memory_context_bytes` | Memory context size from vGPU monitor | runtime/container |
+| `hami_vgpu_memory_module_bytes` | Memory module size from vGPU monitor | runtime/container |
+| `hami_vgpu_memory_buffer_bytes` | Memory buffer size from vGPU monitor | runtime/container |
+| `hami_mig_device_info` / `MigInfo` | MIG runtime identity per container from vGPU monitor | runtime/container |
+| `hami_scheduler_is_leader` | 1 when this scheduler instance is the active leader, 0 otherwise | scheduler |
+| `hami_scheduler_cache_synced` | 1 when the internal node/device cache is fully synced, 0 otherwise | scheduler |
 | `hami_build_info` | HAMi version/build metadata | cluster |
 
 ---

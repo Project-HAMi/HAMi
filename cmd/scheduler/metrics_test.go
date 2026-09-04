@@ -29,12 +29,15 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
 
 type fakeMetricsProvider struct {
 	nodeUsage    map[string]*schedulerpkg.NodeUsage
 	quotaManager *device.QuotaManager
 	podManager   *device.PodManager
+	isLeader     bool
+	isSynced     bool
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
@@ -47,6 +50,14 @@ func (f *fakeMetricsProvider) GetQuotaManager() *device.QuotaManager {
 
 func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 	return f.podManager
+}
+
+func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
+	return leaderelection.NewDummyLeaderManager(f.isLeader)
+}
+
+func (f *fakeMetricsProvider) IsSynced() bool {
+	return f.isSynced
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
@@ -268,9 +279,9 @@ func TestAMDCoreAllocatedRatioNormalization(t *testing.T) {
 # HELP hami_gpu_core_allocated_ratio Device core allocated for a certain GPU
 # TYPE hami_gpu_core_allocated_ratio gauge
 hami_gpu_core_allocated_ratio{device_index="0",device_type="AMDGPU",device_uuid="AMD-1",node="node-1"} 50
-# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a container
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
 # TYPE hami_vgpu_core_allocated_ratio gauge
-hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
 `
 	if err := promtestutil.CollectAndCompare(
 		newCollector,
@@ -291,7 +302,7 @@ hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace
 		},
 	}
 	legacyWant := `
-# HELP vGPUCoreAllocated vGPU core allocated from a container
+# HELP vGPUCoreAllocated vGPU core allocated from a pod
 # TYPE vGPUCoreAllocated gauge
 vGPUCoreAllocated{containeridx="0",deviceuuid="AMD-1",nodename="node-1",podname="amd-pod",podnamespace="default"} 32
 `
@@ -359,7 +370,7 @@ func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *te
 hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 2
 hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 2
 hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 2
-# HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
+# HELP hami_node_gpu_memory_allocated_ratio GPU memory allocated ratio on a certain GPU (0-1)
 # TYPE hami_node_gpu_memory_allocated_ratio gauge
 hami_node_gpu_memory_allocated_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 0.25
 # HELP nodeGPUMemoryPercentage GPU Memory Allocated Percentage on a certain GPU
@@ -522,4 +533,69 @@ hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpu
 	); err != nil {
 		t.Fatalf("unexpected unconfigured limit collecting result:\n%s", err)
 	}
+}
+
+// TestSchedulerStateMetrics verifies that hami_scheduler_is_leader and
+// hami_scheduler_cache_synced are emitted correctly for all combinations of
+// leader and sync state.
+func TestSchedulerStateMetrics(t *testing.T) {
+	tests := []struct {
+		name       string
+		isLeader   bool
+		isSynced   bool
+		wantLeader float64
+		wantSynced float64
+	}{
+		{"leader and synced", true, true, 1, 1},
+		{"leader but not synced", true, false, 1, 0},
+		{"synced but not leader", false, true, 0, 1},
+		{"neither leader nor synced", false, false, 0, 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
+			provider := &fakeMetricsProvider{
+				nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+				quotaManager: device.NewQuotaManager(),
+				podManager:   device.NewPodManager(),
+				isLeader:     tc.isLeader,
+				isSynced:     tc.isSynced,
+			}
+			cc := ClusterManagerCollector{
+				ClusterManager:  c,
+				metricsProvider: provider,
+			}
+
+			if err := promtestutil.CollectAndCompare(
+				cc,
+				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced)),
+				"hami_scheduler_is_leader",
+				"hami_scheduler_cache_synced",
+			); err != nil {
+				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
+			}
+		})
+	}
+}
+
+// wantStr builds the expected Prometheus text for the two scheduler state
+// metrics given the expected gauge values (0.0 or 1.0).
+func wantStr(leaderVal, syncedVal float64) string {
+	return strings.Join([]string{
+		`# HELP hami_scheduler_cache_synced 1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.`,
+		`# TYPE hami_scheduler_cache_synced gauge`,
+		strings.Join([]string{`hami_scheduler_cache_synced`, formatFloat(syncedVal)}, " "),
+		`# HELP hami_scheduler_is_leader 1 if this scheduler instance is the current leader, 0 otherwise.`,
+		`# TYPE hami_scheduler_is_leader gauge`,
+		strings.Join([]string{`hami_scheduler_is_leader`, formatFloat(leaderVal)}, " "),
+		"",
+	}, "\n")
+}
+
+func formatFloat(v float64) string {
+	if v == 0 {
+		return "0"
+	}
+	return "1"
 }

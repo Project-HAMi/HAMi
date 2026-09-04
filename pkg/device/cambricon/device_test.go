@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -75,13 +76,73 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "device plugin model label supplies the real MLU model",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+					Labels: map[string]string{
+						MLUModelLabel: "MLU370-X4",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"cambricon.com/mlu.smlu.vcore":   *resource.NewQuantity(1, resource.DecimalSI),
+						"cambricon.com/mlu.smlu.vmemory": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         "MLU370-X4",
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
+				},
+			},
+		},
+		{
+			name: "model label without MLU keeps the device schedulable",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+					Labels: map[string]string{
+						MLUModelLabel: "370-X4",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"cambricon.com/mlu.smlu.vcore":   *resource.NewQuantity(1, resource.DecimalSI),
+						"cambricon.com/mlu.smlu.vmemory": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         CambriconMLUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
+				},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
 			result, err := dev.GetNodeDevices(test.args)
 			if err != nil {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k])
@@ -129,7 +190,7 @@ func Test_MutateAdmission(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
 			result, _ := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
-			assert.Equal(t, result, test.want)
+			assert.Equal(t, test.want, result)
 		})
 	}
 }
@@ -193,6 +254,160 @@ func Test_checkType(t *testing.T) {
 				},
 			},
 			want1: false,
+			want2: false,
+		},
+		{
+			name: "use-mlutype allows the listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "use-mlutype rejects a non-listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype excludes the listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype ignores a non-listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "empty use-mlutype does not block scheduling",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: ""},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "whitespace nouse-mlutype does not block scheduling",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "   "},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "comma-separated use-mlutype matches one entry",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU290,MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "comma-separated use-mlutype matches no entry",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU290,MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "missing model annotations keep default behavior",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "use-mlutype rejects a device whose model is unknown",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU370"},
+				d:     device.DeviceUsage{Type: CambriconMLUDevice},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype rejects a device whose model is unknown",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU370"},
+				d:     device.DeviceUsage{Type: CambriconMLUDevice},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
 			want2: false,
 		},
 	}
@@ -304,12 +519,136 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
+			name: "zero count must not silently bypass quota",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
 			name: "decimal-form memory request is rejected, not treated as zero",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("1"),
 						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2147483647,
+				Type:             CambriconMLUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2147483647,
+				Type:             CambriconMLUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483648"),
 					},
 				},
 			},
@@ -414,7 +753,7 @@ func Test_PatchAnnotations(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
 			result := dev.PatchAnnotations(&corev1.Pod{}, &test.args.annoinput, test.args.pd)
-			assert.Equal(t, len(test.want), len(result), "Expected length of result to match want")
+			assert.Len(t, result, len(test.want), "Expected length of result to match want")
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k], "pod add annotation key [%s], values is [%s]", k, result[k])
 			}
@@ -1032,7 +1371,7 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 CardTimeSlicingExhausted",
 		},
 		{
-			name: "fit success: but core limit can't exceed 100",
+			name: "fit fail: core limit out of range",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
@@ -1054,10 +1393,10 @@ func TestDevices_Fit(t *testing.T) {
 				Type:             CambriconMLUDevice,
 			},
 			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
-			wantReason: "",
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "core limit out of range",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -1272,6 +1611,118 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{},
 			wantReason: "1/1 CardNotHealth",
 		},
+		{
+			name: "model-aware fit: use-mlutype selects the matching model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: "MLU370"},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+		{
+			name: "model-aware fit fail: use-mlutype excludes a non-listed model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: "MLU590"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "model-aware fit fail: nouse-mlutype excludes the listed model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUNoUse: "MLU370"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "model-aware fit: empty use-mlutype does not block scheduling",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: ""},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
 	}
 
 	for _, test := range tests {
@@ -1426,4 +1877,179 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := &CambriconDevices{}
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+
+	tests := []struct {
+		name    string
+		cores   int64
+		wantReq bool
+	}{
+		{
+			name:    "cores 0 accepted",
+			cores:   0,
+			wantReq: true,
+		},
+		{
+			name:    "cores 50 accepted",
+			cores:   50,
+			wantReq: true,
+		},
+		{
+			name:    "cores 100 accepted",
+			cores:   100,
+			wantReq: true,
+		},
+		{
+			name:    "cores 101 rejected",
+			cores:   101,
+			wantReq: false,
+		},
+		{
+			name:    "cores 150 rejected",
+			cores:   150,
+			wantReq: false,
+		},
+		{
+			name:    "cores 200 rejected",
+			cores:   200,
+			wantReq: false,
+		},
+		{
+			name:    "negative cores -1 rejected",
+			cores:   -1,
+			wantReq: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(MLUResourceCount):  resource.MustParse("1"),
+						corev1.ResourceName(MLUResourceCores):  *resource.NewQuantity(tt.cores, resource.DecimalSI),
+						corev1.ResourceName(MLUResourceMemory): resource.MustParse("1000"),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantReq {
+				assert.Equal(t, int32(1), req.Nums)
+				assert.Equal(t, int32(tt.cores), req.Coresreq)
+			} else {
+				assert.Equal(t, int32(0), req.Nums)
+			}
+		})
+	}
+}
+
+func TestFit_CoresValidation(t *testing.T) {
+	dev := &CambriconDevices{}
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      CambriconMLUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		coresreq int32
+		wantOk   bool
+	}{
+		{
+			name:     "cores 0 is accepted",
+			coresreq: 0,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 50 is accepted",
+			coresreq: 50,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 100 is accepted",
+			coresreq: 100,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 101 is rejected",
+			coresreq: 101,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 150 is rejected and not converted to 100",
+			coresreq: 150,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 200 is rejected",
+			coresreq: 200,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -1 is rejected",
+			coresreq: -1,
+			wantOk:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     CambriconMLUDevice,
+				Memreq:   1000,
+				Coresreq: tt.coresreq,
+			}
+			ok, _, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, tt.wantOk, ok)
+		})
+	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     CambriconMLUDevice,
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.False(t, ok)
+		assert.Equal(t, "core limit out of range", reason)
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     CambriconMLUDevice,
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.False(t, ok)
+		assert.Equal(t, "core limit out of range", reason)
+	})
 }

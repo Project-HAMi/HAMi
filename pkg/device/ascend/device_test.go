@@ -787,6 +787,40 @@ func Test_MutateAdmission_NilRequests(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_EmptyResourceMemoryName(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			ChipName:           "Ascend910A",
+			CommonWord:         "Ascend910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "",
+			MemoryCapacity:     0,
+			MemoryAllocatable:  0,
+		},
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910A": resource.MustParse("1"),
+			},
+		},
+	}
+	pod := corev1.Pod{}
+	result, err := dev.MutateAdmission(&ctr, &pod)
+	if err != nil {
+		t.Fatalf("MutateAdmission returned unexpected error: %v", err)
+	}
+	if !result {
+		t.Fatalf("MutateAdmission expected true, got false")
+	}
+	if _, ok := ctr.Resources.Limits[corev1.ResourceName("")]; ok {
+		t.Fatalf("MutateAdmission should not inject empty resource name into Limits")
+	}
+	if _, ok := ctr.Resources.Requests[corev1.ResourceName("")]; ok {
+		t.Fatalf("MutateAdmission should not inject empty resource name into Requests")
+	}
+}
+
 func Test_MutateAdmission910C(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2053,7 +2087,7 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 CardTimeSlicingExhausted",
 		},
 		{
-			name: "fit success: but core limit can't exceed 100",
+			name: "fit fail: core limit out of range",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
@@ -2073,10 +2107,10 @@ func TestDevices_Fit(t *testing.T) {
 				Coresreq:         120,
 			},
 			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
-			wantReason: "",
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "core limit out of range",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -2528,6 +2562,7 @@ func TestDevices_Fit_910C(t *testing.T) {
   memoryCapacity: 65536
   aiCore: 20
   aiCPU: 7
+  superPod: true
 `
 
 	var config []VNPUConfig
@@ -2720,4 +2755,201 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := &Devices{
+		config: VNPUConfig{
+			CommonWord:       "Ascend910A",
+			ResourceName:     "huawei.com/Ascend910",
+			ResourceCoreName: "huawei.com/Ascend910-core",
+		},
+	}
+
+	tests := []struct {
+		name    string
+		cores   int64
+		rawCore string
+		wantReq bool
+	}{
+		{
+			name:    "cores 0 accepted",
+			cores:   0,
+			wantReq: true,
+		},
+		{
+			name:    "cores 50 accepted",
+			cores:   50,
+			wantReq: true,
+		},
+		{
+			name:    "cores 100 accepted",
+			cores:   100,
+			wantReq: true,
+		},
+		{
+			name:    "cores 101 rejected",
+			cores:   101,
+			wantReq: false,
+		},
+		{
+			name:    "cores 150 rejected",
+			cores:   150,
+			wantReq: false,
+		},
+		{
+			name:    "cores 200 rejected",
+			cores:   200,
+			wantReq: false,
+		},
+		{
+			name:    "negative cores -1 rejected",
+			cores:   -1,
+			wantReq: false,
+		},
+		{
+			name:    "fractional cores 50m rejected",
+			rawCore: "50m",
+			wantReq: false,
+		},
+		{
+			name:    "fractional cores 99.1 rejected",
+			rawCore: "99.1",
+			wantReq: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreQty := *resource.NewQuantity(tt.cores, resource.DecimalSI)
+			if tt.rawCore != "" {
+				coreQty = resource.MustParse(tt.rawCore)
+			}
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910":      resource.MustParse("1"),
+						"huawei.com/Ascend910-core": coreQty,
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantReq {
+				assert.Equal(t, int32(1), req.Nums)
+				assert.Equal(t, int32(tt.cores), req.Coresreq)
+			} else {
+				assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+			}
+		})
+	}
+}
+
+func TestFit_CoresValidation(t *testing.T) {
+	dev := &Devices{
+		config: VNPUConfig{
+			CommonWord: "Ascend910A",
+		},
+	}
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      "Ascend910A",
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		coresreq int32
+		wantOk   bool
+	}{
+		{
+			name:     "cores 0 is accepted",
+			coresreq: 0,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 50 is accepted",
+			coresreq: 50,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 100 is accepted",
+			coresreq: 100,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 101 is rejected",
+			coresreq: 101,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 150 is rejected and not converted to 100",
+			coresreq: 150,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 200 is rejected",
+			coresreq: 200,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -1 is rejected",
+			coresreq: -1,
+			wantOk:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     "Ascend910A",
+				Memreq:   1000,
+				Coresreq: tt.coresreq,
+			}
+			ok, _, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, ok, tt.wantOk)
+		})
+	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     "Ascend910A",
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     "Ascend910A",
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
 }
