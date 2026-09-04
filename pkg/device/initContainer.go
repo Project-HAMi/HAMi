@@ -30,6 +30,12 @@ type usage struct {
 	slots int32
 }
 
+// slotsOf returns the concurrent-task count an entry occupies on its device.
+// Raw allocations leave Slots unset, which means a single slot.
+func slotsOf(dev ContainerDevice) int32 {
+	return max(dev.Slots, 1)
+}
+
 func isSidecarAt(pod *corev1.Pod, cidx int) bool {
 	if cidx < 0 || cidx >= len(pod.Spec.InitContainers) {
 		return false
@@ -71,7 +77,7 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 					// joins the set of running containers.
 					s.sc.mem += dev.Usedmem
 					s.sc.cores += dev.Usedcores
-					s.sc.slots++
+					s.sc.slots += slotsOf(dev)
 					s.peak.mem = max(s.peak.mem, s.sc.mem)
 					s.peak.cores = max(s.peak.cores, s.sc.cores)
 					s.peak.slots = max(s.peak.slots, s.sc.slots)
@@ -81,14 +87,14 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 					s := get(dev.UUID)
 					s.peak.mem = max(s.peak.mem, s.sc.mem+dev.Usedmem)
 					s.peak.cores = max(s.peak.cores, s.sc.cores+dev.Usedcores)
-					s.peak.slots = max(s.peak.slots, s.sc.slots+1)
+					s.peak.slots = max(s.peak.slots, s.sc.slots+slotsOf(dev))
 				}
 			default:
 				for _, dev := range ctrDevs {
 					s := get(dev.UUID)
 					s.app.mem += dev.Usedmem
 					s.app.cores += dev.Usedcores
-					s.app.slots++
+					s.app.slots += slotsOf(dev)
 				}
 			}
 		}
@@ -130,7 +136,7 @@ func SteadyStateDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 				s := sums[dev.UUID]
 				s.mem += dev.Usedmem
 				s.cores += dev.Usedcores
-				s.slots++ // each concurrent app container occurrence is one slot
+				s.slots += slotsOf(dev)
 				sums[dev.UUID] = s
 			}
 		}

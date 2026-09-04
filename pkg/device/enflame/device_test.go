@@ -285,9 +285,11 @@ func TestFit_MutexRejectsUsedDevice(t *testing.T) {
 	dev := InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
 	devices := []*device.DeviceUsage{
 		{
-			ID:       "node-a-enflame-drs-0",
+			ID: "node-a-enflame-drs-0",
+			// 5 of 6 slices free, so the 3-slice profile clears the slice guard
+			// and the mutex check is the binding constraint.
 			Index:    0,
-			Count:    2,
+			Count:    6,
 			Used:     1,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,

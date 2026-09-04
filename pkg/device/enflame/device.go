@@ -255,10 +255,7 @@ func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 				continue
 			}
 			chosen := ctrDevices[0]
-			slice := clampToInt32(readCustomInfoInt(chosen.CustomInfo, "drsSlice"))
-			if slice <= 0 {
-				slice = 1
-			}
+			slice := sliceCount(&chosen)
 			ctrName := containerNameByIndex(pod, ctridx)
 			profileName := readCustomInfoString(chosen.CustomInfo, "profileName")
 			profileID := readCustomInfoString(chosen.CustomInfo, "profileID")
@@ -368,12 +365,24 @@ func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 	return 0
 }
 
-func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	slice := clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
-	if slice <= 0 {
-		slice = 1
+// sliceCount returns the DRS slices an entry occupies. Slots is authoritative;
+// CustomInfo is the fallback for entries built before Fit recorded Slots.
+func sliceCount(ctr *device.ContainerDevice) int32 {
+	if ctr == nil {
+		return 1
 	}
-	n.Used = clampToInt32(int(n.Used) + int(slice))
+	slice := ctr.Slots
+	if slice <= 0 {
+		slice = clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
+	}
+	if slice <= 0 {
+		return 1
+	}
+	return slice
+}
+
+func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	n.Used = clampToInt32(int(n.Used) + int(sliceCount(ctr)))
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
@@ -409,6 +418,10 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
 	profileCorePercent := int32(profile.CorePercent)
+	// profile.Size is already range checked above, so this is the single
+	// bounded conversion reused by the slice guard and the allocation.
+	profileSlices := int32(profile.Size)
+
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -429,9 +442,11 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		if dev.Count <= dev.Used {
+		// The whole profile has to fit: a 3 slice profile needs 3 free slices,
+		// not just one.
+		if dev.Count-dev.Used < profileSlices {
 			reason[common.CardTimeSlicingExhausted]++
-			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used, "request slices", profileSlices)
 			continue
 		}
 		if isMutex && dev.Used > 0 {
@@ -458,6 +473,9 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 				Type:      k.Type,
 				Usedmem:   profileMemoryMiB,
 				Usedcores: profileCorePercent,
+				// A DRS profile consumes profile.Size slices; recording it here keeps
+				// the count across the annotation round trip that drops CustomInfo.
+				Slots: profileSlices,
 				CustomInfo: map[string]any{
 					"profileName": profile.Name,
 					"profileID":   profile.ID,
