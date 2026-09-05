@@ -45,6 +45,7 @@ const (
 	Ascend910NetworkWeight     = 10
 	VNPUModeAnnotation         = "huawei.com/vnpu-mode"
 	VNPUModeHamiCore           = "hami-core"
+	VNPUModeTemplate           = "template"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
@@ -450,6 +451,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+	isTemplate := (vnpuMode == VNPUModeTemplate)
 
 	// Verify whether the Node supports hami vnpu core.
 	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
@@ -464,6 +466,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
 		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
+		return false, nil, common.GenReason(reason, len(devices))
+	}
+	if isTemplate && nodeSupportHamiCore {
+		reason[common.ModeNotFit]++
+		klog.V(4).InfoS("Node filtered: pod requests template mode but node uses hami-core", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
 	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
