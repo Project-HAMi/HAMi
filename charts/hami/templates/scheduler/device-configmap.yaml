@@ -56,9 +56,9 @@ data:
       resourceMemoryName: {{ .Values.mluResourceMem }}
       resourceCoreName: {{ .Values.mluResourceCores }}
     hygon:
-      resourceCountName: {{ .Values.dcuResourceName }}
-      resourceMemoryName: {{ .Values.dcuResourceMem }}
-      resourceCoreName: {{ .Values.dcuResourceCores }}
+      resourceCountName: {{ .Values.hcuResourceName }}
+      resourceMemoryName: {{ .Values.hcuResourceMem }}
+      resourceCoreName: {{ .Values.hcuResourceCores }}
       memoryFactor: 1
     metax:
       resourceCountName: "metax-tech.com/gpu"

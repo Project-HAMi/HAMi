@@ -36,7 +36,7 @@ HAMi 提供了一个 Kubernetes 原生层：
 - **设备共享**：按显存、核心或设备数量分配物理加速器的部分资源。
 - **资源隔离**：在设备后端支持的情况下，强制执行每个工作负载的加速器显存和算力限制。
 - **设备感知调度**：通过拓扑感知、binpack、spread 和设备特定的调度策略放置 Pod。
-- **异构 AI 集群**：通过统一的调度和分配工作流管理 NVIDIA GPU、NPU、DCU、MLU 等多种加速器类型。
+- **异构 AI 集群**：通过统一的调度和分配工作流管理 NVIDIA GPU、NPU、HCU、MLU 等多种加速器类型。
 - **零应用改动**：继续使用标准 Kubernetes 资源请求和限制。
 - **生产运维**：暴露指标、仪表盘、WebUI、Helm 安装和社区支持的部署指南。
 
@@ -84,7 +84,7 @@ resources:
 
 ## 支持的设备
 
-HAMi 支持多种异构加速器后端，包括 GPU、NPU、DCU、MLU、GCU、XPU 等。设备能力因厂商、型号、驱动和硬件代次而异。
+HAMi 支持多种异构加速器后端，包括 GPU、NPU、HCU、MLU、GCU、XPU 等。设备能力因厂商、型号、驱动和硬件代次而异。
 
 请参阅 [HAMi 支持的设备](https://project-hami.io/docs/userguide/device-supported)页面获取最新的支持矩阵。
 

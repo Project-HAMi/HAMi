@@ -1,18 +1,18 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: vdcu-pytorch-demo
+  name: vhcu-pytorch-demo
   annotations:
-    hygon.com/nouse-dcutype: "DCU-K100_AI" #Specify the card type for this job, use comma to separate, will not launch job on non-specified card
+    hygon.com/nouse-hcutype: "HCU-K100_AI" #Specify the card type for this job, use comma to separate, will not launch job on non-specified card
     #In this example, we don't want this container to run on K100_AI
 spec:
   containers:
-    - name: vdcu-pytorch-demo
-      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+    - name: vhcu-pytorch-demo
+      image: image.sourcefind.cn:5000/hcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
       command: [ "/bin/bash", "-c", "--" ]
       args: [ "sleep infinity & wait" ]
       resources:
         limits:
-          hygon.com/dcunum: 1
-          hygon.com/dcucores: 60
-          hygon.com/dcumem: 2000
+          hygon.com/hcunum: 1
+          hygon.com/hcucores: 60
+          hygon.com/hcumem: 2000

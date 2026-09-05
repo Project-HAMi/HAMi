@@ -1142,7 +1142,7 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 						Name: "node",
 						Annotations: map[string]string{
 							"hami.io/node-handshake":     "Requesting_2025-06-13 09:07:40",
-							"hami.io/node-handshake-dcu": "Requesting_2025-06-13 09:07:40",
+							"hami.io/node-handshake-hcu": "Requesting_2025-06-13 09:07:40",
 						},
 					},
 				}
@@ -1171,19 +1171,19 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 					t.Errorf("missing annotation: hami.io/node-handshake")
 					return false
 				}
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
-				if !okDcu {
-					t.Errorf("missing annotation: hami.io/node-handshake-dcu")
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
+				if !okHcu {
+					t.Errorf("missing annotation: hami.io/node-handshake-hcu")
 					return false
 				}
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 				return true
@@ -1280,24 +1280,24 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 
 				// If annotations exist, check for specific annotations
 				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
 
 				// Here you can define what should happen when annotations are present but not set
-				if !okHami || !okDcu {
+				if !okHami || !okHcu {
 					t.Logf("expected annotations are missing, checking if handled properly...")
 					return true // Adjust based on expected behavior
 				}
 
 				// Verify time format in annotations if they exist
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 
