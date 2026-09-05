@@ -1619,3 +1619,142 @@ func TestMigInUseDeepCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceInfoDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original DeviceInfo
+	}{
+		{
+			name:     "empty device info",
+			original: DeviceInfo{},
+		},
+		{
+			name: "device info with nested maps and slices",
+			original: DeviceInfo{
+				ID:           "GPU-12345678-abcd-ef01-2345-6789abcdef01",
+				Index:        0,
+				Count:        1,
+				Devmem:       8192,
+				Devcore:      100,
+				Type:         "NVIDIA-A100-SXM4-40GB",
+				Numa:         0,
+				Mode:         "hami-core",
+				Health:       true,
+				DeviceVendor: "NVIDIA",
+				MIGTemplate: []Geometry{
+					{
+						{Name: "1g.5gb", Core: 1, Memory: 5, Count: 7},
+					},
+				},
+				CustomInfo: map[string]any{
+					"vendor": "nvidia",
+					"region": "us-east-1",
+				},
+				DevicePairScore: DevicePairScore{
+					ID: "GPU-12345678-abcd-ef01-2345-6789abcdef01",
+					Scores: map[string]int{
+						"GPU-peer-1": 100,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating fields and nested collections in copy must not affect original.
+			if copy.ID != "" {
+				copy.ID = "mutated-id"
+				assert.Equal(t, tt.original.ID, "GPU-12345678-abcd-ef01-2345-6789abcdef01")
+			}
+
+			if len(copy.MIGTemplate) > 0 && len(copy.MIGTemplate[0]) > 0 {
+				originalName := tt.original.MIGTemplate[0][0].Name
+				copy.MIGTemplate[0][0].Name = "mutated-mig"
+				assert.Equal(t, tt.original.MIGTemplate[0][0].Name, originalName)
+			}
+
+			if copy.CustomInfo != nil {
+				originalVal := tt.original.CustomInfo["vendor"]
+				copy.CustomInfo["vendor"] = "mutated-vendor"
+				assert.Equal(t, tt.original.CustomInfo["vendor"], originalVal)
+			}
+
+			if copy.DevicePairScore.Scores != nil {
+				originalScore := tt.original.DevicePairScore.Scores["GPU-peer-1"]
+				copy.DevicePairScore.Scores["GPU-peer-1"] = 999
+				assert.Equal(t, tt.original.DevicePairScore.Scores["GPU-peer-1"], originalScore)
+			}
+		})
+	}
+}
+
+func TestDeepCopyDeviceInfos(t *testing.T) {
+	tests := []struct {
+		name     string
+		original []DeviceInfo
+		wantNil  bool
+	}{
+		{
+			name:     "nil slice",
+			original: nil,
+			wantNil:  true,
+		},
+		{
+			name:     "empty slice",
+			original: []DeviceInfo{},
+			wantNil:  false,
+		},
+		{
+			name: "slice with elements",
+			original: []DeviceInfo{
+				{
+					ID:      "GPU-1",
+					Devmem:  4096,
+					Devcore: 50,
+					Type:    "NVIDIA-T4",
+					CustomInfo: map[string]any{
+						"key": "val",
+					},
+				},
+				{
+					ID:      "GPU-2",
+					Devmem:  8192,
+					Devcore: 100,
+					Type:    "NVIDIA-V100",
+				},
+			},
+			wantNil: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copied := DeepCopyDeviceInfos(tt.original)
+
+			if tt.wantNil {
+				assert.Assert(t, copied == nil)
+				return
+			}
+
+			assert.DeepEqual(t, tt.original, copied)
+
+			if len(copied) > 0 {
+				// Mutating copied element must not mutate original element
+				copied[0].ID = "mutated-id"
+				assert.Equal(t, tt.original[0].ID, "GPU-1")
+
+				if copied[0].CustomInfo != nil {
+					copied[0].CustomInfo["key"] = "mutated-val"
+					assert.Equal(t, tt.original[0].CustomInfo["key"], "val")
+				}
+			}
+		})
+	}
+}
