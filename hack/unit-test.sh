@@ -47,6 +47,10 @@ cov_file="./_output/coverage/coverage_pkg.txt"
 go test $(go list ./pkg/... ./cmd/...) -short --race -count=1 -covermode=atomic -coverprofile=${cov_file}
 cat $cov_file | grep -v mode: | grep -v pkg/version | grep -v fake | grep -v main.go >>${mergeF}
 #merge them
-echo "mode: atomic" >coverage.out
-cat ${mergeF} >>./_output/coverage/coverage.out
-go tool cover -func=coverage.out
+# The mode line and the profile data have to land in the same file: go tool
+# cover rejects a profile whose first line is not the mode, and the truncating
+# redirect keeps repeated local runs from appending a second copy of the data.
+outF="./_output/coverage/coverage.out"
+echo "mode: atomic" >${outF}
+cat ${mergeF} >>${outF}
+go tool cover -func=${outF}
