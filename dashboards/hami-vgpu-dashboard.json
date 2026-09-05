@@ -273,7 +273,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
+          "expr": "hami_host_gpu_memory_used_bytes{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
@@ -319,7 +319,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_utilization_ratio and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
+          "expr": "hami_host_gpu_utilization_ratio{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
@@ -328,8 +328,67 @@
       "type": "timeseries"
     },
     {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Scheduler-allocated GPU memory and physical host memory used, grouped by physical GPU.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "/host used/" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "hami_gpu_memory_allocated_bytes{node=~\"$node\"}",
+          "legendFormat": "allocated {{node}} idx{{device_index}} ({{device_uuid}})",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "hami_host_gpu_memory_used_bytes{node=~\"$node\"}",
+          "legendFormat": "host used {{node}} idx{{device_index}} ({{device_uuid}})",
+          "refId": "B"
+        }
+      ],
+      "title": "GPU memory: allocated vs host used",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
       "id": 102,
       "panels": [],
       "title": "Scheduler / allocation",
@@ -369,7 +428,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
       "id": 20,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -431,7 +490,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "id": 21,
       "options": {
         "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -477,7 +536,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
       "id": 22,
       "options": {
         "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -521,7 +580,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
       "id": 23,
       "options": {
         "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -541,7 +600,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
       "id": 103,
       "panels": [],
       "title": "vGPU / container workloads",
@@ -581,7 +640,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
       "id": 30,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -634,7 +693,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
       "id": 31,
       "options": {
         "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -689,7 +748,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
       "id": 32,
       "options": {
         "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -728,7 +787,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
       "id": 33,
       "options": {
         "cellHeight": "sm",

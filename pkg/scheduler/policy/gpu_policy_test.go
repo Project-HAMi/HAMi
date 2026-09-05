@@ -740,3 +740,39 @@ func TestComputeScoreWithResourceWeights(t *testing.T) {
 		assert.Equal(t, devices.DeviceLists[len(devices.DeviceLists)-1].Device.ID, "gpu-a")
 	})
 }
+
+// TestLessTrimsThePolicy covers a padded policy value. IsValidGPUSchedulerPolicy
+// accepts one, and Policy is also assigned straight from --gpu-scheduler-policy,
+// so Less has to reach the same branch it would for the trimmed form. Comparing
+// the untrimmed string matched no branch and sorted as spread, inverting the
+// order a binpack annotation asked for.
+func TestLessTrimsThePolicy(t *testing.T) {
+	newList := func(policy string) DeviceUsageList {
+		return DeviceUsageList{
+			Policy: policy,
+			DeviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{ID: "low", Numa: 0}, Score: 1},
+				{Device: &device.DeviceUsage{ID: "high", Numa: 0}, Score: 9},
+			},
+		}
+	}
+
+	for _, policy := range []string{"binpack", " binpack ", "\tbinpack\n"} {
+		l := newList(policy)
+		// binpack ranks the lower score first; spread does the opposite.
+		assert.Equal(t, l.Less(0, 1), true, "policy %q", policy)
+	}
+
+	for _, policy := range []string{"spread", " spread "} {
+		l := newList(policy)
+		assert.Equal(t, l.Less(0, 1), false, "policy %q", policy)
+	}
+
+	// mutex is a whole-string branch too: it orders busy devices first.
+	for _, policy := range []string{"mutex", " mutex "} {
+		l := newList(policy)
+		l.DeviceLists[0].Device.Used = 0
+		l.DeviceLists[1].Device.Used = 3
+		assert.Equal(t, l.Less(0, 1), false, "policy %q", policy)
+	}
+}

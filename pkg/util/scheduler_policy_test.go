@@ -107,3 +107,33 @@ func TestGetGPUSchedulerPolicyByPodUnrecognizedValue(t *testing.T) {
 		})
 	}
 }
+
+// The validator trims each comma token, so padded values are accepted; the
+// returned policy must be canonical because DeviceUsageList.Less compares the
+// whole string and would silently fall back to the spread branch otherwise.
+func TestGetGPUSchedulerPolicyByPodNormalizesAcceptedValues(t *testing.T) {
+	podWith := func(value string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: "p", Namespace: "default",
+			Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: value},
+		}}
+	}
+
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"binpack", "binpack"},
+		{" binpack ", "binpack"},
+		{"binpakc", "spread"},
+		{"", "spread"},
+	}
+	for _, tt := range tests {
+		got := GetGPUSchedulerPolicyByPod("spread", podWith(tt.value))
+		assert.Equal(t, got, tt.want, "value %q", tt.value)
+	}
+
+	// --gpu-scheduler-policy is unvalidated, so a padded cluster default must
+	// be normalized on the way out as well.
+	assert.Equal(t, GetGPUSchedulerPolicyByPod(" binpack ", nil), "binpack")
+}
