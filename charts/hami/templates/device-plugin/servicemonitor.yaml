@@ -19,4 +19,5 @@ spec:
   endpoints:
   - port: monitorport
     path: "/metrics"
+    honorLabels: true
 {{- end }}
