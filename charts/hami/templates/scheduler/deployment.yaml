@@ -142,6 +142,10 @@ spec:
             {{- if .Values.scheduler.kubeTimeout }}
             - --kube-timeout={{ .Values.scheduler.kubeTimeout }}
             {{- end }}
+            {{- /* Compared as a string so an explicit 0, which disables retry, is passed through rather than treated as unset. */}}
+            {{- if ne (toString .Values.scheduler.nodeLockRetryTimeout) "" }}
+            - --node-lock-retry-timeout={{ .Values.scheduler.nodeLockRetryTimeout }}
+            {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}
