@@ -1048,3 +1048,61 @@ func TestListAndWatchSendError(t *testing.T) {
 		require.Len(t, server.sent, 2)
 	})
 }
+
+// TestAllocateRejectsEmptyDeviceIDs guards against a regression of the
+// index-out-of-range panic in Allocate when kubelet sends a container
+// request with an empty DevicesIds list (upstream k8s-device-plugin has
+// the same guard).
+func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: ptr(v1.DeviceIDStrategyUUID),
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: func() v1.DeviceListStrategies {
+			s, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+			return s
+		}(),
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{},
+		}},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, response)
+	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
+}
