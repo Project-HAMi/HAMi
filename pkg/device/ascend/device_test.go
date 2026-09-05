@@ -821,6 +821,169 @@ func Test_MutateAdmission_EmptyResourceMemoryName(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_OverwriteEnvDoesNotOverrideAscendContainer(t *testing.T) {
+	// Regression: a container that requests an Ascend resource (here Ascend910B4) must
+	// NOT get an empty ASCEND_VISIBLE_DEVICES injected by a sibling chip's
+	// MutateAdmission. Previously each chip injected an empty value per-chip when
+	// !ok, and the empty pod-spec env overrode the real value injected later by the
+	// device plugin, so ascend-docker-runtime saw an empty value and skipped device
+	// mounting.
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	dev := Devices{
+		config: VNPUConfig{
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  int64(32768),
+			MemoryCapacity:     int64(32768),
+			OverwriteEnv:       true,
+			Templates: []Template{
+				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
+			},
+		},
+		allAscendResourceNames: allResNames,
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910B4":        resource.MustParse("1"),
+				"huawei.com/Ascend910B4-memory": resource.MustParse("8192"),
+			},
+		},
+	}
+	got, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Equal(t, got, false) // 910A device: container did not request 910A
+	for _, e := range ctr.Env {
+		if e.Name == "ASCEND_VISIBLE_DEVICES" {
+			t.Fatalf("expected no ASCEND_VISIBLE_DEVICES env injected for ascend container, got %q", e.Value)
+		}
+	}
+}
+
+func Test_MutateAdmission_OverwriteEnvInjectsEmptyForNonAscendContainer(t *testing.T) {
+	// A container that requests NO Ascend resource should get exactly one empty
+	// ASCEND_VISIBLE_DEVICES injected (to clear image-baked values), even when
+	// multiple chips' MutateAdmission run in the webhook device loop.
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	mkDev := func(resourceName string) *Devices {
+		return &Devices{
+			config: VNPUConfig{
+				ResourceName:       resourceName,
+				ResourceMemoryName: resourceName + "-memory",
+				MemoryAllocatable:  int64(32768),
+				MemoryCapacity:     int64(32768),
+				OverwriteEnv:       true,
+				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+			},
+			allAscendResourceNames: allResNames,
+		}
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		Env: []corev1.EnvVar{
+			{Name: "ASCEND_VISIBLE_DEVICES", Value: "2"}, // image-baked leak
+		},
+	}
+	// Simulate the webhook device loop: every chip's MutateAdmission runs.
+	for _, name := range allResNames {
+		_, err := mkDev(string(name)).MutateAdmission(&ctr, &corev1.Pod{})
+		assert.NilError(t, err)
+	}
+	emptyCount := 0
+	for _, e := range ctr.Env {
+		if e.Name == "ASCEND_VISIBLE_DEVICES" && e.Value == "" {
+			emptyCount++
+		}
+	}
+	assert.Equal(t, emptyCount, 1, "expected exactly one empty ASCEND_VISIBLE_DEVICES")
+}
+
+func Test_MutateAdmission_OverwriteEnvLastWinsInjectsAfterRealValue(t *testing.T) {
+	// Regression: kubelet dedupes same-name env vars last-wins, so an empty
+	// ASCEND_VISIBLE_DEVICES earlier in the list does NOT hide a real value that
+	// comes after it (["", "2"] resolves to "2"). The guard must check the LAST
+	// same-name entry and still inject, so the container ends up seeing "".
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	dev := &Devices{
+		config: VNPUConfig{
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  int64(32768),
+			MemoryCapacity:     int64(32768),
+			OverwriteEnv:       true,
+			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+		},
+		allAscendResourceNames: allResNames,
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		Env: []corev1.EnvVar{
+			{Name: "ASCEND_VISIBLE_DEVICES", Value: ""},  // e.g. injected by another webhook
+			{Name: "ASCEND_VISIBLE_DEVICES", Value: "2"}, // real value after the empty one
+		},
+	}
+	got, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Equal(t, got, false)
+	last := ctr.Env[len(ctr.Env)-1]
+	assert.Equal(t, last.Name, "ASCEND_VISIBLE_DEVICES")
+	assert.Equal(t, last.Value, "", "expected an empty value injected after the real one")
+	assert.Assert(t, last.ValueFrom == nil, "injected entry must be a literal")
+}
+
+func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
+	// An ASCEND_VISIBLE_DEVICES populated via ValueFrom must NOT be treated as an
+	// existing empty literal value: hasEnvWithValue skips ValueFrom entries so the
+	// safety injection still runs for a non-Ascend container.
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	dev := &Devices{
+		config: VNPUConfig{
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  int64(32768),
+			MemoryCapacity:     int64(32768),
+			OverwriteEnv:       true,
+			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+		},
+		allAscendResourceNames: allResNames,
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		Env: []corev1.EnvVar{
+			{Name: "ASCEND_VISIBLE_DEVICES", ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "cm"},
+					Key:                  "devices",
+				},
+			}},
+		},
+	}
+	got, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Equal(t, got, false)
+	// The ValueFrom entry must not block injection: an empty literal entry should be appended.
+	foundEmpty := false
+	for _, e := range ctr.Env {
+		if e.Name == "ASCEND_VISIBLE_DEVICES" && e.Value == "" && e.ValueFrom == nil {
+			foundEmpty = true
+			break
+		}
+	}
+	assert.Assert(t, foundEmpty, "expected an empty literal ASCEND_VISIBLE_DEVICES to be injected despite the ValueFrom entry")
+}
+
 func Test_MutateAdmission910C(t *testing.T) {
 	tests := []struct {
 		name   string
