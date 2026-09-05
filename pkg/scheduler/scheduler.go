@@ -74,8 +74,13 @@ type Scheduler struct {
 	leaseLister coordinationv1.LeaseLister
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
-	eventRecorder  record.EventRecorder
-	started        uint32 // 0 = false, 1 = true
+	// printedLog records the nodes whose devices have already been logged at
+	// info level, so a re-registration logs at V(5) instead. It is pruned when
+	// a node is deleted, both to keep it bounded under node churn and so a node
+	// that returns under the same name is logged as newly added again.
+	printedLog    map[string]bool
+	eventRecorder record.EventRecorder
+	started       uint32 // 0 = false, 1 = true
 
 	lock   sync.RWMutex
 	synced atomic.Bool
@@ -93,6 +98,7 @@ func NewScheduler() *Scheduler {
 	s := &Scheduler{
 		stopCh:         make(chan struct{}),
 		overviewstatus: make(map[string]*NodeUsage),
+		printedLog:     make(map[string]bool),
 		nodeNotify:     make(chan struct{}, 1),
 		leaderNotify:   make(chan struct{}, 1),
 		started:        0,
@@ -313,8 +319,9 @@ func (s *Scheduler) onDelNode(obj any) {
 	}
 }
 
-// cleanupNodeUsage removes the node from overviewstatus maps
-// to ensure metrics no longer report data for deleted nodes.
+// cleanupNodeUsage removes the node from the overviewstatus and printedLog maps
+// to ensure metrics no longer report data for deleted nodes, and that a node
+// recreated under the same name is logged as newly added rather than updated.
 func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -322,6 +329,7 @@ func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 		delete(s.overviewstatus, nodeID)
 		klog.V(4).InfoS("Removed node from overviewstatus", "node", nodeID)
 	}
+	delete(s.printedLog, nodeID)
 }
 
 func (s *Scheduler) onAddQuota(obj any) {
@@ -442,7 +450,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
-	printedLog := map[string]bool{}
 	for {
 		select {
 		case <-s.nodeNotify:
@@ -459,11 +466,11 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
 			continue
 		}
-		s.register(labelSelector, printedLog)
+		s.register(labelSelector)
 	}
 }
 
-func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[string]bool) {
+func (s *Scheduler) register(labelSelector labels.Selector) {
 	// Lock here to avoid setting s.synced to false, when we lost leadership, while doing register.
 	// 1. lost leadership before register: synced will set to false in callbacks, and register will be skipped because IsLeader() returns false
 	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
@@ -558,11 +565,11 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			s.addNode(val.Name, nodeInfo)
 			// Log the locally built nodeInfo; reading it back from s.nodes raced with onDelNode->rmNode.
 			if len(nodeInfo.Devices) > 0 {
-				if printedLog[val.Name] {
+				if s.printedLog[val.Name] {
 					klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo)
 				} else {
 					klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo)
-					printedLog[val.Name] = true
+					s.printedLog[val.Name] = true
 				}
 			}
 		}
