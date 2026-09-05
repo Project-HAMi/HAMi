@@ -51,8 +51,39 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
-      {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+      {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
+        {{- if .Values.selinux.enabled }}
+        - name: selinux-relabel
+          image: {{ include "hami.devicePlugin.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+              chmod 0777 /host/hami/containers
+              chmod 1777 /host/hami/tmp/vgpulock
+              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
+                /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+          env:
+            - name: SELINUX_TYPE
+              value: {{ .Values.selinux.type | quote }}
+            - name: SELINUX_LEVEL
+              value: {{ .Values.selinux.level | quote }}
+          volumeMounts:
+            - name: lib
+              mountPath: /host/hami/vgpu
+            - name: ctrs
+              mountPath: /host/hami/containers
+            - name: hosttmp
+              mountPath: /host/hami/tmp
+        {{- end }}
+        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: toolkit-validation
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
@@ -74,6 +105,7 @@ spec:
               mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
               mountPropagation: HostToContainer
               readOnly: true
+        {{- end }}
       {{- end }}
       containers:
         - name: device-plugin
@@ -110,7 +142,7 @@ spec:
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             - name: NVIDIA_DRIVER_ROOT
               value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
             {{- end }}
@@ -225,6 +257,12 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            # fake-gpu-operator validation requires the monitor to receive the
+            # same driver-root configuration as the device plugin.
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- end }}
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -247,6 +285,12 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
       volumes:
         {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
         - name: numa-refit-ca
@@ -256,6 +300,9 @@ spec:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}
+            {{- if .Values.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         - name: hosttmp
           hostPath:
             path: /tmp
@@ -271,6 +318,9 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
+            {{- if .Values.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         {{- if or .Values.devicePlugin.gpuOperatorToolkitReady.enabled (eq .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: nvidia-validations
           hostPath:

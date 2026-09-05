@@ -17,6 +17,12 @@ This document provides detailed descriptions of all configurable values paramete
 | `nameOverride` | Name override | `""` |
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
+| `platform.openshift` | Enable OpenShift-specific resources and handling | `false` |
+| `openshift.securityContextConstraints.create` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. | `true` |
+| `openshift.securityContextConstraints.name` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. | `"hami-device-plugin"` |
+| `selinux.enabled` | Relabel shared vGPU host directories on SELinux-enabled Kubernetes nodes | `false` |
+| `selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
+| `selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |
 
 ## Resource Name Configuration
 
@@ -184,6 +190,9 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
+| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
+| `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
+| `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
 
 When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
 `/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a

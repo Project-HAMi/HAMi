@@ -21,6 +21,23 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
+    create: true
+
+    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
+    name: "hami-device-plugin"
+
+# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
+selinux:
+  enabled: false
+  type: container_file_t
+  level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -275,6 +292,7 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
+    # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
     runAsUser: 2000
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
@@ -282,7 +300,7 @@ scheduler:
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
-    httpTargetPort: 443
+    httpTargetPort: 9443
     labels: {}
     annotations: {}
 
@@ -459,7 +477,11 @@ devicePlugin:
       add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
-  tolerations: []
+  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
