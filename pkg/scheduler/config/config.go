@@ -489,7 +489,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var yamlData Config
-	if err := yaml.Unmarshal(data, &yamlData); err != nil {
+	if err := yaml.UnmarshalStrict(data, &yamlData); err != nil {
 		return nil, err
 	}
 	klog.Info("Successfully read and parsed config file")

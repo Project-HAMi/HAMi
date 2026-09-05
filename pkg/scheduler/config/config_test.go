@@ -18,6 +18,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -227,6 +229,57 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.VNPUs, expectedVNPUs)
 	expectedIluvatars := createIluvatarConfigs()
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
+}
+
+func TestLoadConfigRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name:   "valid configuration",
+			config: "nvidia:\n  resourceCountName: nvidia.com/gpu\n",
+		},
+		{
+			name:    "unknown top-level field",
+			config:  "unknown: true\n",
+			wantErr: "field unknown not found",
+		},
+		{
+			name: "unknown nested field",
+			config: "nvidia:\n" +
+				"  resourceCountNmae: nvidia.com/gpu\n",
+			wantErr: "field resourceCountNmae not found",
+		},
+		{
+			name: "duplicate field",
+			config: "nvidia:\n" +
+				"  resourceCountName: nvidia.com/gpu\n" +
+				"  resourceCountName: nvidia.com/gpu2\n",
+			wantErr: "resourceCountName already set",
+		},
+		{
+			name: "invalid value type",
+			config: "nvidia:\n" +
+				"  defaultGPUNum: not-a-number\n",
+			wantErr: "cannot unmarshal",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "device-config.yaml")
+			assert.NilError(t, os.WriteFile(path, []byte(test.config), 0o600))
+
+			_, err := LoadConfig(path)
+			if test.wantErr == "" {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, test.wantErr)
+		})
+	}
 }
 
 func createNvidiaConfig() nvidia.NvidiaConfig {
