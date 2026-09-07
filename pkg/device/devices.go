@@ -451,6 +451,12 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 func EncodeContainerDevices(cd ContainerDevices) string {
 	var builder strings.Builder
 	for _, val := range cd {
+		// Slots is appended as an optional 5th field only when it exceeds 1, so
+		// single-slot allocations keep the historical 4-field encoding.
+		if val.Slots > 1 {
+			fmt.Fprintf(&builder, "%s,%s,%d,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, val.Slots, OneContainerMultiDeviceSplitSymbol)
+			continue
+		}
 		fmt.Fprintf(&builder, "%s,%s,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, OneContainerMultiDeviceSplitSymbol)
 	}
 	tmp := builder.String()
@@ -536,6 +542,15 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			Type:      tmpstr[1],
 			Usedmem:   int32(devmem),
 			Usedcores: int32(devcores),
+		}
+		// The 5th field is optional. An unusable value is ignored rather than
+		// rejected: dropping the whole annotation undercounts far more than one slot.
+		if len(tmpstr) >= 5 {
+			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
+				tmpdev.Slots = int32(devslots)
+			} else {
+				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
+			}
 		}
 		contdev = append(contdev, tmpdev)
 	}

@@ -17,7 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
+
+	"gotest.tools/v3/assert"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
@@ -40,6 +44,10 @@ type stubInfo struct {
 	bufSize    []uint64
 	smUtil     []uint64
 	lastKernel int64
+	// recentKernel and utilSwitch back the feedback fields Observe reads and
+	// writes, so a test can drive a full Observe pass.
+	recentKernel int32
+	utilSwitch   int32
 }
 
 func slot(v []uint64, i int) uint64 {
@@ -71,13 +79,13 @@ func (s *stubInfo) DeviceMemoryLimit(i int) uint64 { return slot(s.limit, i) }
 func (s *stubInfo) SetDeviceMemoryLimit(uint64)    {}
 func (s *stubInfo) LastKernelTime() int64          { return s.lastKernel }
 func (s *stubInfo) GetPriority() int               { return s.priority }
-func (s *stubInfo) GetRecentKernel() int32         { return 1 }
-func (s *stubInfo) SetRecentKernel(int32)          {}
-func (s *stubInfo) GetUtilizationSwitch() int32    { return 0 }
-func (s *stubInfo) SetUtilizationSwitch(int32)     {}
+func (s *stubInfo) GetRecentKernel() int32         { return s.recentKernel }
+func (s *stubInfo) SetRecentKernel(v int32)        { s.recentKernel = v }
+func (s *stubInfo) GetUtilizationSwitch() int32    { return s.utilSwitch }
+func (s *stubInfo) SetUtilizationSwitch(v int32)   { s.utilSwitch = v }
 
 func TestCheckFunctionsHighPriority(t *testing.T) {
-	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 1}}
+	sw := map[string]UtilizationPerDevice{"gpu-0": {0: 0, 1: 1}}
 	c := &nvidia.ContainerUsage{Info: &stubInfo{priority: 3, uuids: []string{"gpu-0"}}}
 	if !CheckBlocking(sw, 3, c) {
 		t.Error("CheckBlocking: expected true")
@@ -85,7 +93,7 @@ func TestCheckFunctionsHighPriority(t *testing.T) {
 	if !CheckPriority(sw, 3, c) {
 		t.Error("CheckPriority: expected true")
 	}
-	sw2 := map[string]UtilizationPerDevice{"gpu-0": {0, 0}}
+	sw2 := map[string]UtilizationPerDevice{"gpu-0": {0: 0, 1: 0}}
 	if CheckBlocking(sw2, 2, c) {
 		t.Error("CheckBlocking: expected false")
 	}
@@ -109,35 +117,35 @@ func TestCheckBlocking_MultiDevice(t *testing.T) {
 			name:     "two devices, contention on the second",
 			priority: 1,
 			uuids:    []string{"gpu-0", "gpu-1"},
-			sw:       map[string]UtilizationPerDevice{"gpu-0": {0, 0}, "gpu-1": {1, 0}},
+			sw:       map[string]UtilizationPerDevice{"gpu-0": {0: 0, 1: 0}, "gpu-1": {0: 1, 1: 0}},
 			want:     true,
 		},
 		{
 			name:     "three devices, all clear",
 			priority: 1,
 			uuids:    []string{"gpu-0", "gpu-1", "gpu-2"},
-			sw:       map[string]UtilizationPerDevice{"gpu-0": {0, 0}, "gpu-1": {0, 0}, "gpu-2": {0, 0}},
+			sw:       map[string]UtilizationPerDevice{"gpu-0": {0: 0, 1: 0}, "gpu-1": {0: 0, 1: 0}, "gpu-2": {0: 0, 1: 0}},
 			want:     false,
 		},
 		{
 			name:     "four devices, contention only on the last",
 			priority: 1,
 			uuids:    []string{"gpu-0", "gpu-1", "gpu-2", "gpu-3"},
-			sw:       map[string]UtilizationPerDevice{"gpu-0": {0, 0}, "gpu-1": {0, 0}, "gpu-2": {0, 0}, "gpu-3": {1, 0}},
+			sw:       map[string]UtilizationPerDevice{"gpu-0": {0: 0, 1: 0}, "gpu-1": {0: 0, 1: 0}, "gpu-2": {0: 0, 1: 0}, "gpu-3": {0: 1, 1: 0}},
 			want:     true,
 		},
 		{
 			name:     "some device UUIDs missing from switch map, present one contended",
 			priority: 1,
 			uuids:    []string{"gpu-0", "gpu-1", "gpu-2"},
-			sw:       map[string]UtilizationPerDevice{"gpu-1": {1, 0}},
+			sw:       map[string]UtilizationPerDevice{"gpu-1": {0: 1, 1: 0}},
 			want:     true,
 		},
 		{
 			name:     "none of the container UUIDs are in the switch map",
 			priority: 1,
 			uuids:    []string{"gpu-0", "gpu-1"},
-			sw:       map[string]UtilizationPerDevice{"gpu-9": {1, 0}},
+			sw:       map[string]UtilizationPerDevice{"gpu-9": {0: 1, 1: 0}},
 			want:     false,
 		},
 		{
@@ -161,4 +169,104 @@ func TestCheckBlocking_MultiDevice(t *testing.T) {
 			}
 		})
 	}
+}
+
+// observeWith runs a full Observe pass over the given containers and reports
+// the blocking and utilization decisions it recorded on each of them.
+func observeWith(t *testing.T, priorities []int) (blocked, throttled []bool) {
+	t.Helper()
+
+	lister := &nvidia.ContainerLister{}
+	containers := map[string]*nvidia.ContainerUsage{}
+	infos := make([]*stubInfo, len(priorities))
+	for i, p := range priorities {
+		// recentKernel 2 survives Observe's decrement, which is what gates the
+		// counting pass.
+		infos[i] = &stubInfo{priority: p, uuids: []string{"gpu-0"}, recentKernel: 2}
+		containers[fmt.Sprintf("pod-%d_ctr", i)] = &nvidia.ContainerUsage{Info: infos[i]}
+	}
+	lister.SetContainersForTest(containers)
+
+	Observe(lister)
+
+	for _, info := range infos {
+		blocked = append(blocked, info.recentKernel < 0)
+		throttled = append(throttled, info.utilSwitch == 1)
+	}
+	return blocked, throttled
+}
+
+// TestObserveKeepsPriorityClassesDistinct pins the contention semantics across
+// more than the two documented priority classes. A container is blocked when a
+// strictly higher priority one shares the device, and throttled when another
+// container shares its own class. Counting by a keyed priority rather than a
+// slice index has to leave both of those unchanged.
+func TestObserveKeepsPriorityClassesDistinct(t *testing.T) {
+	tests := []struct {
+		name          string
+		priorities    []int
+		wantBlocked   []bool
+		wantThrottled []bool
+	}{
+		{
+			name:          "two documented classes",
+			priorities:    []int{0, 1},
+			wantBlocked:   []bool{false, true},
+			wantThrottled: []bool{false, true},
+		},
+		{
+			name:          "a third class stays distinct from the second",
+			priorities:    []int{1, 2},
+			wantBlocked:   []bool{false, true},
+			wantThrottled: []bool{false, true},
+		},
+		{
+			name:          "three classes",
+			priorities:    []int{0, 1, 2},
+			wantBlocked:   []bool{false, true, true},
+			wantThrottled: []bool{false, true, true},
+		},
+		{
+			name:          "same class contends with itself",
+			priorities:    []int{1, 1},
+			wantBlocked:   []bool{false, false},
+			wantThrottled: []bool{true, true},
+		},
+		{
+			name:          "a lone container contends with nobody",
+			priorities:    []int{5},
+			wantBlocked:   []bool{false},
+			wantThrottled: []bool{false},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			blocked, throttled := observeWith(t, test.priorities)
+			assert.DeepEqual(t, blocked, test.wantBlocked)
+			assert.DeepEqual(t, throttled, test.wantThrottled)
+		})
+	}
+}
+
+// TestObserveDoesNotAllocatePerPriorityValue is the regression guard for the
+// original defect. The priority is read from a region the container mounts
+// read-write, so a large value must not size an allocation. Counting it in a
+// slice indexed by priority allocated one entry per unit, which reached
+// gigabytes for a single container.
+func TestObserveDoesNotAllocatePerPriorityValue(t *testing.T) {
+	const hugePriority = 1 << 26 // 512 MiB if one int is allocated per unit
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	blocked, throttled := observeWith(t, []int{hugePriority})
+	runtime.ReadMemStats(&after)
+
+	grewMiB := float64(after.TotalAlloc-before.TotalAlloc) / (1 << 20)
+	if grewMiB > 8 {
+		t.Errorf("Observe allocated %.1f MiB for one container at priority %d", grewMiB, hugePriority)
+	}
+	// The container still has to be accounted for, not skipped.
+	assert.DeepEqual(t, blocked, []bool{false})
+	assert.DeepEqual(t, throttled, []bool{false})
 }

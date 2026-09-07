@@ -247,6 +247,20 @@ func TestCollapseInitContainerUsage_MultiAppSameGPUSlots(t *testing.T) {
 	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(3))
 }
 
+// A multi-slot allocation such as an Enflame DRS profile already carries its own
+// slot count, so two app containers holding three slices each collapse to six.
+func TestCollapseInitContainerUsage_MultiSlotAppContainers(t *testing.T) {
+	pod := makePod("test", 0, 2)
+	raw := PodDevices{
+		"Enflame": PodSingleDevice{
+			{ContainerDevice{UUID: "gcu0", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+			{ContainerDevice{UUID: "gcu0", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+		},
+	}
+	result := CollapseInitContainerUsage(pod, raw)
+	assert.Equal(t, result["Enflame"][0][0].Slots, int32(6))
+}
+
 func TestSteadyStateDeviceUsage_NilInput(t *testing.T) {
 	result := SteadyStateDeviceUsage(nil, nil)
 	assert.Assert(t, result == nil)

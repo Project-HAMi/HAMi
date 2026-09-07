@@ -111,6 +111,46 @@ func TestDecodeContainerDevices(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:  "optional slots field is decoded",
+			input: "GPU-1,NVIDIA,1000,10,3:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+					Slots:     3,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:  "fields after slots are ignored",
+			input: "GPU-1,NVIDIA,1000,10,3,extra:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+					Slots:     3,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid non-numeric slots is ignored",
+			input:       "GPU-1,NVIDIA,1000,10,invalid:",
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			expectError: false,
+		},
+		{
+			name:        "negative slots value is ignored",
+			input:       "GPU-1,NVIDIA,1000,10,-1:",
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			expectError: false,
+		},
+		{
 			name:  "existing valid fields preserved with extra optional fields",
 			input: "GPU-1,NVIDIA,1000,10,extra1,extra2:",
 			want: ContainerDevices{
@@ -1278,6 +1318,59 @@ func TestGetDevicesUUIDList(t *testing.T) {
 		})
 	}
 }
+
+// TestEncodeDecodeContainerDevicesSlots covers the optional slots field: it is
+// only written when it exceeds 1, so single-slot entries keep the 4-field form.
+func TestEncodeDecodeContainerDevicesSlots(t *testing.T) {
+	tests := []struct {
+		name        string
+		cd          ContainerDevices
+		wantEncoded string
+		wantDecoded ContainerDevices
+	}{
+		{
+			name:        "multi slot entry encodes the slots field",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+			wantEncoded: "GPU-1,Enflame,20480,50,3:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+		},
+		{
+			name:        "single slot entry keeps the legacy four fields",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10, Slots: 1}},
+			wantEncoded: "GPU-1,NVIDIA,1000,10:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+		},
+		{
+			name:        "unset slots keeps the legacy four fields",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			wantEncoded: "GPU-1,NVIDIA,1000,10:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+		},
+		{
+			name: "mixed entries in one container",
+			cd: ContainerDevices{
+				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
+				{UUID: "GPU-2", Type: "Enflame", Usedmem: 6144, Usedcores: 17},
+			},
+			wantEncoded: "GPU-1,Enflame,20480,50,3:GPU-2,Enflame,6144,17:",
+			wantDecoded: ContainerDevices{
+				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
+				{UUID: "GPU-2", Type: "Enflame", Usedmem: 6144, Usedcores: 17},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeContainerDevices(tt.cd)
+			assert.Equal(t, encoded, tt.wantEncoded)
+			decoded, err := DecodeContainerDevices(encoded)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.wantDecoded, decoded)
+		})
+	}
+}
+
 func TestEncodeContainerDeviceType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1964,15 +2057,19 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 }
 
 func FuzzEncodeDecodeContainerDevices(f *testing.F) {
-	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10))
-	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0))
-	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647))
-	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores int32) {
+	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10), int32(0))
+	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0), int32(1))
+	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647), int32(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int32) {
 		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
 			t.Skip()
 		}
-		if uuid == "" || deviceType == "" || usedmem < 0 || usedcores < 0 {
+		if uuid == "" || deviceType == "" || usedmem < 0 || usedcores < 0 || slots < 0 {
 			t.Skip()
+		}
+		// Slots below 2 is not encoded, so it always decodes back as unset.
+		if slots < 2 {
+			slots = 0
 		}
 
 		want := ContainerDevices{{
@@ -1980,6 +2077,7 @@ func FuzzEncodeDecodeContainerDevices(f *testing.F) {
 			Type:      deviceType,
 			Usedmem:   usedmem,
 			Usedcores: usedcores,
+			Slots:     slots,
 		}}
 		encoded := EncodeContainerDevices(want)
 		got, err := DecodeContainerDevices(encoded)
