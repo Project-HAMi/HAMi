@@ -159,7 +159,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hami.scheduler.extender.imagePullSecrets" -}}
-{{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.extender.image) "global" .Values.global) }}
+{{- $images := list .Values.scheduler.extender.image -}}
+{{- if .Values.scheduler.kubeScheduler.enabled -}}
+{{- $images = append $images .Values.scheduler.kubeScheduler.image -}}
+{{- end -}}
+{{ include "common.images.pullSecrets" (dict "images" $images "global" .Values.global) }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.imagePullSecrets" -}}
