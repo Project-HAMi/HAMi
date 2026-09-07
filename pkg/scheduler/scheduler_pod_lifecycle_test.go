@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -115,4 +116,96 @@ func Test_onUpdatePod_TerminatingPodMissingFromCache(t *testing.T) {
 	assert.Equal(t, pi.Devices[nvidia.NvidiaGPUDevice][0][0].UUID, "GPU0")
 	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"), int64(20000))
 	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpucores"), int64(100))
+}
+
+// An informer delete notification is only an identity signal. The final Pod
+// object may no longer carry the scheduler annotations that were present when
+// its allocation was cached, so cleanup must use the UID-keyed PodManager
+// entry instead of depending on the delete object's annotations.
+func Test_onDelPod_CleansCachedAllocationWithoutAnnotations(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	pod := newTerminatingAllocatedPod(
+		"annotationless-delete-uid",
+		"annotationless-delete",
+		"annotationless-delete-ns",
+	)
+	t.Cleanup(func() { s.onDelPod(pod) })
+
+	s.onAddPod(pod)
+	deletedPod := pod.DeepCopy()
+	deletedPod.Annotations = nil
+
+	s.onDelPod(deletedPod)
+
+	_, cached := s.podManager.GetPod(pod)
+	assert.Equal(
+		t,
+		cached,
+		false,
+		"delete must evict the allocation by UID even without annotations",
+	)
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"), int64(0))
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpucores"), int64(0))
+}
+
+func Test_onDelPod_CleansAnnotationlessTombstoneAndIsIdempotent(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	pod := newTerminatingAllocatedPod(
+		"annotationless-tombstone-uid",
+		"annotationless-tombstone",
+		"annotationless-tombstone-ns",
+	)
+	t.Cleanup(func() { s.onDelPod(pod) })
+
+	s.onAddPod(pod)
+	deletedPod := pod.DeepCopy()
+	deletedPod.Annotations = nil
+	tombstone := cache.DeletedFinalStateUnknown{
+		Key: deletedPod.Namespace + "/" + deletedPod.Name,
+		Obj: deletedPod,
+	}
+
+	s.onDelPod(tombstone)
+	s.onDelPod(tombstone)
+
+	_, cached := s.podManager.GetPod(pod)
+	assert.Equal(t, cached, false)
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"), int64(0))
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpucores"), int64(0))
+}
+
+func Test_onDelPod_AnnotationlessOldUIDDoesNotDeleteReplacement(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	oldPod := newTerminatingAllocatedPod(
+		"old-uid",
+		"replaced-pod",
+		"replacement-delete-ns",
+	)
+	newPod := newTerminatingAllocatedPod("new-uid", oldPod.Name, oldPod.Namespace)
+	t.Cleanup(func() {
+		s.onDelPod(oldPod)
+		s.onDelPod(newPod)
+	})
+
+	s.onAddPod(oldPod)
+	s.onAddPod(newPod)
+	deletedOldPod := oldPod.DeepCopy()
+	deletedOldPod.Annotations = nil
+
+	s.onDelPod(deletedOldPod)
+
+	_, oldCached := s.podManager.GetPod(oldPod)
+	_, newCached := s.podManager.GetPod(newPod)
+	assert.Equal(t, oldCached, false)
+	assert.Equal(
+		t,
+		newCached,
+		true,
+		"a stale delete must not evict the same-name replacement UID",
+	)
+	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpumem"), int64(20000))
+	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpucores"), int64(100))
 }

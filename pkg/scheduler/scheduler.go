@@ -266,10 +266,8 @@ func (s *Scheduler) onDelPod(obj any) {
 		return
 	}
 
-	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
+	// Delete notifications can contain incomplete Pod objects. The cached
+	// allocation, keyed by the immutable UID, is the cleanup source of truth.
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
