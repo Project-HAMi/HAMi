@@ -460,6 +460,39 @@ func hamiCoreFitBudget(advertisedTotalcore int32) int32 {
 	return hamiCorePercentBase
 }
 
+// hamiCoreExclusiveOccupant reports whether a single Pod already holds the
+// whole percentage base on dev.
+//
+// dev.Used cannot answer that. CollapseInitContainerUsage takes the peak core
+// usage and the peak slot count independently, so a Pod whose init container
+// reserves the whole card and whose app containers then run alongside is
+// recorded as Usedcores at the base with two slots. Reading dev.Used == 1 would
+// miss the reservation and let an oversold budget admit a second tenant onto a
+// card that is still exclusively held.
+//
+// Per-Pod entries are collapsed, so a Pod spreading the base across several of
+// its own containers counts as an occupant too. Such a card is full at the base
+// budget without oversell anyway, so this only declines to oversell it. Two
+// Pods holding half the card each stay below the base individually and keep
+// sharing an oversold card.
+func hamiCoreExclusiveOccupant(dev *device.DeviceUsage) bool {
+	for _, podInfo := range dev.PodInfos {
+		if podInfo == nil {
+			continue
+		}
+		for _, podSingle := range podInfo.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, ctrDev := range ctrDevs {
+					if ctrDev.UUID == dev.ID && ctrDev.Usedcores >= hamiCorePercentBase {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -595,13 +628,16 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
 		}
-		// A card held by a single full-core occupant rejects every later request.
-		// Oversell lifts the budget above that occupant's share, so the check above
-		// no longer recognizes the card as full. Running after it keeps the
-		// non-oversold rejection reason as CardComputeUnitsExhausted. The requesting
-		// pod's own mode is irrelevant: only hami-core pods on non-hami-core nodes
-		// are filtered out, so a legacy vNPU pod still reaches an oversold card.
-		if dev.Used == 1 && dev.Usedcores >= hamiCorePercentBase {
+		// A card whose full-core occupancy belongs to one pod rejects every later
+		// request. Oversell lifts the budget above that occupant's share, so the
+		// check above no longer recognizes the card as full. Running after it keeps
+		// the non-oversold rejection reason as CardComputeUnitsExhausted. The
+		// requesting pod's own mode is irrelevant: only hami-core pods on
+		// non-hami-core nodes are filtered out, so a legacy vNPU pod still reaches
+		// an oversold card. dev.Used == 1 covers usage rebuilt without pod detail;
+		// hamiCoreExclusiveOccupant covers the multi-slot collapsed entry an
+		// init-container reservation produces.
+		if dev.Usedcores >= hamiCorePercentBase && (dev.Used == 1 || hamiCoreExclusiveOccupant(dev)) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
 			continue

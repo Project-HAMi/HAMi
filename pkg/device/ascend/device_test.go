@@ -3328,3 +3328,122 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, reason, "core limit out of range")
 	})
 }
+
+// TestDevices_Fit_HamiCoreOversellInitContainerExclusivity keeps a full-core
+// init-container reservation exclusive once the plugin advertises an oversold
+// budget. CollapseInitContainerUsage tracks the peak core usage and the peak
+// slot count independently, so a Pod whose init container reserves the whole
+// card and whose app containers then run alongside is stored as Usedcores=100
+// with Slots=2, which the scheduler reconstructs as dev.Used=2.
+func TestDevices_Fit_HamiCoreOversellInitContainerExclusivity(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+	}
+
+	// applyUsage rebuilds node usage from a collapsed allocation the way the
+	// scheduler does: slots feed Used, and the Pod is recorded on the device.
+	applyUsage := func(dev *device.DeviceUsage, pi *device.PodInfo) {
+		for _, podSingle := range pi.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, cd := range ctrDevs {
+					if cd.UUID != dev.ID {
+						continue
+					}
+					dev.Used += max(cd.Slots, 1)
+					dev.Usedmem += cd.Usedmem
+					dev.Usedcores += cd.Usedcores
+					dev.PodInfos = append(dev.PodInfos, pi)
+				}
+			}
+		}
+	}
+
+	t.Run("init container holding the full card stays exclusive", func(t *testing.T) {
+		holder := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init"}},
+				Containers:     []corev1.Container{{Name: "app-0"}, {Name: "app-1"}},
+			},
+		}
+		collapsed := device.CollapseInitContainerUsage(holder, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 100}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 30}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 30}},
+			},
+		})
+		entry := collapsed["Ascend910B3"][0][0]
+		if entry.Usedcores != hamiCorePercentBase || entry.Slots != 2 {
+			t.Fatalf("collapsed usage changed: Usedcores=%d Slots=%d, want %d and 2",
+				entry.Usedcores, entry.Slots, hamiCorePercentBase)
+		}
+
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: holder, NodeID: "node1", Devices: collapsed})
+		if held.Used != 2 || held.Usedcores != hamiCorePercentBase {
+			t.Fatalf("reconstructed usage changed: Used=%d Usedcores=%d, want 2 and %d",
+				held.Used, held.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected the exclusive init reservation to reject a 50-core share")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("two half-card tenants keep sharing the oversold card", func(t *testing.T) {
+		shared := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		for _, name := range []string{"tenant-a", "tenant-b"} {
+			tenant := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			}
+			collapsed := device.CollapseInitContainerUsage(tenant, device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+				},
+			})
+			applyUsage(shared, &device.PodInfo{Pod: tenant, NodeID: "node1", Devices: collapsed})
+		}
+		if shared.Used != 2 || shared.Usedcores != hamiCorePercentBase {
+			t.Fatalf("reconstructed usage changed: Used=%d Usedcores=%d, want 2 and %d",
+				shared.Used, shared.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{shared}, share, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+}
