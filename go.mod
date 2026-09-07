@@ -38,7 +38,7 @@ require (
 	k8s.io/kubelet v0.37.0
 	sigs.k8s.io/controller-runtime v0.24.1
 	tags.cncf.io/container-device-interface v1.1.0
-	tags.cncf.io/container-device-interface/specs-go v1.1.0
+	tags.cncf.io/container-device-interface/specs-go v1.1.1
 )
 
 require (
