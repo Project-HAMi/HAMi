@@ -18,7 +18,7 @@ spec:
   ports:
     - name: monitorport
       port: {{ .Values.devicePlugin.service.httpPort | default 31992 }}  # Default HTTP port is 31992
-      targetPort: 9394
+      targetPort: {{ .Values.devicePlugin.service.monitorTargetPort | default "metrics" }}
       {{- if eq (.Values.devicePlugin.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
       nodePort: {{ .Values.devicePlugin.service.httpPort | default 31992 }}
       {{- end }}

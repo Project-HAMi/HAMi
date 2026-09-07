@@ -438,6 +438,7 @@ devicePlugin:
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
+    monitorTargetPort: metrics  # Name of the container port, so it follows the monitor's containerPort name
     labels: {}
     annotations: {}
 

@@ -197,6 +197,7 @@ become ready and restart the HAMi device plugin DaemonSet.
 |-----------|-------------|---------------|
 | `devicePlugin.service.type` | Service type | `NodePort` |
 | `devicePlugin.service.httpPort` | HTTP port | `31992` |
+| `devicePlugin.service.monitorTargetPort` | Monitor target port | `metrics` |
 
 ### Device Plugin Deployment Configuration
 
