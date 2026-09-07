@@ -109,13 +109,14 @@ func (m *PodManager) UpdatePod(pod *corev1.Pod) {
 	}
 }
 
-// DeepCopy must include the new field.
-func (p *PodInfo) DeepCopy() *PodInfo {
+// Snapshot copies manager-owned state and shares the read-only Pod.
+// Callers must not mutate the shared Pod.
+func (p *PodInfo) Snapshot() *PodInfo {
 	if p == nil {
 		return nil
 	}
 	return &PodInfo{
-		Pod:                           p.Pod.DeepCopy(),
+		Pod:                           p.Pod,
 		NodeID:                        p.NodeID,
 		Devices:                       p.Devices.DeepCopy(),
 		InitContainerResourceReleased: p.InitContainerResourceReleased,
@@ -140,8 +141,8 @@ func (m *PodManager) DelPod(pod *corev1.Pod) {
 	}
 }
 
-// GetPod returns a copy. AddPod and UpdatePod write to the stored PodInfo in
-// place, so handing out the pointer would let the caller read it while the
+// GetPod returns a snapshot. AddPod and UpdatePod write to the stored PodInfo
+// in place, so handing out the pointer would let the caller read it while the
 // informer is rewriting it.
 func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	m.mutex.RLock()
@@ -151,7 +152,7 @@ func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	if !ok {
 		return nil, false
 	}
-	return pi.DeepCopy(), true
+	return pi.Snapshot(), true
 }
 
 func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
@@ -224,7 +225,7 @@ func (m *PodManager) ListPodsInfo() []*PodInfo {
 
 	pods := make([]*PodInfo, 0, len(m.pods))
 	for _, pod := range m.pods {
-		pods = append(pods, pod.DeepCopy())
+		pods = append(pods, pod.Snapshot())
 		klog.V(5).InfoS("Pod info",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
 			"nodeID", pod.NodeID,
@@ -301,7 +302,7 @@ func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 	// over Devices after this returns, by which point the read lock is gone.
 	podsCopy := make(map[k8stypes.UID]*PodInfo, podCount)
 	for uid, pi := range m.pods {
-		podsCopy[uid] = pi.DeepCopy()
+		podsCopy[uid] = pi.Snapshot()
 	}
 	return podsCopy, nil
 }

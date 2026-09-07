@@ -486,7 +486,7 @@ func TestUpdatePod(t *testing.T) {
 	}
 }
 
-func TestPodInfoDeepCopy(t *testing.T) {
+func TestPodInfoSnapshot(t *testing.T) {
 	tests := []struct {
 		name     string
 		original *PodInfo
@@ -523,7 +523,7 @@ func TestPodInfoDeepCopy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			copy := tt.original.DeepCopy()
+			copy := tt.original.Snapshot()
 
 			if tt.original == nil {
 				if copy != nil {
@@ -532,19 +532,17 @@ func TestPodInfoDeepCopy(t *testing.T) {
 				return
 			}
 
-			// 1. Copy must be deeply equal to original.
 			assert.Equal(t, tt.original.NodeID, copy.NodeID)
 			assert.Equal(t, tt.original.Devices, copy.Devices)
 			if tt.original.Pod != nil {
 				assert.Equal(t, tt.original.Name, copy.Name)
 			}
 
-			// 2. Mutating the copy must not affect the original.
-			if copy.Pod != nil {
-				originalPodName := tt.original.Name
-				copy.Name = "mutated-pod"
-				assert.Equal(t, tt.original.Name, originalPodName)
+			if tt.original.Pod != nil {
+				assert.Same(t, tt.original.Pod, copy.Pod, "Pod pointer should be shared with the snapshot")
 			}
+
+			// Manager-owned fields remain independent of the snapshot.
 			originalNodeID := tt.original.NodeID
 			copy.NodeID = "mutated-node"
 			assert.Equal(t, tt.original.NodeID, originalNodeID)
@@ -647,7 +645,7 @@ func TestContainerDeviceDeepCopy(t *testing.T) {
 	assert.False(t, exists, "original CustomInfo should not have key2")
 }
 
-func TestListPodsInfoReturnsDeepCopy(t *testing.T) {
+func TestListPodsInfoReturnsSnapshot(t *testing.T) {
 	pm := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p", Namespace: "ns"}}
 	pm.AddPod(pod, "node-1", PodDevices{"dev": {{{UUID: "GPU-0"}}}})
@@ -729,7 +727,7 @@ func TestGetScheduledPodsCopiesEntries(t *testing.T) {
 	wg.Wait()
 }
 
-// A caller must not be able to reach into the manager through what it hands back.
+// Mutating snapshot accounting fields must not affect the manager.
 func TestGetScheduledPodsReturnsDetachedEntries(t *testing.T) {
 	pm := NewPodManager()
 	pod := &corev1.Pod{
