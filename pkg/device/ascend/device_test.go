@@ -348,16 +348,20 @@ func Test_PatchAnnotations(t *testing.T) {
 func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
 	dev := Devices{
 		config: VNPUConfig{
-			CommonWord:   "Ascend910B3",
-			ResourceName: "huawei.com/Ascend910B3",
+			CommonWord:     "Ascend910B3",
+			ResourceName:   "huawei.com/Ascend910B3",
+			MemoryCapacity: 32768,
+			Templates: []Template{
+				{Name: "vir08", Memory: 8738, AICore: 8},
+			},
 		},
 	}
 
 	tests := []struct {
-		name string
-		pod  *corev1.Pod
-		pd   device.PodDevices
-		want map[string]string
+		name     string
+		pod      *corev1.Pod
+		pd       device.PodDevices
+		wantTemp bool
 	}{
 		{
 			name: "vNPU-mode patch: check json contains cores and memory instead of template",
@@ -381,9 +385,30 @@ func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]string{
-				"huawei.com/Ascend910B3": "[{\"UUID\":\"ascend-uuid-1\",\"core\":5,\"memory\":8192}]",
+		},
+		{
+			name: "vNPU-mode template: keep template field",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						VNPUModeAnnotation: VNPUModeTemplate,
+					},
+				},
 			},
+			pd: device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					[]device.ContainerDevice{
+						{
+							Idx:       0,
+							UUID:      "ascend-uuid-1",
+							Type:      "Ascend",
+							Usedcores: 5,
+							Usedmem:   8192,
+						},
+					},
+				},
+			},
+			wantTemp: true,
 		},
 	}
 
@@ -396,7 +421,11 @@ func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
 			assert.Assert(t, ok)
 			assert.Assert(t, strings.Contains(val, "\"core\":5"))
 			assert.Assert(t, strings.Contains(val, "\"memory\":8192"))
-			assert.Assert(t, !strings.Contains(val, "\"temp\""))
+			if test.wantTemp {
+				assert.Assert(t, strings.Contains(val, "\"temp\":\"vir08\""), "template mode should encode temp, got %s", val)
+			} else {
+				assert.Assert(t, !strings.Contains(val, "\"temp\""))
+			}
 		})
 	}
 }
@@ -1083,6 +1112,37 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantMem:       32768, // no template configured -> MemoryAllocatable
 			wantCore:      0,
 		},
+		{
+			name: "vNPU-mode template: memory trimmed like hard split",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+					},
+				},
+				pod: corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							VNPUModeAnnotation: VNPUModeTemplate,
+						},
+					},
+				},
+			},
+			wantPostStart: false,
+			wantMem:       32768, // no template configured -> MemoryAllocatable
+			wantCore:      0,
+		},
 	}
 
 	for _, test := range tests {
@@ -1144,14 +1204,15 @@ func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 	tests := []struct {
 		name     string
 		ctr      corev1.Container
-		hamiCore bool
+		vnpuMode string
 		wantErr  bool
 	}{
-		{name: "hard split with core is rejected", ctr: newCtr("10"), hamiCore: false, wantErr: true},
-		{name: "hard split with core over physical is rejected", ctr: newCtr("25"), hamiCore: false, wantErr: true},
-		{name: "hard split with core=0 is allowed", ctr: newCtr("0"), hamiCore: false, wantErr: false},
-		{name: "hard split without core is allowed", ctr: newCtr(""), hamiCore: false, wantErr: false},
-		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), hamiCore: true, wantErr: false},
+		{name: "hard split with core is rejected", ctr: newCtr("10"), wantErr: true},
+		{name: "hard split with core over physical is rejected", ctr: newCtr("25"), wantErr: true},
+		{name: "hard split with core=0 is allowed", ctr: newCtr("0"), wantErr: false},
+		{name: "hard split without core is allowed", ctr: newCtr(""), wantErr: false},
+		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), vnpuMode: VNPUModeHamiCore, wantErr: false},
+		{name: "template mode with core is rejected", ctr: newCtr("10"), vnpuMode: VNPUModeTemplate, wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -1171,8 +1232,8 @@ func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 				},
 			}
 			pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
-			if test.hamiCore {
-				pod.Annotations = map[string]string{VNPUModeAnnotation: VNPUModeHamiCore}
+			if test.vnpuMode != "" {
+				pod.Annotations = map[string]string{VNPUModeAnnotation: test.vnpuMode}
 			}
 			ctr := test.ctr
 			_, err := dev.MutateAdmission(&ctr, &pod)
@@ -2382,6 +2443,44 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
 		{
+			name: "fit fail: template pod on hami-core node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeTemplate,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
+		{
+			name: "fit success: template pod on legacy node",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeTemplate,
+			},
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
+			nodeAnnotation: map[string]string{},
+		},
+		{
 			name: "mutex policy rejects used device",
 			devices: []*device.DeviceUsage{
 				{
@@ -2550,6 +2649,61 @@ func TestDevices_Fit(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
+	devices := []*device.DeviceUsage{{
+		ID: "dev-0", Index: 0, Used: 0, Count: 100,
+		Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+		Type: "Ascend910B3", Numa: 0, Health: true,
+	}}
+	request := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3", Memreq: 8738, MemPercentagereq: 0, Coresreq: 0,
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{VNPUModeAnnotation: VNPUModeTemplate},
+		},
+	}
+
+	tests := []struct {
+		name           string
+		hamiVnpuCore   bool
+		nodeAnnotation map[string]string
+		wantFit        bool
+		wantReason     string
+	}{
+		{
+			name:         "template pod rejected when global hamiVnpuCore is on",
+			hamiVnpuCore: true,
+			wantFit:      false,
+			wantReason:   "1/1 ModeNotFit",
+		},
+		{
+			name:           "template pod accepted when node overrides global hamiVnpuCore off",
+			hamiVnpuCore:   true,
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "false"},
+			wantFit:        true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &Devices{
+				config:       VNPUConfig{CommonWord: "Ascend910B3"},
+				hamiVnpuCore: test.hamiVnpuCore,
+			}
+			nodeInfo := &device.NodeInfo{
+				ID: "node1",
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Annotations: test.nodeAnnotation},
+				},
+			}
+			fit, _, reason := dev.Fit(devices, request, pod, nodeInfo, &device.PodDevices{})
+			assert.Equal(t, fit, test.wantFit)
+			assert.Equal(t, reason, test.wantReason)
+		})
 	}
 }
 
