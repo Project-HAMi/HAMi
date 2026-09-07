@@ -147,19 +147,27 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		}
 	}
 
-	// Check if hami-core is declared
-	vnpuMode := p.Annotations[VNPUModeAnnotation]
+	vnpuMode := ""
+	if p.Annotations != nil {
+		vnpuMode = p.Annotations[VNPUModeAnnotation]
+	}
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// -core only applies to hami-core (soft split); on hard split the template
-	// fixes compute, so reject it here.
 	if !isHAMiCore && dev.config.ResourceCoreName != "" {
 		coreQ, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
 		if !ok {
 			coreQ, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceCoreName)]
 		}
 		if ok && coreQ.Value() > 0 {
-			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+			if vnpuMode == VNPUModeTemplate {
+				return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+			}
+			if p.Annotations == nil {
+				p.Annotations = map[string]string{}
+			}
+			p.Annotations[VNPUModeAnnotation] = VNPUModeHamiCore
+			isHAMiCore = true
+			klog.InfoS("Inferred hami-core vnpu mode from core request", "pod", klog.KObj(p), "core", coreQ.Value())
 		}
 	}
 

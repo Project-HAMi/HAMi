@@ -1113,6 +1113,33 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantCore:      0,
 		},
 		{
+			name: "core request without vnpu-mode infers hami-core and keeps raw memory",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+					},
+				},
+				pod: corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			wantPostStart: false,
+			wantMem:       15360,
+			wantCore:      20,
+		},
+		{
 			name: "vNPU-mode template: memory trimmed like hard split",
 			args: struct {
 				ctr corev1.Container
@@ -1173,13 +1200,17 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 
 			coreLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
 			assert.Equal(t, coreLimit.Value(), test.wantCore)
+
+			if test.wantCore > 0 {
+				assert.Equal(t, test.args.pod.Annotations[VNPUModeAnnotation], VNPUModeHamiCore)
+			}
 		})
 	}
 }
 
-// Test_MutateAdmission_HardSplitCoreRejected verifies that a -core request is
-// rejected on hard split (non hami-core) but accepted in hami-core soft-split
-// mode, and that a hard-split request without -core is unaffected.
+// Test_MutateAdmission_HardSplitCoreRejected verifies that a -core request
+// without an explicit mode infers hami-core, that template mode still rejects
+// -core, and that a hard-split request without -core is unaffected.
 func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 	// 8738 maps to the vir08 template so hard-split memory trimming succeeds.
 	newCtr := func(core string) corev1.Container {
@@ -1202,17 +1233,18 @@ func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		ctr      corev1.Container
-		vnpuMode string
-		wantErr  bool
+		name         string
+		ctr          corev1.Container
+		vnpuMode     string
+		wantErr      bool
+		wantVNPUMode string
 	}{
-		{name: "hard split with core is rejected", ctr: newCtr("10"), wantErr: true},
-		{name: "hard split with core over physical is rejected", ctr: newCtr("25"), wantErr: true},
-		{name: "hard split with core=0 is allowed", ctr: newCtr("0"), wantErr: false},
-		{name: "hard split without core is allowed", ctr: newCtr(""), wantErr: false},
-		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), vnpuMode: VNPUModeHamiCore, wantErr: false},
-		{name: "template mode with core is rejected", ctr: newCtr("10"), vnpuMode: VNPUModeTemplate, wantErr: true},
+		{name: "core request infers hami-core", ctr: newCtr("10"), wantVNPUMode: VNPUModeHamiCore},
+		{name: "core request above typical template still infers hami-core", ctr: newCtr("25"), wantVNPUMode: VNPUModeHamiCore},
+		{name: "hard split with core=0 is allowed", ctr: newCtr("0")},
+		{name: "hard split without core is allowed", ctr: newCtr("")},
+		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), vnpuMode: VNPUModeHamiCore, wantVNPUMode: VNPUModeHamiCore},
+		{name: "template mode with core is rejected", ctr: newCtr("10"), vnpuMode: VNPUModeTemplate, wantErr: true, wantVNPUMode: VNPUModeTemplate},
 	}
 
 	for _, test := range tests {
@@ -1244,6 +1276,7 @@ func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 			} else {
 				assert.NilError(t, err)
 			}
+			assert.Equal(t, pod.Annotations[VNPUModeAnnotation], test.wantVNPUMode)
 		})
 	}
 }
