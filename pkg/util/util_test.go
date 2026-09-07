@@ -1131,3 +1131,34 @@ func TestGetNode(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkAnnotationsToDelete(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				"hami.io/nvidia": "handshake",
+			},
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := MarkAnnotationsToDelete("hami.io/nvidia", "test-node")
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, hasAnno := updated.Annotations["hami.io/nvidia"]
+	assert.Assert(t, !hasAnno)
+}
+
+func TestMarkAnnotationsToDelete_NodeNotFound(t *testing.T) {
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset()
+
+	err := MarkAnnotationsToDelete("hami.io/nvidia", "missing-node")
+	assert.ErrorContains(t, err, "not found")
+}
