@@ -113,6 +113,8 @@ data:
       resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
       - chipName: 910A
         commonWord: Ascend910A
@@ -123,8 +125,6 @@ data:
         memoryCapacity: 32768
         memoryFactor: 1
         aiCore: 30
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir02
             memory: 2184
@@ -148,8 +148,6 @@ data:
         memoryFactor: 1
         aiCore: 24
         aiCPU: 6
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir03_1c_8g
             memory: 8192
@@ -173,8 +171,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_16g
             memory: 16384
@@ -194,8 +190,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_16g
             memory: 16384
@@ -215,8 +209,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_8g
             memory: 8192
@@ -236,8 +228,6 @@ data:
         memoryFactor: 1
         aiCore: 8
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir01
             memory: 3072
@@ -260,8 +250,6 @@ data:
         memoryCapacity: 65536
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         superPod: true
         templates:
           - name: vir05_1c_16g

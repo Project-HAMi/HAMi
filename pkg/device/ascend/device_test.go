@@ -912,11 +912,11 @@ func Test_MutateAdmission_OverwriteEnvDoesNotOverrideAscendContainer(t *testing.
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates: []Template{
 				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
 			},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -952,9 +952,9 @@ func Test_MutateAdmission_OverwriteEnvInjectsEmptyForNonAscendContainer(t *testi
 				ResourceMemoryName: resourceName + "-memory",
 				MemoryAllocatable:  int64(32768),
 				MemoryCapacity:     int64(32768),
-				OverwriteEnv:       true,
 				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 			},
+			overwriteEnv:           true,
 			allAscendResourceNames: allResNames,
 		}
 	}
@@ -993,9 +993,9 @@ func Test_MutateAdmission_OverwriteEnvLastWinsInjectsAfterRealValue(t *testing.T
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -1028,9 +1028,9 @@ func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -1071,7 +1071,7 @@ func hasInjectedEmptyAVD(env []corev1.EnvVar) bool {
 
 // Test_MutateAdmission_OverwriteEnvOptOut covers the universal opt-out annotation
 // (hami.io/overwrite-env pod-level + hami.io/overwrite-env-containers JSON container-level)
-// resolved via util.OverwriteEnvDecision, with the backend's dev.config.OverwriteEnv
+// resolved via util.OverwriteEnvDecision, with the backend's dev.overwriteEnv
 // as the Unset fallback. The three-state decision: On forces injection, Off skips,
 // Unset falls back to config. Container-level overrides pod-level (both directions).
 func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
@@ -1086,9 +1086,9 @@ func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
 				ResourceMemoryName: "huawei.com/Ascend910A-memory",
 				MemoryAllocatable:  int64(32768),
 				MemoryCapacity:     int64(32768),
-				OverwriteEnv:       overwriteEnv,
 				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 			},
+			overwriteEnv:           overwriteEnv,
 			allAscendResourceNames: allResNames,
 		}
 	}
@@ -1105,7 +1105,7 @@ func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
 
 	type tc struct {
 		name        string
-		configOn    bool // dev.config.OverwriteEnv
+		configOn    bool // dev.overwriteEnv
 		annotations map[string]string
 		wantInject  bool
 	}
@@ -3458,4 +3458,27 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
 	})
+}
+
+// Test_InitDevices_GlobalOverwriteEnvPropagation verifies the global vnpus
+// overwriteEnv and runtimeClassName settings reach every Devices instance.
+func Test_InitDevices_GlobalOverwriteEnvPropagation(t *testing.T) {
+	chip := VNPUConfig{
+		ChipName:           "910A",
+		CommonWord:         "Ascend910A",
+		ResourceName:       "huawei.com/Ascend910A",
+		ResourceMemoryName: "huawei.com/Ascend910A-memory",
+	}
+	enable := true
+	defer func() { enableAscend = enable }()
+	enableAscend = true
+
+	devs := InitDevices(VNPUs{
+		OverwriteEnv:     true,
+		RuntimeClassName: "ascend-rc",
+		Configs:          []VNPUConfig{chip},
+	})
+	assert.Assert(t, len(devs) == 1, "expected one device")
+	assert.Equal(t, devs[0].overwriteEnv, true)
+	assert.Equal(t, devs[0].runtimeClassName, "ascend-rc")
 }

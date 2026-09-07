@@ -56,6 +56,8 @@ type Devices struct {
 	noUseUUIDAnno          string
 	handshakeAnno          string
 	hamiVnpuCore           bool
+	overwriteEnv           bool
+	runtimeClassName       string
 	allAscendResourceNames []corev1.ResourceName
 }
 
@@ -98,6 +100,8 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
 			hamiVnpuCore:           vnpus.HamiVnpuCore,
+			overwriteEnv:           vnpus.OverwriteEnv,
+			runtimeClassName:       vnpus.RuntimeClassName,
 			allAscendResourceNames: allAscendResourceNames,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
@@ -163,7 +167,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		case util.OverwriteEnvOff:
 			inject = false
 		default:
-			inject = dev.config.OverwriteEnv
+			inject = dev.overwriteEnv
 		}
 		if inject && !lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -247,8 +251,8 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	// Set runtime class name if it is not set by user and the runtime class name is configured
-	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
-		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+	if p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	return true, nil
 }
