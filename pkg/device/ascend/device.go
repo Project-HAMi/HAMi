@@ -616,8 +616,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			continue
 		}
 		// Coresreq at the percentage base stays exclusive for hami-core even when
-		// the plugin advertises an oversold budget.
-		if k.Coresreq == hamiCorePercentBase && dev.Used > 0 && (isHAMiCore || effectiveTotalCore == hamiCorePercentBase) {
+		// the plugin advertises an oversold budget. A pod that declares no mode
+		// keeps dev.Totalcore as its budget, so on a hami-core node the base
+		// equality no longer holds once the plugin oversells; gate on the node too.
+		if k.Coresreq == hamiCorePercentBase && dev.Used > 0 &&
+			(isHAMiCore || nodeSupportHamiCore || effectiveTotalCore == hamiCorePercentBase) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue

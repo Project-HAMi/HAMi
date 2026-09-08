@@ -3447,3 +3447,77 @@ func TestDevices_Fit_HamiCoreOversellInitContainerExclusivity(t *testing.T) {
 		}
 	})
 }
+
+// TestDevices_Fit_HamiCoreOversellLegacyFullCore keeps a full-core request
+// exclusive on a hami-core node even when the requesting Pod carries no
+// vnpu-mode annotation. Without the annotation isHAMiCore is false, so the
+// budget stays at the advertised Totalcore and the base-equality arm of the
+// exclusivity guard no longer holds once the plugin oversells.
+func TestDevices_Fit_HamiCoreOversellLegacyFullCore(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	// No vnpu-mode annotation: Fit only filters hami-core pods off
+	// non-hami-core nodes, so this pod still reaches a hami-core card.
+	legacyPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+	fullCore := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 100,
+	}
+
+	partial := func(totalcore int32) []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 50, Totalcore: totalcore,
+			Health: true,
+		}}
+	}
+
+	// Without oversell the capacity check already stops this request, which is
+	// why the exclusivity guard was never exercised on the base budget.
+	t.Run("advertised 100 rejects a legacy full-core request on capacity", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(partial(100), fullCore, legacyPod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected a partially used card to reject a full-core request")
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+
+	t.Run("advertised 150 still rejects a legacy full-core request", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(partial(150), fullCore, legacyPod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected oversell to keep a full-core request exclusive")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("advertised 150 still admits a legacy partial request", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		share := fullCore
+		share.Coresreq = 50
+		fit, _, reason := dev.Fit(partial(150), share, legacyPod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+}
