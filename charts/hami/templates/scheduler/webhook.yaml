@@ -7,6 +7,9 @@ metadata:
     cert-manager.io/inject-ca-from: {{ include "hami-vgpu.namespace" . }}/{{ include "hami-vgpu.scheduler" . }}-serving-cert
   {{- end }}
   name: {{ include "hami-vgpu.scheduler.webhook" . }}
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
 webhooks:
   - admissionReviewVersions:
     - v1beta1
