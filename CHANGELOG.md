@@ -179,7 +179,7 @@ Fix an issue where mlu device-plugin can't be launched properly
 
 Major rework on devices-related code
 
-Add support for hygon DCU device
+Add support for hygon HCU device
 
 ## v2.3.3
 

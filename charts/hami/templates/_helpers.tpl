@@ -202,10 +202,10 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" .Values.resourcePriority "ignoredByScheduler" true) -}}
 {{/* MLU resources */}}
 {{- $resources = append $resources (dict "name" .Values.mluResourceName "ignoredByScheduler" true) -}}
-{{/* DCU resources */}}
-{{- $resources = append $resources (dict "name" .Values.dcuResourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.dcuResourceMem "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.dcuResourceCores "ignoredByScheduler" true) -}}
+{{/* HCU resources */}}
+{{- $resources = append $resources (dict "name" .Values.hcuResourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.hcuResourceMem "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.hcuResourceCores "ignoredByScheduler" true) -}}
 {{/* Metax resources */}}
 {{- $resources = append $resources (dict "name" "metax-tech.com/gpu" "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.metaxResourceName "ignoredByScheduler" true) -}}

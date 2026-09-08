@@ -60,9 +60,9 @@ cambricon:
   resourceMemoryName: cambricon.com/mlu.smlu.vmemory
   resourceCoreName: cambricon.com/mlu.smlu.vcore
 hygon:
-  resourceCountName: hygon.com/dcunum
-  resourceMemoryName: hygon.com/dcumem
-  resourceCoreName: hygon.com/dcucores
+  resourceCountName: hygon.com/hcunum
+  resourceMemoryName: hygon.com/hcumem
+  resourceCoreName: hygon.com/hcucores
 metax:
   resourceCountName: "metax-tech.com/gpu"
 enflame:
@@ -253,9 +253,9 @@ func createCambriconConfig() cambricon.CambriconConfig {
 
 func createHygonConfig() hygon.HygonConfig {
 	return hygon.HygonConfig{
-		ResourceCountName:  "hygon.com/dcunum",
-		ResourceMemoryName: "hygon.com/dcumem",
-		ResourceCoreName:   "hygon.com/dcucores",
+		ResourceCountName:  "hygon.com/hcunum",
+		ResourceMemoryName: "hygon.com/hcumem",
+		ResourceCoreName:   "hygon.com/hcucores",
 	}
 }
 
@@ -417,7 +417,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 	expectedDevices := map[string]string{
 		nvidia.NvidiaGPUDevice:       nvidia.NvidiaGPUDevice,
 		cambricon.CambriconMLUDevice: cambricon.CambriconMLUCommonWord,
-		hygon.HygonDCUDevice:         hygon.HygonDCUCommonWord,
+		hygon.HygonHCUDevice:         hygon.HygonHCUCommonWord,
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
