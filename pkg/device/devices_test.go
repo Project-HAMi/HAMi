@@ -38,6 +38,55 @@ func init() {
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 
+func TestAppendEnvIfAbsent(t *testing.T) {
+	wanted := corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: "none"}
+	fromFieldRef := corev1.EnvVar{
+		Name: "NVIDIA_VISIBLE_DEVICES",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+		},
+	}
+
+	tests := []struct {
+		name string
+		env  []corev1.EnvVar
+		want []corev1.EnvVar
+	}{
+		{
+			name: "appends a missing variable",
+			want: []corev1.EnvVar{wanted},
+		},
+		{
+			name: "does not append an identical literal variable",
+			env:  []corev1.EnvVar{wanted},
+			want: []corev1.EnvVar{wanted},
+		},
+		{
+			name: "keeps the existing overwrite behavior for a different value",
+			env: []corev1.EnvVar{
+				{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"},
+			},
+			want: []corev1.EnvVar{
+				{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"},
+				wanted,
+			},
+		},
+		{
+			name: "appends after a value from reference",
+			env:  []corev1.EnvVar{fromFieldRef},
+			want: []corev1.EnvVar{fromFieldRef, wanted},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{Env: tt.env}
+			AppendEnvIfAbsent(ctr, wanted)
+			assert.DeepEqual(t, ctr.Env, tt.want)
+		})
+	}
+}
+
 func TestEmptyContainerDevicesCoding(t *testing.T) {
 	cd1 := ContainerDevices{}
 	s := EncodeContainerDevices(cd1)

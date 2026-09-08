@@ -2650,6 +2650,60 @@ func TestMutateAdmission_OverwriteEnv(t *testing.T) {
 	assert.Assert(t, found, "expected NVIDIA_VISIBLE_DEVICES=none env")
 }
 
+func TestMutateAdmissionIsIdempotent(t *testing.T) {
+	tests := []struct {
+		name string
+		dev  *NvidiaGPUDevices
+		ctr  *corev1.Container
+	}{
+		{
+			name: "priority and core policy",
+			dev: &NvidiaGPUDevices{config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourcePriority:             "nvidia.com/priority",
+				GPUCorePolicy:                ForceCorePolicy,
+			}},
+			ctr: &corev1.Container{
+				Env: []corev1.EnvVar{{Name: "EXISTING", Value: "value"}},
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/gpu":      resource.MustParse("1"),
+					"nvidia.com/priority": resource.MustParse("5"),
+				}},
+			},
+		},
+		{
+			name: "overwrite visible devices preserves conflicting user value",
+			dev: &NvidiaGPUDevices{config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				OverwriteEnv:                 true,
+			}},
+			ctr: &corev1.Container{
+				Env:       []corev1.EnvVar{{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"}},
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{}
+			_, err := test.dev.MutateAdmission(test.ctr, pod)
+			assert.NilError(t, err)
+			afterFirstMutation := test.ctr.DeepCopy()
+
+			_, err = test.dev.MutateAdmission(test.ctr, pod)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, test.ctr, afterFirstMutation)
+		})
+	}
+}
+
 func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
 	dev := &NvidiaGPUDevices{config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu", ResourceCoreName: "nvidia.com/gpucores"}}
 	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
