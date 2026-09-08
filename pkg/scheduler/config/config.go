@@ -295,8 +295,13 @@ func InitDevices() {
 	}
 }
 
-func InitDefaultDevices() {
-	configMapdata := `
+// defaultDeviceConfig mirrors the device configuration the Helm chart renders
+// in charts/hami/templates/scheduler/device-configmap.yaml when no
+// device-config.content override is supplied, with the chart's default values
+// substituted. InitDefaultDevices parses it, so tests exercise the same device
+// topology a default install produces rather than a smaller hand-written one.
+// TestDefaultDeviceConfigCoversChartVendors guards the two against drifting apart.
+const defaultDeviceConfig = `
 nvidia:
   resourceCountName: "nvidia.com/gpu"
   resourceMemoryName: "nvidia.com/gpumem"
@@ -307,6 +312,34 @@ nvidia:
   defaultMemory: 0
   defaultCores: 0
   defaultGPUNum: 1
+  preConfiguredDeviceMemory: 0
+  memoryFactor: 1
+  deviceSplitCount: 10
+  deviceMemoryScaling: 1
+  deviceCoreScaling: 1
+  enableNumaTopology: false
+  gpuCorePolicy: default
+  libCudaLogLevel: 1
+  runtimeClassName: ""
+  migProfileAllowlist:
+  - models: [ "A30" ]
+    profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+  - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
+    profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "7g.40gb" ]
+  - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
+    profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.79gb" ]
+  - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+    profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.80gb" ]
+  - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+    profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "7g.94gb" ]
+  - models: [ "H20", "H100 on GH200"]
+    profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "7g.96gb" ]
+  - models: [ "H200 NVL", "H200-SXM5"]
+    profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "7g.141gb" ]
+  - models: [ "B200" ]
+    profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "7g.180gb" ]
+  - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
+    profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
 cambricon:
   resourceCountName: "cambricon.com/vmlu"
   resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
@@ -315,8 +348,18 @@ hygon:
   resourceCountName: "hygon.com/dcunum"
   resourceMemoryName: "hygon.com/dcumem"
   resourceCoreName: "hygon.com/dcucores"
+  memoryFactor: 1
 metax:
   resourceCountName: "metax-tech.com/gpu"
+  resourceVCountName: "metax-tech.com/sgpu"
+  resourceVMemoryName: "metax-tech.com/vmemory"
+  resourceVCoreName: "metax-tech.com/vcore"
+  sgpuTopologyAware: false
+enflame:
+  resourceNameGCU: "enflame.com/gcu"
+  resourceNameDRSGCU: "enflame.com/drs-gcu"
+  resourceNameGCUMemory: "enflame.com/gcu-memory"
+  resourceNameGCUCore: "enflame.com/gcu-core"
 mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
@@ -351,6 +394,12 @@ awsneuron:
   resourceCoreName: "aws.amazon.com/neuroncore"
 amd:
   resourceCountName: "amd.com/gpu"
+  resourceCoreName: "amd.com/gpucores"
+  resourceMemoryName: "amd.com/gpumem"
+vastai:
+  resourceCountName: "vastaitech.com/va"
+biren:
+  resourceCountName: "birentech.com/gpu"
 vnpus:
   hamiVnpuCore: false
   configs:
@@ -358,9 +407,13 @@ vnpus:
     commonWord: "Ascend910A"
     resourceName: "huawei.com/Ascend910A"
     resourceMemoryName: "huawei.com/Ascend910A-memory"
+    resourceCoreName: "huawei.com/Ascend910A-core"
     memoryAllocatable: 32768
     memoryCapacity: 32768
+    memoryFactor: 1
     aiCore: 30
+    runtimeClassName: ""
+    overwriteEnv: false
     templates:
       - name: "vir02"
         memory: 2184
@@ -378,10 +431,14 @@ vnpus:
     commonWord: Ascend910B2
     resourceName: huawei.com/Ascend910B2
     resourceMemoryName: huawei.com/Ascend910B2-memory
+    resourceCoreName: huawei.com/Ascend910B2-core
     memoryAllocatable: 65536
     memoryCapacity: 65536
+    memoryFactor: 1
     aiCore: 24
     aiCPU: 6
+    runtimeClassName: ""
+    overwriteEnv: false
     templates:
       - name: vir03_1c_8g
         memory: 8192
@@ -399,10 +456,14 @@ vnpus:
     commonWord: "Ascend910B3"
     resourceName: "huawei.com/Ascend910B3"
     resourceMemoryName: "huawei.com/Ascend910B3-memory"
+    resourceCoreName: "huawei.com/Ascend910B3-core"
     memoryAllocatable: 65536
     memoryCapacity: 65536
+    memoryFactor: 1
     aiCore: 20
     aiCPU: 7
+    runtimeClassName: ""
+    overwriteEnv: false
     templates:
       - name: "vir05_1c_16g"
         memory: 16384
@@ -412,14 +473,39 @@ vnpus:
         memory: 32768
         aiCore: 10
         aiCPU: 3
+  - chipName: 910B4-1
+    commonWord: Ascend910B4-1
+    resourceName: huawei.com/Ascend910B4-1
+    resourceMemoryName: huawei.com/Ascend910B4-1-memory
+    resourceCoreName: huawei.com/Ascend910B4-1-core
+    memoryAllocatable: 65536
+    memoryCapacity: 65536
+    memoryFactor: 1
+    aiCore: 20
+    aiCPU: 7
+    runtimeClassName: ""
+    overwriteEnv: false
+    templates:
+      - name: vir05_1c_16g
+        memory: 16384
+        aiCore: 5
+        aiCPU: 1
+      - name: vir10_3c_32g
+        memory: 32768
+        aiCore: 10
+        aiCPU: 3
   - chipName: 910B4
     commonWord: Ascend910B4
     resourceName: huawei.com/Ascend910B4
     resourceMemoryName: huawei.com/Ascend910B4-memory
+    resourceCoreName: huawei.com/Ascend910B4-core
     memoryAllocatable: 32768
     memoryCapacity: 32768
+    memoryFactor: 1
     aiCore: 20
     aiCPU: 7
+    runtimeClassName: ""
+    overwriteEnv: false
     templates:
       - name: vir05_1c_8g
         memory: 8192
@@ -433,10 +519,14 @@ vnpus:
     commonWord: "Ascend310P"
     resourceName: "huawei.com/Ascend310P"
     resourceMemoryName: "huawei.com/Ascend310P-memory"
+    resourceCoreName: "huawei.com/Ascend310P-core"
     memoryAllocatable: 21527
     memoryCapacity: 24576
+    memoryFactor: 1
     aiCore: 8
     aiCPU: 7
+    runtimeClassName: ""
+    overwriteEnv: false
     templates:
       - name: "vir01"
         memory: 3072
@@ -449,10 +539,32 @@ vnpus:
       - name: "vir04"
         memory: 12288
         aiCore: 4
-        aiCPU: 4`
+        aiCPU: 4
+  - chipName: Ascend910
+    commonWord: Ascend910C
+    resourceName: huawei.com/Ascend910C
+    resourceMemoryName: huawei.com/Ascend910C-memory
+    resourceCoreName: huawei.com/Ascend910C-core
+    memoryAllocatable: 65536
+    memoryCapacity: 65536
+    aiCore: 20
+    aiCPU: 7
+    runtimeClassName: ""
+    overwriteEnv: false
+    superPod: true
+    templates:
+      - name: vir05_1c_16g
+        memory: 16384
+        aiCore: 5
+        aiCPU: 1
+      - name: vir10_3c_32g
+        memory: 32768
+        aiCore: 10
+        aiCPU: 3`
 
+func InitDefaultDevices() {
 	var yamlData Config
-	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)
+	err := yaml.Unmarshal([]byte(defaultDeviceConfig), &yamlData)
 	if err != nil {
 		klog.Fatalf("Failed to unmarshal default config: %v", err)
 		return
