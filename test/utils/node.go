@@ -19,7 +19,6 @@ package utils
 import (
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +59,6 @@ func UpdateNode(clientSet *kubernetes.Clientset, node *v1.Node) (*v1.Node, error
 		return nil, err
 	}
 
-	time.Sleep(time.Second * 30)
 	return updatedNode, nil
 }
 
@@ -81,7 +79,6 @@ func AddNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey, labelValu
 	if err != nil {
 		return nil, err
 	}
-	time.Sleep(time.Second * 30)
 	return result, nil
 }
 
@@ -101,6 +98,5 @@ func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string)
 	if err != nil {
 		return nil, err
 	}
-	time.Sleep(time.Second * 30)
 	return result, nil
 }
