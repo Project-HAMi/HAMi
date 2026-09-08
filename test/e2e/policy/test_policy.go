@@ -711,6 +711,15 @@ func ensureGPUNodeLabeled(client kubernetes.Interface) {
 		return hasReadyDevicePlugin(client, nodeName)
 	}, policyTestTimeout, policyTestInterval).Should(gomega.BeTrue(),
 		"device-plugin did not become ready on node %s after labeling", nodeName)
+
+	// Wait for the scheduler to recognize the node's GPU resources.
+	// After the device-plugin is ready, there's a delay before the scheduler
+	// processes the node update and registers the node's GPU capacity.
+	ginkgo.By(fmt.Sprintf("waiting for scheduler to register GPU resources on node %s", nodeName))
+	gomega.Eventually(func() bool {
+		return schedulerCanScheduleGPU(client, nodeName)
+	}, policyTestTimeout, policyTestInterval).Should(gomega.BeTrue(),
+		"scheduler did not register GPU resources on node %s", nodeName)
 }
 
 func nodeReady(node *corev1.Node) bool {
@@ -741,6 +750,32 @@ func hasReadyDevicePlugin(client kubernetes.Interface, nodeName string) bool {
 		}
 	}
 	return false
+}
+
+// schedulerCanScheduleGPU checks if the scheduler can schedule a GPU pod on the node.
+// This verifies that the node has GPU resources registered and available.
+func schedulerCanScheduleGPU(client kubernetes.Interface, nodeName string) bool {
+	node, err := client.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+
+	// Check if the node has GPU resources in its capacity
+	if _, ok := node.Status.Capacity[gpuResourceName]; !ok {
+		return false
+	}
+
+	// Check if the node has GPU resources in its allocatable
+	if _, ok := node.Status.Allocatable[gpuResourceName]; !ok {
+		return false
+	}
+
+	// Check if the node is not unschedulable
+	if node.Spec.Unschedulable {
+		return false
+	}
+
+	return true
 }
 
 func hamiNamespace() string {
