@@ -2909,6 +2909,85 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 	})
 }
 
+func TestDevices_Fit_HamiCoreMemoryOversell(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 32768, MemPercentagereq: 0, Coresreq: 20,
+	}
+
+	t.Run("physical 65536 rejects a 32768 share after a full-card occupant", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 65536,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, share, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 65536+32768>65536, got reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientMemory" {
+			t.Fatalf("expected CardInsufficientMemory, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 98304 admits 65536+32768", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 98304,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, share, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit at 65536+32768<=98304, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("plugin advertises 98304 rejects 65536+40000", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 98304,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		over := share
+		over.Memreq = 40000
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, over, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 65536+40000>98304, got reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientMemory" {
+			t.Fatalf("expected CardInsufficientMemory, got %s", reason)
+		}
+	})
+}
+
 func TestHamiCoreFitBudget(t *testing.T) {
 	cases := []struct {
 		in   int32
