@@ -32,6 +32,10 @@ data:
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
+      {{- with .Values.devices.nvidia.sandboxRuntimeClassNames }}
+      sandboxRuntimeClassNames:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]

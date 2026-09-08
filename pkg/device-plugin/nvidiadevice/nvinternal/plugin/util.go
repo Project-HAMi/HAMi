@@ -453,3 +453,26 @@ func createSpecFile(outputPath string) error {
 	}
 	return nil
 }
+
+// isSandboxedRuntimeClass reports whether the pod runs under one of the configured sandbox
+// runtime classes. libvgpu.so carries a DT_NEEDED on libcuda.so.1, which those sandboxes do
+// not provide, so preloading it makes every binary in the container fail to start.
+func isSandboxedRuntimeClass(pod *corev1.Pod, configured []string) bool {
+	if pod == nil || pod.Spec.RuntimeClassName == nil {
+		return false
+	}
+	runtimeClass := strings.TrimSpace(*pod.Spec.RuntimeClassName)
+	if runtimeClass == "" {
+		return false
+	}
+	names := configured
+	if len(names) == 0 {
+		names = nvidia.DefaultSandboxRuntimeClassNames
+	}
+	for _, name := range names {
+		if strings.EqualFold(strings.TrimSpace(name), runtimeClass) {
+			return true
+		}
+	}
+	return false
+}

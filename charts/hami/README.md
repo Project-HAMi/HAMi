@@ -240,6 +240,7 @@ become ready and restart the HAMi device plugin DaemonSet.
 |-----------|-------------|---------------|
 | `devices.nvidia.gpuCorePolicy` | GPU core policy | `default` |
 | `devices.nvidia.libCudaLogLevel` | CUDA library log level | `1` |
+| `devices.nvidia.sandboxRuntimeClassNames` | RuntimeClass names whose sandbox does not provide the `libcuda.so.1` that `libvgpu.so` links against (gVisor); pods using them skip the preload injection, and vGPU limits are not enforced. Empty means the defaults `gvisor` and `runsc` | `[]` |
 
 ### Huawei Ascend
 | Parameter | Description | Default Value |

@@ -531,6 +531,11 @@ devices:
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
+    # RuntimeClass names, gVisor for example, whose sandbox does not provide the
+    # libcuda.so.1 that libvgpu.so links against. Pods using one of these skip the preload
+    # injection so the container can start; memory and core limits are not enforced in them.
+    # Leave empty for the built-in defaults: gvisor and runsc.
+    sandboxRuntimeClassNames: []
   ascend:
     enabled: false
     image: ""
