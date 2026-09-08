@@ -37,6 +37,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `mluResourceCores` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
 
 ### Hygon HCU Resources
+
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `hcuResourceName` | HCU resource name | `"hygon.com/hcunum"` |

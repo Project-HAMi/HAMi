@@ -5,7 +5,7 @@ metadata:
   annotations:
     # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-hcu-register}' to get HCU UUID.
     # UUID is like HCU-TPXS320016070601
-    hygon.com/use-gpuuuid: "HCU-TPXS320016070601" # Specify the blacklist card UUIDs for this job, use comma to separate, will launch job on specified cards
+    hygon.com/use-gpuuuid: "HCU-TPXS320016070601" # Specify the allowed card UUIDs for this job, use comma to separate, will launch job on specified cards
     # In this job, we want our job to run on HCU-TPXS320016070601.
 spec:
   containers:
