@@ -63,7 +63,6 @@ spec:
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
-        {{- end }}
           {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             failureThreshold: 8
@@ -76,6 +75,7 @@ spec:
             successThreshold: 1
             timeoutSeconds: 15
           {{- end }}
+        {{- end }}
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
