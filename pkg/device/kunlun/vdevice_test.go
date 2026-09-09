@@ -567,3 +567,19 @@ func Test_FitVXPU_direct(t *testing.T) {
 		})
 	}
 }
+
+func Test_KunlunVDevices_GenerateResourceRequests_CountRange(t *testing.T) {
+	dev := InitKunlunVDevice(testVConfig())
+	for _, count := range []string{"0", "-1", "4294967296"} {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceName(KunlunResourceVCount): resource.MustParse(count),
+				},
+			},
+		}
+		result, err := dev.GenerateResourceRequests(ctr)
+		assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+		assert.ErrorContains(t, err, "out of range")
+	}
+}

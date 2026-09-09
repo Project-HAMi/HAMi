@@ -18,6 +18,7 @@ package mthreads
 
 import (
 	"flag"
+	"fmt"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -1504,4 +1505,33 @@ func TestGenerateResourceRequests_UnevenCoresFailsClosed(t *testing.T) {
 	result, err := dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
 	assert.ErrorContains(t, err, "does not divide evenly")
+}
+
+// TestGenerateResourceRequests_MultiCardCoresPerCard makes sure that with
+// multiple devices every core total, including ones at or below 100 that
+// MutateAdmission can produce (count*16), is divided back to the per card
+// value and checked against the per card limit.
+func TestGenerateResourceRequests_MultiCardCoresPerCard(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	for cards := int64(2); cards <= 6; cards++ {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"mthreads.com/vgpu":      resource.MustParse(fmt.Sprint(cards)),
+					"mthreads.com/sgpu-core": resource.MustParse(fmt.Sprint(cards * 16)),
+				},
+			},
+		}
+		result, err := dev.GenerateResourceRequests(ctr)
+		assert.NilError(t, err)
+		assert.Equal(t, result.Nums, int32(cards))
+		assert.Equal(t, result.Coresreq, int32(16))
+	}
 }

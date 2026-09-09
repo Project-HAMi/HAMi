@@ -727,3 +727,19 @@ func TestGCUDevices_AddResourceUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestGCUDevices_GenerateResourceRequests_CountRange(t *testing.T) {
+	dev := GCUDevices{}
+	for _, count := range []string{"0", "-1", "4294967296"} {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceName(EnflameResourceNameGCU): resource.MustParse(count),
+				},
+			},
+		}
+		result, err := dev.GenerateResourceRequests(ctr)
+		assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+		assert.ErrorContains(t, err, "out of range")
+	}
+}

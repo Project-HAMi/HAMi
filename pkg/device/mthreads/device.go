@@ -246,19 +246,19 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %s is not a non-negative integer", core.String())}
 				}
 				// Coresreq is a per card percentage, but MutateAdmission rewrites
-				// the limit to count*coresPerMthreadsGPU (16) only when more than
-				// one device is requested, so a value above 100 with multiple
-				// devices is a total across the cards and has to be divided
-				// back. A value at or below 100 is already per card, and a value
-				// above 100 with a single requested device is plain invalid
-				// because MutateAdmission never writes one.
-				if corenums > 100 && n > 1 {
+				// the limit to count*coresPerMthreadsGPU (16) whenever more than
+				// one device is requested, so with multiple devices the value
+				// is a total across the cards and has to be divided back. With
+				// a single device MutateAdmission never writes a total, so a
+				// value above 100 is plain invalid.
+				if n > 1 {
 					if corenums%n != 0 {
 						klog.ErrorS(nil, "mthreads core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)
 						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d does not divide evenly across %d devices", corenums, n)}
 					}
 					corenums /= n
-				} else if corenums > 100 {
+				}
+				if corenums > 100 {
 					klog.ErrorS(nil, "mthreads core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}

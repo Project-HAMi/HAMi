@@ -19,6 +19,7 @@ package kunlun
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -164,6 +165,10 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	if ok {
 		klog.V(3).Infof("Counting %s devices", dev.CommonWord())
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "kunlun vdevice count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[xpuResourceMem]
 			if !ok {

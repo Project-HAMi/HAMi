@@ -18,6 +18,7 @@ package enflame
 
 import (
 	"fmt"
+	"math"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -97,6 +98,10 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "enflame device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("device count %d is out of range", n)}
+			}
 			klog.Info("Found enflame devices")
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
