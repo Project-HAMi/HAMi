@@ -19,7 +19,7 @@ import (
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"google.golang.org/grpc"
-	kubelet "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -88,7 +88,7 @@ func TestMigPluginStartupRollback(t *testing.T) {
 				}
 				server := grpc.NewServer()
 				// The default registration method returns Unimplemented.
-				kubelet.RegisterRegistrationServer(server, &kubelet.UnimplementedRegistrationServer{})
+				kubeletdevicepluginv1beta1.RegisterRegistrationServer(server, &kubeletdevicepluginv1beta1.UnimplementedRegistrationServer{})
 				go func() { _ = server.Serve(listener) }()
 				t.Cleanup(server.Stop)
 			}
