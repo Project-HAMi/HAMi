@@ -43,6 +43,11 @@ func init() {
 }
 
 func GetNode(nodename string) (*corev1.Node, error) {
+	return GetNodeWithContext(context.Background(), nodename)
+}
+
+// GetNodeWithContext allows callers to cancel a node lookup during shutdown.
+func GetNodeWithContext(ctx context.Context, nodename string) (*corev1.Node, error) {
 	if nodename == "" {
 		klog.ErrorS(nil, "Node name is empty")
 		return nil, fmt.Errorf("nodename is empty")
@@ -54,7 +59,7 @@ func GetNode(nodename string) (*corev1.Node, error) {
 	}
 
 	klog.V(5).InfoS("Fetching node", "nodeName", nodename)
-	n, err := c.CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	n, err := c.CoreV1().Nodes().Get(ctx, nodename, metav1.GetOptions{})
 	if err != nil {
 		switch {
 		case apierrors.IsNotFound(err):
@@ -137,6 +142,11 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+	return PatchNodeAnnotationsWithContext(context.Background(), node, annotations)
+}
+
+// PatchNodeAnnotationsWithContext allows callers to cancel registration on shutdown.
+func PatchNodeAnnotationsWithContext(ctx context.Context, node *corev1.Node, annotations map[string]string) error {
 	if node == nil {
 		return fmt.Errorf("node is nil")
 	}
@@ -159,7 +169,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 		return err
 	}
 	_, err = c.CoreV1().Nodes().
-		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+		Patch(ctx, node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch node %v failed, %v", node.Name, err)
