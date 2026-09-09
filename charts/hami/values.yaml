@@ -596,3 +596,6 @@ prometheus:
 #           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
 device-config:
   content: ""
+
+# Memory units (512MiB each) provided by one MThreads card. 96 = MTT S4000 (48GiB, upstream default); 160 = MTT S5000 (80GiB).
+mthreadsMemoryPerCard: 96

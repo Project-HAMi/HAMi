@@ -17,7 +17,6 @@ limitations under the License.
 package mthreads
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -50,7 +49,10 @@ const (
 	MthreadsAssignedNode     = "mthreads.com/predicate-node"
 	MthreadsPredicateTime    = "mthreads.com/predicate-time"
 	coresPerMthreadsGPU      = 16
-	memoryPerMthreadsGPU     = 96
+	// defaultMemoryPerMthreadsGPU is the memory units per card for the MTT
+	// S4000 (96 x 512MiB = 48GiB). Other cards (e.g. S5000 with 80GiB = 160
+	// units) should override it via device-config `mthreads.memoryPerCard`.
+	defaultMemoryPerMthreadsGPU = 96
 	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
 	// HAMi accounts internally. One mthreads vmemory unit is 512 MiB.
 	MemoryFactor = 512
@@ -60,19 +62,42 @@ var (
 	MthreadsResourceCount  string
 	MthreadsResourceMemory string
 	MthreadsResourceCores  string
-	legalMemoryslices      = []int64{2, 4, 8, 16, 32, 64, 96}
+	memoryPerMthreadsGPU   = int64(defaultMemoryPerMthreadsGPU)
+	legalMemoryslices      = buildLegalMemorySlices(memoryPerMthreadsGPU)
 )
+
+// buildLegalMemorySlices returns the valid per-slice memory unit requests:
+// powers of two starting at 2, always ending with the full-card capacity.
+// For 96 this yields [2 4 8 16 32 64 96], matching the historical list.
+func buildLegalMemorySlices(memoryPerCard int64) []int64 {
+	if memoryPerCard < 2 {
+		return []int64{memoryPerCard}
+	}
+	out := make([]int64, 0, 12)
+	for v := int64(2); v < memoryPerCard; v *= 2 {
+		out = append(out, v)
+	}
+	out = append(out, memoryPerCard)
+	return out
+}
 
 type MthreadsConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
+	// MemoryPerCard is the number of 512MiB memory units provided by one
+	// physical card. Defaults to 96 (MTT S4000, 48GiB) when unset.
+	MemoryPerCard int64 `yaml:"memoryPerCard"`
 }
 
 func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 	MthreadsResourceCount = config.ResourceCountName
 	MthreadsResourceCores = config.ResourceCoreName
 	MthreadsResourceMemory = config.ResourceMemoryName
+	if config.MemoryPerCard > 0 {
+		memoryPerMthreadsGPU = config.MemoryPerCard
+		legalMemoryslices = buildLegalMemorySlices(memoryPerMthreadsGPU)
+	}
 	_, ok := device.InRequestDevices[MthreadsGPUDevice]
 	if !ok {
 		device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
@@ -120,7 +145,7 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 			memnum, _ := mem.AsInt64()
 			found := slices.Contains(legalMemoryslices, memnum)
 			if !found {
-				return true, errors.New("sGPU memory request value is invalid, valid values are [2, 4, 8, 16, 32, 64, 96]")
+				return true, fmt.Errorf("sGPU memory request value is invalid, valid values are %v (memoryPerCard=%d)", legalMemoryslices, memoryPerMthreadsGPU)
 			}
 		}
 	}
