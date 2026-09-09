@@ -2191,7 +2191,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := dev.GenerateResourceRequests(tt.ctr)
+			result, _ := dev.GenerateResourceRequests(tt.ctr)
 			assert.DeepEqual(t, result, tt.want)
 		})
 	}
@@ -2214,11 +2214,11 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 			},
 		},
 	}
-	result := dev.GenerateResourceRequests(ctr)
+	result, _ := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(2048))
 
 	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1Gi")
-	result = dev.GenerateResourceRequests(ctr)
+	result, _ = dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
@@ -2239,19 +2239,19 @@ func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 			},
 		},
 	}
-	result := dev.GenerateResourceRequests(ctr)
+	result, _ := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
 
 	// a percentage of 0 is unset, so it lands on defaultMemory just like nvidia.com/gpumem: 0
 	ctr.Resources.Limits["nvidia.com/gpumem-percentage"] = *resource.NewQuantity(0, resource.DecimalSI)
-	result = dev.GenerateResourceRequests(ctr)
+	result, _ = dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
 
 	delete(ctr.Resources.Limits, "nvidia.com/gpumem-percentage")
 	ctr.Resources.Limits["nvidia.com/gpumem"] = *resource.NewQuantity(0, resource.DecimalSI)
-	control := dev.GenerateResourceRequests(ctr)
+	control, _ := dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, control)
 }
 
@@ -2285,7 +2285,7 @@ func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
 			Type: NvidiaGPUDevice, Health: true,
 		}}
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, _ := dev.GenerateResourceRequests(ctr)
 
 	fit, result, reason := dev.Fit(newCard(0), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Assert(t, fit, "empty card should fit, reason: %s", reason)
@@ -3407,7 +3407,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
 				assert.Equal(t, req.Nums, int32(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)
@@ -3615,4 +3615,29 @@ func TestDistinctCardCandidates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateResourceRequests_InvalidCoresFailsClosed makes sure a core
+// request outside 0-100 returns an error instead of a zero request, so the
+// scheduler rejects the pod rather than binding it without devices.
+func TestGenerateResourceRequests_InvalidCoresFailsClosed(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":      resource.MustParse("1"),
+				"nvidia.com/gpucores": resource.MustParse("150"),
+			},
+		},
+	}
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+	assert.ErrorContains(t, err, "out of range")
 }

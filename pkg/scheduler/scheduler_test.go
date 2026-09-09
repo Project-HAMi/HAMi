@@ -1370,8 +1370,8 @@ func (m *registerMockDevice) GetNodeDevices(node corev1.Node) ([]*device.DeviceI
 }
 func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *registerMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 func (m *registerMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil
@@ -3483,4 +3483,36 @@ func TestSchedulerIsSynced(t *testing.T) {
 	s.synced.Store(true)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+// TestFilterInvalidDeviceRequestFailsClosed makes sure a pod whose container
+// declares a HAMi device resource with an invalid value is rejected by the
+// filter instead of being treated as device-less and bound without any GPU.
+func TestFilterInvalidDeviceRequestFailsClosed(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+	client.KubeClient = fake.NewClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-ic", Name: "invalid-cores", Namespace: "ns-invalid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpucores": *resource.NewQuantity(150, resource.BinarySI),
+			}},
+		}}},
+	}
+	nodeNames := []string{"node1"}
+	res, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+	assert.Assert(t, res != nil)
+	assert.Equal(t, res.Error, err.Error())
+	// No node may survive: the pod must not be schedulable as device-less.
+	assert.Assert(t, res.Nodes == nil && res.NodeNames == nil)
 }

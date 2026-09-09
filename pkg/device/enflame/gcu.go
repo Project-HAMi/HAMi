@@ -88,7 +88,7 @@ func (dev *GCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
 	enflameResourceCount := corev1.ResourceName(EnflameResourceNameGCU)
 	v, ok := ctr.Resources.Limits[enflameResourceCount]
@@ -104,10 +104,10 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				Memreq:           100,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *GCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

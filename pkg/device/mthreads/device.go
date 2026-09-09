@@ -199,7 +199,7 @@ func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 	return true, true
 }
 
-func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count mthreads devices for container ", ctr.Name)
 	mthreadsResourceCount := corev1.ResourceName(MthreadsResourceCount)
 	mthreadsResourceMem := corev1.ResourceName(MthreadsResourceMemory)
@@ -214,7 +214,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				"container", ctr.Name,
 				"deviceCount", n)
 			if n <= 0 || n > math.MaxInt32 {
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mthreadsResourceMem]
@@ -226,7 +226,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "mthreads memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 				klog.InfoS("Memory allocation calculated",
@@ -241,9 +241,26 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			}
 			if ok {
 				corenums, ok := core.AsInt64()
-				if !ok || corenums < 0 || corenums > 100 {
-					klog.ErrorS(nil, "mthreads core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
-					return device.ContainerDeviceRequest{}
+				if !ok || corenums < 0 {
+					klog.ErrorS(nil, "mthreads core request is not a non-negative integer", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %s is not a non-negative integer", core.String())}
+				}
+				// Coresreq is a per card percentage, but MutateAdmission rewrites
+				// the limit to count*coresPerMthreadsGPU (16) only when more than
+				// one device is requested, so a value above 100 with multiple
+				// devices is a total across the cards and has to be divided
+				// back. A value at or below 100 is already per card, and a value
+				// above 100 with a single requested device is plain invalid
+				// because MutateAdmission never writes one.
+				if corenums > 100 && n > 1 {
+					if corenums%n != 0 {
+						klog.ErrorS(nil, "mthreads core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d does not divide evenly across %d devices", corenums, n)}
+					}
+					corenums /= n
+				} else if corenums > 100 {
+					klog.ErrorS(nil, "mthreads core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
 				corenum = int32(corenums)
 			}
@@ -258,11 +275,11 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				Type:             MthreadsGPUDevice,
 				Memreq:           int32(memnum) / int32(n),
 				MemPercentagereq: int32(mempnum),
-				Coresreq:         corenum / int32(n),
-			}
+				Coresreq:         corenum,
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *MthreadsDevices) customFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, device *device.DeviceUsage) bool {

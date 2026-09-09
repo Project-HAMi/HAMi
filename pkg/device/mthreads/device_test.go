@@ -709,7 +709,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			InitMthreadsDevice(config)
 			dev := MthreadsDevices{}
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -1445,4 +1445,63 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
 	})
+}
+
+// TestGenerateResourceRequests_MultiCardCoresDivision covers the case from
+// issue #2987: MutateAdmission rewrites the core limit to count*16 when more
+// than one device is requested, and GenerateResourceRequests has to divide it
+// back to the per card value instead of silently dropping or misreporting it.
+func TestGenerateResourceRequests_MultiCardCoresDivision(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu": resource.MustParse("7"),
+			},
+		},
+	}
+	// What MutateAdmission writes for a 7 card request without explicit
+	// per card cores.
+	mutated, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Assert(t, mutated)
+	mutatedCore := ctr.Resources.Limits["mthreads.com/sgpu-core"]
+	assert.Equal(t, mutatedCore.Value(), int64(112))
+
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
+	assert.Equal(t, result.Nums, int32(7))
+	assert.Equal(t, result.Coresreq, int32(16))
+}
+
+// TestGenerateResourceRequests_UnevenCoresFailsClosed makes sure a core total
+// that does not divide evenly across the requested cards is rejected instead
+// of producing a device-less pod.
+func TestGenerateResourceRequests_UnevenCoresFailsClosed(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu":      resource.MustParse("3"),
+				"mthreads.com/sgpu-core": resource.MustParse("130"),
+			},
+		},
+	}
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+	assert.ErrorContains(t, err, "does not divide evenly")
 }

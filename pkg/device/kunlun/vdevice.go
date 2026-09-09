@@ -154,7 +154,7 @@ func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsa
 	return false, false
 }
 
-func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	xpuResourceCount := corev1.ResourceName(KunlunResourceVCount)
 	xpuResourceMem := corev1.ResourceName(KunlunResourceVMemory)
 	v, ok := ctr.Resources.Limits[xpuResourceCount]
@@ -189,10 +189,10 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 				Memreq:           int32(memnum), //int32(dev.config.MemoryMax),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         int32(cores),
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *KunlunVDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

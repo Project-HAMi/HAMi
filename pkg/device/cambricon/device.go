@@ -253,7 +253,7 @@ func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceU
 	return false, false, false
 }
 
-func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count mlu devices for container ", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
@@ -269,7 +269,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "cambricon device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found cambricon devices")
 			memnum := 0
@@ -284,7 +284,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "cambricon memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 			}
@@ -297,7 +297,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				corenums, ok := core.AsInt64()
 				if !ok || corenums < 0 || corenums > 100 {
 					klog.ErrorS(nil, "cambricon core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("core request %s is out of range (must be 0-100)", core.String())}
 				}
 				corenum = int32(corenums)
 			}
@@ -313,12 +313,12 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
 	}
 	return device.ContainerDeviceRequest{
 		Nums: 0,
-	}
+	}, nil
 }
 
 func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

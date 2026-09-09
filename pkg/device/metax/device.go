@@ -132,7 +132,7 @@ func (dev *MetaxDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool
 	return count > 0, true
 }
 
-func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count metax devices for container ", ctr.Name)
 	metaxResourceCount := corev1.ResourceName(MetaxResourceCount)
 	v, ok := ctr.Resources.Limits[metaxResourceCount]
@@ -143,7 +143,7 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "metax device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found metax devices")
 			return device.ContainerDeviceRequest{
@@ -152,10 +152,10 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 				Memreq:           0,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func parseMetaxAnnos(annos string, index int) float32 {

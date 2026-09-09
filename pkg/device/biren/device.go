@@ -125,7 +125,7 @@ func (dev *BirenDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool
 	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
-func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.V(5).Info("Start to count biren devices for container ", ctr.Name)
 	BirenResourceCount := corev1.ResourceName(BirenResourceCount)
 	v, ok := ctr.Resources.Limits[BirenResourceCount]
@@ -136,7 +136,7 @@ func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "biren device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "biren", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found biren devices")
 			memnum := 0
@@ -149,10 +149,10 @@ func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *BirenDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

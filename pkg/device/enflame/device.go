@@ -315,7 +315,7 @@ func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 	return true, true
 }
 
-func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
 	resourceCount := corev1.ResourceName(EnflameResourceNameDRSGCU)
 	v, ok := ctr.Resources.Limits[resourceCount]
@@ -327,7 +327,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			klog.Info("Found enflame devices")
 			if n > math.MaxInt32 {
 				klog.ErrorS(nil, "drs request is too large", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("drs request %d is too large", n)}
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             1,
@@ -335,21 +335,21 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 				Memreq:           int32(n),
 				MemPercentagereq: enflameRequestModeDirect,
 				Coresreq:         enflameUnknownCoreRequest,
-			}
+			}, nil
 		}
 	}
 	memReq, hasMem := getContainerResourceRequest(ctr, corev1.ResourceName(EnflameResourceNameGCUMemory))
 	coreReq, hasCore := getContainerResourceRequest(ctr, corev1.ResourceName(EnflameResourceNameGCUCore))
 	if !hasMem && !hasCore {
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, nil
 	}
 	if hasMem && memReq > math.MaxInt32 {
 		klog.ErrorS(nil, "gcu memory request is too large", "container", ctr.Name, "request", memReq)
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("gcu memory request %d is too large", memReq)}
 	}
 	if hasCore && (coreReq < 0 || coreReq > 100) {
 		klog.ErrorS(nil, "gcu core request is out of range (must be 0-100)", "container", ctr.Name, "request", coreReq)
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("gcu core request %d is out of range (must be 0-100)", coreReq)}
 	}
 	klog.Info("Found enflame memory/core based request")
 	return device.ContainerDeviceRequest{
@@ -358,7 +358,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		Memreq:           int32(memReq),
 		MemPercentagereq: enflameRequestModeBySpec,
 		Coresreq:         int32(coreReq),
-	}
+	}, nil
 }
 
 func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

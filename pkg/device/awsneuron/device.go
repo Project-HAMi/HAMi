@@ -286,7 +286,7 @@ func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {
 	}
 }
 
-func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count awsNeuron devices for container ", ctr.Name)
 	awsResourceCount := corev1.ResourceName(dev.resourceCountName)
 	awsResourceCores := corev1.ResourceName(dev.resourceCoreName)
@@ -295,7 +295,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 		n, err := validateResourceRequest(v, dev.resourceCountName, maxAWSNeuronDeviceCount)
 		if err != nil {
 			klog.ErrorS(err, "Invalid awsNeuron device request", "container", ctr.Name)
-			return device.ContainerDeviceRequest{}
+			return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "awsneuron", Reason: err.Error()}
 		}
 		klog.InfoS("Detected awsNeuron device request",
 			"container", ctr.Name,
@@ -306,19 +306,19 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			Memreq:           0,
 			MemPercentagereq: 0,
 			Coresreq:         int32(dev.coresPerDevice()),
-		}
+		}, nil
 	} else {
 		core, ok := resourceQuantity(ctr, awsResourceCores)
 		if ok {
 			n, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
 			if err != nil {
 				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "awsneuron", Reason: err.Error()}
 			}
 			nums, coresreq, err := dev.splitCoreRequest(n)
 			if err != nil {
 				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "awsneuron", Reason: err.Error()}
 			}
 			klog.InfoS("Detected awsNeuron device request",
 				"container", ctr.Name,
@@ -329,10 +329,10 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				Memreq:           0,
 				MemPercentagereq: 0,
 				Coresreq:         coresreq,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *AWSNeuronDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

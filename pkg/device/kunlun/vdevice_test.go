@@ -490,7 +490,7 @@ func Test_KunlunVDevices_GenerateResourceRequests(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := dev.GenerateResourceRequests(test.ctr)
+			got, _ := dev.GenerateResourceRequests(test.ctr)
 			assert.DeepEqual(t, got, test.want)
 		})
 	}

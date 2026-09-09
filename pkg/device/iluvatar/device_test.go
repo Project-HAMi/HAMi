@@ -531,7 +531,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

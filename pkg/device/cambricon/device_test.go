@@ -664,7 +664,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			InitMLUDevice(config)
 			dev := CambriconDevices{}
-			result := dev.GenerateResourceRequests(&test.args)
+			result, _ := dev.GenerateResourceRequests(&test.args)
 			assert.Equal(t, test.want, result)
 		})
 	}
@@ -1937,7 +1937,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
 				assert.Equal(t, int32(1), req.Nums)
 				assert.Equal(t, int32(tt.cores), req.Coresreq)

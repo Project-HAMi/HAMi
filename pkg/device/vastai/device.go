@@ -127,7 +127,7 @@ func (dev *VastaiDevices) CheckHealth(devType string, n *corev1.Node) (bool, boo
 	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
-func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.V(5).Info("Start to count vastai devices for container ", ctr.Name)
 	vastaiResourceCount := corev1.ResourceName(VastaiResourceCount)
 	v, ok := ctr.Resources.Limits[vastaiResourceCount]
@@ -138,7 +138,7 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "vastai device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "vastai", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found vastai devices")
 			memnum := 0
@@ -151,10 +151,10 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *VastaiDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

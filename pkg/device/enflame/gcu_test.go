@@ -424,7 +424,7 @@ func TestGCUDevices_GenerateResourceRequests(t *testing.T) {
 			}
 			InitGCUDevice(config)
 			dev := &GCUDevices{}
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

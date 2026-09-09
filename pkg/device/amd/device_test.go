@@ -238,7 +238,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 		}
-		got := dev.GenerateResourceRequests(ctr)
+		got, _ := dev.GenerateResourceRequests(ctr)
 		assert.DeepEqual(t, device.ContainerDeviceRequest{
 			Nums:             2,
 			Type:             AMDDevice,
@@ -257,7 +257,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 		}
-		got := dev.GenerateResourceRequests(ctr)
+		got, _ := dev.GenerateResourceRequests(ctr)
 		assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
 	})
 
@@ -270,7 +270,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 		}
-		got := dev.GenerateResourceRequests(ctr)
+		got, _ := dev.GenerateResourceRequests(ctr)
 		assert.Equal(t, int32(100), got.Coresreq)
 	})
 
@@ -285,7 +285,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 		}
-		got := dev.GenerateResourceRequests(ctr)
+		got, _ := dev.GenerateResourceRequests(ctr)
 		assert.Equal(t, int32(42), got.Coresreq)
 	})
 
@@ -299,7 +299,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			}
-			got := dev.GenerateResourceRequests(ctr)
+			got, _ := dev.GenerateResourceRequests(ctr)
 			assert.Equal(t, int32(cores), got.Coresreq)
 		}
 		for _, cores := range []int64{0, 101, 150, 200, -1} {
@@ -311,7 +311,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			}
-			got := dev.GenerateResourceRequests(ctr)
+			got, _ := dev.GenerateResourceRequests(ctr)
 			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
 		}
 		for _, rawCore := range []string{"50m", "99.1"} {
@@ -323,7 +323,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			}
-			got := dev.GenerateResourceRequests(ctr)
+			got, _ := dev.GenerateResourceRequests(ctr)
 			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
 		}
 	})
@@ -346,7 +346,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			limits[tc.resource] = *resource.NewQuantity(tc.value, resource.DecimalSI)
 			ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: limits}}
-			assert.DeepEqual(t, device.ContainerDeviceRequest{}, dev.GenerateResourceRequests(ctr))
+			got, err := dev.GenerateResourceRequests(ctr)
+			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
+			assert.ErrorContains(t, err, "out of range")
 		})
 	}
 }

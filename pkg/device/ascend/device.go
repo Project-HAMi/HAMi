@@ -331,7 +331,7 @@ func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
-func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
 	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	ascendResourceCore := corev1.ResourceName(dev.config.ResourceCoreName)
@@ -346,7 +346,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			klog.Info("Found AscendDevices devices")
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "ascend device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[ascendResourceMem]
@@ -357,7 +357,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 				// Negative quantities such as -1m return ok=false from AsInt64, so reject by sign first.
 				if mem.Sign() < 0 {
 					klog.ErrorS(nil, "ascend device memory request is negative", "container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("memory request %s is negative", mem.String())}
 				}
 				memnums, ok := mem.AsInt64()
 				if ok {
@@ -365,7 +365,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 					if memnums > math.MaxInt32 {
 						klog.ErrorS(nil, "ascend device memory request is out of range; memory unit is treated as MB not Byte, so a quantity such as 16Gi is invalid, request 16384 for 16GB instead",
 							"container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
-						return device.ContainerDeviceRequest{}
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("memory request %s is out of range; memory unit is treated as MB not Byte", mem.String())}
 					}
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
@@ -374,7 +374,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						if memnums > math.MaxInt32 {
 							klog.ErrorS(nil, "ascend device memory request overflows int32 after applying memory factor; memory unit is treated as MB not Byte",
 								"container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", dev.config.MemoryFactor)
-							return device.ContainerDeviceRequest{}
+							return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("memory request %d overflows int32 after applying memory factor %d", rawMemnums, dev.config.MemoryFactor)}
 						}
 						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
@@ -393,7 +393,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 					corenums, valid := cv.AsInt64()
 					if !valid || corenums < 0 || corenums > 100 {
 						klog.ErrorS(nil, "ascend device core request is out of range", "container", ctr.Name, "request", cv.String())
-						return device.ContainerDeviceRequest{}
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", cv.String())}
 					}
 					corenum = int32(corenums)
 				}
@@ -410,10 +410,10 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
