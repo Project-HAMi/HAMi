@@ -65,7 +65,7 @@ func GetNode(nodename string) (*corev1.Node, error) {
 			return nil, fmt.Errorf("unauthorized to access node %s", nodename)
 		default:
 			klog.ErrorS(err, "Failed to get node", "nodeName", nodename)
-			return nil, fmt.Errorf("failed to get node %s: %v", nodename, err)
+			return nil, fmt.Errorf("failed to get node %s: %w", nodename, err)
 		}
 	}
 
