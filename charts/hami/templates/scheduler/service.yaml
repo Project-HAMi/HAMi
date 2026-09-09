@@ -17,7 +17,7 @@ spec:
   ports:
     - name: http
       port: {{ .Values.scheduler.service.httpPort | default 443 }}  # Default HTTP port is 443
-      targetPort: {{ .Values.scheduler.service.httpTargetPort | default 443 }}
+      targetPort: {{ .Values.scheduler.service.httpTargetPort | default 9443 }}
       {{- if eq (.Values.scheduler.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
       nodePort: {{ .Values.scheduler.service.schedulerPort | default 31998 }}
       {{- end }}
