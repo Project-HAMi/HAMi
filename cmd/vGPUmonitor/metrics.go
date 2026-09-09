@@ -327,7 +327,7 @@ func (cc ClusterManagerCollector) resolveGPUDeviceIdentity(hdev nvml.Device) (gp
 	return gpuDeviceIdentity{
 		nodeName:   nodeName,
 		uuid:       uuid,
-		deviceName: "NVIDIA-" + deviceName,
+		deviceName: nv.NormalizeDeviceModel(deviceName),
 	}, nil
 }
 

@@ -170,11 +170,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		if !ok {
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
 		}
-		if !strings.HasPrefix(Model, "NVIDIA") {
-			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
-			// This is to handle cases where the model name might not be in the expected format.
-			Model = fmt.Sprintf("NVIDIA-%s", Model)
-		}
+		Model = nvidia.NormalizeDeviceModel(Model)
 		devcore := int32(100)
 		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)

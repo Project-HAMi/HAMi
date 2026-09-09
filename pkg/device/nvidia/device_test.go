@@ -3616,3 +3616,25 @@ func TestDistinctCardCandidates(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDeviceModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		// Drivers from R470 on already report the vendor in the model name.
+		{"already prefixed", "NVIDIA A100-SXM4-40GB", "NVIDIA A100-SXM4-40GB"},
+		{"already prefixed geforce", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 4090"},
+		// Older names carry no vendor, so HAMi adds one.
+		{"legacy tesla name", "Tesla V100-SXM2-16GB", "NVIDIA-Tesla V100-SXM2-16GB"},
+		{"empty", "", "NVIDIA-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeDeviceModel(tt.model); got != tt.want {
+				t.Errorf("NormalizeDeviceModel(%q) = %q, want %q", tt.model, got, tt.want)
+			}
+		})
+	}
+}
