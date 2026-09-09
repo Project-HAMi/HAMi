@@ -46,6 +46,11 @@ const (
 	// MthreadsNoUseUUID annotation specifies a comma-separated list of Mthreads UUIDs to exclude.
 	MthreadsNoUseUUID        = "mthreads.ai/nouse-gpuuuid"
 	MthreadsAssignedGPUIndex = "mthreads.com/gpu-index"
+	// MthreadsWholeGPUResource is the vendor whole-card resource advertised
+	// by the Moore Threads device plugin for GPUs NOT carved into sGPU
+	// slices. Requests for it are delivered by the vendor stack directly
+	// (outside HAMi scheduling) and must not be mixed with slice requests.
+	MthreadsWholeGPUResource = "mthreads.com/gpu"
 	MthreadsAssignedNode     = "mthreads.com/predicate-node"
 	MthreadsPredicateTime    = "mthreads.com/predicate-time"
 	coresPerMthreadsGPU      = 16
@@ -117,6 +122,27 @@ func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
+	// Reject pods that mix whole-card and slice delivery: the whole-card
+	// resource is allocated by the vendor device plugin outside HAMi's
+	// accounting, so combining both would silently overcommit the node.
+	for _, rl := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+		if rl == nil {
+			continue
+		}
+		if _, whole := rl[corev1.ResourceName(MthreadsWholeGPUResource)]; whole {
+			_, sliced := rl[corev1.ResourceName(MthreadsResourceCount)]
+			if !sliced {
+				_, sliced = rl[corev1.ResourceName(MthreadsResourceMemory)]
+			}
+			if !sliced {
+				_, sliced = rl[corev1.ResourceName(MthreadsResourceCores)]
+			}
+			if sliced {
+				return true, fmt.Errorf("cannot mix %s (whole card, delivered outside HAMi) with %s/%s/%s (sGPU slices) in the same container",
+					MthreadsWholeGPUResource, MthreadsResourceCount, MthreadsResourceMemory, MthreadsResourceCores)
+			}
+		}
+	}
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCount)]
 	if !ok {
 		count, ok = ctr.Resources.Requests[corev1.ResourceName(MthreadsResourceCount)]
