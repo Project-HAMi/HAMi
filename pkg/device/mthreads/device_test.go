@@ -1494,3 +1494,47 @@ func Test_InitMthreadsDeviceMemoryPerCard(t *testing.T) {
 	assert.Equal(t, int64(160), memoryPerMthreadsGPU)
 	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 128, 160}, legalMemoryslices)
 }
+
+func Test_MutateAdmissionMixedDelivery(t *testing.T) {
+	dev := &MthreadsDevices{}
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	})
+
+	newContainer := func(limits map[string]string) *corev1.Container {
+		rl := corev1.ResourceList{}
+		for k, v := range limits {
+			q := resource.MustParse(v)
+			rl[corev1.ResourceName(k)] = q
+		}
+		return &corev1.Container{Resources: corev1.ResourceRequirements{Limits: rl}}
+	}
+
+	// Whole card + slice request must be rejected.
+	ctr := newContainer(map[string]string{
+		"mthreads.com/gpu":         "1",
+		"mthreads.com/vgpu":        "1",
+		"mthreads.com/sgpu-memory": "32",
+	})
+	_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	if err == nil {
+		t.Fatalf("expected mixed whole-card/slice request to be rejected")
+	}
+
+	// Whole card + cores only must also be rejected.
+	ctr = newContainer(map[string]string{
+		"mthreads.com/gpu":       "1",
+		"mthreads.com/sgpu-core": "8",
+	})
+	if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err == nil {
+		t.Fatalf("expected mixed whole-card/core request to be rejected")
+	}
+
+	// Whole card alone must pass through untouched.
+	ctr = newContainer(map[string]string{"mthreads.com/gpu": "1"})
+	found, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.Equal(t, false, found)
+	assert.NilError(t, err)
+}
