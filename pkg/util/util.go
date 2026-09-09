@@ -140,6 +140,9 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	if node == nil {
 		return fmt.Errorf("node is nil")
 	}
+	if node.Name == "" {
+		return fmt.Errorf("node name is empty")
+	}
 	c := client.GetClient()
 	if c == nil {
 		return fmt.Errorf("kubernetes client is not initialized")
@@ -192,6 +195,13 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	if pod == nil {
 		return fmt.Errorf("pod is nil")
 	}
+	if pod.Name == "" {
+		return fmt.Errorf("pod name is empty")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 		Labels      map[string]string `json:"labels,omitempty"`
@@ -213,7 +223,7 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 		return err
 	}
 	klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
-	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
+	_, err = c.CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)
@@ -222,6 +232,13 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 }
 
 func PatchPodLabels(namespace, name string, labels map[string]string) error {
+	if namespace == "" || name == "" {
+		return fmt.Errorf("pod namespace or name is empty")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		Labels map[string]string `json:"labels,omitempty"`
 	}
@@ -240,7 +257,7 @@ func PatchPodLabels(namespace, name string, labels map[string]string) error {
 		return err
 	}
 	klog.V(5).InfoS("Patching pod labels", "namespace", namespace, "name", name, "labels", labels)
-	_, err = client.GetClient().CoreV1().Pods(namespace).
+	_, err = c.CoreV1().Pods(namespace).
 		Patch(context.Background(), name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.ErrorS(err, "Failed to patch pod labels", "namespace", namespace, "name", name)
