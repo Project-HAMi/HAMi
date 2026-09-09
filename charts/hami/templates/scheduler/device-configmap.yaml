@@ -75,6 +75,7 @@ data:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
+      memoryPerCard: {{ .Values.mthreadsMemoryPerCard | default 96 }}
     iluvatars:
     - chipName: MR-V100
       commonWord: MR-V100

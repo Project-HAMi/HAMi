@@ -1446,3 +1446,51 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, reason, "core limit out of range")
 	})
 }
+
+func TestBuildLegalMemorySlices(t *testing.T) {
+	tests := []struct {
+		name          string
+		memoryPerCard int64
+		want          []int64
+	}{
+		{
+			// MTT S4000 (48GiB): matches the historical hardcoded list.
+			name:          "s4000-96-units",
+			memoryPerCard: 96,
+			want:          []int64{2, 4, 8, 16, 32, 64, 96},
+		},
+		{
+			// MTT S5000 (80GiB): powers of two plus the exact card capacity.
+			name:          "s5000-160-units",
+			memoryPerCard: 160,
+			want:          []int64{2, 4, 8, 16, 32, 64, 128, 160},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildLegalMemorySlices(tt.memoryPerCard)
+			assert.DeepEqual(t, tt.want, got)
+		})
+	}
+}
+
+func Test_InitMthreadsDeviceMemoryPerCard(t *testing.T) {
+	// Unset config keeps the S4000 default (96 units).
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	})
+	assert.Equal(t, int64(96), memoryPerMthreadsGPU)
+	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 96}, legalMemoryslices)
+
+	// MTT S5000 (80GiB) configuration overrides the per-card model.
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+		MemoryPerCard:      160,
+	})
+	assert.Equal(t, int64(160), memoryPerMthreadsGPU)
+	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 128, 160}, legalMemoryslices)
+}
