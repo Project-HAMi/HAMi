@@ -440,7 +440,7 @@ devicePlugin:
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: true
-  deviceListStrategy: "envvar"
+  deviceListStrategy: "volume-mounts"
   nvidiaHookPath: null
   # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
   # and device roots from GPU Operator's driver-ready contract. If the
