@@ -243,6 +243,221 @@ func TestIsManagedQuota(t *testing.T) {
 	}
 }
 
+// Multiple ResourceQuota objects in one namespace must all be enforced: a pod
+// has to satisfy every object, so the effective limit is the minimum. This is
+// the core scenario from the multi-quota bug: before the fix, the last-added
+// object's limit won regardless of whether it was the tighter one.
+func TestMultipleQuotaObjectsTakeMin(t *testing.T) {
+	initTest()
+	ns := "multi-obj"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	rqWith := func(name string, mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					"limits.nvidia.com/gpumem": *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		}
+	}
+
+	strict, loose := rqWith("strict", 1000), rqWith("loose", 5000)
+
+	// Either add order must converge on the tighter limit.
+	for _, order := range [][]*corev1.ResourceQuota{{strict, loose}, {loose, strict}} {
+		qm.AddQuota(order[0])
+		qm.AddQuota(order[1])
+		if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 1000 {
+			t.Errorf("effective limit = %d, want 1000 (the tighter object)", got)
+		}
+		if qm.FitQuota(ns, 3000, 1, 0, "NVIDIA") {
+			t.Error("FitQuota admitted a 3000 request; the strict 1000 limit must hold")
+		}
+		if !qm.FitQuota(ns, 500, 1, 0, "NVIDIA") {
+			t.Error("FitQuota rejected a 500 request under the 1000 limit")
+		}
+		// Reset for the second order.
+		qm.DelQuota(strict)
+		qm.DelQuota(loose)
+		if (*qm.Quotas[ns])["nvidia.com/gpumem"].LimitSet {
+			t.Fatal("LimitSet still true after deleting every quota object")
+		}
+	}
+}
+
+// Deleting one of two quota objects must recompute from the survivors, not
+// drop enforcement. Both directions are covered: removing the larger limit
+// keeps the smaller one, removing the smaller one lets the limit rise.
+func TestDelQuotaRecomputesFromRemainingObjects(t *testing.T) {
+	initTest()
+	ns := "del-recompute"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	rqWith := func(name string, mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					"limits.nvidia.com/gpumem": *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		}
+	}
+	strict, loose := rqWith("strict", 1000), rqWith("loose", 5000)
+	qm.AddQuota(strict)
+	qm.AddQuota(loose)
+
+	// Deleting the looser object keeps the strict limit enforced.
+	qm.DelQuota(loose)
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 1000 {
+		t.Errorf("limit after deleting the looser object = %d, want 1000", got)
+	}
+	if qm.FitQuota(ns, 1001, 1, 0, "NVIDIA") {
+		t.Error("FitQuota admitted past the surviving strict limit")
+	}
+
+	// Deleting the strict one then lifts the limit to the remaining object.
+	qm.AddQuota(loose)
+	qm.DelQuota(strict)
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 5000 {
+		t.Errorf("limit after deleting the stricter object = %d, want 5000", got)
+	}
+
+	// Deleting the last object unsets the limit but keeps the slot for usage.
+	qm.DelQuota(loose)
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"]; got == nil || got.LimitSet {
+		t.Errorf("quota after deleting every object = %+v, want LimitSet=false", got)
+	}
+}
+
+// Updating one object's limit in place must follow the change immediately.
+func TestUpdateQuotaObjectFollowsLimitChange(t *testing.T) {
+	initTest()
+	ns := "obj-update"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	rqWith := func(name string, mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					"limits.nvidia.com/gpumem": *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		}
+	}
+	a, b := rqWith("a", 2000), rqWith("b", 3000)
+	qm.AddQuota(a)
+	qm.AddQuota(b)
+
+	// Raise a's limit: effective stays at b's 3000.
+	qm.UpdateQuota(rqWith("a", 2000), rqWith("a", 4000))
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 3000 {
+		t.Errorf("limit = %d, want 3000 after raising a above b", got)
+	}
+
+	// Lower a back down: effective follows immediately.
+	qm.UpdateQuota(rqWith("a", 4000), rqWith("a", 1500))
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 1500 {
+		t.Errorf("limit = %d, want 1500 after lowering a below b", got)
+	}
+
+	// An update that drops the resource from the object's spec releases it.
+	qm.UpdateQuota(rqWith("a", 1500), &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: ns},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{}},
+	})
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 3000 {
+		t.Errorf("limit = %d, want 3000 once a stops setting the resource", got)
+	}
+}
+
+// An explicit "0" from one object must block everything even when another
+// object allows more: min(0, x) = 0.
+func TestMultipleQuotaObjectsExplicitZeroBlocks(t *testing.T) {
+	initTest()
+	ns := "zero-and-more"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	zero := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "block-all", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpumem": *resource.NewQuantity(0, resource.DecimalSI),
+			},
+		},
+	}
+	loose := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "loose", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpumem": *resource.NewQuantity(5000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(zero)
+	qm.AddQuota(loose)
+
+	if qm.FitQuota(ns, 1, 1, 0, "NVIDIA") {
+		t.Error("FitQuota admitted a request while one object set an explicit 0 limit")
+	}
+}
+
+// The same object set must produce the same final state regardless of the
+// order events arrive in — scheduler restarts replay the full set, and the
+// old last-writer-wins behavior could flip the effective limit across restarts.
+func TestQuotaStateOrderIndependent(t *testing.T) {
+	initTest()
+	ns := "order-independent"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	rqWith := func(name string, mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					"limits.nvidia.com/gpumem": *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		}
+	}
+	objects := []*corev1.ResourceQuota{rqWith("a", 800), rqWith("b", 3000), rqWith("c", 1200)}
+
+	snapshot := func() (int64, bool) {
+		q := (*qm.Quotas[ns])["nvidia.com/gpumem"]
+		return q.Limit, q.LimitSet
+	}
+
+	var wantLimit int64
+	var wantSet bool
+	first := true
+	// Forward, reverse, and rotated orders must all converge.
+	for _, perm := range [][]int{{0, 1, 2}, {2, 1, 0}, {1, 2, 0}} {
+		for _, i := range perm {
+			qm.AddQuota(objects[i])
+		}
+		gotLimit, gotSet := snapshot()
+		if first {
+			wantLimit, wantSet, first = gotLimit, gotSet, false
+		} else if gotLimit != wantLimit || gotSet != wantSet {
+			t.Errorf("state = (%d, %v), want (%d, %v): add order changed the effective limit", gotLimit, gotSet, wantLimit, wantSet)
+		}
+		for _, obj := range objects {
+			qm.DelQuota(obj)
+		}
+	}
+	if wantLimit != 800 || !wantSet {
+		t.Errorf("converged state = (%d, %v), want (800, true)", wantLimit, wantSet)
+	}
+}
+
 func TestAddQuotaAndDelQuota(t *testing.T) {
 	initTest()
 	qm := NewQuotaManager()
