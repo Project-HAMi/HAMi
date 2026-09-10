@@ -549,7 +549,11 @@ func newPolicyPod(namespace, name string, options podOptions) *corev1.Pod {
 		},
 		Spec: corev1.PodSpec{
 			SchedulerName: policyTestScheduler,
-			RestartPolicy: corev1.RestartPolicyNever,
+			// OnFailure lets kubelet retry if the container fails to start
+			// (e.g. during a transient device-plugin restart), avoiding a
+			// permanent Failed phase that would stall the test for its full
+			// timeout duration.
+			RestartPolicy: corev1.RestartPolicyOnFailure,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
@@ -664,7 +668,7 @@ func registeredGPUNodes(client kubernetes.Interface) []gpuNode {
 		if !nodeReady(node) || node.Spec.Unschedulable {
 			continue
 		}
-		if !hasReadyDevicePlugin(client, node.Name) {
+		if !hasReadyDevicePlugin(client, node.Name) || hasTerminatingDevicePlugin(client, node.Name) {
 			continue
 		}
 
@@ -740,11 +744,14 @@ func ensureGPUNodeLabeled(client kubernetes.Interface) {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
-	// Wait for the device-plugin pod to become Ready on this node.
+	// Wait for the device-plugin pod to become Ready on this node, with no
+	// terminating pods left from a previous DaemonSet revision (the label may
+	// have been briefly removed by an earlier suite's cleanup, causing the
+	// DaemonSet controller to terminate and recreate the device-plugin pod).
 	gomega.Eventually(func() bool {
-		return hasReadyDevicePlugin(client, nodeName)
+		return hasReadyDevicePlugin(client, nodeName) && !hasTerminatingDevicePlugin(client, nodeName)
 	}, policyTestTimeout, policyTestInterval).Should(gomega.BeTrue(),
-		"device-plugin did not become ready on node %s after labeling", nodeName)
+		"device-plugin did not become ready and stable on node %s after labeling", nodeName)
 
 	// Wait for the scheduler to recognize the node's GPU resources.
 	// After the device-plugin is ready, there's a delay before the scheduler
@@ -781,6 +788,26 @@ func hasReadyDevicePlugin(client kubernetes.Interface, nodeName string) bool {
 			if status.Name == "device-plugin" && status.Ready {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasTerminatingDevicePlugin returns true if any device-plugin pod on the given
+// node is being deleted. A terminating pod may still pass readiness checks
+// briefly, but kubelet's device-plugin gRPC registration will be removed once
+// the pod is fully gone, so scheduling through a terminating plugin is unsafe.
+func hasTerminatingDevicePlugin(client kubernetes.Interface, nodeName string) bool {
+	pods, err := client.CoreV1().Pods(hamiNamespace()).List(context.Background(), metav1.ListOptions{
+		LabelSelector: schedulerComponentKey + "=" + devicePluginComponent,
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return false
+	}
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp != nil {
+			return true
 		}
 	}
 	return false
