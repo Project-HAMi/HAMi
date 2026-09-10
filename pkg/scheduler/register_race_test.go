@@ -104,11 +104,10 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 	// indexer.Update never errors for the default store and require/FailNow must not
 	// run outside the test goroutine, so the error is ignored.
 	wg.Go(func() {
-		printed := map[string]bool{}
 		sel := labels.Everything()
 		for v := 1; v <= rounds; v++ {
 			_ = indexer.Update(mkNode(v%2 == 0))
-			s.register(sel, printed)
+			s.register(sel)
 		}
 	})
 
