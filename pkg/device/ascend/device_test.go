@@ -169,6 +169,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	dev := Devices{}
 	tests := []struct {
 		name string
+		dev  Devices
 		args corev1.Node
 		want []*device.DeviceInfo
 		err  error
@@ -188,6 +189,81 @@ func Test_GetNodeDevices(t *testing.T) {
 					ID:      "GPU-0",
 					Count:   int32(4),
 					Devcore: int32(8),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "hami-core node rewrites physical Devcore to 100",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-hami-core",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":20,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "true",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(100),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "hami-core node keeps advertised oversell Devcore",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-oversell",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":150,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "true",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(150),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "node annotation false keeps physical Devcore",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-template",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":20,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "false",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(20),
 					Devmem:  int32(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
@@ -235,7 +311,8 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := dev.GetNodeDevices(test.args)
+			d := test.dev
+			result, err := d.GetNodeDevices(test.args)
 			if (err != nil) != (test.err != nil) {
 				klog.ErrorS(err, "failed to unmarshal node devices", "node", test.args.Name)
 			}
@@ -2770,30 +2847,55 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 		}}},
 	}
 
-	t.Run("physical aiCore 20 still admits Coresreq 30", func(t *testing.T) {
+	t.Run("normalized 100-point budget admits Coresreq 30", func(t *testing.T) {
 		c := base
 		c.Used = 0
 		c.Usedmem = 0
 		c.Usedcores = 0
-		c.Totalcore = 20
+		c.Totalcore = 100
 		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
 		req30 := req
 		req30.Coresreq = 30
 		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, req30, pod, nodeInfo, &device.PodDevices{})
 		if !fit {
-			t.Fatalf("expected admit against 100-point budget with physical Totalcore=20, got reason=%s", reason)
+			t.Fatalf("expected admit against 100-point budget, got reason=%s", reason)
 		}
 		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
 			t.Fatalf("unexpected result %#v", result)
 		}
 	})
-	t.Run("physical aiCore 20 still rejects 90+20", func(t *testing.T) {
+	t.Run("GetNodeDevices remaps physical 20 then Fit admits 30", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		n := corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Annotations: map[string]string{
+				dev.nodeRegisterAnno:       `[{"ID":"dev-0","Count":4,"Devmem":65536,"Devcore":20,"Type":"Ascend910B3","Numa":0,"Health":true}]`,
+				VNPUNodeSelectorAnnotation: "true",
+			},
+		}}
+		infos, err := dev.GetNodeDevices(n)
+		if err != nil || len(infos) != 1 || infos[0].Devcore != 100 {
+			t.Fatalf("expected remapped Devcore=100, err=%v infos=%#v", err, infos)
+		}
 		c := base
-		c.Totalcore = 20
+		c.Used = 0
+		c.Usedmem = 0
+		c.Usedcores = 0
+		c.Totalcore = infos[0].Devcore
+		req30 := req
+		req30.Coresreq = 30
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req30, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit after inventory remap 20->100, got reason=%s", reason)
+		}
+	})
+	t.Run("normalized 100-point budget rejects 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 100
 		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
 		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
 		if fit {
-			t.Fatalf("expected reject at 110>100 with physical Totalcore=20, got fit reason=%s", reason)
+			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
 		}
 		if reason != "1/1 CardInsufficientCore" {
 			t.Fatalf("expected CardInsufficientCore, got %s", reason)
@@ -2988,7 +3090,7 @@ func TestDevices_Fit_HamiCoreMemoryOversell(t *testing.T) {
 	})
 }
 
-func TestHamiCoreFitBudget(t *testing.T) {
+func TestHamiCorePercentBudget(t *testing.T) {
 	cases := []struct {
 		in   int32
 		want int32
@@ -3001,8 +3103,8 @@ func TestHamiCoreFitBudget(t *testing.T) {
 		{200, 200},
 	}
 	for _, tc := range cases {
-		if got := hamiCoreFitBudget(tc.in); got != tc.want {
-			t.Fatalf("hamiCoreFitBudget(%d)=%d, want %d", tc.in, got, tc.want)
+		if got := hamiCorePercentBudget(tc.in); got != tc.want {
+			t.Fatalf("hamiCorePercentBudget(%d)=%d, want %d", tc.in, got, tc.want)
 		}
 	}
 }

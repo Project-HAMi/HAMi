@@ -218,8 +218,21 @@ func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) 
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
 	}
+	normalizeHamiCore := dev.nodeSupportsHamiCore(&n)
 	for idx := range nodeDevices {
 		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
+		if !normalizeHamiCore {
+			continue
+		}
+		advertised := nodeDevices[idx].Devcore
+		budget := hamiCorePercentBudget(advertised)
+		if budget == advertised {
+			continue
+		}
+		klog.V(5).InfoS("hami-core Devcore normalized to percentage budget",
+			"node", n.Name, "device", nodeDevices[idx].ID,
+			"advertised", advertised, "budget", budget)
+		nodeDevices[idx].Devcore = budget
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
@@ -443,17 +456,27 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 // is expressed in.
 const hamiCorePercentBase = 100
 
-// hamiCoreFitBudget is the percentage capacity used by hami-core Fit.
+func (dev *Devices) nodeSupportsHamiCore(n *corev1.Node) bool {
+	supported := dev.hamiVnpuCore
+	if n != nil && n.Annotations != nil {
+		if val, ok := n.Annotations[VNPUNodeSelectorAnnotation]; ok {
+			supported = val == "true"
+		}
+	}
+	return supported
+}
+
+// hamiCorePercentBudget is the percentage capacity stored on hami-core nodes.
 //
-// Coresreq is a percentage, not physical AI cores, so dev.Totalcore cannot be
-// used directly: a plugin that has not enabled hami-core registers Devcore as
-// the hardware AICore count (8/20/24/30). Keep the percentage base for any
-// advertised value at or below it so admission does not change.
+// Coresreq is a percentage, not physical AI cores, so a plugin that has not
+// enabled hami-core registers Devcore as the hardware AICore count
+// (8/20/24/30). GetNodeDevices rewrites any advertised value at or below the
+// base to 100 so Fit and the rest of the scheduler see one inventory unit.
 //
 // The coupled plugin change (Project-HAMi/ascend-device-plugin#132) advertises
 // Devcore = round(100 * deviceCoreScaling) for hami-core and never reports less
 // than the base, so any higher value is an intentional oversell budget.
-func hamiCoreFitBudget(advertisedTotalcore int32) int32 {
+func hamiCorePercentBudget(advertisedTotalcore int32) int32 {
 	if advertisedTotalcore > hamiCorePercentBase {
 		return advertisedTotalcore
 	}
@@ -517,13 +540,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 
 	// Verify whether the Node supports hami vnpu core.
 	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
-	nodeSupportHamiCore := npu.hamiVnpuCore
-
-	if nodeInfo != nil && nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok {
-			nodeSupportHamiCore = val == "true"
-		}
+	var node *corev1.Node
+	if nodeInfo != nil {
+		node = nodeInfo.Node
 	}
+	nodeSupportHamiCore := npu.nodeSupportsHamiCore(node)
 
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
@@ -599,34 +620,27 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// hami-core Coresreq is a percentage. Do not treat physical AICore
-		// (dev.Totalcore) as that budget; honor plugin oversell only when the
-		// advertised Devcore is above the percentage base.
-		effectiveTotalCore := dev.Totalcore
-		if isHAMiCore {
-			effectiveTotalCore = hamiCoreFitBudget(dev.Totalcore)
-			if effectiveTotalCore != dev.Totalcore {
-				klog.V(5).InfoS("hami-core budget clamped to the percentage base", "pod", klog.KObj(pod), "device", dev.ID, "advertised total core", dev.Totalcore, "budget", effectiveTotalCore)
-			}
-		}
-
-		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
+		// Inventory already holds the percentage budget on hami-core nodes
+		// (GetNodeDevices rewrites physical AICore to 100 and keeps advertised
+		// oversell above the base). Fit compares against that stored Totalcore.
+		if dev.Totalcore-dev.Usedcores < k.Coresreq {
 			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		// Coresreq at the percentage base stays exclusive for hami-core even when
 		// the plugin advertises an oversold budget. A pod that declares no mode
-		// keeps dev.Totalcore as its budget, so on a hami-core node the base
-		// equality no longer holds once the plugin oversells; gate on the node too.
+		// used to keep physical Totalcore as its budget; after inventory
+		// normalization a hami-core node already stores 100/150, so gate on the
+		// node as well.
 		if k.Coresreq == hamiCorePercentBase && dev.Used > 0 &&
-			(isHAMiCore || nodeSupportHamiCore || effectiveTotalCore == hamiCorePercentBase) {
+			(isHAMiCore || nodeSupportHamiCore || dev.Totalcore == hamiCorePercentBase) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if effectiveTotalCore != 0 && dev.Usedcores == effectiveTotalCore && k.Coresreq == 0 {
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
