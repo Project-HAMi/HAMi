@@ -923,6 +923,73 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		// Old event still present plus one new event.
 		assert.Equal(t, 2, len(events.Items))
 	})
+
+	t.Run("uninitialized client is a no-op", func(t *testing.T) {
+		oldClient := client.KubeClient
+		client.KubeClient = nil
+		t.Cleanup(func() { client.KubeClient = oldClient })
+
+		EmitNodeWarningEvent(node, reason, msg1, dedupWindow)
+	})
+
+	t.Run("multiple existing events update only the most recent matching one", func(t *testing.T) {
+		older := metav1.NewTime(time.Now().Add(-45 * time.Minute))
+		newer := metav1.NewTime(time.Now().Add(-15 * time.Minute))
+		olderMatch := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-older", Namespace: corev1.NamespaceDefault},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node", Name: nodeName, UID: nodeUID,
+			},
+			Reason: reason, Message: msg1, Count: 1,
+			FirstTimestamp: older, LastTimestamp: older,
+		}
+		newerMatch := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-newer", Namespace: corev1.NamespaceDefault},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node", Name: nodeName, UID: nodeUID,
+			},
+			Reason: reason, Message: msg1, Count: 2,
+			FirstTimestamp: newer, LastTimestamp: newer,
+		}
+		otherReason := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-other-reason", Namespace: corev1.NamespaceDefault},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node", Name: nodeName, UID: nodeUID,
+			},
+			Reason: "SomethingElse", Message: msg1, Count: 1,
+			FirstTimestamp: newer, LastTimestamp: newer,
+		}
+		otherUID := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-other-uid", Namespace: corev1.NamespaceDefault},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node", Name: nodeName, UID: types.UID("some-other-uid"),
+			},
+			Reason: reason, Message: msg1, Count: 1,
+			FirstTimestamp: newer, LastTimestamp: newer,
+		}
+		client.KubeClient = fake.NewClientset(olderMatch, newerMatch, otherReason, otherUID)
+
+		EmitNodeWarningEvent(node, reason, msg2, dedupWindow)
+
+		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
+			context.TODO(), metav1.ListOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, 4, len(events.Items))
+		for i := range events.Items {
+			ev := &events.Items[i]
+			switch ev.Name {
+			case newerMatch.Name:
+				assert.Equal(t, int32(3), ev.Count)
+				assert.Equal(t, msg2, ev.Message)
+			case olderMatch.Name:
+				assert.Equal(t, int32(1), ev.Count)
+				assert.Equal(t, msg1, ev.Message)
+			case otherReason.Name, otherUID.Name:
+				assert.Equal(t, int32(1), ev.Count)
+				assert.Equal(t, msg1, ev.Message)
+			}
+		}
+	})
 }
 
 func TestIsSidecarContainer(t *testing.T) {
