@@ -1347,3 +1347,124 @@ func TestSetNodeLockNilPod(t *testing.T) {
 		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
 	}
 }
+
+func TestReleaseNodeLockNilPod(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "nil-pod-release-node"
+
+	clientSet := fake.NewClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+		},
+	})
+	client.KubeClient = clientSet
+
+	err := ReleaseNodeLock(nodeName, "", nil, false)
+	if err == nil {
+		t.Fatal("expected ReleaseNodeLock(..., nil, ...) to fail, got nil")
+	}
+	expectedErrMsg := "cannot release node lock: pod is nil"
+	if err.Error() != expectedErrMsg {
+		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+func TestGenerateNodeLockKeyByPodNilPod(t *testing.T) {
+	key := GenerateNodeLockKeyByPod(nil)
+	if strings.Contains(key, NodeLockSep) {
+		t.Fatalf("expected a bare timestamp with no %q separator, got %q", NodeLockSep, key)
+	}
+	if _, err := time.Parse(time.RFC3339, key); err != nil {
+		t.Fatalf("expected an RFC3339 timestamp, got %q: %v", key, err)
+	}
+}
+
+func TestParseNodeLockMalformedAnnotation(t *testing.T) {
+	value := "2026-08-01T06:00:00Z" + NodeLockSep + "ns"
+	_, _, _, err := ParseNodeLock(value)
+	if err == nil {
+		t.Fatal("expected ParseNodeLock() to fail on a two-part value, got nil")
+	}
+	expectedErrMsg := "malformed lock annotation: expected 3 parts, got 2 from " + value
+	if err.Error() != expectedErrMsg {
+		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+func TestSetNodeLockAlreadyLockedAtEntry(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-set-locked-at-entry"
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "ns"}}
+	holderB := GenerateNodeLockKeyByPod(podB)
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: holderB},
+	}})
+	client.KubeClient = clientSet
+
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, errors.New("should not be called")
+	})
+
+	err := SetNodeLock(nodeName, "", podA)
+	if !IsNodeLockContention(err) {
+		t.Fatalf("SetNodeLock() error = %v, want node lock contention", err)
+	}
+	if patchCalls != 0 {
+		t.Fatalf("patch calls = %d, want 0, the lock at entry should be rejected before any patch attempt", patchCalls)
+	}
+}
+
+func TestSetNodeLockReturnsInitialGetError(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-set-initial-get-error"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	client.KubeClient = clientSet
+
+	wantErr := errors.New("simulated get failure")
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		return true, nil, wantErr
+	})
+
+	err := SetNodeLock(nodeName, "", pod)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SetNodeLock() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestReleaseNodeLockAlreadyReleasedDuringRetry(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-already-gone"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	holder := GenerateNodeLockKeyByPod(pod)
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: holder},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 2 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, errors.New("should not be called")
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	if patchCalls != 0 {
+		t.Fatalf("patch calls = %d, want 0, a lock already gone by retry time needs no patch", patchCalls)
+	}
+}
