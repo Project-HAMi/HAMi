@@ -1457,7 +1457,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, mockDev.nodeCleanedUp, 0)
 
@@ -1542,7 +1542,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 1, mockDev.nodeCleanedUp, "NodeCleanUp should be invoked when device is unhealthy even on discovery error")
 
@@ -1625,7 +1625,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Healthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be invoked when device is healthy")
 
@@ -1752,7 +1752,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testi
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, devHealthy.nodeCleanedUp)
 	assert.Equal(t, 1, devUnhealthyErr.nodeCleanedUp)
@@ -1846,7 +1846,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	atomic.StoreUint32(&s.started, 1)
 
 	// Cycle 1: Transient discovery error occurs when fetching node devices.
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 1 semantics:
 	// - NodeCleanUp was NOT called because device is healthy.
@@ -1875,7 +1875,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.health = true
 	mockDev.needUpdate = true
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 2 recovery semantics:
 	// - Device state correctly recovers and updates in scheduler cache.
@@ -1890,7 +1890,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.getNodeErr = nil
 	mockDev.nodeDevices = []*device.DeviceInfo{}
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 3 zero-device semantics:
 	// - NodeCleanUp is NOT called because device is healthy.
@@ -2046,7 +2046,7 @@ func Test_register_StaleDeviceVendorRemoval(t *testing.T) {
 	// - For node-1: vendor-B (0 devices) is removed from cache (exercises ok == true branch);
 	//   vendor-D (0 devices) is not in cache (exercises ok == false branch).
 	// - For node-absent: node is absent from scheduler cache (exercises GetNode error branch).
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Expect vendor-B to be removed from node-1 cache, while vendor-A and vendor-C remain
 	nodeInfo, err = s.GetNode("node-1")
@@ -3483,4 +3483,71 @@ func TestSchedulerIsSynced(t *testing.T) {
 	s.synced.Store(true)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+// Test_register_PrintedLogPrunedOnNodeDelete covers the printedLog bookkeeping
+// across a node's full lifecycle. The map used to be a loop-local in
+// RegisterFromNodeAnnotations, so onDelNode could not reach it: entries
+// accumulated for every node name ever seen, and a node recreated under an old
+// name was logged at V(5) as "updated" instead of at info level as "added".
+func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": &registerMockDevice{
+			nodeDevices: []*device.DeviceInfo{{
+				ID:           "gpu-1",
+				DeviceVendor: "mock-vendor",
+				Health:       true,
+			}},
+			health:     true,
+			needUpdate: true,
+		},
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	// A second node stands in for the rest of the cluster: deleting node-1 must
+	// not disturb it.
+	s.lock.Lock()
+	s.printedLog["node-2"] = true
+	s.lock.Unlock()
+
+	// First registration logs the node as added and records it.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "first registration should record the node")
+	s.lock.RUnlock()
+
+	// Deleting the node must drop its entry, and only its entry.
+	s.onDelNode(node)
+	s.lock.RLock()
+	_, stillPresent := s.printedLog["node-1"]
+	assert.Equal(t, false, stillPresent, "deleting a node should prune its printedLog entry")
+	assert.Equal(t, true, s.printedLog["node-2"], "deleting a node must not disturb other nodes")
+	s.lock.RUnlock()
+
+	// A node returning under the same name is treated as newly added again.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
+	s.lock.RUnlock()
 }
