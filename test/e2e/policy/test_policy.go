@@ -579,6 +579,17 @@ func waitForAllocatedPod(client kubernetes.Interface, namespace, name string) *c
 		pod, err := client.CoreV1().Pods(namespace).Get(context.Background(), name, metav1.GetOptions{})
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		latest = pod
+
+		// Abort immediately on terminal pod phases — no amount of retrying
+		// will move a Failed or Succeeded pod back to Running.
+		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
+			gomega.StopTrying(fmt.Sprintf(
+				"pod %s/%s reached terminal phase %s: %s",
+				namespace, name, pod.Status.Phase,
+				podTerminalReason(pod),
+			)).Now()
+		}
+
 		g.Expect(pod.Spec.SchedulerName).To(gomega.Equal(policyTestScheduler))
 		g.Expect(pod.Spec.NodeName).NotTo(gomega.BeEmpty())
 		g.Expect(pod.Status.Phase).To(gomega.Equal(corev1.PodRunning))
@@ -587,6 +598,29 @@ func waitForAllocatedPod(client kubernetes.Interface, namespace, name string) *c
 		g.Expect(pod.Annotations[allocatedDevicesKey]).NotTo(gomega.BeEmpty())
 	}, policyTestTimeout, policyTestInterval).Should(gomega.Succeed())
 	return latest
+}
+
+// podTerminalReason extracts a human-readable reason from a pod in a terminal
+// phase (Failed/Succeeded), checking container statuses for exit codes and OOM
+// signals so the E2E failure message is immediately actionable.
+func podTerminalReason(pod *corev1.Pod) string {
+	var reasons []string
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Terminated != nil {
+			t := cs.State.Terminated
+			reasons = append(reasons, fmt.Sprintf(
+				"container %q exited %d (reason=%s, message=%s)",
+				cs.Name, t.ExitCode, t.Reason, t.Message,
+			))
+		}
+	}
+	if pod.Status.Message != "" {
+		reasons = append(reasons, pod.Status.Message)
+	}
+	if len(reasons) == 0 {
+		return "(no additional detail)"
+	}
+	return strings.Join(reasons, "; ")
 }
 
 func allocatedGPU(pod *corev1.Pod) string {
