@@ -422,9 +422,11 @@ func Test_checkType(t *testing.T) {
 
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
-		name string
-		args corev1.Container
-		want device.ContainerDeviceRequest
+		name        string
+		args        corev1.Container
+		want        device.ContainerDeviceRequest
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name: "don't set to limits and request",
@@ -516,7 +518,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "not a plain integer",
 		},
 		{
 			name: "zero count must not silently bypass quota",
@@ -527,7 +531,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 		{
 			name: "decimal-form memory request is rejected, not treated as zero",
@@ -539,7 +545,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "not a plain integer",
 		},
 		{
 			name: "negative count must be rejected",
@@ -550,7 +558,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 		{
 			name: "max int32 count is accepted",
@@ -578,7 +588,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 		{
 			name: "memory overflowing int32 is rejected, not truncated to zero",
@@ -590,7 +602,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "not a plain integer",
 		},
 		{
 			name: "zero count must not silently bypass quota",
@@ -601,7 +615,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 		{
 			name: "decimal-form memory request is rejected, not treated as zero",
@@ -613,7 +629,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "not a plain integer",
 		},
 		{
 			name: "negative count must be rejected",
@@ -624,7 +642,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 		{
 			name: "max int32 count is accepted",
@@ -652,7 +672,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:        device.ContainerDeviceRequest{},
+			wantErr:     true,
+			errContains: "out of range",
 		},
 	}
 	for _, test := range tests {
@@ -664,8 +686,13 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			InitMLUDevice(config)
 			dev := CambriconDevices{}
-			result, _ := dev.GenerateResourceRequests(&test.args)
+			result, err := dev.GenerateResourceRequests(&test.args)
 			assert.Equal(t, test.want, result)
+			if test.wantErr {
+				assert.ErrorContains(t, err, test.errContains)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
