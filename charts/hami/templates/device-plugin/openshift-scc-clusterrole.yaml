@@ -1,0 +1,17 @@
+{{- if and .Values.platform.openshift .Values.openshift.securityContextConstraints.create .Values.openshift.securityContextConstraints.name }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:openshift:scc:{{ .Values.openshift.securityContextConstraints.name }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - security.openshift.io
+    resources:
+      - securitycontextconstraints
+    resourceNames:
+      - {{ .Values.openshift.securityContextConstraints.name }}
+    verbs:
+      - use
+{{- end }}

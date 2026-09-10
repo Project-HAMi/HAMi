@@ -45,16 +45,18 @@ const (
 	Ascend910NetworkWeight     = 10
 	VNPUModeAnnotation         = "huawei.com/vnpu-mode"
 	VNPUModeHamiCore           = "hami-core"
+	VNPUModeTemplate           = "template"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
 type Devices struct {
-	config           VNPUConfig
-	nodeRegisterAnno string
-	useUUIDAnno      string
-	noUseUUIDAnno    string
-	handshakeAnno    string
-	hamiVnpuCore     bool
+	config                 VNPUConfig
+	nodeRegisterAnno       string
+	useUUIDAnno            string
+	noUseUUIDAnno          string
+	handshakeAnno          string
+	hamiVnpuCore           bool
+	allAscendResourceNames []corev1.ResourceName
 }
 
 type RuntimeInfo struct {
@@ -83,15 +85,20 @@ func InitDevices(vnpus VNPUs) []*Devices {
 	if !enableAscend {
 		return devs
 	}
+	allAscendResourceNames := make([]corev1.ResourceName, 0, len(vnpus.Configs))
+	for _, vnpu := range vnpus.Configs {
+		allAscendResourceNames = append(allAscendResourceNames, corev1.ResourceName(vnpu.ResourceName))
+	}
 	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
-			config:           vnpu,
-			nodeRegisterAnno: fmt.Sprintf("hami.io/node-register-%s", commonWord),
-			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
-			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
-			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
-			hamiVnpuCore:     vnpus.HamiVnpuCore,
+			config:                 vnpu,
+			nodeRegisterAnno:       fmt.Sprintf("hami.io/node-register-%s", commonWord),
+			useUUIDAnno:            fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
+			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
+			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+			hamiVnpuCore:           vnpus.HamiVnpuCore,
+			allAscendResourceNames: allAscendResourceNames,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -116,10 +123,35 @@ func (dev *Devices) CommonWord() string {
 	return dev.config.CommonWord
 }
 
+func (dev *Devices) containerRequestsAnyAscendResource(ctr *corev1.Container) bool {
+	for _, name := range dev.allAscendResourceNames {
+		if _, ok := ctr.Resources.Limits[name]; ok {
+			return true
+		}
+		if _, ok := ctr.Resources.Requests[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func lastEnvValueEquals(env []corev1.EnvVar, name, value string) bool {
+	// kubelet will dedupes same-name env and the last one wins, so iterate backward
+	for _, e := range slices.Backward(env) {
+		if e.Name != name {
+			continue
+		}
+		// TODO: currently ignore the ValueFrom reference, because it's complicated to get the runtime value.
+		return e.ValueFrom == nil && e.Value == value
+	}
+	return false
+}
+
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
-		if dev.config.OverwriteEnv {
+		if dev.config.OverwriteEnv && !dev.containerRequestsAnyAscendResource(ctr) &&
+			!lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
 				Name:  "ASCEND_VISIBLE_DEVICES",
 				Value: "",
@@ -146,19 +178,27 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		}
 	}
 
-	// Check if hami-core is declared
-	vnpuMode := p.Annotations[VNPUModeAnnotation]
+	vnpuMode := ""
+	if p.Annotations != nil {
+		vnpuMode = p.Annotations[VNPUModeAnnotation]
+	}
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// -core only applies to hami-core (soft split); on hard split the template
-	// fixes compute, so reject it here.
 	if !isHAMiCore && dev.config.ResourceCoreName != "" {
 		coreQ, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
 		if !ok {
 			coreQ, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceCoreName)]
 		}
 		if ok && coreQ.Value() > 0 {
-			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+			if vnpuMode == VNPUModeTemplate {
+				return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+			}
+			if p.Annotations == nil {
+				p.Annotations = map[string]string{}
+			}
+			p.Annotations[VNPUModeAnnotation] = VNPUModeHamiCore
+			isHAMiCore = true
+			klog.InfoS("Inferred hami-core vnpu mode from core request", "pod", klog.KObj(p), "core", coreQ.Value())
 		}
 	}
 
@@ -450,6 +490,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+	isTemplate := (vnpuMode == VNPUModeTemplate)
 
 	// Verify whether the Node supports hami vnpu core.
 	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
@@ -464,6 +505,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
 		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
+		return false, nil, common.GenReason(reason, len(devices))
+	}
+	if isTemplate && nodeSupportHamiCore {
+		reason[common.ModeNotFit]++
+		klog.V(4).InfoS("Node filtered: pod requests template mode but node uses hami-core", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
 	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)

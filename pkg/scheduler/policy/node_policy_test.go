@@ -229,7 +229,7 @@ func TestOverrideScore(t *testing.T) {
 				},
 				NodeID: "node1",
 				Devices: device.PodDevices{
-					"DCU": device.PodSingleDevice{
+					"HCU": device.PodSingleDevice{
 						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
@@ -271,7 +271,7 @@ func TestOverrideScore(t *testing.T) {
 				},
 				NodeID: "node1",
 				Devices: device.PodDevices{
-					"DCU": device.PodSingleDevice{
+					"HCU": device.PodSingleDevice{
 						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},

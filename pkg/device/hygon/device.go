@@ -32,25 +32,25 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type DCUDevices struct {
+type HCUDevices struct {
 }
 
 const (
-	HandshakeAnnos     = "hami.io/node-handshake-dcu"
-	RegisterAnnos      = "hami.io/node-dcu-register"
-	HygonDCUDevice     = "DCU"
-	HygonDCUCommonWord = "DCU"
-	DCUInUse           = "hygon.com/use-dcutype"
-	DCUNoUse           = "hygon.com/nouse-dcutype"
-	// DCUUseUUID annotation specifies a comma-separated list of DCU UUIDs to use.
-	DCUUseUUID = "hygon.com/use-gpuuuid"
-	// DCUNoUseUUID annotation specifies a comma-separated list of DCU UUIDs to exclude.
-	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
+	HandshakeAnnos     = "hami.io/node-handshake-hcu"
+	RegisterAnnos      = "hami.io/node-hcu-register"
+	HygonHCUDevice     = "HCU"
+	HygonHCUCommonWord = "HCU"
+	HCUInUse           = "hygon.com/use-hcutype"
+	HCUNoUse           = "hygon.com/nouse-hcutype"
+	// HCUUseUUID annotation specifies a comma-separated list of HCU UUIDs to use.
+	HCUUseUUID = "hygon.com/use-gpuuuid"
+	// HCUNoUseUUID annotation specifies a comma-separated list of HCU UUIDs to exclude.
+	HCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 
-	// NodeLockDCU should same with device plugin node lock name
+	// NodeLockHCU should same with device plugin node lock name
 	// there is a bug with nodelock package utils, the key is hard coded as "hami.io/mutex.lock"
 	// so we can only use this value now.
-	NodeLockDCU = "hami.io/mutex.lock"
+	NodeLockHCU = "hami.io/mutex.lock"
 )
 
 var (
@@ -67,54 +67,54 @@ type HygonConfig struct {
 	MemoryFactor       int32  `yaml:"memoryFactor"`
 }
 
-func InitDCUDevice(config HygonConfig) *DCUDevices {
+func InitHCUDevice(config HygonConfig) *HCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
 	MemoryFactor = config.MemoryFactor
-	_, ok := device.InRequestDevices[HygonDCUDevice]
+	_, ok := device.InRequestDevices[HygonHCUDevice]
 	if !ok {
-		device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
-		device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
-		util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+		device.InRequestDevices[HygonHCUDevice] = "hami.io/hcu-devices-to-allocate"
+		device.SupportDevices[HygonHCUDevice] = "hami.io/hcu-devices-allocated"
+		util.HandshakeAnnos[HygonHCUDevice] = HandshakeAnnos
 	}
-	return &DCUDevices{}
+	return &HCUDevices{}
 }
 
-func (dev *DCUDevices) CommonWord() string {
-	return HygonDCUCommonWord
+func (dev *HCUDevices) CommonWord() string {
+	return HygonHCUCommonWord
 }
 
 func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&HygonResourceCount, "dcu-name", "hygon.com/dcunum", "dcu resource count")
-	fs.StringVar(&HygonResourceMemory, "dcu-memory", "hygon.com/dcumem", "dcu memory resource")
-	fs.StringVar(&HygonResourceCores, "dcu-cores", "hygon.com/dcucores", "dcu core resource")
+	fs.StringVar(&HygonResourceCount, "hcu-name", "hygon.com/hcunum", "hcu resource count")
+	fs.StringVar(&HygonResourceMemory, "hcu-memory", "hygon.com/hcumem", "hcu memory resource")
+	fs.StringVar(&HygonResourceCores, "hcu-cores", "hygon.com/hcucores", "hcu core resource")
 }
 
-func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
+func (dev *HCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
 	return ok, nil
 }
 
-func checkDCUtype(annos map[string]string, cardtype string) bool {
-	return device.CheckType(annos, cardtype, DCUInUse, DCUNoUse)
+func checkHCUtype(annos map[string]string, cardtype string) bool {
+	return device.CheckType(annos, cardtype, HCUInUse, HCUNoUse)
 }
 
-func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+func (dev *HCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
-	return nodelock.LockNode(n.Name, NodeLockDCU, p)
+	return nodelock.LockNode(n.Name, NodeLockHCU, p)
 }
 
-func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *HCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockDCU, p, false)
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockHCU, p, false)
 }
 
-func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+func (dev *HCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {
 		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
@@ -125,7 +125,7 @@ func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		return []*device.DeviceInfo{}, err
 	}
 	for idx := range nodedevices {
-		nodedevices[idx].DeviceVendor = HygonDCUCommonWord
+		nodedevices[idx].DeviceVendor = HygonHCUCommonWord
 	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
@@ -136,54 +136,54 @@ func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *DCUDevices) NodeCleanUp(nn string) error {
+func (dev *HCUDevices) NodeCleanUp(nn string) error {
 	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
-func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+func (dev *HCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
-func (dev *DCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
-		return true, checkDCUtype(annos, d.Type), false
+func (dev *HCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
+	if strings.Compare(n.Type, HygonHCUDevice) == 0 {
+		return true, checkHCUtype(annos, d.Type), false
 	}
 	return false, false, false
 }
 
-func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Info("Start to count dcu devices for container ", ctr.Name)
-	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
-	dcuResourceMem := corev1.ResourceName(HygonResourceMemory)
-	dcuResourceCores := corev1.ResourceName(HygonResourceCores)
-	v, ok := ctr.Resources.Limits[dcuResourceCount]
+func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	klog.Info("Start to count hcu devices for container ", ctr.Name)
+	hcuResourceCount := corev1.ResourceName(HygonResourceCount)
+	hcuResourceMem := corev1.ResourceName(HygonResourceMemory)
+	hcuResourceCores := corev1.ResourceName(HygonResourceCores)
+	v, ok := ctr.Resources.Limits[hcuResourceCount]
 	if !ok {
-		v, ok = ctr.Resources.Requests[dcuResourceCount]
+		v, ok = ctr.Resources.Requests[hcuResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
-				klog.ErrorS(nil, "dcu device count request is out of range", "container", ctr.Name, "request", n)
+				klog.ErrorS(nil, "hcu device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}
 			}
-			klog.Info("Found dcu devices")
+			klog.Info("Found hcu devices")
 			memnum := 0
-			mem, ok := ctr.Resources.Limits[dcuResourceMem]
+			mem, ok := ctr.Resources.Limits[hcuResourceMem]
 			if !ok {
-				mem, ok = ctr.Resources.Requests[dcuResourceMem]
+				mem, ok = ctr.Resources.Requests[hcuResourceMem]
 			}
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					if memnums < 0 || memnums > math.MaxInt32 {
-						klog.ErrorS(nil, "dcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
+						klog.ErrorS(nil, "hcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
 						return device.ContainerDeviceRequest{}
 					}
 					if MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(MemoryFactor)
 						if memnums > math.MaxInt32 {
-							klog.ErrorS(nil, "dcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
+							klog.ErrorS(nil, "hcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
 							return device.ContainerDeviceRequest{}
 						}
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
@@ -192,14 +192,14 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				}
 			}
 			corenum := int32(100)
-			core, ok := ctr.Resources.Limits[dcuResourceCores]
+			core, ok := ctr.Resources.Limits[hcuResourceCores]
 			if !ok {
-				core, ok = ctr.Resources.Requests[dcuResourceCores]
+				core, ok = ctr.Resources.Requests[hcuResourceCores]
 			}
 			if ok {
 				corenums, valid := core.AsInt64()
 				if !valid || corenums < 0 || corenums > 100 {
-					klog.ErrorS(nil, "dcu device core request is out of range", "container", ctr.Name, "request", core.String())
+					klog.ErrorS(nil, "hcu device core request is out of range", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}
 				}
 				corenum = int32(corenums)
@@ -212,7 +212,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
-				Type:             HygonDCUDevice,
+				Type:             HygonHCUDevice,
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
@@ -222,30 +222,30 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	return device.ContainerDeviceRequest{}
 }
 
-func (dev *DCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
-	devlist, ok := pd[HygonDCUDevice]
+func (dev *HCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
+	devlist, ok := pd[HygonHCUDevice]
 	if ok && len(devlist) > 0 {
 		deviceStr := device.EncodePodSingleDevice(devlist)
-		(*annoinput)[device.InRequestDevices[HygonDCUDevice]] = deviceStr
-		(*annoinput)[device.SupportDevices[HygonDCUDevice]] = deviceStr
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[HygonDCUDevice], deviceStr)
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[HygonDCUDevice], deviceStr)
+		(*annoinput)[device.InRequestDevices[HygonHCUDevice]] = deviceStr
+		(*annoinput)[device.SupportDevices[HygonHCUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[HygonHCUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[HygonHCUDevice], deviceStr)
 	}
 	return *annoinput
 }
 
-func (dcu *DCUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
+func (hcu *HCUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dcu *DCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+func (hcu *HCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (hcu *HCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -266,7 +266,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
 			continue
 		}
-		_, found, numa := dcu.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, numa := hcu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -281,7 +281,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, DCUUseUUID, DCUNoUseUUID, dcu.CommonWord()) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, HCUUseUUID, HCUNoUseUUID, hcu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -351,7 +351,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
+func (dev *HCUDevices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
 		ResourceCountName:  HygonResourceCount,
 		ResourceMemoryName: HygonResourceMemory,
