@@ -18,6 +18,7 @@ package mthreads
 
 import (
 	"flag"
+	"math"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -1537,4 +1538,113 @@ func Test_MutateAdmissionMixedDelivery(t *testing.T) {
 	found, err := dev.MutateAdmission(ctr, &corev1.Pod{})
 	assert.Equal(t, false, found)
 	assert.NilError(t, err)
+}
+
+func TestBuildLegalMemorySlicesBoundaries(t *testing.T) {
+	// math.MaxInt64 must terminate and end with the exact capacity.
+	got := buildLegalMemorySlices(math.MaxInt64)
+	if len(got) == 0 || got[len(got)-1] != math.MaxInt64 {
+		t.Fatalf("expected the last slice to be memoryPerCard")
+	}
+	for i := 1; i < len(got)-1; i++ {
+		if got[i] <= 0 || got[i] >= got[i+1] {
+			t.Fatalf("slice list not strictly increasing: %v", got)
+		}
+	}
+	if got[0] != 2 {
+		t.Fatalf("expected the first power of two to be 2, got %d", got[0])
+	}
+
+	// Tiny capacities still end with the exact capacity.
+	assert.DeepEqual(t, []int64{2}, buildLegalMemorySlices(2))
+	assert.DeepEqual(t, []int64{2, 3}, buildLegalMemorySlices(3))
+}
+
+func Test_InitMthreadsDeviceReset(t *testing.T) {
+	base := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	// Apply an S5000 override first.
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  base.ResourceCountName,
+		ResourceMemoryName: base.ResourceMemoryName,
+		ResourceCoreName:   base.ResourceCoreName,
+		MemoryPerCard:      160,
+	})
+	assert.Equal(t, int64(160), memoryPerMthreadsGPU)
+
+	// Re-initializing with an unset MemoryPerCard must reset to the
+	// S4000 default instead of inheriting the previous override.
+	InitMthreadsDevice(base)
+	assert.Equal(t, int64(96), memoryPerMthreadsGPU)
+	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 96}, legalMemoryslices)
+}
+
+func Test_MutateAdmissionMixedDeliveryCrossList(t *testing.T) {
+	dev := &MthreadsDevices{}
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	})
+
+	res := func(limits, requests map[string]string) *corev1.Container {
+		c := &corev1.Container{}
+		if limits != nil {
+			rl := corev1.ResourceList{}
+			for k, v := range limits {
+				rl[corev1.ResourceName(k)] = resource.MustParse(v)
+			}
+			c.Resources.Limits = rl
+		}
+		if requests != nil {
+			rq := corev1.ResourceList{}
+			for k, v := range requests {
+				rq[corev1.ResourceName(k)] = resource.MustParse(v)
+			}
+			c.Resources.Requests = rq
+		}
+		return c
+	}
+
+	cases := []struct {
+		name     string
+		limits   map[string]string
+		requests map[string]string
+		wantErr  bool
+	}{
+		{
+			name:     "whole in limits, slice in requests",
+			limits:   map[string]string{"mthreads.com/gpu": "1"},
+			requests: map[string]string{"mthreads.com/vgpu": "1"},
+			wantErr:  true,
+		},
+		{
+			name:     "slice in limits, whole in requests",
+			limits:   map[string]string{"mthreads.com/vgpu": "1", "mthreads.com/sgpu-memory": "32"},
+			requests: map[string]string{"mthreads.com/gpu": "1"},
+			wantErr:  true,
+		},
+		{
+			name:     "cores in limits, whole in requests",
+			limits:   map[string]string{"mthreads.com/sgpu-core": "8"},
+			requests: map[string]string{"mthreads.com/gpu": "1"},
+			wantErr:  true,
+		},
+		{
+			name:     "whole alone in requests",
+			requests: map[string]string{"mthreads.com/gpu": "1"},
+			wantErr:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := dev.MutateAdmission(res(tc.limits, tc.requests), &corev1.Pod{})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got error: %v", tc.wantErr, err)
+			}
+		})
+	}
 }

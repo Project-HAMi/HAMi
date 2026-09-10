@@ -74,6 +74,8 @@ var (
 // buildLegalMemorySlices returns the valid per-slice memory unit requests:
 // powers of two starting at 2, always ending with the full-card capacity.
 // For 96 this yields [2 4 8 16 32 64 96], matching the historical list.
+// The doubling stops before it could overflow int64, so absurd capacities
+// cannot hang scheduler initialization.
 func buildLegalMemorySlices(memoryPerCard int64) []int64 {
 	if memoryPerCard < 2 {
 		return []int64{memoryPerCard}
@@ -81,6 +83,9 @@ func buildLegalMemorySlices(memoryPerCard int64) []int64 {
 	out := make([]int64, 0, 12)
 	for v := int64(2); v < memoryPerCard; v *= 2 {
 		out = append(out, v)
+		if v > math.MaxInt64/2 {
+			break // doubling again would overflow
+		}
 	}
 	out = append(out, memoryPerCard)
 	return out
@@ -99,6 +104,10 @@ func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 	MthreadsResourceCount = config.ResourceCountName
 	MthreadsResourceCores = config.ResourceCoreName
 	MthreadsResourceMemory = config.ResourceMemoryName
+	// Reset to the S4000 default first so re-initialization with an unset
+	// MemoryPerCard does not inherit a previous override.
+	memoryPerMthreadsGPU = int64(defaultMemoryPerMthreadsGPU)
+	legalMemoryslices = buildLegalMemorySlices(memoryPerMthreadsGPU)
 	if config.MemoryPerCard > 0 {
 		memoryPerMthreadsGPU = config.MemoryPerCard
 		legalMemoryslices = buildLegalMemorySlices(memoryPerMthreadsGPU)
@@ -125,23 +134,25 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 	// Reject pods that mix whole-card and slice delivery: the whole-card
 	// resource is allocated by the vendor device plugin outside HAMi's
 	// accounting, so combining both would silently overcommit the node.
-	for _, rl := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+	// The check aggregates Limits and Requests: splitting whole-card and
+	// slice resources across the two lists must not bypass it.
+	contains := func(rl corev1.ResourceList, names ...string) bool {
 		if rl == nil {
-			continue
+			return false
 		}
-		if _, whole := rl[corev1.ResourceName(MthreadsWholeGPUResource)]; whole {
-			_, sliced := rl[corev1.ResourceName(MthreadsResourceCount)]
-			if !sliced {
-				_, sliced = rl[corev1.ResourceName(MthreadsResourceMemory)]
-			}
-			if !sliced {
-				_, sliced = rl[corev1.ResourceName(MthreadsResourceCores)]
-			}
-			if sliced {
-				return true, fmt.Errorf("cannot mix %s (whole card, delivered outside HAMi) with %s/%s/%s (sGPU slices) in the same container",
-					MthreadsWholeGPUResource, MthreadsResourceCount, MthreadsResourceMemory, MthreadsResourceCores)
+		for _, n := range names {
+			if _, ok := rl[corev1.ResourceName(n)]; ok {
+				return true
 			}
 		}
+		return false
+	}
+	hasWhole := contains(ctr.Resources.Limits, MthreadsWholeGPUResource) || contains(ctr.Resources.Requests, MthreadsWholeGPUResource)
+	hasSlice := contains(ctr.Resources.Limits, MthreadsResourceCount, MthreadsResourceMemory, MthreadsResourceCores) ||
+		contains(ctr.Resources.Requests, MthreadsResourceCount, MthreadsResourceMemory, MthreadsResourceCores)
+	if hasWhole && hasSlice {
+		return true, fmt.Errorf("cannot mix %s (whole card, delivered outside HAMi) with %s/%s/%s (sGPU slices) in the same container",
+			MthreadsWholeGPUResource, MthreadsResourceCount, MthreadsResourceMemory, MthreadsResourceCores)
 	}
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCount)]
 	if !ok {
