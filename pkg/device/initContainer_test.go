@@ -597,3 +597,32 @@ func TestCollapseInitContainerUsage_LateSidecarDoesNotInflatePeak(t *testing.T) 
 	}
 	assert.DeepEqual(t, expectedSteady, SteadyStateDeviceUsage(pod, raw))
 }
+
+// Sparse annotation without a placeholder for a non-GPU init container
+// (issue #2965): a single segment holds the app usage and must not be
+// mistaken for init usage, which previously cleared exclusive occupancy.
+func TestSteadyStateDeviceUsage_SparseInitWithoutPlaceholder(t *testing.T) {
+	pod := makePod("test", 1, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}},
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10, Slots: 1}},
+		},
+	}
+	assert.DeepEqual(t, expected, SteadyStateDeviceUsage(pod, raw))
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+
+	// Same shape as decoded from the wire: the encoder's trailing ";" adds
+	// one extra empty entry on top of the missing init placeholder.
+	decoded := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}},
+			{},
+		},
+	}
+	assert.DeepEqual(t, expected, SteadyStateDeviceUsage(pod, decoded))
+}
