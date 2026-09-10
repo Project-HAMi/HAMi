@@ -583,6 +583,14 @@ devices:
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
+  remotegpu:
+    # Schedule pods onto GPUs served over the network by a lupine server.
+    # Label each lupine node with hami.io/lupine-server, optionally setting the
+    # label value to the port lupine listens on.
+    enabled: false
+    defaultPort: 14833
+    resourceCountName: "nvidia.com/remote-gpu"
+    resourceMemoryName: "nvidia.com/remote-gpu-memory"
   ascend:
     enabled: false
     image: ""

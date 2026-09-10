@@ -1,0 +1,357 @@
+/*
+Copyright 2025 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+// Package remotegpu schedules pods onto GPUs that live on a different node,
+// served over the network by a lupine server. A client pod runs on a node with
+// no GPU of its own and reaches the fleet through LUPINE_SERVER.
+//
+// Unlike every other backend here, the devices this one reports do not belong
+// to the node they are reported for. See pool for what that costs.
+package remotegpu
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+
+	"github.com/ccoveille/go-safecast/v2"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+)
+
+const (
+	RemoteGPUDevice     = "RemoteGPU"
+	RemoteGPUCommonWord = "RemoteGPU"
+
+	HandshakeAnnos = "hami.io/node-handshake-remote-gpu"
+	InRequestAnnos = "hami.io/remote-gpu-devices-to-allocate"
+	AllocatedAnnos = "hami.io/remote-gpu-devices-allocated"
+
+	// LupineServerAnno carries the scheduler's placement decision to the
+	// client container through the downward API. There is no device plugin on
+	// a GPU-less client node to inject it at Allocate time.
+	LupineServerAnno = "hami.io/lupine-server"
+
+	lupineServerEnv     = "LUPINE_SERVER"
+	lupineWorkloadIDEnv = "LUPINE_WORKLOAD_ID"
+
+	// DefaultLupinePort is lupine's listen port when a server node does not
+	// override it through the LupineServerLabel value.
+	DefaultLupinePort = 14833
+)
+
+var (
+	RemoteGPUResourceCount  string
+	RemoteGPUResourceMemory string
+
+	errNoClient       = errors.New("kubernetes client is not initialized")
+	errNoRegistration = errors.New("node has no decodable GPU registration")
+	errNoPool         = errors.New("no lupine server available in the cluster")
+)
+
+type RemoteGPUDevices struct {
+	pool *pool
+}
+
+func InitRemoteGPUDevice(config RemoteGPUConfig) *RemoteGPUDevices {
+	RemoteGPUResourceCount = config.ResourceCountName
+	RemoteGPUResourceMemory = config.ResourceMemoryName
+	port := config.DefaultPort
+	if port <= 0 || port > 65535 {
+		port = DefaultLupinePort
+	}
+	if _, ok := device.InRequestDevices[RemoteGPUDevice]; !ok {
+		device.InRequestDevices[RemoteGPUDevice] = InRequestAnnos
+		device.SupportDevices[RemoteGPUDevice] = AllocatedAnnos
+		util.HandshakeAnnos[RemoteGPUDevice] = HandshakeAnnos
+	}
+	return &RemoteGPUDevices{pool: newPool(port)}
+}
+
+func (dev *RemoteGPUDevices) CommonWord() string {
+	return RemoteGPUCommonWord
+}
+
+func (dev *RemoteGPUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  RemoteGPUResourceCount,
+		ResourceMemoryName: RemoteGPUResourceMemory,
+		ResourceCoreName:   "",
+	}
+}
+
+// CheckHealth always reports healthy and always asks for an update.
+//
+// The shared device.CheckHealth handshake expects a device plugin on the node
+// to answer a "Requesting_" annotation. A client node runs no such plugin, and
+// the lupine fleet's own liveness is already covered by the pool refresh, so
+// running the handshake here would time out after 60s and evict the whole pool.
+func (dev *RemoteGPUDevices) CheckHealth(_ string, _ *corev1.Node) (bool, bool) {
+	return true, true
+}
+
+func (dev *RemoteGPUDevices) NodeCleanUp(_ string) error {
+	return nil
+}
+
+// GetNodeDevices reports the cluster-wide lupine pool for every node that can
+// host a client pod. n is the *client* node and owns none of these GPUs.
+func (dev *RemoteGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	// Unconfigured resource name means the feature is off; do not poll the API.
+	if RemoteGPUResourceCount == "" {
+		return nil, errNoPool
+	}
+	// Serving the pool, and a fleet with no server left, both mean "no devices
+	// here right now" rather than a failed lookup. Scheduler.register only
+	// prunes a stale cache entry when this succeeds with zero devices, and
+	// skips the pruning entirely on error, so reporting an error would leave
+	// the node advertising GPUs it can no longer reach: a client node that has
+	// just been relabelled as a lupine server, or every client node once the
+	// last server goes away.
+	if isLupineNode(&n) {
+		return nil, nil
+	}
+	return dev.pool.snapshot(context.Background()), nil
+}
+
+// MutateAdmission wires LUPINE_SERVER to the annotation the scheduler writes in
+// PatchAnnotations. A literal value in the pod spec is replaced: the endpoint
+// is not known until placement.
+func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, _ *corev1.Pod) (bool, error) {
+	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
+		return false, nil
+	}
+	setEnv(ctr, corev1.EnvVar{
+		Name: lupineServerEnv,
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{
+				APIVersion: "v1",
+				FieldPath:  fmt.Sprintf("metadata.annotations['%s']", LupineServerAnno),
+			},
+		},
+	})
+	// Pod UID is the workload identity lupine's usage endpoint groups by.
+	setEnv(ctr, corev1.EnvVar{
+		Name: lupineWorkloadIDEnv,
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.uid"},
+		},
+	})
+	return true, nil
+}
+
+func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	count, ok := resourceValue(ctr, RemoteGPUResourceCount)
+	if !ok || count <= 0 {
+		return device.ContainerDeviceRequest{}
+	}
+	nums, err := safecast.Convert[int32](count)
+	if err != nil {
+		klog.ErrorS(err, "remotegpu: device count out of range", "value", count)
+		return device.ContainerDeviceRequest{}
+	}
+	var memreq int32
+	if mem, ok := resourceValue(ctr, RemoteGPUResourceMemory); ok && mem > 0 {
+		memreq, err = safecast.Convert[int32](mem)
+		if err != nil {
+			klog.ErrorS(err, "remotegpu: memory request out of range", "value", mem)
+			return device.ContainerDeviceRequest{}
+		}
+	}
+	return device.ContainerDeviceRequest{
+		Nums: nums,
+		Type: RemoteGPUCommonWord,
+		// ponytail: whole-server allocation for the first cut. Memreq filters
+		// candidate cards but never splits one, so cores are always the whole
+		// card. Relax both when lupine can scope a connection to a subset of
+		// the server's GPUs.
+		Memreq:   memreq,
+		Coresreq: 100,
+	}
+}
+
+func (dev *RemoteGPUDevices) PatchAnnotations(_ *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
+	devList, ok := pd[RemoteGPUCommonWord]
+	if !ok || len(devList) == 0 {
+		return *annoinput
+	}
+	deviceStr := device.EncodePodSingleDevice(devList)
+	(*annoinput)[InRequestAnnos] = deviceStr
+	(*annoinput)[AllocatedAnnos] = deviceStr
+
+	// Book the cards straight away. The pool rebuilds its reservation set from
+	// pod annotations at most once per poolTTL, so without this two pods
+	// scheduled inside the same window both see this card as free.
+	var allocated []string
+	for _, ctrDevs := range devList {
+		for _, d := range ctrDevs {
+			allocated = append(allocated, d.UUID)
+		}
+	}
+	dev.pool.hold(allocated...)
+
+	// Fit refuses to span two servers, so any allocated device names the one
+	// the client must connect to.
+	for _, id := range allocated {
+		if ep, ok := dev.pool.endpoint(serverOf(id)); ok {
+			(*annoinput)[LupineServerAnno] = ep
+			return *annoinput
+		}
+	}
+	klog.ErrorS(nil, "remotegpu: allocated devices resolve to no known lupine endpoint", "devices", deviceStr)
+	return *annoinput
+}
+
+// LockNode and ReleaseNodeLock are deliberately no-ops. The shared node lock
+// exists so a node's device plugin can serialise Allocate against the
+// scheduler; a GPU-less client node has no such plugin, so a lock taken here
+// would never be released.
+func (dev *RemoteGPUDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
+
+func (dev *RemoteGPUDevices) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
+
+func (dev *RemoteGPUDevices) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
+	return 0
+}
+
+func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	n.Used++
+	n.Usedmem += ctr.Usedmem
+	n.Usedcores += ctr.Usedcores
+	return nil
+}
+
+// Fit allocates whole cards from a single lupine server.
+//
+// Spanning two servers would need the client to hold two connections and
+// lupine to agree on which GPUs each one sees, so the allocation is confined
+// to one server even when the fleet has enough free cards overall.
+func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	byServer := map[string][]*device.DeviceUsage{}
+	servers := make([]string, 0, len(devices))
+	for _, d := range devices {
+		server := serverOf(d.ID)
+		if server == "" {
+			klog.V(5).InfoS("remotegpu: skipping device with no server prefix", "device", d.ID)
+			continue
+		}
+		if _, seen := byServer[server]; !seen {
+			servers = append(servers, server)
+		}
+		byServer[server] = append(byServer[server], d)
+	}
+	// Map iteration order is random; sort so equal-fitting servers are picked
+	// deterministically across Filter calls.
+	sort.Strings(servers)
+
+	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, pod)
+	if !fit && reason[common.ExclusiveDeviceAllocateConflict] > 0 {
+		// Only a booking stood in the way, and bookings come from a snapshot
+		// up to poolTTL old: a card freed moments ago still reads as taken.
+		// Refusing here is expensive, because kube-scheduler parks the pod
+		// until its next periodic flush of the unschedulable queue, minutes
+		// away. Pay for a fresh read instead of guessing wrong.
+		dev.pool.refreshNow(context.Background())
+		fit, tmpDevs, reason = dev.tryFit(byServer, servers, request, pod)
+	}
+	if fit {
+		return true, tmpDevs, ""
+	}
+	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// tryFit walks the servers in order and takes the first that can serve the
+// whole request. It reads pool reservations, so the same call can answer
+// differently before and after a refresh.
+func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, pod *corev1.Pod) (bool, map[string]device.ContainerDevices, map[string]int) {
+	tmpDevs := map[string]device.ContainerDevices{}
+	reason := map[string]int{}
+
+	for _, server := range servers {
+		free := make([]*device.DeviceUsage, 0, len(byServer[server]))
+		for _, d := range byServer[server] {
+			switch {
+			case !d.Health:
+				reason[common.CardNotHealth]++
+			case d.Used > 0 || dev.pool.reserved(d.ID):
+				// Used covers pods already booked on this client node; reserved
+				// covers pods booked on any other client node, which the
+				// scheduler's per-node usage view cannot see.
+				reason[common.ExclusiveDeviceAllocateConflict]++
+			case request.Memreq > 0 && d.Totalmem < request.Memreq:
+				reason[common.CardInsufficientMemory]++
+			default:
+				free = append(free, d)
+			}
+		}
+		if int32(len(free)) < request.Nums {
+			reason[common.NodeInsufficientDevice]++
+			continue
+		}
+		for _, d := range free[:request.Nums] {
+			tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
+				Idx:  int(d.Index),
+				UUID: d.ID,
+				Type: request.Type,
+				// Whole card: the request's memory is a filter, not a split.
+				Usedmem:   d.Totalmem,
+				Usedcores: d.Totalcore,
+			})
+		}
+		klog.V(4).InfoS("remotegpu: allocated from lupine server",
+			"pod", klog.KObj(pod), "server", server, "cards", request.Nums)
+		return true, tmpDevs, reason
+	}
+	return false, tmpDevs, reason
+}
+
+// resourceValue reads a resource from limits, falling back to requests.
+func resourceValue(ctr *corev1.Container, name string) (int64, bool) {
+	if name == "" || ctr == nil {
+		return 0, false
+	}
+	v, ok := ctr.Resources.Limits[corev1.ResourceName(name)]
+	if !ok {
+		v, ok = ctr.Resources.Requests[corev1.ResourceName(name)]
+	}
+	if !ok {
+		return 0, false
+	}
+	n, ok := v.AsInt64()
+	return n, ok
+}
+
+// setEnv replaces an env var of the same name rather than appending a second
+// entry with the same key.
+func setEnv(ctr *corev1.Container, env corev1.EnvVar) {
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == env.Name {
+			ctr.Env[i] = env
+			return
+		}
+	}
+	ctr.Env = append(ctr.Env, env)
+}
