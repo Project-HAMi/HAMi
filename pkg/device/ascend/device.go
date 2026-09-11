@@ -516,6 +516,46 @@ func hamiCoreExclusiveOccupant(dev *device.DeviceUsage) bool {
 	return false
 }
 
+// incomingHamiCoreOnDevice is this pod's cores already placed on dev in the
+// current scheduling pass (prior containers in allocated, plus devices already
+// chosen in this Fit).
+func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices) int32 {
+	var sum int32
+	add := func(devs []device.ContainerDevice) {
+		for _, d := range devs {
+			if d.UUID == devID {
+				sum += d.Usedcores
+			}
+		}
+	}
+	if allocated != nil {
+		for _, podSingle := range *allocated {
+			for _, ctrDevs := range podSingle {
+				add(ctrDevs)
+			}
+		}
+	}
+	for _, ctrDevs := range tmpDevs {
+		add(ctrDevs)
+	}
+	return sum
+}
+
+// hamiCoreIncomingExclusive reports whether this request would take the
+// incoming pod to the percentage base on a card that already has another
+// tenant. Prior containers of the same pod are assumed to be in Usedcores
+// as well as allocated, matching score.AddResourceUsage.
+func hamiCoreIncomingExclusive(dev *device.DeviceUsage, self, coresreq int32) bool {
+	if self+coresreq < hamiCorePercentBase {
+		return false
+	}
+	others := dev.Usedcores
+	if self > 0 && dev.Usedcores >= self {
+		others = dev.Usedcores - self
+	}
+	return others > 0
+}
+
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -657,6 +697,15 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		if dev.Usedcores >= hamiCorePercentBase && (dev.Used == 1 || hamiCoreExclusiveOccupant(dev)) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
+			continue
+		}
+		// Incoming pods use the same occupant rule. Fit is per container, so a
+		// pod that reaches the base across several of its own requests must
+		// not share an oversold card once another tenant is already there.
+		if (isHAMiCore || nodeSupportHamiCore || dev.Totalcore >= hamiCorePercentBase) &&
+			hamiCoreIncomingExclusive(dev, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs), k.Coresreq) {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		if k.Nums > 0 {

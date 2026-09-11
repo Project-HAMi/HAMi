@@ -3629,6 +3629,141 @@ func TestDevices_Fit_HamiCoreOversellInitContainerExclusivity(t *testing.T) {
 	})
 }
 
+// TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity applies the
+// same occupant rule to an incoming pod: a pod-total of 100 on one card
+// cannot share oversell with another tenant, regardless of arrival order.
+func TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	share50 := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 4096, MemPercentagereq: 0, Coresreq: 50,
+	}
+	applyUsage := func(dev *device.DeviceUsage, pi *device.PodInfo) {
+		for _, podSingle := range pi.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, cd := range ctrDevs {
+					if cd.UUID != dev.ID {
+						continue
+					}
+					dev.Used += max(cd.Slots, 1)
+					dev.Usedmem += cd.Usedmem
+					dev.Usedcores += cd.Usedcores
+					dev.PodInfos = append(dev.PodInfos, pi)
+				}
+			}
+		}
+	}
+	collapsedOn := func(pod *corev1.Pod, cores int32) device.PodDevices {
+		return device.CollapseInitContainerUsage(pod, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: cores}},
+			},
+		})
+	}
+
+	t.Run("A then B rejects B after A occupies 100 across two containers", func(t *testing.T) {
+		holder := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
+		}
+		collapsed := device.CollapseInitContainerUsage(holder, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		})
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: holder, NodeID: "node1", Devices: collapsed})
+		if held.Usedcores != hamiCorePercentBase {
+			t.Fatalf("collapsed A usage: Usedcores=%d, want %d", held.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected B to be rejected after A already holds 100")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("B then A admits A's first 50 and rejects A's second 50", func(t *testing.T) {
+		tenantB := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: tenantB, NodeID: "node1", Devices: collapsedOn(tenantB, 50)})
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected A's first 50 to fit beside B, got reason=%s", reason)
+		}
+
+		// score.AddResourceUsage records the first container before Fit sees
+		// the second. allocated carries that prior request so the incoming
+		// occupant rule can see the pod-total of 100.
+		held.Used++
+		held.Usedcores += 50
+		held.Usedmem += 4096
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		fit, _, reason = dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if fit {
+			t.Fatalf("expected A's second 50 to be exclusive against B")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("same pod can place a second 50 on an empty oversold card", func(t *testing.T) {
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+			Used: 1, Usedmem: 4096, Usedcores: 50,
+		}
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if !fit {
+			t.Fatalf("expected the same pod's second 50 to fit, got reason=%s", reason)
+		}
+	})
+}
+
 // TestDevices_Fit_HamiCoreOversellLegacyFullCore keeps a full-core request
 // exclusive on a hami-core node even when the requesting Pod carries no
 // vnpu-mode annotation. Without the annotation isHAMiCore is false, so the
