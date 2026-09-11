@@ -1,0 +1,40 @@
+# An interactive session against a GPU served over the network by lupine.
+#
+# The session pod is what a user reaches, so lupine itself never has to be.
+# Keeping it that way is an RBAC decision rather than something HAMi enforces:
+# grant pod/portforward where sessions live, not in the namespace running the
+# lupine server. The pod holds its card the same way a workload does, so a
+# session and a workload cannot be handed the same GPU.
+#
+#   kubectl apply -f port_forward_session.yaml
+#   kubectl port-forward pod/lupine-session 14833:14833
+#
+# Then, on a machine with no GPU and no NVIDIA driver:
+#
+#   export LUPINE_SERVER=127.0.0.1:14833
+#   LD_LIBRARY_PATH=/opt/lupine/lib nvidia-smi
+#
+# Delete the pod to give the card back.
+#
+# The session reserves a whole card and no memory request is made, because
+# nothing would enforce it: HAMi-core runs inside a client container and
+# intercepts that container's CUDA calls, while here the calls are made on the
+# user's own machine, outside the cluster.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lupine-session
+spec:
+  containers:
+    - name: relay
+      image: alpine/socat:1.8.0.0
+      # LUPINE_SERVER is filled in by the HAMi scheduler during scheduling, so
+      # the relay learns which server it was given only once it starts.
+      command: ["sh", "-c"]
+      args: ["exec socat TCP-LISTEN:14833,fork,reuseaddr TCP:$LUPINE_SERVER"]
+      ports:
+        - name: lupine
+          containerPort: 14833
+      resources:
+        limits:
+          nvidia.com/remote-gpu: 1 # how many cards the session holds
