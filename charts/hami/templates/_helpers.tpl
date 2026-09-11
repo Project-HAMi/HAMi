@@ -265,5 +265,16 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- range .Values.devices.amd.customresources -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
+{{/* Remote GPU (lupine) resources. A client pod requests these on a node that
+     owns no GPU, so ignoredByScheduler is what keeps that node a candidate:
+     kube-scheduler skips the node-fit check and leaves placement to the
+     extender, which still gets called because the resource is listed here.
+     Both names come straight from the values the device config uses, so
+     renaming a resource cannot leave it off this list and silently reinstate
+     the node-fit check that rejects every GPU-less node. */}}
+{{- if .Values.devices.remotegpu.enabled -}}
+{{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- end -}}
 {{- toYaml $resources -}}
 {{- end -}}

@@ -96,6 +96,12 @@ data:
       resourceCountName: iluvatar.ai/BI-V100-vgpu
       resourceMemoryName: iluvatar.ai/BI-V100.vMem
       resourceCoreName: iluvatar.ai/BI-V100.vCore
+    {{- if .Values.devices.remotegpu.enabled }}
+    remotegpu:
+      resourceCountName: {{ .Values.devices.remotegpu.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.remotegpu.resourceMemoryName }}
+      defaultPort: {{ .Values.devices.remotegpu.defaultPort }}
+    {{- end }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
       resourceVCountName: {{ .Values.kunlunResourceVCountName }}

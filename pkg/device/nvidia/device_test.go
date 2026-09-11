@@ -2716,6 +2716,35 @@ func TestGetNodeDevices_InvalidJSON(t *testing.T) {
 	assert.Assert(t, err != nil)
 }
 
+// A node serving its GPUs through lupine publishes the same registration
+// annotation the remote-gpu backend reads. Claiming those cards here too would
+// hand one physical GPU to two pods at once, which was reproduced on a real
+// cluster before this filter existed.
+func TestGetNodeDevices_SkipsRemotelyServedGPUs(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	node := func(annos string) corev1.Node {
+		return corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-lupine",
+			Annotations: map[string]string{RegisterAnnos: annos},
+		}}
+	}
+
+	// Every card served remotely: zero devices and no error, so
+	// Scheduler.register prunes whatever this node had cached.
+	result, err := dev.GetNodeDevices(node(
+		`[{"id":"GPU-0","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"remote"}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 0)
+
+	// A mixed node keeps the cards it still serves locally.
+	result, err = dev.GetNodeDevices(node(
+		`[{"id":"GPU-0","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"remote"},` +
+			`{"id":"GPU-1","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"hami-core"}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 1)
+	assert.Equal(t, result[0].ID, "GPU-1")
+}
+
 func TestGetNodeDevices_MigProfilesFromNode(t *testing.T) {
 	dev := &NvidiaGPUDevices{}
 	node := corev1.Node{
