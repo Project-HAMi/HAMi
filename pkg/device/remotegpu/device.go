@@ -374,48 +374,63 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
 
+	// A server is taken whole or not at all. Pointing a client at one exposes
+	// every GPU that server owns, and nothing on the wire narrows that down, so
+	// leaving a card behind would leave it visible to this pod and free for the
+	// next one. The design puts the boundary in the same place: a GPU node is
+	// managed by lupine entirely, and runs one server.
 	type candidate struct {
 		server string
-		free   []*device.DeviceUsage
+		cards  []*device.DeviceUsage // every healthy card, all of them allocated
+		usable int32                 // how many of them meet the request
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
-		free := make([]*device.DeviceUsage, 0, len(byServer[server]))
+		c := candidate{server: server}
+		taken := false
 		for _, d := range byServer[server] {
 			switch {
 			case !d.Health:
+				// An unhealthy card is still visible to whoever holds the
+				// server, but it is not one this request can count on.
 				reason[common.CardNotHealth]++
 			case d.Used > 0 || dev.pool.reserved(d.ID):
 				// Used covers pods already booked on this client node; reserved
 				// covers pods booked on any other client node, which the
-				// scheduler's per-node usage view cannot see.
+				// scheduler's per-node usage view cannot see, and clients the
+				// server itself reports.
 				reason[common.ExclusiveDeviceAllocateConflict]++
+				taken = true
 			case request.Memreq > 0 && d.Totalmem < request.Memreq:
 				reason[common.CardInsufficientMemory]++
+				c.cards = append(c.cards, d)
 			default:
-				free = append(free, d)
+				c.cards = append(c.cards, d)
+				c.usable++
 			}
 		}
-		candidates = append(candidates, candidate{server: server, free: free})
+		if taken {
+			// One card in use means the server is, whatever the rest look like.
+			continue
+		}
+		candidates = append(candidates, c)
 	}
 
-	// Spread the fleet: serve from whichever server has the most cards free.
-	// An allocation cannot span servers, so filling the emptiest one keeps the
-	// deepest server deep, and a later multi-card request still has somewhere
-	// to land. servers arrives sorted by name, and a stable sort keeps that
-	// order among equals, so equally free servers are picked the same way on
-	// every call.
+	// Among the servers that can serve the request, take the smallest. Whole
+	// servers are the unit, so the smallest sufficient one leaves the deeper
+	// servers intact for requests that need them. servers arrives sorted by
+	// name and the sort is stable, so equal servers are picked the same way on
+	// every call, which repeated Filter calls for one pod rely on.
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return len(candidates[i].free) > len(candidates[j].free)
+		return len(candidates[i].cards) < len(candidates[j].cards)
 	})
 
 	for _, c := range candidates {
-		server, free := c.server, c.free
-		if int32(len(free)) < request.Nums {
+		if c.usable < request.Nums {
 			reason[common.NodeInsufficientDevice]++
 			continue
 		}
-		for _, d := range free[:request.Nums] {
+		for _, d := range c.cards {
 			tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 				Idx:  int(d.Index),
 				UUID: d.ID,
@@ -425,8 +440,8 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 				Usedcores: d.Totalcore,
 			})
 		}
-		klog.V(4).InfoS("remotegpu: allocated from lupine server",
-			"pod", klog.KObj(pod), "server", server, "cards", request.Nums)
+		klog.V(4).InfoS("remotegpu: allocated a lupine server",
+			"pod", klog.KObj(pod), "server", c.server, "cards", len(c.cards), "requested", request.Nums)
 		return true, tmpDevs, reason
 	}
 	return false, tmpDevs, reason

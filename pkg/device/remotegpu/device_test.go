@@ -334,46 +334,83 @@ func TestMutateAdmission_SkipsEnforcementWhenNotAsked(t *testing.T) {
 	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
 
-// An allocation cannot span servers, so filling the emptiest server first keeps
-// the deepest one deep and leaves somewhere for a later multi-card request to
-// land. Picking the lowest-sorting server instead would hollow out one server
-// while another sat idle.
-func TestFit_SpreadsAcrossServers(t *testing.T) {
+// Pointing a client at a server exposes every GPU that server owns, so a
+// server is taken whole. Leaving a card behind would leave it visible to this
+// pod and free for the next one, which is how two pods end up on one card.
+func TestFit_TakesTheWholeServer(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
-	// gpu-a sorts first but has one card left; gpu-b has three.
 	devices := []*device.DeviceUsage{
 		card("gpu-a", "GPU-A1", 40000),
+		card("gpu-a", "GPU-A2", 40000),
+		card("gpu-a", "GPU-A3", 40000),
+	}
+
+	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 3,
+		"one card was asked for, the server's three come with it")
+}
+
+// Whole servers are the unit, so the smallest one that can serve the request
+// leaves the deeper servers for requests that need them.
+func TestFit_PrefersTheSmallestSufficientServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	// gpu-a sorts first and is the larger of the two.
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-A1", 40000),
+		card("gpu-a", "GPU-A2", 40000),
+		card("gpu-a", "GPU-A3", 40000),
 		card("gpu-b", "GPU-B1", 40000),
-		card("gpu-b", "GPU-B2", 40000),
-		card("gpu-b", "GPU-B3", 40000),
+	}
+
+	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b")
+
+	// Two cards no longer fit on the small server, so the large one is used.
+	fit, allocated, _ = dev.Fit(devices, request(2, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 3)
+}
+
+// A single card in use takes its whole server out of the running, because the
+// pod holding it can already see the rest.
+func TestFit_OneBusyCardWithholdsItsServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	busy := card("gpu-a", "GPU-A1", 40000)
+	busy.Used = 1
+	devices := []*device.DeviceUsage{
+		busy,
+		card("gpu-a", "GPU-A2", 40000),
+		card("gpu-b", "GPU-B1", 40000),
 	}
 
 	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b",
-		"the emptiest server serves the request")
+		"gpu-a still has a free card but is not on offer")
 
-	// With the fleet level, the tie breaks on name so the choice is repeatable.
-	level := []*device.DeviceUsage{
-		card("gpu-a", "GPU-A1", 40000),
-		card("gpu-b", "GPU-B1", 40000),
-	}
-	fit, allocated, _ = dev.Fit(level, request(1, 0), &corev1.Pod{}, nil, nil)
-	assert.Equal(t, fit, true)
-	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
+	only := []*device.DeviceUsage{busy, card("gpu-a", "GPU-A2", 40000)}
+	fit, _, reason := dev.Fit(only, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Assert(t, reason != "")
+}
 
-	// Spreading must not hand out a server that cannot serve the whole request.
-	// gpu-b has the most cards free but only gpu-a has two of the right size.
-	small := card("gpu-b", "GPU-B4", 1000)
-	mixed := []*device.DeviceUsage{
+// Cards too small for the request do not count towards it, but they still come
+// with the server, since the client can see them either way.
+func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
 		card("gpu-a", "GPU-A1", 40000),
-		card("gpu-a", "GPU-A2", 40000),
-		small,
-		card("gpu-b", "GPU-B5", 1000),
-		card("gpu-b", "GPU-B6", 1000),
+		card("gpu-a", "GPU-A2", 1000),
 	}
-	fit, allocated, _ = dev.Fit(mixed, request(2, 2000), &corev1.Pod{}, nil, nil)
+
+	fit, allocated, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
-	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
-	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2, "the small card comes along")
+
+	fit, _, reason := dev.Fit(devices, request(2, 2000), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false, "only one card is big enough")
+	assert.Assert(t, reason != "")
 }
