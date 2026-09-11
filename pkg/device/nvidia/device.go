@@ -62,6 +62,10 @@ const (
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
+	// RemoteMode marks a GPU this node serves over the network through lupine
+	// rather than to pods of its own. The remote-gpu backend hands such a card
+	// out cluster wide, so this backend must leave it alone.
+	RemoteMode = "remote"
 )
 
 var (
@@ -300,6 +304,29 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
 	}
+	// The device plugin publishes one registration annotation whatever mode it
+	// runs in, and the remote-gpu backend reads the same annotation. Claiming a
+	// card that lupine is already serving would let this node hand the same
+	// physical GPU to a second pod.
+	local := make([]*device.DeviceInfo, 0, len(nodedevices))
+	for _, nodedevice := range nodedevices {
+		if nodedevice != nil && nodedevice.Mode == RemoteMode {
+			continue
+		}
+		local = append(local, nodedevice)
+	}
+	if skipped := len(nodedevices) - len(local); skipped > 0 {
+		klog.InfoS("skipping GPUs this node serves remotely through lupine",
+			"node", n.Name, "skipped", skipped, "kept", len(local))
+	}
+	if len(local) == 0 {
+		// Zero devices rather than an error: Scheduler.register prunes a stale
+		// cache entry only on a successful empty result, and skips the pruning
+		// on error. An error would leave a node that has just switched to
+		// serving lupine still advertising its cards here.
+		return nil, nil
+	}
+	nodedevices = local
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}

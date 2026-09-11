@@ -48,6 +48,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/stretchr/testify/require"
@@ -1105,4 +1106,35 @@ func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
 	response, err := plugin.Allocate(context.Background(), request)
 	require.Nil(t, response)
 	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
+}
+
+// The lupine label is the operator's one declaration that a node serves its
+// GPUs over the network. Deriving the mode from it keeps the plugin and the
+// scheduler's pool from disagreeing about which fleet a node belongs to.
+func TestResolveOperatingMode(t *testing.T) {
+	labelled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "gpu-a",
+		Labels: map[string]string{remotegpu.LupineServerLabel: ""},
+	}}
+	plain := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-b"}}
+
+	for _, tc := range []struct {
+		name       string
+		configured string
+		node       *corev1.Node
+		want       string
+	}{
+		{"label wins over the configured mode", nvidia.HamiCoreMode, labelled, nvidia.RemoteMode},
+		{"label wins over mig too", nvidia.MigMode, labelled, nvidia.RemoteMode},
+		{"an unlabelled node keeps its configured mode", nvidia.MigMode, plain, nvidia.MigMode},
+		// Honouring remote here would hide the cards from both fleets: this
+		// backend would skip them and the pool would never discover the node.
+		{"remote without the label is refused", nvidia.RemoteMode, plain, nvidia.HamiCoreMode},
+		{"remote with no node readable is refused", nvidia.RemoteMode, nil, nvidia.HamiCoreMode},
+		{"no node readable keeps the configured mode", nvidia.HamiCoreMode, nil, nvidia.HamiCoreMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
+		})
+	}
 }

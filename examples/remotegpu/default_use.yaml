@@ -1,0 +1,29 @@
+# A pod that runs where there is no GPU and reaches one over the network.
+#
+# The node this lands on owns no GPU and runs no device plugin. The scheduler
+# picks a lupine server for the pod and writes its address into the
+# hami.io/lupine-server annotation; the webhook wires LUPINE_SERVER to that
+# annotation through the downward API, so the container reads it at startup.
+#
+# The image supplies the client side: lupine's libcuda shim on the library
+# search path, which is what turns the CUDA calls into requests to the server.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: remote-gpu-pod
+spec:
+  containers:
+    - name: cuda-container
+      image: ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04
+      command: ["bash", "-c", "nvidia-smi -L && sleep 86400"]
+      resources:
+        limits:
+          # How many cards the pod needs. The server it lands on must have at
+          # least this many, and the pod is given that server whole: a client
+          # can see every GPU on the server it is pointed at, so leaving a card
+          # behind would leave it visible here and free for the next pod.
+          nvidia.com/remote-gpu: 1
+          # Memory each card may use, in MB (Optional, Integer). HAMi-core is
+          # loaded into the container to hold the pod to it, and reports the
+          # card as this size. Leave it out to run without a limit.
+          nvidia.com/remote-gpu-memory: 3000

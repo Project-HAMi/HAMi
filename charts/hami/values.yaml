@@ -583,6 +583,43 @@ devices:
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
+  remotegpu:
+    # Schedule pods onto GPUs served over the network by a lupine server.
+    # Label each lupine node with hami.io/lupine-server, optionally setting the
+    # label value to the port lupine listens on.
+    enabled: false
+    defaultPort: 14833
+    resourceCountName: "nvidia.com/remote-gpu"
+    resourceMemoryName: "nvidia.com/remote-gpu-memory"
+    # Image carrying HAMi-core, which an init container copies into the client
+    # pod so the memory request is enforced and not merely a placement filter.
+    # A client node runs no device plugin, so nothing else would deliver it.
+    # Defaults to the device plugin image. Set it to "" to schedule remote GPUs
+    # without enforcement.
+    libImage: ""
+    # Image for the session stub the scheduler keeps on each lupine server, so
+    # a user port-forwards to the stub instead of the server. Needs socat on
+    # the path. Empty runs no stubs, and no port-forward sessions with them.
+    sessionImage: ""
+    server:
+      # Run a lupine server on every node carrying serverLabel. Turn this off
+      # when lupine is managed outside the chart; the label's value then names
+      # the port that server listens on. The chart-managed one uses
+      # defaultPort, because a DaemonSet cannot vary a port per node.
+      enabled: true
+      image:
+        registry: "ghcr.io"
+        repository: "lupinemachines/lupine-server"
+        tag: "cuda-13.3.1-ubuntu24.04"
+        pullPolicy: IfNotPresent
+      # The server reaches the GPUs through NVIDIA_VISIBLE_DEVICES, which only
+      # works under the NVIDIA container runtime. Name the RuntimeClass that
+      # selects it when the cluster does not make it the default, commonly
+      # "nvidia". It has its own setting rather than borrowing the device
+      # plugin's, because in remote mode that plugin may not run at all.
+      runtimeClassName: ""
+      tolerations: []
+      resources: {}
   ascend:
     enabled: false
     image: ""
