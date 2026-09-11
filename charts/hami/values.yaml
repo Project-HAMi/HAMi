@@ -648,3 +648,10 @@ prometheus:
 #           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
 device-config:
   content: ""
+
+# Memory units (512MiB each) provided by one MThreads card model, one entry per
+# model present in the cluster. 96 = MTT S4000 (48GiB, upstream default);
+# 160 = MTT S5000 (80GiB). Mixed fleets list every model, e.g. [96, 160].
+# Pods that omit mthreads.com/sgpu-memory are sized from the node's real card.
+mthreadsMemoryPerCard:
+  - 96

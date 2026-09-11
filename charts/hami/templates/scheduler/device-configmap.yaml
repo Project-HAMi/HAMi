@@ -75,6 +75,12 @@ data:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
+      memoryPerCard:
+{{- if kindIs "slice" .Values.mthreadsMemoryPerCard }}
+{{ toYaml (.Values.mthreadsMemoryPerCard | default (list 96)) | indent 8 }}
+{{- else }}
+        - {{ .Values.mthreadsMemoryPerCard | default 96 }}
+{{- end }}
     iluvatars:
     - chipName: MR-V100
       commonWord: MR-V100
