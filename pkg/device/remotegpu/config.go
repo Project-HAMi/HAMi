@@ -27,4 +27,8 @@ type RemoteGPUConfig struct {
 	// to load it. Leave it empty to schedule remote GPUs without enforcing the
 	// memory request, which is then only a placement filter.
 	LibImage string `yaml:"libImage"`
+	// SessionImage relays a port-forwarded session to the lupine server beside
+	// it, so a user never forwards to the server itself. It needs socat on the
+	// path. Leave it empty to run no session stubs.
+	SessionImage string `yaml:"sessionImage"`
 }

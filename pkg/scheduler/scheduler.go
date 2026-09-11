@@ -44,6 +44,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -578,6 +579,13 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		return
 	}
 	s.overviewstatus = *overallnodeMap
+
+	// The lupine fleet keeps a relay pod on each of its servers so a user can
+	// port-forward to something other than the server. Reconciled here because
+	// this is the loop that already runs only on the leader.
+	if dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
+		dev.ReconcileSessionStubs(context.Background())
+	}
 
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced.Store(true)

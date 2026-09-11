@@ -597,6 +597,10 @@ devices:
     # Defaults to the device plugin image. Set it to "" to schedule remote GPUs
     # without enforcement.
     libImage: ""
+    # Image for the session stub the scheduler keeps on each lupine server, so
+    # a user port-forwards to the stub instead of the server. Needs socat on
+    # the path. Empty runs no stubs, and no port-forward sessions with them.
+    sessionImage: ""
     server:
       # Run a lupine server on every node carrying serverLabel. Turn this off
       # when lupine is managed outside the chart; the label's value then names

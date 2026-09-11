@@ -1,50 +1,46 @@
-# An interactive session against a GPU served over the network by lupine.
+# Reaching the fleet by hand, from a machine with no GPU and no NVIDIA driver.
 #
-# The stub is what a user reaches, so the lupine server never has to be. It
-# runs on the server's own node and relays to it there, which keeps the server
-# reachable from one place and leaves the user with a pod they can be granted
-# forwarding on by itself.
+# There is nothing to apply here. Set devices.remotegpu.sessionImage and the
+# scheduler keeps a stub on every lupine server, named after its node. The stub
+# is what you forward to, so nobody needs forwarding rights in the namespace
+# running the servers themselves.
 #
-#   kubectl apply -f port_forward_session.yaml
-#   kubectl port-forward pod/lupine-session 14833:14833
+#   kubectl -n kube-system get pods -l hami.io/lupine-session
+#   kubectl -n kube-system port-forward pod/lupine-session-<node> 14833:14833
 #
-# Then, on a machine with no GPU and no NVIDIA driver:
+# Then, locally:
 #
 #   export LUPINE_SERVER=127.0.0.1:14833
 #   LD_LIBRARY_PATH=/opt/lupine/lib nvidia-smi
 #
-# The stub holds no card. A lupine node reports no devices to the scheduler,
-# since it serves its GPUs rather than hosting pods that use them, so there is
-# nothing there for a pod to be given. The session is therefore not accounted
-# for: it reaches whatever the server has, alongside whatever the scheduler has
-# placed on it. Give sessions a fleet of their own, or a server the scheduler
-# is not offering, when that matters.
-apiVersion: v1
-kind: Pod
-metadata:
-  name: lupine-session
-spec:
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          # Exists, not a nodeSelector: the label's value carries the port, so
-          # matching on it would pin the session to one port.
-          - matchExpressions:
-              - key: hami.io/lupine-server
-                operator: Exists
-  containers:
-    - name: relay
-      image: alpine/socat:1.8.0.0
-      # The server runs on the host network of this same node, so it answers on
-      # the node's own address rather than inside this pod.
-      env:
-        - name: NODE_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-      command: ["sh", "-c"]
-      args: ["exec socat TCP-LISTEN:14833,fork,reuseaddr TCP:$NODE_IP:14833"]
-      ports:
-        - name: lupine
-          containerPort: 14833
+# The forwarded port is the one that server listens on, which is the value of
+# its hami.io/lupine-server label when it carries one.
+#
+# A session is not accounted for. The stub holds no card, because a lupine node
+# reports no devices to the scheduler: it serves its GPUs rather than hosting
+# pods that use them, so there is nothing there for a pod to be given. A session
+# reaches whatever the server has, alongside whatever the scheduler has placed
+# on it. Keep sessions to a fleet the scheduler is not offering when that
+# matters.
+#
+# What the scheduler creates, for reference:
+#
+#   apiVersion: v1
+#   kind: Pod
+#   metadata:
+#     name: lupine-session-<node>
+#     namespace: <the scheduler's namespace>
+#     labels:
+#       hami.io/lupine-session: <node>
+#   spec:
+#     nodeName: <node>
+#     tolerations:
+#       - operator: Exists
+#     containers:
+#       - name: relay
+#         image: <devices.remotegpu.sessionImage>
+#         env:
+#           - name: LUPINE_ENDPOINT
+#             value: <node ip>:<port>
+#         command: ["sh", "-c"]
+#         args: ["exec socat TCP-LISTEN:<port>,fork,reuseaddr TCP:$LUPINE_ENDPOINT"]
