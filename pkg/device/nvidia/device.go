@@ -367,13 +367,38 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		}
 	}
 
-	if !hasResource && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
+	if !hasResource {
+		// Unset falls back to dev.config.OverwriteEnv.
+		inject := false
+		switch util.OverwriteEnvDecision(p, ctr) {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.config.OverwriteEnv
+		}
+		// Idempotent on webhook reinvocation (reinvocationPolicy: IfNeeded).
+		if inject && !hasEnvVarWithValue(ctr.Env, "NVIDIA_VISIBLE_DEVICES", "none") {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "NVIDIA_VISIBLE_DEVICES",
+				Value: "none",
+			})
+		}
 	}
 	return hasResource, nil
+}
+
+// hasEnvVarWithValue matches the last entry with the given name, because
+// kubelet lets the last same-name env entry win.
+func hasEnvVarWithValue(env []corev1.EnvVar, name, value string) bool {
+	for _, e := range slices.Backward(env) {
+		if e.Name != name {
+			continue
+		}
+		return e.ValueFrom == nil && e.Value == value
+	}
+	return false
 }
 
 func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
