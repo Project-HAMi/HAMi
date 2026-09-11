@@ -535,6 +535,54 @@ hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpu
 	}
 }
 
+func TestClusterManagerCollectorGPUMemoryAllocatedAndLimitLabelsMatch(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-1234",
+							Index:     0,
+							Count:     1,
+							Totalmem:  16384,
+							Usedmem:   4096,
+							Totalcore: 100,
+							Usedcores: 25,
+							Type:      "NVIDIA",
+							Mode:      "hami-core",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   device.NewPodManager(),
+		},
+	}
+
+	want := `
+# HELP hami_gpu_memory_allocated_bytes Device memory allocated for a certain GPU
+# TYPE hami_gpu_memory_allocated_bytes gauge
+hami_gpu_memory_allocated_bytes{device_index="0",device_type="NVIDIA",device_uuid="GPU-1234",node="node-1"} 4.294967296e+09
+# HELP hami_gpu_memory_limit_bytes Device memory limit for a certain GPU
+# TYPE hami_gpu_memory_limit_bytes gauge
+hami_gpu_memory_limit_bytes{device_index="0",device_type="NVIDIA",device_uuid="GPU-1234",node="node-1"} 1.7179869184e+10
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_gpu_memory_allocated_bytes",
+		"hami_gpu_memory_limit_bytes",
+	); err != nil {
+		t.Fatalf("unexpected GPU memory metrics result:\n%s", err)
+	}
 // TestSchedulerStateMetrics verifies that hami_scheduler_is_leader and
 // hami_scheduler_cache_synced are emitted correctly for all combinations of
 // leader and sync state.
