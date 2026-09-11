@@ -248,6 +248,32 @@ func TestChecksRejectViolations(t *testing.T) {
 			wantMsg: "exceeds Totalcore",
 		},
 		{
+			name: "allocation oversubscribes the device count",
+			dev: &stubDevices{
+				fit: func(devices []*device.DeviceUsage, request device.ContainerDeviceRequest) (bool, map[string]device.ContainerDevices, string) {
+					// One more concurrent task than the device's time-slicing
+					// count allows.
+					picked := make(device.ContainerDevices, 0, devices[0].Count+1)
+					for range devices[0].Count + 1 {
+						picked = append(picked, device.ContainerDevice{UUID: devices[0].ID, Type: request.Type})
+					}
+					return true, map[string]device.ContainerDevices{request.Type: picked}, ""
+				},
+			},
+			check:   checkFitAllocationStaysWithinDeviceBudget,
+			wantMsg: "exceeds Count",
+		},
+		{
+			name: "AddResourceUsage rejects what Fit returned",
+			dev: &stubDevices{
+				addUsage: func(_ *device.DeviceUsage, _ *device.ContainerDevice) error {
+					return errors.New("device is in an unusable state")
+				},
+			},
+			check:   checkFitAllocationStaysWithinDeviceBudget,
+			wantMsg: "AddResourceUsage failed",
+		},
+		{
 			name: "Fit returns a device it was not given",
 			dev: &stubDevices{
 				fit: func(_ []*device.DeviceUsage, request device.ContainerDeviceRequest) (bool, map[string]device.ContainerDevices, string) {
@@ -291,6 +317,26 @@ func TestChecksRejectViolations(t *testing.T) {
 			},
 			check:   checkEmptyContainerRequestsNoDevices,
 			wantMsg: "requests no resources",
+		},
+		{
+			name: "budget check reports a fixture its backend cannot satisfy",
+			dev: &stubDevices{
+				fit: func(devices []*device.DeviceUsage, _ device.ContainerDeviceRequest) (bool, map[string]device.ContainerDevices, string) {
+					return false, nil, common.GenReason(map[string]int{common.CardTypeMismatch: len(devices)}, len(devices))
+				},
+			},
+			check:   checkFitAllocationStaysWithinDeviceBudget,
+			wantMsg: "fixture must describe an allocatable request",
+		},
+		{
+			name: "neutrality check reports a fixture its backend cannot satisfy",
+			dev: &stubDevices{
+				fit: func(devices []*device.DeviceUsage, _ device.ContainerDeviceRequest) (bool, map[string]device.ContainerDevices, string) {
+					return false, nil, common.GenReason(map[string]int{common.CardTypeMismatch: len(devices)}, len(devices))
+				},
+			},
+			check:   checkScoreNodeDeclaresPolicyNeutrality,
+			wantMsg: "fixture must describe an allocatable request",
 		},
 		{
 			name: "GetNodeDevices reports devices for an unregistered node",
@@ -422,6 +468,30 @@ func TestFixtureValidate(t *testing.T) {
 				t.Errorf("validate() = %q, which does not mention %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestFixtureUsesSuppliedNodeAndNodeInfo(t *testing.T) {
+	f := stubFixture()
+	if got := f.node(); got.Name != "" {
+		t.Errorf("node() = %q for a fixture with no Node, want an empty Node", got.Name)
+	}
+	if got := f.nodeInfo(); got.ID != "" {
+		t.Errorf("nodeInfo() carried ID %q for a fixture with no Node, want empty", got.ID)
+	}
+
+	f.Node = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+	if got := f.node(); got.Name != "node-a" {
+		t.Errorf("node() = %q, want the supplied Node", got.Name)
+	}
+	// With no NodeInfo supplied, one is derived from the Node.
+	if got := f.nodeInfo(); got.ID != "node-a" {
+		t.Errorf("nodeInfo().ID = %q, want it derived from the supplied Node", got.ID)
+	}
+
+	f.NodeInfo = &device.NodeInfo{ID: "explicit"}
+	if got := f.nodeInfo(); got.ID != "explicit" {
+		t.Errorf("nodeInfo().ID = %q, want the supplied NodeInfo to win", got.ID)
 	}
 }
 
