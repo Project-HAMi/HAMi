@@ -591,6 +591,12 @@ devices:
     defaultPort: 14833
     resourceCountName: "nvidia.com/remote-gpu"
     resourceMemoryName: "nvidia.com/remote-gpu-memory"
+    # Image carrying HAMi-core, which an init container copies into the client
+    # pod so the memory request is enforced and not merely a placement filter.
+    # A client node runs no device plugin, so nothing else would deliver it.
+    # Defaults to the device plugin image. Set it to "" to schedule remote GPUs
+    # without enforcement.
+    libImage: ""
     server:
       # Run a lupine server on every node carrying serverLabel. Turn this off
       # when lupine is managed outside the chart; the label's value then names

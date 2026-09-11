@@ -57,11 +57,24 @@ const (
 	// DefaultLupinePort is lupine's listen port when a server node does not
 	// override it through the LupineServerLabel value.
 	DefaultLupinePort = 14833
+
+	// HAMi-core arrives in the client pod through this volume, since no device
+	// plugin runs on a node that owns no GPU. The name is shared by the volume
+	// and the init container that fills it, so both are easy to recognise in a
+	// mutated pod spec.
+	libVolumeName = "hami-remote-gpu-lib"
+	libMountPath  = "/hami-remote-gpu"
+	libSourceGlob = "/k8s-vgpu/lib/nvidia/libvgpu.so.*"
+
+	ldPreloadEnv   = "LD_PRELOAD"
+	memoryLimitEnv = "CUDA_DEVICE_MEMORY_LIMIT"
+	sharedCacheEnv = "CUDA_DEVICE_MEMORY_SHARED_CACHE"
 )
 
 var (
 	RemoteGPUResourceCount  string
 	RemoteGPUResourceMemory string
+	RemoteGPULibImage       string
 
 	errNoClient       = errors.New("kubernetes client is not initialized")
 	errNoRegistration = errors.New("node has no decodable GPU registration")
@@ -75,6 +88,7 @@ type RemoteGPUDevices struct {
 func InitRemoteGPUDevice(config RemoteGPUConfig) *RemoteGPUDevices {
 	RemoteGPUResourceCount = config.ResourceCountName
 	RemoteGPUResourceMemory = config.ResourceMemoryName
+	RemoteGPULibImage = config.LibImage
 	port := config.DefaultPort
 	if port <= 0 || port > 65535 {
 		port = DefaultLupinePort
@@ -136,10 +150,11 @@ func (dev *RemoteGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 // MutateAdmission wires LUPINE_SERVER to the annotation the scheduler writes in
 // PatchAnnotations. A literal value in the pod spec is replaced: the endpoint
 // is not known until placement.
-func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, _ *corev1.Pod) (bool, error) {
+func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
 		return false, nil
 	}
+	armMemoryLimit(ctr, pod)
 	setEnv(ctr, corev1.EnvVar{
 		Name: lupineServerEnv,
 		ValueFrom: &corev1.EnvVarSource{
@@ -157,6 +172,75 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, _ *corev1.Po
 		},
 	})
 	return true, nil
+}
+
+// armMemoryLimit puts HAMi-core in front of the client's CUDA calls, so the
+// memory the pod asked for is the memory it can take.
+//
+// On a node that owns its GPUs the device plugin does this at Allocate time. A
+// client node owns none, runs no plugin, and never sees an Allocate call, so
+// the library has to arrive with the pod. HAMi-core resolves the real driver
+// with dlopen("libcuda.so.1"), which lands on the lupine client library the
+// workload image already puts on its search path, and enforcement then happens
+// before anything goes out on the wire.
+func armMemoryLimit(ctr *corev1.Container, pod *corev1.Pod) {
+	if RemoteGPULibImage == "" || pod == nil {
+		return
+	}
+	mem, ok := resourceValue(ctr, RemoteGPUResourceMemory)
+	if !ok || mem <= 0 {
+		// Nothing was asked for, so there is nothing to hold the pod to.
+		return
+	}
+	addLibDelivery(pod)
+	mountLib(ctr)
+
+	setEnv(ctr, corev1.EnvVar{Name: ldPreloadEnv, Value: libMountPath + "/libvgpu.so"})
+	// The unindexed limit is HAMi-core's fallback for every device, which is
+	// what a request spread evenly over the allocated cards means here.
+	setEnv(ctr, corev1.EnvVar{Name: memoryLimitEnv, Value: fmt.Sprintf("%vm", mem)})
+	// Whole-card allocation leaves nothing to divide, and HAMi-core already
+	// defaults an unset SM limit to the whole device, so no core limit is set.
+	//
+	// A per-pod cache rather than the node-wide one the device plugin uses:
+	// the pod holds its cards outright, so it has no peers to account against.
+	setEnv(ctr, corev1.EnvVar{Name: sharedCacheEnv, Value: libMountPath + "/vgpu.cache"})
+}
+
+// addLibDelivery gives the pod somewhere to put HAMi-core and an init container
+// that fetches it. Both are named after the volume so a pod whose containers
+// each ask for a remote GPU collects one copy, not one per container.
+func addLibDelivery(pod *corev1.Pod) {
+	for i := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[i].Name == libVolumeName {
+			return
+		}
+	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name:         libVolumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	})
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+		Name:  libVolumeName,
+		Image: RemoteGPULibImage,
+		// The library is published under a version suffix, and the glob keeps
+		// this from having to track the chart's image tag.
+		Command:      []string{"sh", "-c", "cp " + libSourceGlob + " " + libMountPath + "/libvgpu.so"},
+		VolumeMounts: []corev1.VolumeMount{{Name: libVolumeName, MountPath: libMountPath}},
+	})
+}
+
+func mountLib(ctr *corev1.Container) {
+	for i := range ctr.VolumeMounts {
+		if ctr.VolumeMounts[i].Name == libVolumeName {
+			return
+		}
+	}
+	// Writable, because HAMi-core keeps its accounting cache alongside.
+	ctr.VolumeMounts = append(ctr.VolumeMounts, corev1.VolumeMount{
+		Name:      libVolumeName,
+		MountPath: libMountPath,
+	})
 }
 
 func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {

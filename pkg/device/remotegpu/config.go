@@ -23,4 +23,8 @@ type RemoteGPUConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	DefaultPort        int    `yaml:"defaultPort"`
+	// LibImage carries HAMi-core into a client pod, which has no device plugin
+	// to load it. Leave it empty to schedule remote GPUs without enforcing the
+	// memory request, which is then only a placement filter.
+	LibImage string `yaml:"libImage"`
 }

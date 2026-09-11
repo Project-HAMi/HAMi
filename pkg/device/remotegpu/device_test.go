@@ -34,6 +34,7 @@ func testConfig() RemoteGPUConfig {
 		ResourceCountName:  "nvidia.com/remote-gpu",
 		ResourceMemoryName: "nvidia.com/remote-gpu-memory",
 		DefaultPort:        DefaultLupinePort,
+		LibImage:           "projecthami/hami:test",
 	}
 }
 
@@ -261,4 +262,74 @@ func TestCheckHealth_AlwaysHealthy(t *testing.T) {
 	health, needUpdate := dev.CheckHealth(RemoteGPUDevice, &corev1.Node{})
 	assert.Equal(t, health, true)
 	assert.Equal(t, needUpdate, true)
+}
+
+// The memory request only means something once HAMi-core is in the container to
+// hold the workload to it, and on a GPU-less node no device plugin is there to
+// put it in. Verified on a real cluster: without this a pod asking for 2000MB
+// allocated 8GB unhindered.
+func TestMutateAdmission_ArmsTheMemoryLimit(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{
+		Name: "app",
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"nvidia.com/remote-gpu":        resource.MustParse("1"),
+			"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
+		}},
+	}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{*ctr}}}
+
+	found, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, found, true)
+
+	env := map[string]string{}
+	for _, e := range ctr.Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, env[memoryLimitEnv], "2000m")
+	assert.Equal(t, env[ldPreloadEnv], libMountPath+"/libvgpu.so")
+	assert.Equal(t, env[sharedCacheEnv], libMountPath+"/vgpu.cache")
+
+	assert.Equal(t, len(pod.Spec.InitContainers), 1)
+	assert.Equal(t, pod.Spec.InitContainers[0].Image, "projecthami/hami:test")
+	assert.Equal(t, len(pod.Spec.Volumes), 1)
+	assert.Equal(t, len(ctr.VolumeMounts), 1)
+
+	// A second container asking for a remote GPU shares the one copy.
+	other := &corev1.Container{Name: "sidecar", Resources: ctr.Resources}
+	_, err = dev.MutateAdmission(other, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, len(pod.Spec.InitContainers), 1)
+	assert.Equal(t, len(pod.Spec.Volumes), 1)
+	assert.Equal(t, len(other.VolumeMounts), 1)
+}
+
+// Without a memory request there is no limit to enforce, and without an image
+// there is nothing to enforce it with. Neither should drag HAMi-core in.
+func TestMutateAdmission_SkipsEnforcementWhenNotAsked(t *testing.T) {
+	countOnly := corev1.ResourceRequirements{Limits: corev1.ResourceList{
+		"nvidia.com/remote-gpu": resource.MustParse("1"),
+	}}
+	withMem := corev1.ResourceRequirements{Limits: corev1.ResourceList{
+		"nvidia.com/remote-gpu":        resource.MustParse("1"),
+		"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
+	}}
+
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{Name: "app", Resources: countOnly}
+	pod := &corev1.Pod{}
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, len(pod.Spec.InitContainers), 0)
+
+	cfg := testConfig()
+	cfg.LibImage = ""
+	dev = InitRemoteGPUDevice(cfg)
+	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
+	ctr = &corev1.Container{Name: "app", Resources: withMem}
+	pod = &corev1.Pod{}
+	_, err = dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }

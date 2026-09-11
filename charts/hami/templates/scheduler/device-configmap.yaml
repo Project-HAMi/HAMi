@@ -101,6 +101,7 @@ data:
       resourceCountName: {{ .Values.devices.remotegpu.resourceCountName }}
       resourceMemoryName: {{ .Values.devices.remotegpu.resourceMemoryName }}
       defaultPort: {{ .Values.devices.remotegpu.defaultPort }}
+      libImage: {{ .Values.devices.remotegpu.libImage | default (include "hami.devicePlugin.image" .) | quote }}
     {{- end }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
