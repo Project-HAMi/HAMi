@@ -238,6 +238,37 @@ spec:
 
 This example validates resource allocation and device injection only. A production canary should use a trusted image with CUDA or NVML tools and run an actual GPU workload.
 
+### Preferring a MIG profile
+
+Profile selection is memory-only: the scheduler picks the smallest allowlisted profile whose memory covers the request. Because MIG couples memory and compute, two profiles can cover the same request with different compute shares; on an A100-40GB a 20 GB request always resolves to `3g.20gb` even when `4g.20gb` is allowed. A Pod that wants the extra compute can set the `nvidia.com/mig-profile-preference` annotation to an ordered, comma-separated list of profiles:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mig-prefer-4g
+  annotations:
+    nvidia.com/vgpu-mode: "mig"
+    nvidia.com/mig-profile-preference: "4g"
+spec:
+  containers:
+    - name: workload
+      image: ubuntu:22.04
+      command: ["bash", "-c", "sleep 3600"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+          nvidia.com/gpumem: 20000
+```
+
+An entry either names a profile exactly (`4g.20gb`) or names a slice class (`4g`), which matches that class on every GPU model, so one value covers A100 and H100 nodes. Preferred profiles are tried first, in the listed order, before the default smallest-first order. The preference is a bias, not a requirement:
+
+- it never selects a profile smaller than the memory request;
+- it only applies to profiles in the GPU's `migProfileAllowlist`; an entry that matches nothing on a GPU is ignored there;
+- if the preferred profile has no free placement, or the preferred layout does not fit the container's slices on that GPU, the scheduler falls back to the default order rather than rejecting the GPU.
+
+The admission webhook rejects a value that matches no profile in any `migProfileAllowlist` entry, so typos are reported when the Pod is created.
+
 ### Reclamation and recovery
 
 - Deleting the canary Pod releases its CI/GI without affecting instances owned by other Pods.
@@ -291,7 +322,7 @@ The legacy index describes a logical position in a scheduler template. Across GP
 
 ### Must users change their workload YAML?
 
-Usually not. Users continue to request `nvidia.com/gpu` and `nvidia.com/gpumem` and select `nvidia.com/vgpu-mode: "mig"`. The scheduler and device plugin manage `hami.io/vgpu-mig-allocations`; it is not a user-facing API.
+Usually not. Users continue to request `nvidia.com/gpu` and `nvidia.com/gpumem` and select `nvidia.com/vgpu-mode: "mig"`. Pods that want a specific profile among those covering their request can add `nvidia.com/mig-profile-preference`, see [Preferring a MIG profile](#preferring-a-mig-profile). The scheduler and device plugin manage `hami.io/vgpu-mig-allocations`; it is not a user-facing API.
 
 ## Conclusion
 

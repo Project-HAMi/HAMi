@@ -127,7 +127,7 @@ The device plugin discovers the allowlisted profile set through NVML and publish
 
 ### Scheduling and reservation
 
-The scheduler rebuilds occupancy from active Pod reservations. Each placement occupies the interval `[start, start + size)`. Profile selection follows workload capacity, and placement selection follows deterministic packing. Capacity pressure keeps the workload in the Kubernetes Pending phase.
+The scheduler rebuilds occupancy from active Pod reservations. Each placement occupies the interval `[start, start + size)`. Profile selection follows workload capacity, smallest covering profile first unless the Pod biases the order with the `nvidia.com/mig-profile-preference` annotation, and placement selection follows deterministic packing. Capacity pressure keeps the workload in the Kubernetes Pending phase.
 
 ### Runtime realization
 
