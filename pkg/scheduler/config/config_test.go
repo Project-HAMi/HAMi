@@ -786,3 +786,97 @@ func Test_Resourcereqs(t *testing.T) {
 		})
 	}
 }
+
+func Test_InitDevicesWithConfig_PartialFailure(t *testing.T) {
+	// NVIDIA config is zero value (will fail init), Cambricon is valid
+	cfg := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{},
+		CambriconConfig: cambricon.CambriconConfig{
+			ResourceCountName: "cambricon.com/vmlu",
+		},
+	}
+
+	err := InitDevicesWithConfig(cfg)
+
+	// Should return error for NVIDIA only
+	assert.ErrorContains(t, err, "nvidia")
+	// Cambricon should still initialize
+	assert.Assert(t, device.DevicesMap[cambricon.CambriconMLUCommonWord] != nil)
+	// NVIDIA should NOT be in DevicesMap
+	assert.Assert(t, device.DevicesMap[nvidia.NvidiaGPUDevice] == nil)
+}
+
+func Test_InitDevicesWithConfig_TypeAssertionSafety(t *testing.T) {
+	// Test with zero-value NVIDIA config (tests the ok := cfg.(Type) pattern)
+	cfg := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{},
+	}
+
+	// Should return error, not panic
+	var err error
+	assertDoesNotPanic(t, func() {
+		err = InitDevicesWithConfig(cfg)
+	})
+	assert.ErrorContains(t, err, "nvidia")
+}
+
+func Test_InitDevicesWithConfig_MultipleFailures(t *testing.T) {
+	cfg := &Config{
+		NvidiaConfig:    nvidia.NvidiaConfig{},
+		CambriconConfig: cambricon.CambriconConfig{},
+		HygonConfig:     hygon.HygonConfig{},
+		EnflameConfig:   enflame.EnflameConfig{},
+	}
+
+	err := InitDevicesWithConfig(cfg)
+
+	// All errors should be aggregated
+	assert.ErrorContains(t, err, "nvidia")
+	assert.ErrorContains(t, err, "cambricon")
+	assert.ErrorContains(t, err, "hygon")
+	assert.ErrorContains(t, err, "enflame")
+
+	// DevicesMap should be empty (all failed)
+	assert.Assert(t, len(device.DevicesMap) == 0, "Expected no devices initialized")
+}
+
+// Test_InitDevicesWithConfig_AscendFailure tests that invalid VNPUs config
+// is handled gracefully in the Ascend device initialization loop.
+func Test_InitDevicesWithConfig_AscendFailure(t *testing.T) {
+	// Invalid VNPUs config (empty configs slice but valid struct)
+	cfg := &Config{
+		VNPUs: ascend.VNPUs{
+			HamiVnpuCore: false,
+			Configs:      []ascend.VNPUConfig{},
+		},
+	}
+
+	// Should handle gracefully (no panic)
+	assertDoesNotPanic(t, func() {
+		InitDevicesWithConfig(cfg)
+	})
+	// Other devices (if configured) should still work
+}
+
+func Test_InitDevicesWithConfig_IluvatarFailure(t *testing.T) {
+	cfg := &Config{
+		IluvatarConfig: []iluvatar.IluvatarConfig{
+			{ChipName: "invalid"},
+		},
+	}
+
+	// Should handle gracefully (no panic)
+	assertDoesNotPanic(t, func() {
+		InitDevicesWithConfig(cfg)
+	})
+}
+
+func assertDoesNotPanic(t *testing.T, action func()) {
+	t.Helper()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("unexpected panic: %v", recovered)
+		}
+	}()
+	action()
+}
