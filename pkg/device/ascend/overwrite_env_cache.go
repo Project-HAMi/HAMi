@@ -17,7 +17,6 @@ limitations under the License.
 package ascend
 
 import (
-	"maps"
 	"math"
 	"time"
 
@@ -39,29 +38,26 @@ var overwriteEnvEntriesCache = cache.NewLRUExpireCache(256)
 
 const overwriteEnvCacheTTL = time.Duration(math.MaxInt64)
 
-// cachedContainerOverwriteEnv decodes rawJSON once and caches the result by
-// the raw string. A shallow copy is returned so callers cannot mutate the
-// cached entry.
-func cachedContainerOverwriteEnv(rawJSON string) map[string]util.OverwriteEnvMode {
+// cachedContainerOverwriteEnv resolves ctrName's mode from the container-level
+// JSON. The decoded map never leaves the cache layer. listed is false when the
+// JSON is empty or malformed, or the container has no entry — the caller falls
+// back to the pod-level value.
+func cachedContainerOverwriteEnv(rawJSON, ctrName string) (mode util.OverwriteEnvMode, listed bool) {
 	if rawJSON == "" {
-		return nil
+		return util.OverwriteEnvUnset, false
 	}
-	if v, ok := overwriteEnvEntriesCache.Get(rawJSON); ok {
-		if entries, ok := v.(map[string]util.OverwriteEnvMode); ok {
-			return entries
+	v, ok := overwriteEnvEntriesCache.Get(rawJSON)
+	if !ok {
+		entries, err := util.DecodeContainerOverwriteEnvJSON(rawJSON)
+		if err != nil {
+			// Cache nil so per-chip calls don't re-decode or re-warn.
+			overwriteEnvEntriesCache.Add(rawJSON, map[string]util.OverwriteEnvMode(nil), overwriteEnvCacheTTL)
+			return util.OverwriteEnvUnset, false
 		}
-		// Wrong type stored: unreachable, but recompute rather than panic.
+		overwriteEnvEntriesCache.Add(rawJSON, entries, overwriteEnvCacheTTL)
+		v = entries
 	}
-	entries, err := util.DecodeContainerOverwriteEnvJSON(rawJSON)
-	if err != nil {
-		// DecodeContainerOverwriteEnvJSON already logged the warning. Cache nil
-		// so the remaining per-chip calls don't re-decode and re-log.
-		overwriteEnvEntriesCache.Add(rawJSON, map[string]util.OverwriteEnvMode(nil), overwriteEnvCacheTTL)
-		return nil
-	}
-	// Return a shallow copy so callers cannot mutate the cached shared map.
-	cp := make(map[string]util.OverwriteEnvMode, len(entries))
-	maps.Copy(cp, entries)
-	overwriteEnvEntriesCache.Add(rawJSON, entries, overwriteEnvCacheTTL)
-	return cp
+	entries, _ := v.(map[string]util.OverwriteEnvMode) // nil map is safe to index
+	mode, listed = entries[ctrName]
+	return mode, listed
 }

@@ -28,33 +28,33 @@ import (
 // Test_cachedContainerOverwriteEnv covers hit/miss, malformed-JSON nil caching,
 // and empty short-circuit. Distinct JSON per case avoids cross-case sharing.
 func Test_cachedContainerOverwriteEnv(t *testing.T) {
-	// miss → decode + cache
-	got := cachedContainerOverwriteEnv(`{"main":"true"}`)
-	assert.Equal(t, len(got), 1)
-	assert.Equal(t, got["main"], util.OverwriteEnvOn)
-	// hit (same JSON) → returns cached map
-	got = cachedContainerOverwriteEnv(`{"main":"true"}`)
-	assert.Equal(t, got["main"], util.OverwriteEnvOn)
+	// miss → decode + cache, lookup by container name
+	mode, listed := cachedContainerOverwriteEnv(`{"main":"true"}`, "main")
+	assert.Equal(t, mode, util.OverwriteEnvOn)
+	assert.Assert(t, listed)
+	// hit (same JSON) → same answer, no re-decode
+	mode, listed = cachedContainerOverwriteEnv(`{"main":"true"}`, "main")
+	assert.Equal(t, mode, util.OverwriteEnvOn)
+	assert.Assert(t, listed)
+	// unlisted container
+	mode, listed = cachedContainerOverwriteEnv(`{"main":"true"}`, "sidecar")
+	assert.Equal(t, mode, util.OverwriteEnvUnset)
+	assert.Assert(t, !listed)
 
 	// malformed JSON caches nil so repeated calls don't re-decode/re-warn
-	got = cachedContainerOverwriteEnv("not-json")
-	assert.Assert(t, got == nil, "malformed JSON must return nil")
-	got = cachedContainerOverwriteEnv("not-json") // hit, no re-warn
-	assert.Assert(t, got == nil)
+	mode, listed = cachedContainerOverwriteEnv("not-json", "main")
+	assert.Equal(t, mode, util.OverwriteEnvUnset)
+	assert.Assert(t, !listed)
+	_, listed = cachedContainerOverwriteEnv("not-json", "main") // hit, no re-warn
+	assert.Assert(t, !listed)
 
 	// empty short-circuits (no cache entry)
-	got = cachedContainerOverwriteEnv("")
-	assert.Assert(t, got == nil)
-
-	// multi-container JSON
-	got = cachedContainerOverwriteEnv(`{"main":"true","sidecar":"false"}`)
-	assert.Equal(t, len(got), 2)
-	assert.Equal(t, got["main"], util.OverwriteEnvOn)
-	assert.Equal(t, got["sidecar"], util.OverwriteEnvOff)
+	_, listed = cachedContainerOverwriteEnv("", "main")
+	assert.Assert(t, !listed)
 }
 
 // Test_cachedOverwriteEnv_DecisionEquivalence confirms the cached ascend path
-// (util.ParsePodOverwriteEnv + cachedContainerOverwriteEnv + ResolveOverwriteEnv)
+// (util.ParsePodOverwriteEnv + cachedContainerOverwriteEnv) with the inline
 // produces the same decision as the uncached util.OverwriteEnvDecision for
 // representative inputs.
 func Test_cachedOverwriteEnv_DecisionEquivalence(t *testing.T) {
@@ -84,9 +84,10 @@ func Test_cachedOverwriteEnv_DecisionEquivalence(t *testing.T) {
 			ctr := &corev1.Container{Name: c.ctrName}
 			want := util.OverwriteEnvDecision(pod, ctr)
 			podMode, _ := util.ParsePodOverwriteEnv(c.podVal)
-			entries := cachedContainerOverwriteEnv(c.rawJSON)
-			got := util.ResolveOverwriteEnv(podMode, entries, ctr)
-			assert.Equal(t, got, want, "cached path must match uncached decision")
+			if ctrMode, listed := cachedContainerOverwriteEnv(c.rawJSON, c.ctrName); listed {
+				podMode = ctrMode
+			}
+			assert.Equal(t, podMode, want, "cached path must match uncached decision")
 		})
 	}
 }
