@@ -19,6 +19,7 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -92,7 +93,25 @@ func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *HCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
+	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
+	dcuResourceCores := corev1.ResourceName(HygonResourceCores)
+	_, ok := ctr.Resources.Limits[dcuResourceCount]
+	if !ok {
+		_, ok = ctr.Resources.Requests[dcuResourceCount]
+	}
+	if ok {
+		for _, resList := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+			if resList == nil {
+				continue
+			}
+			if core, coreOk := resList[dcuResourceCores]; coreOk {
+				corenums, valid := core.AsInt64()
+				if !valid || corenums < 0 || corenums > 100 {
+					return false, fmt.Errorf("%s must be an integer between 0 and 100", HygonResourceCores)
+				}
+			}
+		}
+	}
 	return ok, nil
 }
 
@@ -173,23 +192,21 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				mem, ok = ctr.Resources.Requests[hcuResourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					if memnums < 0 || memnums > math.MaxInt32 {
-						klog.ErrorS(nil, "hcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
+				memnums, valid := mem.AsInt64()
+				if !valid || memnums < 0 || memnums > math.MaxInt32 {
+					klog.ErrorS(nil, "hcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
+					return device.ContainerDeviceRequest{}
+				}
+				if MemoryFactor > 1 {
+					rawMemnums := memnums
+					memnums = memnums * int64(MemoryFactor)
+					if memnums > math.MaxInt32 {
+						klog.ErrorS(nil, "hcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
 						return device.ContainerDeviceRequest{}
 					}
-					if MemoryFactor > 1 {
-						rawMemnums := memnums
-						memnums = memnums * int64(MemoryFactor)
-						if memnums > math.MaxInt32 {
-							klog.ErrorS(nil, "hcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
-							return device.ContainerDeviceRequest{}
-						}
-						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
-					}
-					memnum = int(memnums)
+					klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
 				}
+				memnum = int(memnums)
 			}
 			corenum := int32(100)
 			core, ok := ctr.Resources.Limits[hcuResourceCores]
