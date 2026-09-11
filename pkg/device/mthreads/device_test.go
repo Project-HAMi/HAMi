@@ -320,9 +320,10 @@ func Test_MutateAdmission(t *testing.T) {
 
 func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
-		name string
-		args corev1.Node
-		want []*device.DeviceInfo
+		name    string
+		args    corev1.Node
+		want    []*device.DeviceInfo
+		wantErr bool
 	}{
 		{
 			name: "get node device",
@@ -351,13 +352,56 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "get node devices from sgpu.cores label",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test",
+					Labels: map[string]string{"mthreads.com/sgpu.cores": "0-2-3"},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"mthreads.com/sgpu-memory": *resource.NewQuantity(480, resource.DecimalSI),
+						"mthreads.com/sgpu-core":   *resource.NewQuantity(48, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{Index: uint(0), ID: "test-mthreads-0", Count: 100, Devmem: 81920, Devcore: 16, Type: MthreadsGPUDevice, Numa: 0, Health: true, DeviceVendor: MthreadsGPUCommonWord},
+				{Index: uint(2), ID: "test-mthreads-2", Count: 100, Devmem: 81920, Devcore: 16, Type: MthreadsGPUDevice, Numa: 0, Health: true, DeviceVendor: MthreadsGPUCommonWord},
+				{Index: uint(3), ID: "test-mthreads-3", Count: 100, Devmem: 81920, Devcore: 16, Type: MthreadsGPUDevice, Numa: 0, Health: true, DeviceVendor: MthreadsGPUCommonWord},
+			},
+		},
+		{
+			name:    "label capacity mismatch is an error",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test",
+					Labels: map[string]string{"mthreads.com/sgpu.cores": "0-2-3"},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"mthreads.com/sgpu-memory": *resource.NewQuantity(160, resource.DecimalSI),
+						"mthreads.com/sgpu-core":   *resource.NewQuantity(16, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MthreadsDevices{}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
-			result, _ := dev.GetNodeDevices(test.args)
+			result, err := dev.GetNodeDevices(test.args)
+			if test.wantErr {
+				if err == nil {
+				t.Fatalf("expected capacity mismatch error")
+			}
+				return
+			}
+			assert.NilError(t, err)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
