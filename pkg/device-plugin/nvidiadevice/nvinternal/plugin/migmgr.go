@@ -63,6 +63,13 @@ type migInstance struct {
 // Callers must invoke Init once before using other methods, and Shutdown
 // once when done; NVML is not re-initialized per call.
 type MigInstanceManager struct {
+	// sessionMu protects admission; operations finish before NVML is released.
+	sessionMu   sync.Mutex
+	operations  sync.WaitGroup
+	nvmllib     nvml.Interface
+	initialized bool
+	closing     chan struct{}
+
 	mu                  sync.Mutex
 	gpuLocks            map[int]*sync.Mutex
 	byAllocation        map[migAllocationKey]*migInstance
@@ -70,29 +77,83 @@ type MigInstanceManager struct {
 }
 
 func NewMigInstanceManager() *MigInstanceManager {
+	return newMigInstanceManager(nvml.New())
+}
+
+func newMigInstanceManager(lib nvml.Interface) *MigInstanceManager {
 	return &MigInstanceManager{
+		nvmllib:             lib,
 		gpuLocks:            make(map[int]*sync.Mutex),
 		byAllocation:        make(map[migAllocationKey]*migInstance),
 		byAllocationMigUUID: make(map[string]migAllocationKey),
 	}
 }
 
-// Init initializes NVML for this manager. It must be called exactly once,
-// before any other MigInstanceManager method, and paired with a single
-// later call to Shutdown.
+// Init acquires one NVML session for a plugin start cycle. Repeated calls
+// while running are harmless; initialization may be retried after failure.
 func (m *MigInstanceManager) Init() error {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	if m.closing != nil {
+		return fmt.Errorf("MIG manager is shutting down")
 	}
+	if m.initialized {
+		return nil
+	}
+	if m.nvmllib == nil {
+		return fmt.Errorf("MIG manager NVML library is not configured")
+	}
+	if ret := m.nvmllib.Init(); ret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(ret))
+	}
+	m.mu.Lock()
+	clear(m.byAllocation)
+	clear(m.byAllocationMigUUID)
+	m.mu.Unlock()
+	m.initialized = true
+	klog.V(4).InfoS("MIG manager NVML session initialized")
 	return nil
 }
 
-// Shutdown releases the NVML session acquired by Init. Safe to call once,
-// when the manager is no longer needed.
-func (m *MigInstanceManager) Shutdown() {
-	if nvret := nvml.Shutdown(); nvret != nvml.SUCCESS {
-		klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(nvret)), "nvml Shutdown failed")
+// beginOperation admits a complete operation, including error cleanup.
+// Internal helpers must not re-enter admission while an operation is active.
+func (m *MigInstanceManager) beginOperation() (func(), error) {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	if !m.initialized || m.closing != nil {
+		return nil, fmt.Errorf("MIG manager NVML session is not running")
 	}
+	m.operations.Add(1)
+	return m.operations.Done, nil
+}
+
+// Shutdown rejects new work, drains admitted operations, and releases exactly
+// the session acquired by Init. Concurrent/repeated calls are safe.
+func (m *MigInstanceManager) Shutdown() {
+	m.sessionMu.Lock()
+	if done := m.closing; done != nil {
+		m.sessionMu.Unlock()
+		<-done
+		return
+	}
+	if !m.initialized {
+		m.sessionMu.Unlock()
+		return
+	}
+	done := make(chan struct{})
+	m.closing = done
+	m.sessionMu.Unlock()
+	m.operations.Wait()
+	if ret := m.nvmllib.Shutdown(); ret != nvml.SUCCESS {
+		klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(ret)), "nvml Shutdown failed")
+	} else {
+		klog.V(4).InfoS("MIG manager NVML session shut down")
+	}
+	m.sessionMu.Lock()
+	m.initialized = false
+	m.closing = nil
+	close(done)
+	m.sessionMu.Unlock()
 }
 
 func (m *MigInstanceManager) gpuLock(gpuIndex int) *sync.Mutex {
@@ -117,6 +178,12 @@ func profileSliceKey(profile string) string {
 // through NVML. Busy GPUs are left untouched; idle GPUs
 // have MIG mode enabled and all existing GI/CI instances destroyed.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+
 	reset := []int{}
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
 		if _, busy := inUse[gpuIndex]; busy {
@@ -125,11 +192,11 @@ func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct
 
 		lk := m.gpuLock(gpuIndex)
 		lk.Lock()
-		if err := ensureMigModeEnabled(gpuIndex); err != nil {
+		if err := m.ensureMigModeEnabled(gpuIndex); err != nil {
 			lk.Unlock()
 			return reset, err
 		}
-		dev, err := deviceHandleByIndex(gpuIndex)
+		dev, err := m.deviceHandleByIndex(gpuIndex)
 		if err != nil {
 			lk.Unlock()
 			return reset, err
@@ -139,18 +206,7 @@ func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct
 			return reset, err
 		}
 
-		m.mu.Lock()
-		for key := range m.byAllocation {
-			if key.GPUIndex == gpuIndex {
-				delete(m.byAllocation, key)
-			}
-		}
-		for uuid, key := range m.byAllocationMigUUID {
-			if key.GPUIndex == gpuIndex {
-				delete(m.byAllocationMigUUID, uuid)
-			}
-		}
-		m.mu.Unlock()
+		m.clearAllocationsForGPU(gpuIndex)
 		lk.Unlock()
 		reset = append(reset, gpuIndex)
 	}
@@ -158,8 +214,23 @@ func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct
 	return reset, nil
 }
 
-func deviceHandleByIndex(gpuIndex int) (nvml.Device, error) {
-	dev, ret := nvml.DeviceGetHandleByIndex(gpuIndex)
+func (m *MigInstanceManager) clearAllocationsForGPU(gpuIndex int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key := range m.byAllocation {
+		if key.GPUIndex == gpuIndex {
+			delete(m.byAllocation, key)
+		}
+	}
+	for uuid, key := range m.byAllocationMigUUID {
+		if key.GPUIndex == gpuIndex {
+			delete(m.byAllocationMigUUID, uuid)
+		}
+	}
+}
+
+func (m *MigInstanceManager) deviceHandleByIndex(gpuIndex int) (nvml.Device, error) {
+	dev, ret := m.nvmllib.DeviceGetHandleByIndex(gpuIndex)
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("nvml get handle by index %d: %s", gpuIndex, nvml.ErrorString(ret))
 	}
@@ -172,8 +243,8 @@ func deviceHandleByIndex(gpuIndex int) (nvml.Device, error) {
 //
 // SetMigMode may reset/unbind the device; callers must re-fetch the device
 // handle after this returns successfully before further NVML operations.
-func ensureMigModeEnabled(gpuIndex int) error {
-	dev, err := deviceHandleByIndex(gpuIndex)
+func (m *MigInstanceManager) ensureMigModeEnabled(gpuIndex int) error {
+	dev, err := m.deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
 	}
@@ -202,7 +273,7 @@ func ensureMigModeEnabled(gpuIndex int) error {
 		return fmt.Errorf("gpu %d activate mig mode: %s", gpuIndex, nvml.ErrorString(activation))
 	}
 
-	dev, err = deviceHandleByIndex(gpuIndex)
+	dev, err = m.deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
 	}
@@ -221,11 +292,11 @@ func ensureMigModeEnabled(gpuIndex int) error {
 
 // destroyMigInstance destroys the tracked GI+CI on hardware. Returns
 // nil when the instance is already gone or was destroyed successfully.
-func destroyMigInstance(gpuIndex int, inst *migInstance) error {
+func (m *MigInstanceManager) destroyMigInstance(gpuIndex int, inst *migInstance) error {
 	if inst == nil {
 		return nil
 	}
-	dev, err := deviceHandleByIndex(gpuIndex)
+	dev, err := m.deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
 	}
@@ -295,6 +366,12 @@ func destroyAllMigInstances(dev nvml.Device) error {
 
 // Release destroys the GI+CI bound to the given MIG UUID.
 func (m *MigInstanceManager) Release(migUUID string) error {
+	done, err := m.beginOperation()
+	if err != nil {
+		return err
+	}
+	defer done()
+
 	m.mu.Lock()
 	key, ok := m.byAllocationMigUUID[migUUID]
 	m.mu.Unlock()
@@ -311,7 +388,7 @@ func (m *MigInstanceManager) Release(migUUID string) error {
 	if inst == nil {
 		return nil
 	}
-	if err := destroyMigInstance(key.GPUIndex, inst); err != nil {
+	if err := m.destroyMigInstance(key.GPUIndex, inst); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -330,6 +407,12 @@ func allocationKey(gpuIndex int, profile string, placement nvml.GpuInstancePlace
 // caller to roll back only its own partial allocation. It never retries
 // another placement.
 func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (string, bool, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return "", false, err
+	}
+	defer done()
+
 	key := allocationKey(gpuIndex, profile, placement)
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
@@ -343,7 +426,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	}
 	m.mu.Unlock()
 
-	if err := ensureMigModeEnabled(gpuIndex); err != nil {
+	if err := m.ensureMigModeEnabled(gpuIndex); err != nil {
 		return "", false, err
 	}
 	profileKey := profileSliceKey(profile)
@@ -355,7 +438,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	if !ok {
 		return "", false, fmt.Errorf("unsupported MIG compute profile %q", profile)
 	}
-	dev, err := deviceHandleByIndex(gpuIndex)
+	dev, err := m.deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return "", false, err
 	}
@@ -435,10 +518,16 @@ func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string,
 }
 
 func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID string, placement nvml.GpuInstancePlacement, gpuInstanceID, computeInstanceID uint32) error {
+	done, err := m.beginOperation()
+	if err != nil {
+		return err
+	}
+	defer done()
+
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
 	defer lk.Unlock()
-	dev, err := deviceHandleByIndex(gpuIndex)
+	dev, err := m.deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
 	}
@@ -491,6 +580,12 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 }
 
 func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocationKey]struct{}) error {
+	done, err := m.beginOperation()
+	if err != nil {
+		return err
+	}
+	defer done()
+
 	m.mu.Lock()
 	keys := make([]migAllocationKey, 0, len(m.byAllocation))
 	for key := range m.byAllocation {
@@ -508,7 +603,7 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 		m.mu.Unlock()
 		if inst != nil {
 			oldUUID := inst.MigUUID
-			if err := destroyMigInstance(key.GPUIndex, inst); err != nil {
+			if err := m.destroyMigInstance(key.GPUIndex, inst); err != nil {
 				lk.Unlock()
 				return err
 			}

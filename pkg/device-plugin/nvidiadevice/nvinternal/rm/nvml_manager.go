@@ -121,11 +121,19 @@ func (r *nvmlResourceManager) CheckHealth(stop <-chan interface{}, unhealthy cha
 		err := r.checkHealth(stop, r.devices, unhealthy, disableNVML)
 		// checkHealth returns nil when health checks are disabled or on shutdown.
 		if err != nil && err.Error() == "close signal received" {
-			ackDisableHealthChecks <- true
+			select {
+			case ackDisableHealthChecks <- true:
+			case <-stop:
+				return nil
+			}
 			klog.Info("Check Health has been closed")
 			// when disableNVML channel signal is pass restart, continue to restart checkHealth function
 			// when disableNVML channel signal is not pass restart, wait for restart signal
-			<-disableNVML
+			select {
+			case <-disableNVML:
+			case <-stop:
+				return nil
+			}
 			klog.Info("Restarting Check Health")
 			continue
 

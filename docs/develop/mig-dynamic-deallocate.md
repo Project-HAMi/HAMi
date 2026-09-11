@@ -36,6 +36,26 @@ The scheduler owns placement policy. The device plugin owns hardware mutation. P
 
 A stable reservation key supports idempotent realization. Reconciliation aligns managed hardware with active workload reservations.
 
+## NVML session ownership
+
+Each Dynamic MIG plugin start cycle owns one NVML session through its
+`MigInstanceManager`. Construction does not initialize NVML. `Start` initializes
+it before the startup scan; MIG discovery, registration, topology scoring,
+allocation, adoption, and release borrow the configured instance.
+
+`Stop` cancels the cycle's registration and reconciliation loops, stops gRPC and
+waits for handlers (including allocation cleanup), and drains background workers
+before shutting down the manager. Manager shutdown rejects new operations and
+waits for admitted operations to finish. Startup failures use the same cleanup
+path; failed initialization is never paired with shutdown. Repeated shutdown is
+safe. A new start acquires a new session and rebuilds the in-memory allocation
+index from Pod annotations; shutdown itself does not destroy running instances.
+
+Initial resource discovery, health checking, non-MIG operation, and the separate
+monitor retain their independent session ownership. The one-init/one-shutdown
+invariant applies to the Dynamic MIG manager's session, not every NVML caller in
+the process. Forced process termination cannot run graceful cleanup.
+
 ## Architecture
 
 ```text

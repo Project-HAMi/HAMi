@@ -17,6 +17,7 @@ limitations under the License.
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -312,10 +313,14 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 
 	// Create a minimal plugin - WatchAndRegister will read the disable signal
 	// and send an ack, then sleep. We verify the ack arrives.
-	plugin := &NvidiaDevicePlugin{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	plugin := &NvidiaDevicePlugin{ctx: ctx}
+	exited := make(chan struct{})
 
 	done := make(chan struct{})
 	go func() {
+		defer close(exited)
 		plugin.WatchAndRegister(disableCh, ackCh)
 	}()
 
@@ -331,7 +336,12 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 	// Use a select with timeout to avoid hanging forever
 	select {
 	case <-done:
-		// Success: received the ack
+		cancel()
+		select {
+		case <-exited:
+		case <-time.After(time.Second):
+			t.Fatal("WatchAndRegister did not stop during its sleep")
+		}
 	case <-timeAfter(3 * time.Second):
 		t.Fatal("timed out waiting for disable ack from WatchAndRegister")
 	}

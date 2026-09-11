@@ -148,6 +148,7 @@ func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
@@ -168,11 +169,11 @@ func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 }
 
 func GetDeviceNums() (int, error) {
-	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
@@ -183,11 +184,11 @@ func GetDeviceNums() (int, error) {
 
 func GetDeviceNames() ([]string, error) {
 	names := []string{}
-	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return names, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
@@ -326,7 +327,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if reservation.GPUUUID != c[i].UUID {
 			return nil, fmt.Errorf("MIG reservation GPU %s does not match allocated GPU %s", reservation.GPUUUID, c[i].UUID)
 		}
-		gpuIndex, ok := gpuUUIDToIndex(reservation.GPUUUID)
+		gpuIndex, ok := nv.migMgr.gpuUUIDToIndex(reservation.GPUUUID)
 		if !ok {
 			return nil, fmt.Errorf("resolve parent GPU %s", reservation.GPUUUID)
 		}
