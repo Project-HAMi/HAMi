@@ -1,0 +1,46 @@
+# Serving a model from nodes that own no GPU.
+#
+# Each replica is scheduled on its own, so each is given its own lupine server
+# and its own LUPINE_SERVER address. A replica takes the server it lands on
+# whole, so the fleet needs at least as many servers as replicas, each with at
+# least the requested number of cards.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-remote-gpu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-remote-gpu
+  template:
+    metadata:
+      labels:
+        app: vllm-remote-gpu
+    spec:
+      containers:
+        - name: vllm
+          image: registry.example.com/vllm-lupine:cuda-13.1
+          args:
+            - --model=meta-llama/Llama-3.1-8B-Instruct
+            - --host=0.0.0.0
+            - --port=8000
+            - --gpu-memory-utilization=0.85
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/remote-gpu: 2
+              nvidia.com/remote-gpu-memory: 2000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-remote-gpu
+spec:
+  selector:
+    app: vllm-remote-gpu
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
