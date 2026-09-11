@@ -1102,3 +1102,115 @@ func TestDevices_Fit(t *testing.T) {
 		})
 	}
 }
+
+// Test_graphSelect_ScoreSortedInput covers the order the scheduler actually
+// hands to Fit. DeviceUsageList sorts by score, so a busy device can sit at
+// position zero while its Index is elsewhere. graphSelect must reason about
+// physical adjacency and report indexes, because Fit matches its result
+// against DeviceUsage.Index. Every device carries the node type here, as
+// GetNodeDevices sets CustomInfo on all of them.
+func Test_graphSelect_ScoreSortedInput(t *testing.T) {
+	devices := makeDeviceUsages("trn", map[int]int32{5: 1}, true)
+	for _, d := range devices {
+		d.CustomInfo = map[string]any{AWSNodeType: "trn"}
+	}
+
+	// Move the busy device to the front, as a score sort would.
+	scoreOrdered := []*device.DeviceUsage{devices[5]}
+	for i, d := range devices {
+		if i != 5 {
+			scoreOrdered = append(scoreOrdered, d)
+		}
+	}
+
+	got := graphSelect(scoreOrdered, 4)
+	assert.DeepEqual(t, got, []int{0, 1, 2, 3})
+
+	// Every returned value has to name a free device.
+	byIndex := map[uint]*device.DeviceUsage{}
+	for _, d := range devices {
+		byIndex[d.Index] = d
+	}
+	for _, idx := range got {
+		d, ok := byIndex[uint(idx)]
+		assert.Assert(t, ok, "graphSelect returned %d, which is not a device index", idx)
+		assert.Assert(t, d.Used == 0, "graphSelect returned busy device index %d", idx)
+	}
+}
+
+// makeOffsetDeviceUsages builds devices whose Index deliberately does not equal
+// its slice position, so a result made of positions is distinguishable from one
+// made of indexes.
+func makeOffsetDeviceUsages(nodeType string, base uint, n int, used map[uint]int32) []*device.DeviceUsage {
+	devices := make([]*device.DeviceUsage, n)
+	for i := range n {
+		idx := base + uint(i)
+		du := &device.DeviceUsage{
+			Index:      idx,
+			Health:     true,
+			CustomInfo: map[string]any{AWSNodeType: nodeType},
+		}
+		if u, ok := used[idx]; ok {
+			du.Used = u
+		}
+		devices[i] = du
+	}
+	return devices
+}
+
+// Test_graphSelect_ReturnsIndexesNotPositions pins the contract Fit relies on.
+// Fit matches the returned values against DeviceUsage.Index, so graphSelect has
+// to report indexes. With an index set that does not start at zero, a result
+// built from slice positions names devices that do not exist, and Fit's lookup
+// loop then appends nothing while still reporting a successful fit.
+func Test_graphSelect_ReturnsIndexesNotPositions(t *testing.T) {
+	devices := makeOffsetDeviceUsages("trn", 100, 16, nil)
+
+	got := graphSelect(devices, 4)
+	assert.DeepEqual(t, got, []int{100, 101, 102, 103})
+
+	known := map[int]bool{}
+	for _, d := range devices {
+		known[int(d.Index)] = true
+	}
+	for _, idx := range got {
+		assert.Assert(t, known[idx], "graphSelect returned %d, which is not a device index", idx)
+	}
+}
+
+// Test_graphSelect_BusyDeviceWithOffsetIndexes checks the same contract when a
+// device is taken, which is the case that used to hand out an in-use device.
+func Test_graphSelect_BusyDeviceWithOffsetIndexes(t *testing.T) {
+	devices := makeOffsetDeviceUsages("trn", 100, 16, map[uint]int32{101: 1})
+
+	got := graphSelect(devices, 4)
+	assert.DeepEqual(t, got, []int{104, 105, 106, 107})
+
+	byIndex := map[uint]*device.DeviceUsage{}
+	for _, d := range devices {
+		byIndex[d.Index] = d
+	}
+	for _, idx := range got {
+		d, ok := byIndex[uint(idx)]
+		assert.Assert(t, ok, "graphSelect returned %d, which is not a device index", idx)
+		assert.Assert(t, d.Used == 0, "graphSelect returned busy device index %d", idx)
+	}
+}
+
+// Test_graphSelect_NodeTypeReadFromLowestIndex covers the node type lookup.
+// GetNodeDevices hands the same CustomInfo map to every device, but the check
+// only inspects the first element, so it has to run after the slice is ordered
+// by index rather than by score.
+func Test_graphSelect_NodeTypeReadFromLowestIndex(t *testing.T) {
+	devices := makeDeviceUsages("trn", nil, true)
+	// Only the lowest-index device carries the node type, and the score sort
+	// has moved a different device to the front.
+	scoreOrdered := []*device.DeviceUsage{devices[7]}
+	for i, d := range devices {
+		if i != 7 {
+			scoreOrdered = append(scoreOrdered, d)
+		}
+	}
+
+	assert.DeepEqual(t, graphSelect(scoreOrdered, 4), []int{0, 1, 2, 3})
+}
