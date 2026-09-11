@@ -383,3 +383,65 @@ func TestHostGPUMetricsError(t *testing.T) {
 		t.Fatalf("expected no metrics emitted for errored hardware")
 	}
 }
+
+// A modern driver already reports the vendor prefix in nvmlDeviceGetName, so
+// the identity must not add a second one: the device_type label has to match
+// the model the device plugin writes into the node register annotation.
+func TestResolveGPUDeviceIdentityDoesNotDoublePrefixModel(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	cc := ClusterManagerCollector{}
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100-SXM4-40GB", nvml.SUCCESS },
+	}
+
+	identity, err := cc.resolveGPUDeviceIdentity(mockDev)
+	if err != nil {
+		t.Fatalf("resolveGPUDeviceIdentity failed: %v", err)
+	}
+	if identity.deviceName != "NVIDIA A100-SXM4-40GB" {
+		t.Errorf("deviceName = %q, want %q", identity.deviceName, "NVIDIA A100-SXM4-40GB")
+	}
+}
+
+// Every other hami_host_gpu_* series carries the node it was scraped from;
+// the memory controller one used to omit it, so it could not be joined with
+// them or grouped by node.
+func TestMemoryControllerUtilizationCarriesNodeLabel(t *testing.T) {
+	mockDev := &nvmlmock.Device{
+		GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) {
+			return nvml.Utilization{Gpu: 10, Memory: 73}, nvml.SUCCESS
+		},
+	}
+	ch := make(chan prometheus.Metric, 10)
+	cc := ClusterManagerCollector{ClusterManager: &ClusterManager{}}
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0,
+		testGPUIdentity("test-node", "GPU-abc123", "NVIDIA-A100")); err != nil {
+		t.Fatalf("collectGPUUtilizationMetrics: %v", err)
+	}
+	close(ch)
+
+	var found bool
+	for m := range ch {
+		if !strings.Contains(m.Desc().String(), "hami_host_gpu_memory_controller_utilization_ratio") {
+			continue
+		}
+		found = true
+		var dm dto.Metric
+		if err := m.Write(&dm); err != nil {
+			t.Fatalf("write metric: %v", err)
+		}
+		var node string
+		for _, l := range dm.Label {
+			if l.GetName() == "node" {
+				node = l.GetValue()
+			}
+		}
+		if node != "test-node" {
+			t.Errorf("node label = %q, want %q", node, "test-node")
+		}
+	}
+	if !found {
+		t.Fatal("hami_host_gpu_memory_controller_utilization_ratio not emitted")
+	}
+}
