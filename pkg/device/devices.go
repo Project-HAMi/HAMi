@@ -769,6 +769,27 @@ func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool 
 	return true
 }
 
+// MatchesRequestType reports whether a registered device type satisfies a
+// container request type. A backend may register a model-specific type
+// ("NVIDIA A100-SXM4-40GB", "MLU370-X8") while the ContainerDeviceRequest it
+// generates carries the vendor's common word ("NVIDIA", "MLU"), so the two are
+// compared as a case-insensitive substring rather than for equality.
+//
+// An empty request type matches nothing. strings.Contains would match every
+// device instead, which is the one input where this is not a superset of the
+// equality test it replaces. Resourcereqs only records a request once
+// GenerateResourceRequests reports Nums > 0, and every backend sets a non-empty
+// Type in that case, so an empty type does not reach these call sites; the
+// guard is here so scoring a request against every device on the node cannot
+// become reachable by accident.
+func MatchesRequestType(deviceType, requestType string) bool {
+	requestType = strings.TrimSpace(requestType)
+	if requestType == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(deviceType), strings.ToLower(requestType))
+}
+
 // PodRequiresDevice returns true if any container (init container or regular container)
 // in the pod requests resources from the specified device generator.
 func PodRequiresDevice(dev Devices, p *corev1.Pod) bool {
