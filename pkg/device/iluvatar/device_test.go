@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/conformance"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -994,5 +995,32 @@ func TestFit_CoresValidation(t *testing.T) {
 		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
+	})
+}
+
+func TestConformance(t *testing.T) {
+	dev := &IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ChipName:           "MR-V100",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		},
+		nodeRegisterAnno: "hami.io/node-MR-V100-register",
+		useUUIDAnno:      "hami.io/use-MR-V100-uuid",
+		noUseUUIDAnno:    "hami.io/no-use-MR-V100-uuid",
+		handshakeAnno:    "hami.io/node-handshake-MR-V100",
+	}
+
+	conformance.Run(t, dev, conformance.Fixture{
+		Devices: []*device.DeviceUsage{
+			{ID: "dev-0", Index: 0, Count: 100, Totalmem: 128, Totalcore: 100, Numa: 0, Type: "MR-V100", Health: true},
+			{ID: "dev-1", Index: 1, Count: 100, Totalmem: 128, Totalcore: 100, Numa: 0, Type: "MR-V100", Health: true},
+		},
+		Request: device.ContainerDeviceRequest{Nums: 1, Type: "MR-V100", Memreq: 64, Coresreq: 50},
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "conformance-pod", Namespace: "default"},
+		},
 	})
 }
