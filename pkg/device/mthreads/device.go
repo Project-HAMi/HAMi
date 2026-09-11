@@ -189,27 +189,70 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 	return ok, nil
 }
 
+// SGPUCoresLabel is written by the vendor toolkit/GFD on nodes with
+// sgpu-enabled cards and lists the physical card ids that are sliced,
+// e.g. "0-2-3" for cards 0, 2 and 3.
+const SGPUCoresLabel = "mthreads.com/sgpu.cores"
+
+// parseSGPUCoresLabel parses the vendor card-id list label. Accepts '-'
+// or ',' separators, deduplicates and drops unparsable entries while
+// preserving the first-seen order.
+func parseSGPUCoresLabel(raw string) []int64 {
+	seen := map[int64]bool{}
+	var ids []int64
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == '-' || r == ',' }) {
+		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || id < 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	nodedevices := []*device.DeviceInfo{}
-	i := 0
 	cores, ok := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceCores), resource.DecimalSI).AsInt64()
 	if !ok || cores == 0 {
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", MthreadsResourceCores)
 	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceMemory), resource.DecimalSI).AsInt64()
-	for int64(i)*coresPerMthreadsGPU < cores {
+
+	// Prefer the vendor label listing the physical card ids: with a
+	// non-contiguous sgpu_km binding (gpu_ids=0,2,3) the card numbers are
+	// NOT 0..N-1, and the scheduler-selected card index is consumed by the
+	// vendor stack as a physical card id. Synthesizing 0..N-1 would make
+	// HAMi bind containers to the wrong physical card.
+	var cardIDs []int64
+	if raw := n.Labels[SGPUCoresLabel]; raw != "" {
+		// Label path: strict — a listed card set whose capacity does not
+		// add up is a config contradiction worth surfacing.
+		cardIDs = parseSGPUCoresLabel(raw)
+		if int64(len(cardIDs))*coresPerMthreadsGPU != cores {
+			return []*device.DeviceInfo{}, fmt.Errorf("sgpu capacity mismatch on %s: %s=%d units is not %d x %d per card (label %s=%q)",
+				n.Name, MthreadsResourceMemory, cores, len(cardIDs), coresPerMthreadsGPU, SGPUCoresLabel, raw)
+		}
+	} else {
+		// Fallback: contiguous derivation (upstream behavior).
+		for i := int64(0); i*coresPerMthreadsGPU < cores; i++ {
+			cardIDs = append(cardIDs, i)
+		}
+	}
+	devmemPerCard := int32(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores)
+
+	for _, cardID := range cardIDs {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:        uint(i),
-			ID:           n.Name + "-mthreads-" + fmt.Sprint(i),
+			Index:        uint(cardID),
+			ID:           n.Name + "-mthreads-" + strconv.FormatInt(cardID, 10),
 			Count:        100,
-			Devmem:       int32(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores),
+			Devmem:       devmemPerCard,
 			Devcore:      coresPerMthreadsGPU,
 			Type:         MthreadsGPUDevice,
 			Numa:         0,
 			Health:       true,
 			DeviceVendor: MthreadsGPUCommonWord,
 		})
-		i++
 	}
 	return nodedevices, nil
 }
