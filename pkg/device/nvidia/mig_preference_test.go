@@ -18,12 +18,15 @@ package nvidia
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 // a100MigProfilesWith4g is the A100-40GB allowlist with 4g.20gb added: the same
@@ -286,5 +289,51 @@ func TestValidateMigProfilePreference(t *testing.T) {
 	}
 	if _, err := dev.MutateAdmission(&corev1.Container{}, migPod("4g")); err != nil {
 		t.Fatalf("admission should accept an allowlisted preference: %v", err)
+	}
+}
+
+func TestFitChecksQuotaAgainstThePlannedMigProfile(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName: "nvidia.com/gpu", ResourceMemoryName: "nvidia.com/gpumem",
+		ResourceCoreName: "nvidia.com/gpucores", ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor: 1,
+	})
+	device.DevicesMap = map[string]device.Devices{NvidiaGPUDevice: dev}
+	device.NewQuotaManager().AddQuota(&corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "mig-quota", Namespace: "mig-quota"},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			corev1.ResourceName("limits.nvidia.com/gpumem"): resource.MustParse("10000"),
+		}},
+	})
+	newUsage := func() *device.DeviceUsage {
+		return &device.DeviceUsage{
+			ID: "GPU-a", Type: NvidiaGPUDevice, Mode: MigMode, Health: true,
+			Count: 7, Totalmem: 40960, Totalcore: 100, MigProfiles: a100MigProfilesWith4g(),
+		}
+	}
+	newPod := func(preference string) *corev1.Pod {
+		pod := migPod(preference)
+		pod.Namespace = "mig-quota"
+		pod.Spec.Containers = []corev1.Container{{Name: "workload"}}
+		return pod
+	}
+	request := device.ContainerDeviceRequest{Nums: 1, Type: NvidiaGPUDevice, Memreq: 5000}
+
+	// 5000MB fits the 10000MB quota, but the preferred 4g.20gb would charge 20480MB.
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{newUsage()}, request, newPod("4g"), &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Fatal("a preferred profile larger than the quota must not fit")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Fatalf("reason = %q, want %s", reason, common.ResourceQuotaNotFit)
+	}
+	// Without the preference the 1g.5gb slice charges 5120MB and fits, and the
+	// tentative slice already carries the profile capacity the quota was checked with.
+	fit, devs, reason := dev.Fit([]*device.DeviceUsage{newUsage()}, request, newPod(""), &device.NodeInfo{}, &device.PodDevices{})
+	if !fit {
+		t.Fatalf("1g.5gb should fit the quota: %s", reason)
+	}
+	if got := devs[NvidiaGPUDevice][0]; got.Usedmem != 5120 || got.Usedcores != 14 {
+		t.Fatalf("tentative slice = (%d,%d), want the 1g.5gb capacity (5120,14)", got.Usedmem, got.Usedcores)
 	}
 }

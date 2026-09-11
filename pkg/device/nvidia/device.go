@@ -639,6 +639,18 @@ func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int32 
 	return memories
 }
 
+// plannedMigProfile returns the profile a new slice of memory MB gets on dev when planned
+// together with the slices this container has already queued on it.
+func plannedMigProfile(dev *device.DeviceUsage, queued device.ContainerDevices, memory int32, preferred []string) (device.MigProfile, bool) {
+	memories := queuedMigMemories(queued, dev.ID)
+	memories = append(memories, memory)
+	profiles, _, ok := planMigContainer(dev.MigProfiles, occupiedMigPlacements(dev.MigAllocationsInUse), memories, preferred)
+	if !ok {
+		return device.MigProfile{}, false
+	}
+	return profiles[len(profiles)-1], true
+}
+
 // migProfilesByMemory returns the profiles ordered smallest first.
 func migProfilesByMemory(profiles []device.MigProfile) []device.MigProfile {
 	candidates := append([]device.MigProfile(nil), profiles...)
@@ -944,7 +956,19 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memreq), int64(k.Coresreq)) {
+		// A MIG slice is booked and charged its profile's capacity, not the raw request, so resolve
+		// the profile before the quota check and keep it on the tentative slice.
+		usedmem, usedcores := memreq, k.Coresreq
+		if dev.Mode == MigMode {
+			profile, ok := plannedMigProfile(dev, tmpDevs[k.Type], memreq, preferred)
+			if !ok {
+				reason[common.CardMigTopologyInfeasible]++
+				klog.V(5).InfoS(common.CardMigTopologyInfeasible, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "allocations", dev.MigAllocationsInUse)
+				continue
+			}
+			usedmem, usedcores = profile.MemoryMB, profile.Core
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(usedmem), int64(usedcores)) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue
@@ -998,8 +1022,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,
-				Usedmem:   memreq,
-				Usedcores: k.Coresreq,
+				Usedmem:   usedmem,
+				Usedcores: usedcores,
 			})
 		}
 		if k.Nums == 0 && !needTopology {
