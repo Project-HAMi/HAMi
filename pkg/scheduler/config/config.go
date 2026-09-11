@@ -71,6 +71,14 @@ var (
 	LeaderElect                  bool
 	LeaderElectResourceName      string
 	LeaderElectResourceNamespace string
+
+	// DevicePluginNamespace and DevicePluginServiceAccount identify the
+	// device-plugin's bound ServiceAccount. The /refit endpoint authenticates
+	// callers by TokenReview and only accepts a token whose username is
+	// exactly system:serviceaccount:<DevicePluginNamespace>:<DevicePluginServiceAccount>.
+	// See issue #2878.
+	DevicePluginNamespace      string
+	DevicePluginServiceAccount string
 )
 
 type Config struct {

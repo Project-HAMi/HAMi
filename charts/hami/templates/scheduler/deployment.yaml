@@ -114,6 +114,10 @@ spec:
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             {{- else }}
+            {{- /* No TLS: bind on the same port the Service routes to so the
+                   /refit endpoint is reachable. Authenticated refit still
+                   requires HTTPS; operators must supply cert/key when
+                   device-plugin token authentication is required. */}}
             - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}
             {{- end }}
             - --scheduler-name={{ .Values.schedulerName }}
@@ -125,6 +129,8 @@ spec:
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-service-account={{ include "hami-vgpu.device-plugin" . }}
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}
