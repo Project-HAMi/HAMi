@@ -72,7 +72,8 @@ func TestFit_ConfinesAllocationToOneServer(t *testing.T) {
 	assert.Equal(t, fit, false)
 	assert.Assert(t, reason != "", "expected a rejection reason")
 
-	// One card is satisfiable, and the lower-sorting server wins deterministically.
+	// One card is satisfiable. The servers are the same size, so the tie breaks
+	// on name and the choice is repeatable.
 	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)

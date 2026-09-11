@@ -328,11 +328,13 @@ func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
-// Fit allocates whole cards from a single lupine server.
+// Fit hands out one lupine server, with every card on it.
 //
-// Spanning two servers would need the client to hold two connections and
-// lupine to agree on which GPUs each one sees, so the allocation is confined
-// to one server even when the fleet has enough free cards overall.
+// A client sees every GPU of every server it is pointed at, and nothing on the
+// wire narrows that down, so the server is the smallest thing that can be given
+// to one pod without giving it to another as well. Naming a second server would
+// only widen what the pod can reach, which is why a request for more cards than
+// any single server has goes unfilled even when the fleet holds enough.
 func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	byServer := map[string][]*device.DeviceUsage{}
 	servers := make([]string, 0, len(devices))
