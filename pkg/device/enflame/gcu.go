@@ -18,6 +18,7 @@ package enflame
 
 import (
 	"fmt"
+	"math"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -88,7 +89,7 @@ func (dev *GCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
 	enflameResourceCount := corev1.ResourceName(EnflameResourceNameGCU)
 	v, ok := ctr.Resources.Limits[enflameResourceCount]
@@ -97,6 +98,10 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "enflame device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("device count %d is out of range", n)}
+			}
 			klog.Info("Found enflame devices")
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
@@ -104,10 +109,10 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				Memreq:           100,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *GCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

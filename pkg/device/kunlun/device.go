@@ -129,7 +129,7 @@ func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, boo
 	return true, true
 }
 
-func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count kunlun devices for container ", ctr.Name)
 	kunlunResourceCount := corev1.ResourceName(KunlunResourceCount)
 	v, ok := ctr.Resources.Limits[kunlunResourceCount]
@@ -140,7 +140,7 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "kunlun device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found kunlunxin devices")
 
@@ -150,10 +150,10 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device
 				Memreq:           0,
 				MemPercentagereq: 100,
 				Coresreq:         0,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

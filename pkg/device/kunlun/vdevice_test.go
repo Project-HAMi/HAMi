@@ -490,7 +490,7 @@ func Test_KunlunVDevices_GenerateResourceRequests(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := dev.GenerateResourceRequests(test.ctr)
+			got, _ := dev.GenerateResourceRequests(test.ctr)
 			assert.DeepEqual(t, got, test.want)
 		})
 	}
@@ -565,5 +565,21 @@ func Test_FitVXPU_direct(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, FitVXPU(test.usage, test.request), test.want)
 		})
+	}
+}
+
+func Test_KunlunVDevices_GenerateResourceRequests_CountRange(t *testing.T) {
+	dev := InitKunlunVDevice(testVConfig())
+	for _, count := range []string{"0", "-1", "4294967296"} {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceName(KunlunResourceVCount): resource.MustParse(count),
+				},
+			},
+		}
+		result, err := dev.GenerateResourceRequests(ctr)
+		assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+		assert.ErrorContains(t, err, "out of range")
 	}
 }

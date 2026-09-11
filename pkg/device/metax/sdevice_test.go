@@ -598,7 +598,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
 
-			result := metaxSDevice.GenerateResourceRequests(ts.container)
+			result, _ := metaxSDevice.GenerateResourceRequests(ts.container)
 
 			if !reflect.DeepEqual(ts.expected, result) {
 				t.Errorf("GenerateResourceRequests failed: result %v, expected %v",
@@ -3285,7 +3285,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := sdev.GenerateResourceRequests(ctr)
+			req, _ := sdev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
 				assert.Equal(t, req.Nums, int32(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)

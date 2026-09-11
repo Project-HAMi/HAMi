@@ -505,9 +505,9 @@ func TestFitResourceQuota(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := fitResourceQuota(tc.pod)
-			if tc.fit != result {
-				t.Errorf("Expected %v, but got %v", tc.fit, result)
+			err := fitResourceQuota(tc.pod)
+			if (err == nil) != tc.fit {
+				t.Errorf("Expected fit=%v, but got error: %v", tc.fit, err)
 			}
 		})
 	}
@@ -641,8 +641,8 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := fitResourceQuota(tc.pod); got != tc.fit {
-				t.Errorf("fitResourceQuota() = %v, want %v", got, tc.fit)
+			if err := fitResourceQuota(tc.pod); (err == nil) != tc.fit {
+				t.Errorf("fitResourceQuota() error = %v, want fit %v", err, tc.fit)
 			}
 		})
 	}
@@ -682,8 +682,8 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 	pod.Spec.Containers[0].Resources.Limits["cambricon.com/mlu"] = resource.MustParse("2")
 
 	// 2 x 40 units is 80, past the 60 unit limit, even though one device fits.
-	if fitResourceQuota(pod) {
-		t.Error("fitResourceQuota() = true, want false: two devices should each count against the quota")
+	if err := fitResourceQuota(pod); err == nil {
+		t.Errorf("fitResourceQuota() = nil error, want a denial: two devices should each count against the quota: %v", err)
 	}
 }
 
@@ -759,12 +759,12 @@ func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
 	}
 
 	// 4096 x factor 4 is 16384, against a limit of 8192 x 4 = 32768.
-	if !fitResourceQuota(ascendPod("4096")) {
-		t.Error("fitResourceQuota() = false, want true: the limit must be scaled by the same factor as the request")
+	if err := fitResourceQuota(ascendPod("4096")); err != nil {
+		t.Errorf("fitResourceQuota() = %v, want nil: the limit must be scaled by the same factor as the request", err)
 	}
 	// 8192 x 4 is 32768 used against 32768 available, and 8193 pushes it over.
-	if fitResourceQuota(ascendPod("8193")) {
-		t.Error("fitResourceQuota() = true, want false: the request exceeds the scaled limit")
+	if err := fitResourceQuota(ascendPod("8193")); err == nil {
+		t.Error("fitResourceQuota() = nil error, want a denial: the request exceeds the scaled limit")
 	}
 }
 
@@ -1053,8 +1053,8 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 
 	// Step 1: Pod1 (init 20000, app 10000) should be allowed
 	pod1 := makePod("pod1", 20000, 10000)
-	if !fitResourceQuota(pod1) {
-		t.Fatal("Step 1 failed: pod1 should be allowed (peak 20000 ≤ 30000)")
+	if err := fitResourceQuota(pod1); err != nil {
+		t.Fatalf("Step 1 failed: pod1 should be allowed (peak 20000 ≤ 30000): %v", err)
 	}
 
 	// Simulate pod1 scheduled → record its peak usage (20000)
@@ -1068,7 +1068,7 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 
 	// Step 2: Pod2 (same) must be DENIED
 	pod2 := makePod("pod2", 20000, 10000)
-	if fitResourceQuota(pod2) {
+	if err := fitResourceQuota(pod2); err == nil {
 		t.Fatal("Step 2 failed: pod2 should be denied (total used 20000 + request 20000 > 30000)")
 	}
 
@@ -1080,8 +1080,8 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 	}
 
 	// Now pod2 should be allowed
-	if !fitResourceQuota(pod2) {
-		t.Fatal("Step 3 failed: pod2 should be allowed after pod1 init finished (total 10000+20000=30000)")
+	if err := fitResourceQuota(pod2); err != nil {
+		t.Fatalf("Step 3 failed: pod2 should be allowed after pod1 init finished (total 10000+20000=30000): %v", err)
 	}
 }
 
@@ -1207,8 +1207,8 @@ func TestFitResourceQuota_SidecarOrdering(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := fitResourceQuota(tc.pod); got != tc.fit {
-				t.Errorf("fitResourceQuota() = %v, want %v", got, tc.fit)
+			if err := fitResourceQuota(tc.pod); (err == nil) != tc.fit {
+				t.Errorf("fitResourceQuota() error = %v, want fit %v", err, tc.fit)
 			}
 		})
 	}

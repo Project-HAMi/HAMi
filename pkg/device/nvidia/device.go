@@ -525,7 +525,7 @@ func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	return *annoinput
 }
 
-func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	resourceName := corev1.ResourceName(dev.config.ResourceCountName)
 	resourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	resourceMemPercentage := corev1.ResourceName(dev.config.ResourceMemoryPercentageName)
@@ -538,7 +538,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 		if n, ok := v.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "nvidia device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[resourceMem]
@@ -551,7 +551,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/factor {
 					klog.ErrorS(nil, "nvidia memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
 				}
 				if factor > 1 {
 					rawMemnums := memnums
@@ -597,7 +597,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				corenums, ok := core.AsInt64()
 				if !ok || corenums < 0 || corenums > 100 {
 					klog.ErrorS(nil, "nvidia core request is out of range", "container", ctr.Name, "request", core.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", core.String())}
 				}
 				corenum = int32(corenums)
 			}
@@ -607,10 +607,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				Memreq:           int32(memnum),
 				MemPercentagereq: mempnum,
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage) bool {

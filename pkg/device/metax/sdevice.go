@@ -200,21 +200,21 @@ func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 	return len(devices) > 0, true
 }
 
-func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	value, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCount)]
 	if !ok {
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, nil
 	}
 
 	count, ok := value.AsInt64()
 	if !ok {
 		klog.Errorf("container<%s> resource<%s> cannot decode to int64",
 			ctr.Name, MetaxResourceNameVCount)
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("count request %s cannot decode to int64", value.String())}
 	}
 	if count <= 0 || count > math.MaxInt32 {
 		klog.ErrorS(nil, "metax sgpu device count request is out of range", "container", ctr.Name, "request", count)
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("device count %d is out of range", count)}
 	}
 
 	core := int64(100)
@@ -226,7 +226,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		v, valid := coreQuantity.AsInt64()
 		if !valid || v < 0 || v > 100 {
 			klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
-			return device.ContainerDeviceRequest{}
+			return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", coreQuantity.String())}
 		}
 		core = v
 	}
@@ -245,13 +245,13 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			} else {
 				if v < 0 || v > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("memory request %s is out of range", memQuantity.String())}
 				}
 				mem = v * int64(MemoryFactor)
 			}
 			if mem < 0 || mem > math.MaxInt32 {
 				klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("memory request %s is out of range", memQuantity.String())}
 			}
 		}
 	}
@@ -269,7 +269,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		Memreq:           int32(mem),
 		MemPercentagereq: int32(memPercent),
 		Coresreq:         int32(core),
-	}
+	}, nil
 }
 
 // ScoreNode returns a policy-independent score for the node following a

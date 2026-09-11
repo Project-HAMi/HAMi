@@ -200,7 +200,7 @@ func (dev *AMDDevices) GetResourceNames() device.ResourceNames {
 	}
 }
 
-func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count AMD devices for container ", ctr.Name)
 	amdResourceCount := corev1.ResourceName(dev.resourceCountName)
 	amdResourceMemory := corev1.ResourceName(dev.resourceMemoryName)
@@ -210,7 +210,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 		if n, ok := count.AsInt64(); ok {
 			if n <= 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "amd device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := int32(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
@@ -218,7 +218,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				memnums, ok := mem.AsInt64()
 				if !ok || memnums < 0 || memnums > math.MaxInt32 {
 					klog.ErrorS(nil, "amd device memory request is out of range", "container", ctr.Name, "request", mem.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("memory request %s is out of range", mem.String())}
 				}
 				memnum = int32(memnums)
 			}
@@ -234,7 +234,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				corePercentageNums, ok := corePercentage.AsInt64()
 				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
 					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("core percentage request %s is out of range (must be an integer between 1 and 100)", corePercentage.String())}
 				}
 				corePercentageNum = int32(corePercentageNums)
 			}
@@ -248,10 +248,10 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				Memreq:           memnum,
 				MemPercentagereq: 0,
 				Coresreq:         corePercentageNum,
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *AMDDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

@@ -360,7 +360,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
 			dev := MetaxDevices{}
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

@@ -781,7 +781,8 @@ func Test_Resourcereqs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := device.Resourcereqs(test.args)
+			got, err := device.Resourcereqs(test.args)
+			assert.NilError(t, err)
 			assert.DeepEqual(t, test.want, got)
 		})
 	}

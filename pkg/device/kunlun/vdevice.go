@@ -19,6 +19,7 @@ package kunlun
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -154,7 +155,7 @@ func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsa
 	return false, false
 }
 
-func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	xpuResourceCount := corev1.ResourceName(KunlunResourceVCount)
 	xpuResourceMem := corev1.ResourceName(KunlunResourceVMemory)
 	v, ok := ctr.Resources.Limits[xpuResourceCount]
@@ -164,6 +165,10 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 	if ok {
 		klog.V(3).Infof("Counting %s devices", dev.CommonWord())
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "kunlun vdevice count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[xpuResourceMem]
 			if !ok {
@@ -189,10 +194,10 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 				Memreq:           int32(memnum), //int32(dev.config.MemoryMax),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         int32(cores),
-			}
+			}, nil
 		}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *KunlunVDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
