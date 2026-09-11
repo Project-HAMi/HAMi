@@ -541,19 +541,39 @@ func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDev
 	return sum
 }
 
+// hamiCoreOthersOnDevice sums cores already held on dev by pods other than
+// pod. In-flight usage from this scheduling pass (sidecar / prior containers
+// recorded by AddResourceUsage but not yet in PodInfos) is treated as self.
+func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int32 {
+	var others int32
+	for _, podInfo := range dev.PodInfos {
+		if podInfo == nil || podInfo.Pod == nil {
+			continue
+		}
+		if pod != nil && podInfo.Pod.UID != "" && pod.UID != "" && podInfo.Pod.UID == pod.UID {
+			continue
+		}
+		for _, podSingle := range podInfo.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, ctrDev := range ctrDevs {
+					if ctrDev.UUID == dev.ID {
+						others += ctrDev.Usedcores
+					}
+				}
+			}
+		}
+	}
+	return others
+}
+
 // hamiCoreIncomingExclusive reports whether this request would take the
 // incoming pod to the percentage base on a card that already has another
-// tenant. Prior containers of the same pod are assumed to be in Usedcores
-// as well as allocated, matching score.AddResourceUsage.
-func hamiCoreIncomingExclusive(dev *device.DeviceUsage, self, coresreq int32) bool {
+// tenant.
+func hamiCoreIncomingExclusive(dev *device.DeviceUsage, pod *corev1.Pod, self, coresreq int32) bool {
 	if self+coresreq < hamiCorePercentBase {
 		return false
 	}
-	others := dev.Usedcores
-	if self > 0 && dev.Usedcores >= self {
-		others = dev.Usedcores - self
-	}
-	return others > 0
+	return hamiCoreOthersOnDevice(dev, pod) > 0
 }
 
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
@@ -703,7 +723,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		// pod that reaches the base across several of its own requests must
 		// not share an oversold card once another tenant is already there.
 		if (isHAMiCore || nodeSupportHamiCore || dev.Totalcore >= hamiCorePercentBase) &&
-			hamiCoreIncomingExclusive(dev, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs), k.Coresreq) {
+			hamiCoreIncomingExclusive(dev, pod, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs), k.Coresreq) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores, "request cores", k.Coresreq)
 			continue

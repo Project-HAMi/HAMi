@@ -3762,6 +3762,46 @@ func TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity(t *testing.T) {
 			t.Fatalf("expected the same pod's second 50 to fit, got reason=%s", reason)
 		}
 	})
+
+	t.Run("in-flight same-pod usage without PodInfos is not another tenant", func(t *testing.T) {
+		// Sidecar / prior containers stay on Usedcores via AddResourceUsage
+		// but are not in the app-phase allocated map. They must not look like
+		// another tenant or the same pod's later 50 is rejected.
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+			Used: 2, Usedmem: 8192, Usedcores: 100,
+		}
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if !fit {
+			t.Fatalf("expected same-pod in-flight 50+50 to fit, got reason=%s", reason)
+		}
+	})
+
+	t.Run("two 50-core tenants still admit a third 50", func(t *testing.T) {
+		shared := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		for _, name := range []string{"tenant-a", "tenant-b"} {
+			tenant := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			}
+			applyUsage(shared, &device.PodInfo{Pod: tenant, NodeID: "node1", Devices: collapsedOn(tenant, 50)})
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{shared}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
 }
 
 // TestDevices_Fit_HamiCoreOversellLegacyFullCore keeps a full-core request
