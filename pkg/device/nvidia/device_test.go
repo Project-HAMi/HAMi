@@ -136,6 +136,25 @@ func hasInjectedNVDnone(env []corev1.EnvVar) bool {
 	return false
 }
 
+func Test_MutateAdmission_OverwriteEnvIdempotent(t *testing.T) {
+	// Webhook reinvocation (reinvocationPolicy: IfNeeded) must not append
+	// a duplicate entry.
+	dev := &NvidiaGPUDevices{config: NvidiaConfig{OverwriteEnv: true}}
+	ctr := &corev1.Container{Name: "main"}
+	pod := &corev1.Pod{}
+	for range 3 { // simulate multiple invocations
+		_, err := dev.MutateAdmission(ctr, pod)
+		assert.NilError(t, err)
+	}
+	count := 0
+	for _, e := range ctr.Env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1, "expected exactly one NVIDIA_VISIBLE_DEVICES=none")
+}
+
 func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
 	mkDev := func(overwriteEnv bool) *NvidiaGPUDevices {
 		return &NvidiaGPUDevices{
