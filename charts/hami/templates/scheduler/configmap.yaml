@@ -38,7 +38,7 @@ data:
       bindVerb: bind
       nodeCacheCapable: true
       weight: 1
-      httpTimeout: 30s
+      httpTimeout: {{ .Values.scheduler.extenderHTTPTimeout }}s
       managedResources:
       {{- include "hami-vgpu.scheduler.managedResources" . | nindent 6 }}
 {{- else }}
@@ -63,7 +63,7 @@ data:
                 "bindVerb": "bind",
                 "weight": 1,
                 "nodeCacheCapable": true,
-                "httpTimeout": 30000000000,
+                "httpTimeout": {{ mul .Values.scheduler.extenderHTTPTimeout 1000000000 }},
                 "managedResources": {{ include "hami-vgpu.scheduler.managedResources" . | fromYamlArray | toJson }},
                 "ignoreable": false
             }
