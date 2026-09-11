@@ -39,7 +39,15 @@ type DeviceQuota map[string]*Quota
 
 type QuotaManager struct {
 	Quotas map[string]*DeviceQuota
-	mutex  sync.RWMutex
+	// objectLimits records what each ResourceQuota object contributes:
+	// namespace -> object name -> resource -> limit. Kubernetes enforces every
+	// ResourceQuota object in a namespace independently, so the effective limit
+	// for a resource is the minimum across all objects. Storing per object (not
+	// a single slot) keeps the derived state a pure function of the current set
+	// of objects, so the result no longer depends on informer event order or on
+	// which object happened to be added/removed last.
+	objectLimits map[string]map[string]map[string]int64
+	mutex        sync.RWMutex
 }
 
 var localCache QuotaManager
@@ -53,7 +61,8 @@ var once sync.Once
 func NewQuotaManager() *QuotaManager {
 	once.Do(func() {
 		localCache = QuotaManager{
-			Quotas: make(map[string]*DeviceQuota),
+			Quotas:       make(map[string]*DeviceQuota),
+			objectLimits: make(map[string]map[string]map[string]int64),
 		}
 	})
 	return &localCache
@@ -238,51 +247,101 @@ func (q *QuotaManager) UpdateQuota(oldQuota, newQuota *corev1.ResourceQuota) {
 	q.logQuotasLocked()
 }
 
-// addQuotaLocked requires q.mutex to be held.
+// addQuotaLocked requires q.mutex to be held. It records the object's limits
+// under its name and recomputes the effective limit for every resource the
+// object (previously or now) carries.
 func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
+	newLimits := make(map[string]int64)
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
-		if ok {
-			dn, ok := managedQuotaName(idx)
-			if !ok {
-				continue
-			}
-			if q.Quotas[quota.Namespace] == nil {
-				q.Quotas[quota.Namespace] = &DeviceQuota{}
-			}
-			dp := q.Quotas[quota.Namespace]
-			_, ok = (*dp)[dn]
-			if !ok {
-				(*dp)[dn] = &Quota{
-					Used:  0,
-					Limit: value,
-				}
-			}
-			(*dp)[dn].Limit = value
-			(*dp)[dn].LimitSet = true
-			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
+		if !ok {
+			continue
+		}
+		dn, ok := managedQuotaName(idx)
+		if !ok {
+			continue
+		}
+		newLimits[dn] = value
+		klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
+	}
+	if q.objectLimits == nil {
+		q.objectLimits = make(map[string]map[string]map[string]int64)
+	}
+	if q.objectLimits[quota.Namespace] == nil {
+		q.objectLimits[quota.Namespace] = make(map[string]map[string]int64)
+	}
+	// Replace the object's entry wholesale so resources dropped from its spec
+	// are released rather than left at their old values.
+	recomputed := make(map[string]struct{})
+	for dn := range q.objectLimits[quota.Namespace][quota.Name] {
+		recomputed[dn] = struct{}{}
+	}
+	q.objectLimits[quota.Namespace][quota.Name] = newLimits
+	for dn := range newLimits {
+		recomputed[dn] = struct{}{}
+	}
+	for dn := range recomputed {
+		q.recalcLimitLocked(quota.Namespace, dn)
+	}
+}
+
+// delQuotaLocked requires q.mutex to be held. It removes the object's recorded
+// limits for the resources its spec mentions and recomputes the effective
+// limit from the remaining objects. Deletion is driven by the spec so an
+// object that was never added (or a stale event) cannot wipe another object's
+// recorded limits.
+func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
+	obj, ok := q.objectLimits[quota.Namespace][quota.Name]
+	if !ok {
+		return
+	}
+	for idx := range quota.Spec.Hard {
+		dn, ok := managedQuotaName(idx)
+		if !ok {
+			continue
+		}
+		if _, recorded := obj[dn]; !recorded {
+			continue
+		}
+		delete(obj, dn)
+		klog.V(4).InfoS("quota remove:", "resource", dn, "obj", quota.Name)
+		q.recalcLimitLocked(quota.Namespace, dn)
+	}
+	if len(obj) == 0 {
+		delete(q.objectLimits[quota.Namespace], quota.Name)
+		if len(q.objectLimits[quota.Namespace]) == 0 {
+			delete(q.objectLimits, quota.Namespace)
 		}
 	}
 }
 
-// delQuotaLocked requires q.mutex to be held.
-func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
-	for idx, val := range quota.Spec.Hard {
-		value, ok := val.AsInt64()
-		if ok {
-			dn, ok := managedQuotaName(idx)
-			if !ok {
-				continue
-			}
-			klog.V(4).InfoS("quota remove:", "idx=", idx, "val", value)
-			if dq, ok := q.Quotas[quota.Namespace]; ok {
-				if quotaInfo, ok := (*dq)[dn]; ok {
-					quotaInfo.Limit = 0
-					quotaInfo.LimitSet = false
-				}
-			}
+// recalcLimitLocked requires q.mutex to be held. It derives the effective limit
+// for a resource as the minimum across all ResourceQuota objects that set it —
+// a pod must satisfy every object, so the tightest one wins. With no objects
+// left the resource reads as unset (Limit 0, LimitSet false).
+func (q *QuotaManager) recalcLimitLocked(namespace, deviceResource string) {
+	limit := int64(0)
+	found := false
+	for _, res := range q.objectLimits[namespace] {
+		if v, ok := res[deviceResource]; ok && (!found || v < limit) {
+			limit = v
+			found = true
 		}
 	}
+	if q.Quotas[namespace] == nil {
+		q.Quotas[namespace] = &DeviceQuota{}
+	}
+	dp := q.Quotas[namespace]
+	quotaInfo, ok := (*dp)[deviceResource]
+	if !ok {
+		quotaInfo = &Quota{
+			Used:  0,
+			Limit: 0,
+		}
+		(*dp)[deviceResource] = quotaInfo
+	}
+	quotaInfo.Limit = limit
+	quotaInfo.LimitSet = found
 }
 
 // managedQuotaName maps a ResourceQuota key to the device resource it limits,
