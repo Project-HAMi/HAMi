@@ -19,6 +19,7 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -92,7 +93,24 @@ func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *HCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
+	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
+	dcuResourceCores := corev1.ResourceName(HygonResourceCores)
+	_, ok := ctr.Resources.Limits[dcuResourceCount]
+	if !ok {
+		_, ok = ctr.Resources.Requests[dcuResourceCount]
+	}
+	if ok {
+		core, coreOk := ctr.Resources.Limits[dcuResourceCores]
+		if !coreOk {
+			core, coreOk = ctr.Resources.Requests[dcuResourceCores]
+		}
+		if coreOk {
+			corenums, ok := core.AsInt64()
+			if !ok || corenums < 0 || corenums > 100 {
+				return false, fmt.Errorf("%s must be an integer between 0 and 100", HygonResourceCores)
+			}
+		}
+	}
 	return ok, nil
 }
 
