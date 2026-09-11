@@ -395,14 +395,14 @@ func (s *Scheduler) Start() error {
 		DeleteFunc: s.onDelPod,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to register pod event handler: %v", err)
+		return fmt.Errorf("failed to register pod event handler: %w", err)
 	}
 	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
 		DeleteFunc: s.onDelNode,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to register node event handler: %v", err)
+		return fmt.Errorf("failed to register node event handler: %w", err)
 	}
 	resourceQuotaEventHandlerRegistration, err := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
@@ -410,7 +410,7 @@ func (s *Scheduler) Start() error {
 		DeleteFunc: s.onDelQuota,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to register resource quota event handler: %v", err)
+		return fmt.Errorf("failed to register resource quota event handler: %w", err)
 	}
 
 	informerFactory.Start(s.stopCh)

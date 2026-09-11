@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -1048,6 +1049,7 @@ func TestGetNode(t *testing.T) {
 		nodeName    string
 		wantErr     bool
 		checkNode   func(*testing.T, *corev1.Node)
+		checkErr    func(*testing.T, error)
 	}{
 		{
 			name: "empty node name",
@@ -1068,10 +1070,23 @@ func TestGetNode(t *testing.T) {
 		{
 			name: "node not found",
 			setupClient: func() kubernetes.Interface {
-				return fake.NewClientset()
+				clientset := fake.NewClientset()
+				return clientset
 			},
 			nodeName: "non-existent-node",
 			wantErr:  true,
+			checkErr: func(t *testing.T, err error) {
+				var statusErr *apierrors.StatusError
+				if !errors.As(err, &statusErr) {
+					t.Fatalf("errors.As(*StatusError) = false; want true (got type %T)", err)
+				}
+				if !apierrors.IsNotFound(statusErr) {
+					t.Errorf("expected unwrapped error to be NotFound, got %v", statusErr)
+				}
+				if !apierrors.IsNotFound(err) {
+					t.Errorf("apierrors.IsNotFound(wrappedErr) = false; wrapping with %%w is required to preserve the error chain")
+				}
+			},
 		},
 		{
 			name: "success",
@@ -1093,24 +1108,46 @@ func TestGetNode(t *testing.T) {
 			setupClient: func() kubernetes.Interface {
 				clientset := fake.NewClientset()
 				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
-					return false, nil, apierrors.NewUnauthorized("get nodes")
+					return true, nil, apierrors.NewUnauthorized("get nodes")
 				})
 				return clientset
 			},
 			nodeName: "test-node",
 			wantErr:  true,
+			checkErr: func(t *testing.T, err error) {
+				var statusErr *apierrors.StatusError
+				if !errors.As(err, &statusErr) {
+					t.Fatalf("errors.As(*StatusError) = false; want true (got type %T)", err)
+				}
+				if !apierrors.IsUnauthorized(statusErr) {
+					t.Errorf("expected unwrapped error to be Unauthorized, got %v", statusErr)
+				}
+				if !apierrors.IsUnauthorized(err) {
+					t.Errorf("apierrors.IsUnauthorized(wrappedErr) = false; wrapping with %%w is required to preserve the error chain")
+				}
+			},
 		},
 		{
 			name: "generic error",
 			setupClient: func() kubernetes.Interface {
 				clientset := fake.NewClientset()
 				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
-					return false, nil, apierrors.NewBadRequest("generic error")
+					return true, nil, apierrors.NewBadRequest("generic error")
 				})
 				return clientset
 			},
 			nodeName: "test-node",
 			wantErr:  true,
+			checkErr: func(t *testing.T, err error) {
+				var statusErr *apierrors.StatusError
+				if !errors.As(err, &statusErr) {
+					t.Errorf("expected error to wrap *apierrors.StatusError, got %T", err)
+					return
+				}
+				if !apierrors.IsBadRequest(statusErr) {
+					t.Errorf("expected wrapped error to be BadRequest, got %v", statusErr)
+				}
+			},
 		},
 	}
 
@@ -1124,6 +1161,9 @@ func TestGetNode(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetNode() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+			if tt.wantErr && tt.checkErr != nil {
+				tt.checkErr(t, err)
 			}
 			if !tt.wantErr && tt.checkNode != nil {
 				tt.checkNode(t, got)
