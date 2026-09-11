@@ -367,13 +367,18 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-// tryFit walks the servers in order and takes the first that can serve the
-// whole request. It reads pool reservations, so the same call can answer
-// differently before and after a refresh.
+// tryFit picks the server the request should come from. It reads pool
+// reservations, so the same call can answer differently before and after a
+// refresh.
 func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, pod *corev1.Pod) (bool, map[string]device.ContainerDevices, map[string]int) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
 
+	type candidate struct {
+		server string
+		free   []*device.DeviceUsage
+	}
+	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
 		free := make([]*device.DeviceUsage, 0, len(byServer[server]))
 		for _, d := range byServer[server] {
@@ -391,6 +396,21 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 				free = append(free, d)
 			}
 		}
+		candidates = append(candidates, candidate{server: server, free: free})
+	}
+
+	// Spread the fleet: serve from whichever server has the most cards free.
+	// An allocation cannot span servers, so filling the emptiest one keeps the
+	// deepest server deep, and a later multi-card request still has somewhere
+	// to land. servers arrives sorted by name, and a stable sort keeps that
+	// order among equals, so equally free servers are picked the same way on
+	// every call.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return len(candidates[i].free) > len(candidates[j].free)
+	})
+
+	for _, c := range candidates {
+		server, free := c.server, c.free
 		if int32(len(free)) < request.Nums {
 			reason[common.NodeInsufficientDevice]++
 			continue

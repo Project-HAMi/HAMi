@@ -333,3 +333,47 @@ func TestMutateAdmission_SkipsEnforcementWhenNotAsked(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
+
+// An allocation cannot span servers, so filling the emptiest server first keeps
+// the deepest one deep and leaves somewhere for a later multi-card request to
+// land. Picking the lowest-sorting server instead would hollow out one server
+// while another sat idle.
+func TestFit_SpreadsAcrossServers(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	// gpu-a sorts first but has one card left; gpu-b has three.
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-A1", 40000),
+		card("gpu-b", "GPU-B1", 40000),
+		card("gpu-b", "GPU-B2", 40000),
+		card("gpu-b", "GPU-B3", 40000),
+	}
+
+	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b",
+		"the emptiest server serves the request")
+
+	// With the fleet level, the tie breaks on name so the choice is repeatable.
+	level := []*device.DeviceUsage{
+		card("gpu-a", "GPU-A1", 40000),
+		card("gpu-b", "GPU-B1", 40000),
+	}
+	fit, allocated, _ = dev.Fit(level, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
+
+	// Spreading must not hand out a server that cannot serve the whole request.
+	// gpu-b has the most cards free but only gpu-a has two of the right size.
+	small := card("gpu-b", "GPU-B4", 1000)
+	mixed := []*device.DeviceUsage{
+		card("gpu-a", "GPU-A1", 40000),
+		card("gpu-a", "GPU-A2", 40000),
+		small,
+		card("gpu-b", "GPU-B5", 1000),
+		card("gpu-b", "GPU-B6", 1000),
+	}
+	fit, allocated, _ = dev.Fit(mixed, request(2, 2000), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
+}
