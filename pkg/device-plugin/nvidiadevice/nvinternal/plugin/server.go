@@ -866,6 +866,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
+	sandboxedRuntime := isSandboxedRuntimeClass(current, plugin.schedulerConfig.SandboxRuntimeClassNames)
+	if sandboxedRuntime {
+		klog.Warningf("Pod %s/%s uses runtimeClass %q: skipping the libvgpu.so preload injection, "+
+			"device memory and core limits are not enforced in this pod",
+			current.Namespace, current.Name, *current.Spec.RuntimeClassName)
+	}
+
 	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, current)
 	if err != nil {
 		PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -988,7 +995,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						break
 					}
 				}
-				if !found {
+				if !found && !sandboxedRuntime {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
 						HostPath: hostHookPath + "/vgpu/ld.so.preload",
 						ReadOnly: true},
