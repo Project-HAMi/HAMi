@@ -67,9 +67,9 @@ func Benchmark_OverwriteEnvDecision_ContainerJSON(b *testing.B) {
 }
 
 // Benchmark_OverwriteEnvDecision_WebhookLoop simulates the real webhook path:
-// the webhook iterates device.GetDevices() and calls MutateAdmission (→
-// OverwriteEnvDecision) once per registered ascend chip (7 on the arm231
-// cluster). This is the number to compare against a cached implementation.
+// the webhook calls MutateAdmission (→ OverwriteEnvDecision) once per
+// registered Ascend chip (7 on a typical node). Compare against a cached
+// implementation.
 func Benchmark_OverwriteEnvDecision_WebhookLoop(b *testing.B) {
 	entries := map[string]string{"main": "true", "sidecar": "false", "worker": "0"}
 	raw, _ := json.Marshal(entries)

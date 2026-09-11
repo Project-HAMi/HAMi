@@ -24,8 +24,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Annotation keys for the OverwriteEnv opt-out (ADR 0002). Pod-level is a single
-// bool string; container-level is a JSON map of container-name -> bool-string.
+// Annotation keys for the OverwriteEnv opt-out. Pod-level is a single bool
+// string; container-level is a JSON map of container-name -> bool-string.
 const (
 	OverwriteEnvAnnotationKey           = "hami.io/overwrite-env"
 	OverwriteEnvContainersAnnotationKey = "hami.io/overwrite-env-containers"
@@ -54,9 +54,7 @@ func (m OverwriteEnvMode) String() string {
 	}
 }
 
-// parseOverwriteEnvValue parses a single annotation value into a mode using
-// strconv.ParseBool semantics (accepts true/True/1/t/T and false/False/0/f/F).
-// The second return is false when the value is not a valid bool.
+// parseOverwriteEnvValue parses a single bool-string annotation value.
 func parseOverwriteEnvValue(val string) (OverwriteEnvMode, bool) {
 	b, err := strconv.ParseBool(val)
 	if err != nil {
@@ -68,11 +66,7 @@ func parseOverwriteEnvValue(val string) (OverwriteEnvMode, bool) {
 	return OverwriteEnvOff, true
 }
 
-// ParsePodOverwriteEnv parses the pod-level annotation value (hami.io/overwrite-env)
-// into a mode. An empty or absent value returns (Unset, false). An invalid value
-// returns (Unset, false) and is logged so a typo doesn't silently no-op.
-// Exported so backends that cache decoded annotations (ascend's per-chip loop)
-// can parse the pod-level value once and reuse it across chips.
+// ParsePodOverwriteEnv parses the pod-level annotation; an empty or invalid value returns (Unset, false).
 func ParsePodOverwriteEnv(podVal string) (OverwriteEnvMode, bool) {
 	mode, parsed := parseOverwriteEnvValue(podVal)
 	if podVal != "" && !parsed {
@@ -81,16 +75,8 @@ func ParsePodOverwriteEnv(podVal string) (OverwriteEnvMode, bool) {
 	return mode, parsed
 }
 
-// DecodeContainerOverwriteEnvJSON decodes the container-level annotation
-// (hami.io/overwrite-env-containers) into a name→mode map. Each JSON value is
-// parsed with strconv.ParseBool; invalid values are skipped (that container
-// falls back to pod-level) and logged. The empty string returns (nil, nil).
-// A malformed JSON is logged here and returns (nil, err) so the caller can
-// decide its fallback; the warning lives in this single place so the cached
-// and uncached paths cannot diverge.
-//
-// Backends that the webhook calls multiple times per pod (ascend's per-chip
-// loop) should cache this by the raw JSON string to avoid re-decoding 7×.
+// DecodeContainerOverwriteEnvJSON decodes the container-level annotation into
+// a name→mode map; malformed JSON and invalid values are logged and skipped.
 func DecodeContainerOverwriteEnvJSON(rawJSON string) (map[string]OverwriteEnvMode, error) {
 	if rawJSON == "" {
 		return nil, nil
@@ -112,11 +98,8 @@ func DecodeContainerOverwriteEnvJSON(rawJSON string) (map[string]OverwriteEnvMod
 	return entries, nil
 }
 
-// ResolveOverwriteEnv combines a pod-level mode with a (possibly nil) decoded
-// container-level entries map for a specific container. A listed container
-// overrides the pod level; an unlisted one keeps the pod level. There is no
-// wildcard — "*" is a literal container name. This is a pure lookup with no
-// logging (warnings are emitted during DecodeContainerOverwriteEnvJSON).
+// ResolveOverwriteEnv returns the container's mode: a listed container
+// overrides the pod level. "*" is a literal container name, not a wildcard.
 func ResolveOverwriteEnv(podMode OverwriteEnvMode, entries map[string]OverwriteEnvMode, ctr *corev1.Container) OverwriteEnvMode {
 	if entries == nil || ctr == nil {
 		return podMode
@@ -127,19 +110,10 @@ func ResolveOverwriteEnv(podMode OverwriteEnvMode, entries map[string]OverwriteE
 	return podMode
 }
 
-// OverwriteEnvDecision is the composed (uncached) resolver for backends that
-// call once per container (nvidia). Ascend, which the webhook calls once per
-// chip, should cache DecodeContainerOverwriteEnvJSON + ParsePodOverwriteEnv and
-// call ResolveOverwriteEnv to avoid re-decoding the same JSON 7×.
-//
-// Priority: container-level JSON entry > pod-level single value > Unset (the
-// caller falls back to dev.config.OverwriteEnv). Value vocabulary is
-// strconv.ParseBool at both levels. A malformed JSON or invalid value is logged
-// (klog warning) and treated as absent — the affected container falls back to
-// the lower layer. Admission is never denied for a malformed annotation.
-//
-// Nil pod / nil ctr / nil Annotations are all treated as "no annotations"
-// and return Unset.
+// OverwriteEnvDecision is the composed resolver for backends that call once
+// per container (nvidia); backends invoked once per chip (ascend) should use
+// the split functions plus a cache instead. Priority: container entry >
+// pod value > Unset; a malformed annotation never denies admission.
 func OverwriteEnvDecision(pod *corev1.Pod, ctr *corev1.Container) OverwriteEnvMode {
 	if pod == nil || ctr == nil || pod.Annotations == nil {
 		return OverwriteEnvUnset

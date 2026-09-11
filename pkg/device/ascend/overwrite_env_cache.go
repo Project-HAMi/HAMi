@@ -27,29 +27,21 @@ import (
 )
 
 // overwriteEnvEntriesCache memoizes the decoded container-level OverwriteEnv
-// JSON (hami.io/overwrite-env-containers). The webhook calls MutateAdmission
-// once per registered Ascend chip (7 on a typical node), so without the cache
-// the same JSON would be decoded 7× per container — and, for a malformed
-// value, its warning logged 7×. The pod-level annotation is deliberately not
-// cached: strconv.ParseBool is cheaper than a cache lookup, so an invalid
-// pod-level value may log its warning per chip.
-//
-// The key is the raw JSON content (not a pod identity): identical values
-// across pods share one entry, and a changed annotation is a different key —
-// the same key always decodes to the same result, so expiry cannot improve
-// correctness and the LRU capacity is the only bound needed. The TTL is the
-// maximum duration solely because LRUExpireCache's API requires one. Error
-// results (nil) are cached too, so a malformed JSON is decoded and logged
-// exactly once per distinct value.
+// JSON: the webhook calls MutateAdmission once per chip (7 on a typical node),
+// so without it the same JSON would be decoded 7× per container. The key is
+// the raw JSON content (not a pod identity), so the same key always decodes to
+// the same result — expiry cannot improve correctness and the LRU capacity is
+// the only bound needed; the TTL is the max duration solely because the API
+// requires one. Error results (nil) are cached too, so a malformed JSON is
+// decoded and logged exactly once per distinct value. The pod-level annotation
+// is not cached: strconv.ParseBool is cheaper than a cache lookup.
 var overwriteEnvEntriesCache = cache.NewLRUExpireCache(256)
 
 const overwriteEnvCacheTTL = time.Duration(math.MaxInt64)
 
-// cachedContainerOverwriteEnv decodes the container-level JSON once and caches
-// the result (including nil for a malformed JSON) by the raw string, so the 7×
-// per-chip calls don't re-decode or re-warn. An empty rawJSON returns nil
-// without touching the cache (no entry for "no annotation"). A shallow copy of
-// the decoded map is returned so callers cannot mutate the cached entry.
+// cachedContainerOverwriteEnv decodes rawJSON once and caches the result by
+// the raw string. A shallow copy is returned so callers cannot mutate the
+// cached entry.
 func cachedContainerOverwriteEnv(rawJSON string) map[string]util.OverwriteEnvMode {
 	if rawJSON == "" {
 		return nil
