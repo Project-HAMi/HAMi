@@ -591,6 +591,25 @@ devices:
     defaultPort: 14833
     resourceCountName: "nvidia.com/remote-gpu"
     resourceMemoryName: "nvidia.com/remote-gpu-memory"
+    server:
+      # Run a lupine server on every node carrying serverLabel. Turn this off
+      # when lupine is managed outside the chart; the label's value then names
+      # the port that server listens on. The chart-managed one uses
+      # defaultPort, because a DaemonSet cannot vary a port per node.
+      enabled: true
+      image:
+        registry: "ghcr.io"
+        repository: "lupinemachines/lupine-server"
+        tag: "cuda-13.3.1-ubuntu24.04"
+        pullPolicy: IfNotPresent
+      # The server reaches the GPUs through NVIDIA_VISIBLE_DEVICES, which only
+      # works under the NVIDIA container runtime. Name the RuntimeClass that
+      # selects it when the cluster does not make it the default, commonly
+      # "nvidia". It has its own setting rather than borrowing the device
+      # plugin's, because in remote mode that plugin may not run at all.
+      runtimeClassName: ""
+      tolerations: []
+      resources: {}
   ascend:
     enabled: false
     image: ""

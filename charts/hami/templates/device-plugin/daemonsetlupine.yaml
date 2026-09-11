@@ -1,0 +1,69 @@
+{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.server.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-lupine-server
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-lupine-server
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-lupine-server
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: hami-lupine-server
+        hami.io/webhook: ignore
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.devices.remotegpu.server.runtimeClassName }}
+      runtimeClassName: {{ .Values.devices.remotegpu.server.runtimeClassName }}
+      {{- end }}
+      priorityClassName: system-node-critical
+      # The scheduler tells clients to connect to the node's InternalIP, so the
+      # server has to be reachable there rather than on a pod IP.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              # Exists, not a nodeSelector: the label's value carries the port,
+              # so matching on it would pin the fleet to one port.
+              - matchExpressions:
+                  # hami.io/lupine-server is a protocol constant shared with
+                  # pkg/device/remotegpu, not something to configure here.
+                  - key: hami.io/lupine-server
+                    operator: Exists
+      {{- with .Values.devices.remotegpu.server.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: lupine-server
+          image: {{ include "common.images.image" (dict "imageRoot" .Values.devices.remotegpu.server.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.devices.remotegpu.server.image.pullPolicy }}
+          ports:
+            - name: lupine
+              containerPort: {{ .Values.devices.remotegpu.defaultPort }}
+              hostPort: {{ .Values.devices.remotegpu.defaultPort }}
+          env:
+            # The GPUs reach the container through the NVIDIA runtime rather
+            # than a resource request: in remote mode the device plugin no
+            # longer advertises them to kubelet, so there is nothing to request.
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          {{- with .Values.devices.remotegpu.server.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
