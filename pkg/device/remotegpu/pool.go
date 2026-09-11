@@ -114,6 +114,7 @@ type pool struct {
 	devices   []*device.DeviceInfo
 	inUse     map[string]struct{}  // device ID held by a live pod
 	held      map[string]time.Time // device ID booked since the last refresh
+	busy      map[string]struct{}  // device ID a server reports a client on
 }
 
 func newPool(defaultPort int) *pool {
@@ -122,6 +123,7 @@ func newPool(defaultPort int) *pool {
 		endpoints:   map[string]string{},
 		inUse:       map[string]struct{}{},
 		held:        map[string]time.Time{},
+		busy:        map[string]struct{}{},
 	}
 }
 
@@ -181,6 +183,7 @@ func (p *pool) refresh(ctx context.Context) {
 	} else {
 		p.inUse = p.reservations(ctx)
 	}
+	p.busy = askServers(ctx, endpoints)
 	p.fetchedAt = time.Now()
 	// A hold is only needed until the pod list catches up with it. Drop the
 	// ones it has, and the ones so old that the pod they were taken for is
@@ -191,7 +194,8 @@ func (p *pool) refresh(ctx context.Context) {
 		}
 	}
 	klog.V(4).InfoS("remotegpu: pool refreshed",
-		"servers", len(endpoints), "devices", len(devices), "reserved", len(p.inUse))
+		"servers", len(endpoints), "devices", len(devices),
+		"reserved", len(p.inUse), "busyOnServer", len(p.busy))
 }
 
 func (p *pool) endpointOf(n *corev1.Node) (string, bool) {
@@ -333,8 +337,31 @@ func (p *pool) reserved(id string) bool {
 	if _, ok := p.inUse[id]; ok {
 		return true
 	}
-	_, ok := p.held[id]
+	if _, ok := p.held[id]; ok {
+		return true
+	}
+	_, ok := p.busy[id]
 	return ok
+}
+
+// askServers collects the cards each lupine server reports a client on. A
+// server that cannot be reached contributes nothing rather than emptying the
+// fleet, the same way an API error keeps the previous snapshot: a monitoring
+// endpoint going quiet is not evidence that the cards behind it are free.
+func askServers(ctx context.Context, endpoints map[string]string) map[string]struct{} {
+	busy := map[string]struct{}{}
+	for node, endpoint := range endpoints {
+		uuids, err := fetchBusyDevices(ctx, endpoint)
+		if err != nil {
+			klog.V(4).InfoS("remotegpu: no usage from lupine server, trusting local bookkeeping there",
+				"node", node, "endpoint", endpoint, "error", err)
+			continue
+		}
+		for uuid := range uuids {
+			busy[deviceID(node, uuid)] = struct{}{}
+		}
+	}
+	return busy
 }
 
 // endpoint returns the "host:port" a client should point LUPINE_SERVER at.

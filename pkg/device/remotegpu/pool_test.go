@@ -19,6 +19,7 @@ package remotegpu
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,35 @@ func stubFleet(t *testing.T, nodes []corev1.Node, pods []corev1.Pod, nodeErr err
 	prevNodes, prevPods := listLupineNodes, listPods
 	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nodeErr }
 	listPods = func(context.Context) ([]corev1.Pod, error) { return pods, nil }
-	t.Cleanup(func() { listLupineNodes, listPods = prevNodes, prevPods })
+	// Servers report nothing unless a test says otherwise, so existing cases
+	// keep exercising the local bookkeeping on its own.
+	prevBusy := fetchBusyDevices
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		return nil, errNoServerMetrics
+	}
+	t.Cleanup(func() {
+		listLupineNodes, listPods, fetchBusyDevices = prevNodes, prevPods, prevBusy
+	})
+}
+
+var errNoServerMetrics = errors.New("no metrics stubbed for this test")
+
+// stubServerUsage makes the fleet report a client on the given GPU UUIDs.
+func stubServerUsage(t *testing.T, byEndpoint map[string][]string) {
+	t.Helper()
+	prev := fetchBusyDevices
+	fetchBusyDevices = func(_ context.Context, endpoint string) (map[string]struct{}, error) {
+		uuids, ok := byEndpoint[endpoint]
+		if !ok {
+			return nil, errNoServerMetrics
+		}
+		out := map[string]struct{}{}
+		for _, u := range uuids {
+			out[u] = struct{}{}
+		}
+		return out, nil
+	}
+	t.Cleanup(func() { fetchBusyDevices = prev })
 }
 
 func lupineNode(name, ip, portLabel string, gpus []*device.DeviceInfo) corev1.Node {
@@ -227,4 +256,57 @@ func TestGetNodeDevices_DisabledWhenUnconfigured(t *testing.T) {
 
 	_, err := dev.GetNodeDevices(corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cpu-1"}})
 	assert.Assert(t, errors.Is(err, errNoPool))
+}
+
+// The scheduler's own records only cover pods it placed. A card can also be
+// busy with a client it did not place, an interactive session or one pointed
+// at the server by hand, and only the server can see that.
+func TestPool_HonoursUsageReportedByTheServer(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+	}
+	stubFleet(t, nodes, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-2"}})
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assert.Assert(t, !p.reserved("gpu-a/GPU-1"), "a card nobody is on stays available")
+	assert.Assert(t, p.reserved("gpu-a/GPU-2"), "a card the server reports a client on is taken")
+}
+
+// A monitoring endpoint going quiet says nothing about the cards behind it, so
+// it must not hand them out; the local records still stand on their own.
+func TestPool_UnreachableServerDoesNotFreeItsCards(t *testing.T) {
+	held := device.EncodePodSingleDevice(device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
+	})
+	pods := []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{
+		Name: "live", Annotations: map[string]string{AllocatedAnnos: held},
+	}}}
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+	}, pods, nil)
+	// fetchBusyDevices keeps failing, the default from stubFleet.
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "the pod's own booking survives")
+	assert.Assert(t, !p.reserved("gpu-a/GPU-2"), "an unreachable server does not make everything busy")
+}
+
+func TestParseBusyDevices(t *testing.T) {
+	body := `# HELP lupine_host_gpu_memory_total_bytes Total GPU memory in bytes.
+# TYPE lupine_host_gpu_memory_total_bytes gauge
+lupine_host_gpu_memory_total_bytes{device_uuid="GPU-1",device_index="0"} 85520809984
+lupine_monitor_nvml_up 1
+# TYPE lupine_client_device_memory_used_bytes gauge
+lupine_client_device_memory_used_bytes{client_id="10.0.0.9:pod-a:4026532:7",client_address="10.0.0.9",client_hostname="pod-a",client_name="python3",device_uuid="GPU-1",device_index="0"} 83886080
+lupine_client_device_utilization_percent{client_id="10.0.0.9:pod-a:4026532:7",client_address="10.0.0.9",client_hostname="pod-a",client_name="python3",device_uuid="GPU-9",device_index="1"} 12
+`
+	busy := parseBusyDevices(strings.NewReader(body))
+	assert.Equal(t, len(busy), 1, "only the client memory metric names a busy card")
+	_, ok := busy["GPU-1"]
+	assert.Assert(t, ok)
 }
