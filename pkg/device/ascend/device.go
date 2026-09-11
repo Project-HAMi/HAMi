@@ -550,7 +550,7 @@ func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int32 {
 		if podInfo == nil || podInfo.Pod == nil {
 			continue
 		}
-		if pod != nil && podInfo.Pod.UID != "" && pod.UID != "" && podInfo.Pod.UID == pod.UID {
+		if pod != nil && podInfo.UID != "" && pod.UID != "" && podInfo.UID == pod.UID {
 			continue
 		}
 		for _, podSingle := range podInfo.Devices {
