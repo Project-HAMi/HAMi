@@ -55,8 +55,9 @@ const (
 	MthreadsPredicateTime    = "mthreads.com/predicate-time"
 	coresPerMthreadsGPU      = 16
 	// defaultMemoryPerMthreadsGPU is the memory units per card for the MTT
-	// S4000 (96 x 512MiB = 48GiB). Other cards (e.g. S5000 with 80GiB = 160
-	// units) should override it via device-config `mthreads.memoryPerCard`.
+	// S4000 (96 x 512MiB = 48GiB). It seeds the accepted-request set when no
+	// card models are configured; other cards (e.g. S5000 with 80GiB = 160
+	// units) are declared via device-config `mthreads.memoryPerCard`.
 	defaultMemoryPerMthreadsGPU = 96
 	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
 	// HAMi accounts internally. One mthreads vmemory unit is 512 MiB.
@@ -67,8 +68,7 @@ var (
 	MthreadsResourceCount  string
 	MthreadsResourceMemory string
 	MthreadsResourceCores  string
-	memoryPerMthreadsGPU   = int64(defaultMemoryPerMthreadsGPU)
-	legalMemoryslices      = buildLegalMemorySlices(memoryPerMthreadsGPU)
+	legalMemoryslices      = buildLegalMemorySlices(defaultMemoryPerMthreadsGPU)
 )
 
 // buildLegalMemorySlices returns the valid per-slice memory unit requests:
@@ -91,27 +91,56 @@ func buildLegalMemorySlices(memoryPerCard int64) []int64 {
 	return out
 }
 
+// buildLegalMemorySliceUnion returns the sorted, deduplicated union of the
+// valid per-slice memory requests across every configured card capacity.
+// Admission runs before a node is chosen, so on a mixed S4000/S5000 cluster a
+// request must be accepted if it is valid on any of the card models present;
+// the scheduler then enforces the real per-card size of the node it selects.
+func buildLegalMemorySliceUnion(capacities []int64) []int64 {
+	seen := map[int64]bool{}
+	out := []int64{}
+	for _, capacity := range capacities {
+		if capacity <= 0 {
+			continue
+		}
+		for _, v := range buildLegalMemorySlices(capacity) {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return buildLegalMemorySlices(defaultMemoryPerMthreadsGPU)
+	}
+	slices.Sort(out)
+	return out
+}
+
 type MthreadsConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
-	// MemoryPerCard is the number of 512MiB memory units provided by one
-	// physical card. Defaults to 96 (MTT S4000, 48GiB) when unset.
-	MemoryPerCard int64 `yaml:"memoryPerCard"`
+	// MemoryPerCard lists the per-card memory capacities (in 512MiB units) of
+	// the card models present in the cluster, e.g. [96, 160] for a mixed
+	// S4000/S5000 fleet. It only affects which explicit sgpu-memory requests
+	// admission accepts; pods that omit memory get the selected node's real
+	// per-card size from the scheduler. Defaults to [96] (MTT S4000, 48GiB)
+	// when unset.
+	MemoryPerCard []int64 `yaml:"memoryPerCard"`
 }
 
 func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 	MthreadsResourceCount = config.ResourceCountName
 	MthreadsResourceCores = config.ResourceCoreName
 	MthreadsResourceMemory = config.ResourceMemoryName
-	// Reset to the S4000 default first so re-initialization with an unset
-	// MemoryPerCard does not inherit a previous override.
-	memoryPerMthreadsGPU = int64(defaultMemoryPerMthreadsGPU)
-	legalMemoryslices = buildLegalMemorySlices(memoryPerMthreadsGPU)
-	if config.MemoryPerCard > 0 {
-		memoryPerMthreadsGPU = config.MemoryPerCard
-		legalMemoryslices = buildLegalMemorySlices(memoryPerMthreadsGPU)
+	// Rebuild from the configured capacities on every call so re-initialization
+	// with an unset MemoryPerCard does not inherit a previous override.
+	capacities := config.MemoryPerCard
+	if len(capacities) == 0 {
+		capacities = []int64{defaultMemoryPerMthreadsGPU}
 	}
+	legalMemoryslices = buildLegalMemorySliceUnion(capacities)
 	_, ok := device.InRequestDevices[MthreadsGPUDevice]
 	if !ok {
 		device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
@@ -166,8 +195,11 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 			ctr.Resources.Limits = corev1.ResourceList{}
 		}
 		if count.Value() > 1 {
-			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*int64(coresPerMthreadsGPU), resource.DecimalSI)
-			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
+			// Pin every requested slice to a full card's cores, but leave memory
+			// unset so the scheduler derives it from the selected node's real
+			// per-card capacity. Injecting a fixed unit count here would be
+			// wrong on a node whose card differs from the configured default.
+			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*coresPerMthreadsGPU, resource.DecimalSI)
 			if p.Annotations == nil {
 				p.Annotations = make(map[string]string)
 			}
@@ -176,13 +208,12 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 		}
 		mem, memok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)]
 		if !memok {
-			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*int64(coresPerMthreadsGPU), resource.DecimalSI)
-			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
+			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*coresPerMthreadsGPU, resource.DecimalSI)
 		} else {
 			memnum, _ := mem.AsInt64()
 			found := slices.Contains(legalMemoryslices, memnum)
 			if !found {
-				return true, fmt.Errorf("sGPU memory request value is invalid, valid values are %v (memoryPerCard=%d)", legalMemoryslices, memoryPerMthreadsGPU)
+				return true, fmt.Errorf("sGPU memory request value is invalid, valid values are %v", legalMemoryslices)
 			}
 		}
 	}
@@ -194,15 +225,20 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 // e.g. "0-2-3" for cards 0, 2 and 3.
 const SGPUCoresLabel = "mthreads.com/sgpu.cores"
 
+// maxPhysicalCardID bounds a card id parsed from SGPUCoresLabel. DeviceInfo.Index
+// is a uint (32-bit on some platforms), so an out-of-range int64 must be
+// rejected here instead of narrowed silently at the conversion site.
+const maxPhysicalCardID = math.MaxUint32
+
 // parseSGPUCoresLabel parses the vendor card-id list label. Accepts '-'
-// or ',' separators, deduplicates and drops unparsable entries while
-// preserving the first-seen order.
+// or ',' separators, deduplicates and drops unparsable or out-of-range
+// entries while preserving the first-seen order.
 func parseSGPUCoresLabel(raw string) []int64 {
 	seen := map[int64]bool{}
 	var ids []int64
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == '-' || r == ',' }) {
 		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
-		if err != nil || id < 0 || seen[id] {
+		if err != nil || id < 0 || id > maxPhysicalCardID || seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -231,7 +267,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 		cardIDs = parseSGPUCoresLabel(raw)
 		if int64(len(cardIDs))*coresPerMthreadsGPU != cores {
 			return []*device.DeviceInfo{}, fmt.Errorf("sgpu capacity mismatch on %s: %s=%d units is not %d x %d per card (label %s=%q)",
-				n.Name, MthreadsResourceMemory, cores, len(cardIDs), coresPerMthreadsGPU, SGPUCoresLabel, raw)
+				n.Name, MthreadsResourceCores, cores, len(cardIDs), coresPerMthreadsGPU, SGPUCoresLabel, raw)
 		}
 	} else {
 		// Fallback: contiguous derivation (upstream behavior).
