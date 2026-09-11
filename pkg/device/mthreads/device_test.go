@@ -19,6 +19,7 @@ package mthreads
 import (
 	"flag"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -320,10 +321,11 @@ func Test_MutateAdmission(t *testing.T) {
 
 func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    corev1.Node
-		want    []*device.DeviceInfo
-		wantErr bool
+		name            string
+		args            corev1.Node
+		want            []*device.DeviceInfo
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name: "get node device",
@@ -373,7 +375,7 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 		},
 		{
-			name:    "label capacity mismatch is an error",
+			name: "label capacity mismatch is an error",
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   "test",
@@ -387,6 +389,27 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			// The compared value is the core capacity; the message must name
+			// the core resource, not the memory resource.
+			wantErrContains: "mthreads.com/sgpu-core=16 units is not 3 x 16 per card",
+		},
+		{
+			name: "out-of-range card id is dropped",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test",
+					Labels: map[string]string{"mthreads.com/sgpu.cores": "0-4294967296"},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"mthreads.com/sgpu-memory": *resource.NewQuantity(160, resource.DecimalSI),
+						"mthreads.com/sgpu-core":   *resource.NewQuantity(16, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{Index: uint(0), ID: "test-mthreads-0", Count: 100, Devmem: 81920, Devcore: 16, Type: MthreadsGPUDevice, Numa: 0, Health: true, DeviceVendor: MthreadsGPUCommonWord},
+			},
 		},
 	}
 	for _, test := range tests {
@@ -397,14 +420,24 @@ func Test_GetNodeDevices(t *testing.T) {
 			result, err := dev.GetNodeDevices(test.args)
 			if test.wantErr {
 				if err == nil {
-				t.Fatalf("expected capacity mismatch error")
-			}
+					t.Fatalf("expected capacity mismatch error")
+				}
+				if test.wantErrContains != "" {
+					assert.Assert(t, strings.Contains(err.Error(), test.wantErrContains),
+						"error %q must contain %q", err.Error(), test.wantErrContains)
+				}
 				return
 			}
 			assert.NilError(t, err)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+}
+
+func Test_parseSGPUCoresLabelBounds(t *testing.T) {
+	// 2^32 exceeds maxPhysicalCardID and must be dropped, not narrowed to uint.
+	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967296-3"), []int64{0, 3})
+	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967295"), []int64{0, 4294967295})
 }
 
 func Test_PatchAnnotations(t *testing.T) {
@@ -1526,18 +1559,90 @@ func Test_InitMthreadsDeviceMemoryPerCard(t *testing.T) {
 		ResourceMemoryName: "mthreads.com/sgpu-memory",
 		ResourceCoreName:   "mthreads.com/sgpu-core",
 	})
-	assert.Equal(t, int64(96), memoryPerMthreadsGPU)
 	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 96}, legalMemoryslices)
 
-	// MTT S5000 (80GiB) configuration overrides the per-card model.
+	// MTT S5000 (80GiB) configuration widens the accepted-request set.
 	InitMthreadsDevice(MthreadsConfig{
 		ResourceCountName:  "mthreads.com/vgpu",
 		ResourceMemoryName: "mthreads.com/sgpu-memory",
 		ResourceCoreName:   "mthreads.com/sgpu-core",
-		MemoryPerCard:      160,
+		MemoryPerCard:      []int64{160},
 	})
-	assert.Equal(t, int64(160), memoryPerMthreadsGPU)
 	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 128, 160}, legalMemoryslices)
+
+	// A mixed S4000/S5000 fleet accepts the union of both models' requests.
+	InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+		MemoryPerCard:      []int64{96, 160},
+	})
+	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 96, 128, 160}, legalMemoryslices)
+}
+
+func Test_MutateAdmissionDerivedMemory(t *testing.T) {
+	dev := &MthreadsDevices{}
+	newCtr := func(limits map[string]string) *corev1.Container {
+		rl := corev1.ResourceList{}
+		for k, v := range limits {
+			rl[corev1.ResourceName(k)] = resource.MustParse(v)
+		}
+		return &corev1.Container{Resources: corev1.ResourceRequirements{Limits: rl}}
+	}
+	config := func(cards ...int64) MthreadsConfig {
+		return MthreadsConfig{
+			ResourceCountName:  "mthreads.com/vgpu",
+			ResourceMemoryName: "mthreads.com/sgpu-memory",
+			ResourceCoreName:   "mthreads.com/sgpu-core",
+			MemoryPerCard:      cards,
+		}
+	}
+	mem := corev1.ResourceName(MthreadsResourceMemory)
+	cores := corev1.ResourceName(MthreadsResourceCores)
+
+	// S4000-only config: an S5000-sized 160-unit explicit request is rejected.
+	InitMthreadsDevice(config())
+	if _, err := dev.MutateAdmission(newCtr(map[string]string{
+		"mthreads.com/vgpu":        "1",
+		"mthreads.com/sgpu-memory": "160",
+	}), &corev1.Pod{}); err == nil {
+		t.Fatalf("expected a 160-unit request to be rejected with only the S4000 default configured")
+	}
+
+	// Mixed S4000/S5000 config: the same request is accepted.
+	InitMthreadsDevice(config(96, 160))
+	ctr := newCtr(map[string]string{
+		"mthreads.com/vgpu":        "1",
+		"mthreads.com/sgpu-memory": "160",
+	})
+	if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
+		t.Fatalf("expected a 160-unit request to be accepted on a mixed fleet, got %v", err)
+	}
+
+	// A slice request without sgpu-memory gets cores only: never a fixed
+	// memory, so the scheduler sizes it from the selected node's real card.
+	ctr = newCtr(map[string]string{"mthreads.com/vgpu": "1"})
+	if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := ctr.Resources.Limits[mem]; ok {
+		t.Fatalf("admission must not inject a fixed sgpu-memory; the scheduler derives it per node")
+	}
+	if _, ok := ctr.Resources.Limits[cores]; !ok {
+		t.Fatalf("admission must inject the sGPU cores for a slice request")
+	}
+
+	// A multi-card request is pinned to full cores per card but, again, gets
+	// no fixed memory so mixed-model nodes are sized correctly.
+	ctr = newCtr(map[string]string{"mthreads.com/vgpu": "2"})
+	if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := ctr.Resources.Limits[mem]; ok {
+		t.Fatalf("admission must not inject a fixed sgpu-memory for multi-card requests")
+	}
+	coreQty := ctr.Resources.Limits[cores]
+	assert.Equal(t, "32", coreQty.String())
 }
 
 func Test_MutateAdmissionMixedDelivery(t *testing.T) {
@@ -1615,14 +1720,13 @@ func Test_InitMthreadsDeviceReset(t *testing.T) {
 		ResourceCountName:  base.ResourceCountName,
 		ResourceMemoryName: base.ResourceMemoryName,
 		ResourceCoreName:   base.ResourceCoreName,
-		MemoryPerCard:      160,
+		MemoryPerCard:      []int64{160},
 	})
-	assert.Equal(t, int64(160), memoryPerMthreadsGPU)
+	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 128, 160}, legalMemoryslices)
 
 	// Re-initializing with an unset MemoryPerCard must reset to the
 	// S4000 default instead of inheriting the previous override.
 	InitMthreadsDevice(base)
-	assert.Equal(t, int64(96), memoryPerMthreadsGPU)
 	assert.DeepEqual(t, []int64{2, 4, 8, 16, 32, 64, 96}, legalMemoryslices)
 }
 
