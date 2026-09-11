@@ -220,9 +220,27 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
 			}
 			if ok {
-				corenums, ok := core.AsInt64()
-				if !ok || corenums < 0 || corenums > 100 {
-					klog.ErrorS(nil, "iluvatar core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
+				corenums, parsed := core.AsInt64()
+				if !parsed || corenums < 0 {
+					klog.ErrorS(nil, "iluvatar core request is not a non-negative integer", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}
+				}
+				// Coresreq is a per card percentage. MutateAdmission rewrites
+				// this limit to count*100 when more than one device is
+				// requested, so a value above 100 is a total across the cards
+				// and has to be divided back. A value at or below 100 is
+				// already per card, which is also what an operator writes when
+				// the admission webhook is disabled or bypassed, so it is left
+				// alone.
+				if corenums > 100 {
+					if corenums%n != 0 {
+						klog.ErrorS(nil, "iluvatar core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)
+						return device.ContainerDeviceRequest{}
+					}
+					corenums /= n
+				}
+				if corenums > 100 {
+					klog.ErrorS(nil, "iluvatar core request is out of range (must be 0-100 per device)", "container", ctr.Name, "request", core.String(), "perDevice", corenums)
 					return device.ContainerDeviceRequest{}
 				}
 				corenum = int32(corenums)
