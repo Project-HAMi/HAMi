@@ -1,10 +1,9 @@
 # An interactive session against a GPU served over the network by lupine.
 #
-# The session pod is what a user reaches, so lupine itself never has to be.
-# Keeping it that way is an RBAC decision rather than something HAMi enforces:
-# grant pod/portforward where sessions live, not in the namespace running the
-# lupine server. The pod holds its card the same way a workload does, so a
-# session and a workload cannot be handed the same GPU.
+# The stub is what a user reaches, so the lupine server never has to be. It
+# runs on the server's own node and relays to it there, which keeps the server
+# reachable from one place and leaves the user with a pod they can be granted
+# forwarding on by itself.
 #
 #   kubectl apply -f port_forward_session.yaml
 #   kubectl port-forward pod/lupine-session 14833:14833
@@ -14,27 +13,38 @@
 #   export LUPINE_SERVER=127.0.0.1:14833
 #   LD_LIBRARY_PATH=/opt/lupine/lib nvidia-smi
 #
-# Delete the pod to give the card back.
-#
-# The session reserves a whole card and no memory request is made, because
-# nothing would enforce it: HAMi-core runs inside a client container and
-# intercepts that container's CUDA calls, while here the calls are made on the
-# user's own machine, outside the cluster.
+# The stub holds no card. A lupine node reports no devices to the scheduler,
+# since it serves its GPUs rather than hosting pods that use them, so there is
+# nothing there for a pod to be given. The session is therefore not accounted
+# for: it reaches whatever the server has, alongside whatever the scheduler has
+# placed on it. Give sessions a fleet of their own, or a server the scheduler
+# is not offering, when that matters.
 apiVersion: v1
 kind: Pod
 metadata:
   name: lupine-session
 spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          # Exists, not a nodeSelector: the label's value carries the port, so
+          # matching on it would pin the session to one port.
+          - matchExpressions:
+              - key: hami.io/lupine-server
+                operator: Exists
   containers:
     - name: relay
       image: alpine/socat:1.8.0.0
-      # LUPINE_SERVER is filled in by the HAMi scheduler during scheduling, so
-      # the relay learns which server it was given only once it starts.
+      # The server runs on the host network of this same node, so it answers on
+      # the node's own address rather than inside this pod.
+      env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
       command: ["sh", "-c"]
-      args: ["exec socat TCP-LISTEN:14833,fork,reuseaddr TCP:$LUPINE_SERVER"]
+      args: ["exec socat TCP-LISTEN:14833,fork,reuseaddr TCP:$NODE_IP:14833"]
       ports:
         - name: lupine
           containerPort: 14833
-      resources:
-        limits:
-          nvidia.com/remote-gpu: 1 # how many cards the session holds
