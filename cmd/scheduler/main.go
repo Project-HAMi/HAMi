@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -111,7 +112,34 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
+// validateSchedulerPolicyFlags rejects an unrecognized --node-scheduler-policy
+// or --gpu-scheduler-policy. Both values reach a whole-string comparison with an
+// unconditional else (NodeScoreList.Less, DeviceUsageList.Less), so an
+// unrecognized value is not ignored, it selects the other policy with nothing
+// logged. #2769 already refuses to act on an unrecognized value for the
+// equivalent per-pod annotations. The node value is trimmed for the same reason
+// resolveNodeSchedulerPolicy trims an accepted annotation: NodeScoreList.Less
+// compares the whole string.
+func validateSchedulerPolicyFlags() error {
+	if !util.IsValidNodeSchedulerPolicy(config.NodeSchedulerPolicy) {
+		return fmt.Errorf("invalid --node-scheduler-policy %q, want %s or %s",
+			config.NodeSchedulerPolicy, util.NodeSchedulerPolicyBinpack, util.NodeSchedulerPolicySpread)
+	}
+	config.NodeSchedulerPolicy = strings.TrimSpace(config.NodeSchedulerPolicy)
+
+	if !util.IsValidGPUSchedulerPolicy(device.GPUSchedulerPolicy) {
+		return fmt.Errorf("invalid --gpu-scheduler-policy %q, want a comma-separated list of %s, %s, %s, %s, %s",
+			device.GPUSchedulerPolicy, util.GPUSchedulerPolicyBinpack, util.GPUSchedulerPolicySpread,
+			util.GPUSchedulerPolicyNuma, util.GPUSchedulerPolicyMutex, util.GPUSchedulerPolicyTopology)
+	}
+	return nil
+}
+
 func start() error {
+	if err := validateSchedulerPolicyFlags(); err != nil {
+		return err
+	}
+
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
