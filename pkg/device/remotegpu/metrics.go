@@ -91,15 +91,13 @@ func parseBusyDevices(r io.Reader) map[string]struct{} {
 
 // labelValue pulls one label out of a Prometheus sample line.
 func labelValue(line, label string) string {
-	key := label + `="`
-	start := strings.Index(line, key)
-	if start < 0 {
+	_, rest, found := strings.Cut(line, label+`="`)
+	if !found {
 		return ""
 	}
-	rest := line[start+len(key):]
-	end := strings.Index(rest, `"`)
-	if end < 0 {
+	value, _, closed := strings.Cut(rest, `"`)
+	if !closed {
 		return ""
 	}
-	return rest[:end]
+	return value
 }
