@@ -60,10 +60,10 @@ func TestCustomFilterUsesReportedPlacementCapacity(t *testing.T) {
 			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 4, Size: 2}},
 		},
 	}
-	if dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 10000}, nil, usage) {
+	if dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 10000}, nil, usage, nil) {
 		t.Fatal("fourth 2g request should not fit reported placements")
 	}
-	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, nil, usage) {
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, nil, usage, nil) {
 		t.Fatal("1g request should fit the remaining placement")
 	}
 }
@@ -79,11 +79,11 @@ func TestCustomFilterIgnoresQueuedAllocationsForOtherGPUs(t *testing.T) {
 		},
 	}
 	queued := device.ContainerDevices{{UUID: "GPU-b", Usedmem: 5000}}
-	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage) {
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage, nil) {
 		t.Fatal("allocation queued on another GPU consumed this GPU's remaining placement")
 	}
 	queued[0].UUID = "GPU-a"
-	if dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage) {
+	if dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage, nil) {
 		t.Fatal("two allocations on this GPU should not fit its single remaining placement")
 	}
 }
@@ -118,12 +118,12 @@ func TestCustomFilterPlansSlicesOfOneContainerJointly(t *testing.T) {
 	// The 5GB slice is queued first; placed sequentially it would take the
 	// 3g's last legal span. Planned jointly, the 3g goes first.
 	queued := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000}}
-	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, usage) {
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, usage, nil) {
 		t.Fatal("5GB + 20GB should fit next to a running 1g at slot 6 when planned together")
 	}
 	empty := &device.DeviceUsage{ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles()}
 	queued = device.ContainerDevices{{UUID: "GPU-a", Usedmem: 10000}, {UUID: "GPU-a", Usedmem: 10000}}
-	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, empty) {
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, empty, nil) {
 		t.Fatal("10GB + 10GB + 20GB should fill an empty A100")
 	}
 }
@@ -135,7 +135,7 @@ func TestAddResourceUsageCommitsRecordedPlan(t *testing.T) {
 		MigAllocationsInUse: []device.MigAllocation{{Profile: "1g.5gb", Placement: device.MigPlacement{Start: 6, Size: 1}}},
 	}
 	tentative := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000}, {UUID: "GPU-a", Usedmem: 20000}}
-	recordMigPlans([]*device.DeviceUsage{usage}, tentative)
+	recordMigPlans([]*device.DeviceUsage{usage}, tentative, nil)
 	for i := range tentative {
 		if err := dev.AddResourceUsage(nil, usage, &tentative[i]); err != nil {
 			t.Fatalf("commit slice %d: %v", i, err)
@@ -179,7 +179,7 @@ func TestRecordMigPlansClearsStalePlanWhenInfeasible(t *testing.T) {
 		},
 	}
 	tentative := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000, CustomInfo: map[string]any{MigProfileCustomInfo: "1g.5gb"}}}
-	recordMigPlans([]*device.DeviceUsage{usage}, tentative)
+	recordMigPlans([]*device.DeviceUsage{usage}, tentative, nil)
 	if _, ok := tentative[0].CustomInfo[MigProfileCustomInfo]; ok {
 		t.Fatal("stale plan key should have been removed")
 	}
