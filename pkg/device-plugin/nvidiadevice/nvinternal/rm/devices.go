@@ -268,7 +268,7 @@ func (d Device) AlignedAllocationSupported() bool {
 }
 
 // IsMigDevice returns checks whether d is a MIG device or not.
-func (d Device) IsMigDevice() bool {
+func (d *Device) IsMigDevice() bool {
 	return strings.Contains(d.Index, ":")
 }
 
