@@ -372,12 +372,16 @@ func TestPatchPodAnnotations(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "patch nil pod",
-			pod:  nil,
-			annotations: map[string]string{
-				"test-key": "test-value",
-			},
-			wantErr: true,
+			name:        "patch nil pod",
+			pod:         nil,
+			annotations: map[string]string{"key": "val"},
+			wantErr:     true,
+		},
+		{
+			name:        "patch empty pod name",
+			pod:         &corev1.Pod{},
+			annotations: map[string]string{"key": "val"},
+			wantErr:     true,
 		},
 	}
 
