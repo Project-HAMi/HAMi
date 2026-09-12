@@ -22,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -114,9 +115,12 @@ func kubernetesAllocatedMigGPUs(ctx context.Context, nodeName string) (map[int]s
 }
 
 func gpuUUIDToIndex(gpuUUID string) (int, bool) {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+	session := rm.GetNVMLSession(nil)
+	if err := session.Init(); err != nil {
 		return 0, false
 	}
+	defer session.Shutdown()
+
 	dev, ret := nvml.DeviceGetHandleByUUID(gpuUUID)
 	if ret != nvml.SUCCESS {
 		return 0, false
@@ -129,9 +133,11 @@ func gpuUUIDToIndex(gpuUUID string) (int, bool) {
 // compute or graphics process. For MIG-enabled cards every live MIG instance
 // is inspected; for non-MIG cards the parent device is inspected directly.
 func nvmlBusyGPUs() (map[int]struct{}, error) {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return nil, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	session := rm.GetNVMLSession(nil)
+	if err := session.Init(); err != nil {
+		return nil, fmt.Errorf("nvml session Init: %w", err)
 	}
+	defer session.Shutdown()
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("DeviceGetCount: %s", nvml.ErrorString(ret))

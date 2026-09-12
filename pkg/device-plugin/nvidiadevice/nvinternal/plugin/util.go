@@ -35,6 +35,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -144,10 +145,13 @@ func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.Po
 }
 
 func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	session := rm.GetNVMLSession(nil)
+	if err := session.Init(); err != nil {
+		klog.Errorln("nvml session Init err: ", err)
+		return 0, fmt.Errorf("nvml session Init err: %w", err)
 	}
+	defer session.Shutdown()
+
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
@@ -168,11 +172,13 @@ func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 }
 
 func GetDeviceNums() (int, error) {
-	defer nvml.Shutdown()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	session := rm.GetNVMLSession(nil)
+	if err := session.Init(); err != nil {
+		klog.Errorln("nvml session Init err: ", err)
+		return 0, fmt.Errorf("nvml session Init err: %w", err)
 	}
+	defer session.Shutdown()
+
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
@@ -183,11 +189,13 @@ func GetDeviceNums() (int, error) {
 
 func GetDeviceNames() ([]string, error) {
 	names := []string{}
-	defer nvml.Shutdown()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		return names, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	session := rm.GetNVMLSession(nil)
+	if err := session.Init(); err != nil {
+		klog.Errorln("nvml session Init err: ", err)
+		return names, fmt.Errorf("nvml session Init err: %w", err)
 	}
+	defer session.Shutdown()
+
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)

@@ -54,16 +54,11 @@ var _ ResourceManager = (*nvmlResourceManager)(nil)
 
 // NewNVMLResourceManagers returns a set of ResourceManagers, one for each NVML resource in 'config'.
 func NewNVMLResourceManagers(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *spec.Config) ([]ResourceManager, error) {
-	ret := nvmllib.Init()
-	if ret != nvml.SUCCESS {
-		return nil, fmt.Errorf("failed to initialize NVML: %v", ret)
+	session := GetNVMLSession(nvmllib)
+	if err := session.Init(); err != nil {
+		return nil, fmt.Errorf("failed to initialize NVML session: %w", err)
 	}
-	defer func() {
-		ret := nvmllib.Shutdown()
-		if ret != nvml.SUCCESS {
-			klog.Infof("Error shutting down NVML: %v", ret)
-		}
-	}()
+	defer session.Shutdown()
 
 	deviceMap, err := NewDeviceMap(infolib, devicelib, config)
 	if err != nil {
