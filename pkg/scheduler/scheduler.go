@@ -702,6 +702,7 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 			nodeUsage.Devices.DeviceLists = append(nodeUsage.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &device.DeviceUsage{
+<<<<<<< HEAD
 					ID:           d.ID,
 					Index:        d.Index,
 					Used:         0,
@@ -718,6 +719,25 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 					Health:       d.Health,
 					PodInfos:     make([]*device.PodInfo, 0),
 					CustomInfo:   maps.Clone(d.CustomInfo),
+=======
+					ID:          d.ID,
+					Index:       d.Index,
+					Used:        0,
+					Count:       d.Count,
+					Usedmem:     0,
+					Totalmem:    d.Devmem,
+					Totalcore:   d.Devcore,
+					Usedcores:   0,
+					MigProfiles: d.MIGProfiles,
+					Mode:        d.Mode,
+					Type:        d.Type,
+					Numa:        d.Numa,
+					Health:      d.Health,
+					// PodInfos is left nil: every consumer ranges over it or
+					// appends to it, and this runs once per device per node on
+					// every Filter call.
+					CustomInfo: maps.Clone(d.CustomInfo),
+>>>>>>> 8670cf0 (perf(scheduler): build the usage snapshot only for candidate nodes)
 				},
 			})
 		}
@@ -781,13 +801,42 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
-	allNodes, err := s.ListNodes()
-	if err != nil {
-		return &overallnodeMap, &overallnodeMap, failedNodes, err
-	}
 
-	for _, node := range allNodes {
-		overallnodeMap[node.ID] = buildNodeUsage(node, task)
+	// Snapshot only the nodes the caller asked about. Filter and the NUMA
+	// refit handler pass a candidate list and discard the second return value,
+	// so building and deep-copying the rest of the cluster is wasted work. The
+	// register loop passes every selected node, which keeps the overview used
+	// for node metrics complete.
+	if nodes == nil {
+		allNodes, err := s.ListNodes()
+		if err != nil {
+			return &overallnodeMap, &overallnodeMap, failedNodes, err
+		}
+		for _, node := range allNodes {
+			overallnodeMap[node.ID] = buildNodeUsage(node, task)
+		}
+	} else {
+		for _, nodeID := range *nodes {
+			node, err := s.GetNode(nodeID)
+			if err != nil {
+				// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
+				klog.V(5).InfoS("node unregistered", "node", nodeID, "error", err)
+				failedNodes[nodeID] = "node unregistered"
+				continue
+			}
+			// ListNodes drops entries whose Node is nil, but GetNode returns
+			// them as a success. Building usage from one leaves a NodeUsage
+			// with a nil Node that the scoring path dereferences, so apply the
+			// same filter here.
+			if node == nil || node.Node == nil {
+				klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
+				failedNodes[nodeID] = "node usage unavailable"
+				continue
+			}
+			usage := buildNodeUsage(node, task)
+			overallnodeMap[node.ID] = usage
+			cachenodeMap[node.ID] = usage
+		}
 	}
 
 	podsInfo := s.podManager.ListPodsInfo()
@@ -802,8 +851,13 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
-			klog.V(5).InfoS("pod allocated unknown node resources",
-				"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
+			// With a candidate list most Pods sit on nodes that were
+			// deliberately not snapshotted, so only report this when every
+			// node was built and a miss really means an unknown node.
+			if nodes == nil {
+				klog.V(5).InfoS("pod allocated unknown node resources",
+					"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
+			}
 			continue
 		}
 		for _, podsingleds := range p.Devices {
@@ -875,25 +929,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			}
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
-	}
-	if nodes == nil {
-		return &cachenodeMap, &overallnodeMap, failedNodes, nil
-	}
-	for _, nodeID := range *nodes {
-		node, err := s.GetNode(nodeID)
-		if err != nil {
-			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
-			klog.V(5).InfoS("node unregistered", "node", nodeID, "error", err)
-			failedNodes[nodeID] = "node unregistered"
-			continue
-		}
-		usage, ok := overallnodeMap[node.ID]
-		if !ok {
-			klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
-			failedNodes[nodeID] = "node usage unavailable"
-			continue
-		}
-		cachenodeMap[node.ID] = usage
 	}
 	return &cachenodeMap, &overallnodeMap, failedNodes, nil
 }

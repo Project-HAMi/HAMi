@@ -292,3 +292,72 @@ func BenchmarkScoreNodeOccupied(b *testing.B) {
 		})
 	}
 }
+
+// newBenchmarkScheduler builds a Scheduler whose node cache holds nodeCount
+// nodes of gpusPerNode devices each, and whose pod cache holds podCount pods
+// spread across them, each holding one device.
+func newBenchmarkScheduler(nodeCount, gpusPerNode, podCount int) *Scheduler {
+	nodeManager := newNodeManager()
+	nodeNames := make([]string, 0, nodeCount)
+	for i := range nodeCount {
+		nodeName := fmt.Sprintf("node-%d", i)
+		nodeNames = append(nodeNames, nodeName)
+		nodeManager.addNode(nodeName, testNodeInfo(nodeName, gpusPerNode))
+	}
+
+	podManager := device.NewPodManager()
+	for i := range podCount {
+		nodeName := nodeNames[i%nodeCount]
+		podManager.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("pod-%d", i),
+				Namespace: "default",
+				UID:       k8stypes.UID(fmt.Sprintf("uid-%d", i)),
+			},
+		}, nodeName, device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+				device.ContainerDevices{{
+					UUID:      fmt.Sprintf("%s-gpu-%d", nodeName, i%gpusPerNode),
+					Type:      nvidia.NvidiaGPUDevice,
+					Usedmem:   benchMemreq,
+					Usedcores: benchCoresreq,
+				}},
+			},
+		})
+	}
+
+	return &Scheduler{nodeManager: nodeManager, podManager: podManager}
+}
+
+// BenchmarkGetNodesUsage measures rebuilding the usage snapshot, which Filter
+// does once per scheduling attempt. It passes a single candidate node, which is
+// the shape Filter uses when kube-scheduler has already narrowed the field, so
+// the figures show how much of the cost is proportional to the whole cluster
+// rather than to the candidates.
+func BenchmarkGetNodesUsage(b *testing.B) {
+	sizes := []struct {
+		nodes       int
+		gpusPerNode int
+		pods        int
+	}{
+		{nodes: 50, gpusPerNode: 8, pods: 1000},
+		{nodes: 100, gpusPerNode: 16, pods: 5000},
+	}
+
+	quietKlog(b)
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("nodes=%d/gpus=%d/pods=%d", size.nodes, size.gpusPerNode, size.pods), func(b *testing.B) {
+			scheduler := newBenchmarkScheduler(size.nodes, size.gpusPerNode, size.pods)
+			task := newBenchmarkPod(0)
+			candidates := []string{"node-0"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, _, _, err := scheduler.getNodesUsage(&candidates, task); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
