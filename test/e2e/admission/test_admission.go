@@ -212,8 +212,9 @@ var _ = ginkgo.Describe("[admission] Mutating webhook admission E2E tests", gink
 			To(gomega.Equal(first.Spec.Containers[0].Resources.Limits))
 		gomega.Expect(second.Spec.Containers[0].Resources.Requests).
 			To(gomega.Equal(first.Spec.Containers[0].Resources.Requests))
-		gomega.Expect(envNames(second.Spec.Containers[0].Env)).
-			To(gomega.Equal(envNames(first.Spec.Containers[0].Env)))
+		gomega.Expect(second.Spec.Containers[0].Env).
+			To(gomega.Equal(first.Spec.Containers[0].Env))
+		gomega.Expect(second.Spec.RuntimeClassName).To(gomega.Equal(first.Spec.RuntimeClassName))
 	})
 
 	// The quota guard runs in the webhook against the scheduler's cached
@@ -263,14 +264,3 @@ var _ = ginkgo.Describe("[admission] Mutating webhook admission E2E tests", gink
 		})
 	})
 })
-
-// envNames returns the environment variable names of a container, which is the
-// part of an injected env list that must not change between identical
-// submissions. Values can legitimately carry per-Pod data.
-func envNames(env []corev1.EnvVar) []string {
-	names := make([]string, 0, len(env))
-	for _, e := range env {
-		names = append(names, e.Name)
-	}
-	return names
-}
