@@ -199,11 +199,12 @@ var _ = ginkgo.Describe("[admission] Mutating webhook admission E2E tests", gink
 		gomega.Expect(created.Spec.SchedulerName).NotTo(gomega.Equal(admissionScheduler))
 	})
 
-	// Regression cover for #2929 and #2936: mutation must be a function of the
-	// submitted spec, not of how many times it has been applied. Submitting the
-	// same spec twice is a proxy for webhook reinvocation, which cannot be
-	// forced from outside the API server.
-	ginkgo.It("produces the same mutation for an identical spec", func() {
+	// Two separate admissions of the same spec must be mutated identically. This
+	// is not webhook reinvocation, which the API server only triggers when a
+	// later webhook changes the Pod and which cannot be forced from here; the
+	// reinvocation case (#2929) belongs in unit tests that feed MutateAdmission
+	// its own output.
+	ginkgo.It("mutates two admissions of an identical spec the same way", func() {
 		first := createAndCleanup(client, namespace, withDeviceRequest(newPod("idempotent-first"), 1))
 		second := createAndCleanup(client, namespace, withDeviceRequest(newPod("idempotent-second"), 1))
 
