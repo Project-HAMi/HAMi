@@ -3641,3 +3641,41 @@ func TestGenerateResourceRequests_InvalidCoresFailsClosed(t *testing.T) {
 	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
 	assert.ErrorContains(t, err, "out of range")
 }
+
+// TestGenerateResourceRequests_ZeroCountIsDeviceLess pins the distinction
+// between an explicit zero count and a genuinely invalid one. "nvidia.com/gpu: 0"
+// is a common way to say "no GPU" (chart templates render it that way whenever
+// GPU support is switched off), so it has to stay a device-less pod that is
+// admitted and scheduled normally rather than being denied. Only a negative or
+// out-of-int32 count is an error.
+func TestGenerateResourceRequests_ZeroCountIsDeviceLess(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	zero := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+			},
+		},
+	}
+	zeroResult, err := dev.GenerateResourceRequests(zero)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, zeroResult)
+
+	negative := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(-1, resource.BinarySI),
+			},
+		},
+	}
+	negativeResult, err := dev.GenerateResourceRequests(negative)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, negativeResult)
+	assert.ErrorContains(t, err, "out of range")
+}

@@ -1535,3 +1535,45 @@ func TestGenerateResourceRequests_MultiCardCoresPerCard(t *testing.T) {
 		assert.Equal(t, result.Coresreq, int32(16))
 	}
 }
+
+// TestGenerateResourceRequests_MultiCardCoresAreAlwaysATotal pins why the
+// division above is unconditional for n > 1 rather than gated on a value above
+// 100 the way the iluvatar backend gates it.
+//
+// A user-supplied per card value cannot survive to GenerateResourceRequests
+// when more than one card is requested: MutateAdmission overwrites the core
+// limit with count*16 first. So a spec asking for 2 cards at 60 cores each is
+// rewritten to a total of 32 and read back as 16 per card, and the "60 becomes
+// 30" reading never arises. Gating the division on a value above 100 would
+// instead leave the count*16 totals for 2 to 6 cards (32 to 96) undivided.
+func TestGenerateResourceRequests_MultiCardCoresAreAlwaysATotal(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu":      resource.MustParse("2"),
+				"mthreads.com/sgpu-core": resource.MustParse("60"),
+			},
+		},
+	}
+
+	mutated, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Assert(t, mutated)
+
+	// The per card 60 is gone by the time the request is generated.
+	rewritten := ctr.Resources.Limits["mthreads.com/sgpu-core"]
+	assert.Equal(t, rewritten.Value(), int64(32))
+
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
+	assert.Equal(t, result.Nums, int32(2))
+	assert.Equal(t, result.Coresreq, int32(16))
+}

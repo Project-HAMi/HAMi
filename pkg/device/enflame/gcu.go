@@ -98,7 +98,12 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "enflame device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}

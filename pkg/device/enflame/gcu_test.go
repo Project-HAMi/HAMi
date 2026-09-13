@@ -730,7 +730,7 @@ func TestGCUDevices_AddResourceUsage(t *testing.T) {
 
 func TestGCUDevices_GenerateResourceRequests_CountRange(t *testing.T) {
 	dev := GCUDevices{}
-	for _, count := range []string{"0", "-1", "4294967296"} {
+	for _, count := range []string{"-1", "4294967296"} {
 		ctr := &corev1.Container{
 			Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{
@@ -742,4 +742,17 @@ func TestGCUDevices_GenerateResourceRequests_CountRange(t *testing.T) {
 		assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
 		assert.ErrorContains(t, err, "out of range")
 	}
+
+	// A count of zero says "no device", so the container is device-less
+	// rather than invalid and must not be rejected.
+	zero := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceName(EnflameResourceNameGCU): resource.MustParse("0"),
+			},
+		},
+	}
+	zeroResult, err := dev.GenerateResourceRequests(zero)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, zeroResult)
 }

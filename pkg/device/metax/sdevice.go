@@ -212,7 +212,12 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 			ctr.Name, MetaxResourceNameVCount)
 		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("count request %s cannot decode to int64", value.String())}
 	}
-	if count <= 0 || count > math.MaxInt32 {
+	if count == 0 {
+		// An explicit zero count means no device is requested, not an
+		// invalid request. See the nvidia backend.
+		return device.ContainerDeviceRequest{}, nil
+	}
+	if count < 0 || count > math.MaxInt32 {
 		klog.ErrorS(nil, "metax sgpu device count request is out of range", "container", ctr.Name, "request", count)
 		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("device count %d is out of range", count)}
 	}

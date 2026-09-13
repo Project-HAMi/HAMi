@@ -523,7 +523,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			errContains: "not a plain integer",
 		},
 		{
-			name: "zero count must not silently bypass quota",
+			name: "zero count is device-less, not invalid",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -531,9 +531,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "out of range",
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "decimal-form memory request is rejected, not treated as zero",
@@ -607,7 +605,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			errContains: "not a plain integer",
 		},
 		{
-			name: "zero count must not silently bypass quota",
+			name: "zero count is device-less, not invalid",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -615,9 +613,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "out of range",
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "decimal-form memory request is rejected, not treated as zero",

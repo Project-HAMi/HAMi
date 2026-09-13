@@ -328,12 +328,20 @@ func Test_GenerateResourceRequests(t *testing.T) {
 		}
 	})
 
+	t.Run("zero count is device-less, not invalid", func(t *testing.T) {
+		ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"amd.com/gpu": *resource.NewQuantity(0, resource.DecimalSI),
+		}}}
+		got, err := dev.GenerateResourceRequests(ctr)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
+	})
+
 	for _, tc := range []struct {
 		name     string
 		resource corev1.ResourceName
 		value    int64
 	}{
-		{name: "rejects zero count", resource: "amd.com/gpu", value: 0},
 		{name: "rejects overflowing count", resource: "amd.com/gpu", value: math.MaxInt32 + 1},
 		{name: "rejects negative memory", resource: "amd.com/gpu-mem", value: -1},
 		{name: "rejects overflowing memory", resource: "amd.com/gpu-mem", value: math.MaxInt32 + 1},

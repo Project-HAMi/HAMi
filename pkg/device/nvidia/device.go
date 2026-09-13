@@ -536,7 +536,14 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count is how a workload asks for no
+				// device at all, so the container is device-less rather
+				// than invalid. Returning an error here would deny every
+				// pod that templates its count down to 0.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "nvidia device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}

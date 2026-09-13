@@ -45,6 +45,13 @@ type Devices interface {
 	// request this vendor's devices. A non-nil error means it does, but the
 	// request is invalid and the caller must fail closed instead of silently
 	// treating the pod as device-less.
+	//
+	// An explicitly requested count of zero is "no device", not an invalid
+	// request, so it belongs in the first case. Admission runs this on every
+	// pod, and charts commonly render a disabled GPU count as 0, so returning
+	// an error for it would deny ordinary CPU pods. A backend for which zero
+	// really is malformed should reject it in MutateAdmission instead, which
+	// only rejects containers that actually carry its resources.
 	GenerateResourceRequests(ctr *corev1.Container) (ContainerDeviceRequest, error)
 	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
 	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32

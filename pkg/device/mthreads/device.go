@@ -213,7 +213,12 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			klog.InfoS("Detected mthreads device request",
 				"container", ctr.Name,
 				"deviceCount", n)
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
@@ -245,12 +250,19 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					klog.ErrorS(nil, "mthreads core request is not a non-negative integer", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %s is not a non-negative integer", core.String())}
 				}
-				// Coresreq is a per card percentage, but MutateAdmission rewrites
-				// the limit to count*coresPerMthreadsGPU (16) whenever more than
-				// one device is requested, so with multiple devices the value
-				// is a total across the cards and has to be divided back. With
-				// a single device MutateAdmission never writes a total, so a
-				// value above 100 is plain invalid.
+				// Coresreq is a per card value. With more than one device the
+				// limit held here is always a total across the cards, never a
+				// per card value, because MutateAdmission overwrites the core
+				// limit with count*coresPerMthreadsGPU (16) whenever count > 1.
+				// So the total is divided back unconditionally.
+				//
+				// This deliberately does not copy the iluvatar backend's
+				// "corenums > 100 && n > 1" gate. That gate works there because
+				// iluvatar writes count*100, so every multi card total exceeds
+				// 100. Here a total is count*16, which for 2 to 6 cards is 32 to
+				// 96, all at or below 100, so gating on > 100 would leave those
+				// totals undivided and report 16 times too many cores per card.
+				// The per card limit is still enforced, just after the division.
 				if n > 1 {
 					if corenums%n != 0 {
 						klog.ErrorS(nil, "mthreads core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)

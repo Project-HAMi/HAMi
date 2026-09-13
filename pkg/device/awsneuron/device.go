@@ -292,6 +292,12 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 	awsResourceCores := corev1.ResourceName(dev.resourceCoreName)
 	v, ok := resourceQuantity(ctr, awsResourceCount)
 	if ok {
+		// An explicit zero count means no device is requested, not an
+		// invalid request. See the nvidia backend. MutateAdmission keeps
+		// using the shared validator, which still rejects zero there.
+		if zero, isInt := v.AsInt64(); isInt && zero == 0 {
+			return device.ContainerDeviceRequest{}, nil
+		}
 		n, err := validateResourceRequest(v, dev.resourceCountName, maxAWSNeuronDeviceCount)
 		if err != nil {
 			klog.ErrorS(err, "Invalid awsNeuron device request", "container", ctr.Name)

@@ -687,6 +687,46 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 	}
 }
 
+// A count of zero is how a workload says "no device", not a malformed request,
+// so admission has to let it through. The webhook runs fitResourceQuota on
+// every pod it sees, so treating zero as invalid here would deny ordinary CPU
+// pods whose chart renders the GPU count as 0.
+func TestFitResourceQuotaAllowsZeroCount(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "zero-gpu", Namespace: "zero-gpu-ns"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "app",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	if err := fitResourceQuota(pod); err != nil {
+		t.Errorf("fitResourceQuota() = %v, want nil: a zero count means no device is requested, not an invalid request", err)
+	}
+}
+
 // Ascend applies a configurable factor to the memory it records, so the limit
 // has to be raised by the same factor or pods that are within quota get denied.
 func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
