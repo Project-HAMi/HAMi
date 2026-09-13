@@ -2336,6 +2336,18 @@ func TestDeviceInfoDeepCopy(t *testing.T) {
 				Mode:         "hami-core",
 				Health:       true,
 				DeviceVendor: "NVIDIA",
+				MIGProfiles: []MigProfile{
+					{
+						Name:       "1g.5gb",
+						MemoryMB:   5120,
+						Core:       1,
+						SliceCount: 1,
+						Placements: []MigPlacement{
+							{Start: 0, Size: 1},
+							{Start: 1, Size: 1},
+						},
+					},
+				},
 				MIGTemplate: []Geometry{
 					{
 						{Name: "1g.5gb", Core: 1, Memory: 5, Count: 7},
@@ -2366,6 +2378,12 @@ func TestDeviceInfoDeepCopy(t *testing.T) {
 			if copy.ID != "" {
 				copy.ID = "mutated-id"
 				assert.Equal(t, tt.original.ID, "GPU-12345678-abcd-ef01-2345-6789abcdef01")
+			}
+
+			if len(copy.MIGProfiles) > 0 && len(copy.MIGProfiles[0].Placements) > 0 {
+				originalStart := tt.original.MIGProfiles[0].Placements[0].Start
+				copy.MIGProfiles[0].Placements[0].Start = 99
+				assert.Equal(t, tt.original.MIGProfiles[0].Placements[0].Start, originalStart)
 			}
 
 			if len(copy.MIGTemplate) > 0 && len(copy.MIGTemplate[0]) > 0 {
@@ -2422,6 +2440,9 @@ func TestDeepCopyDeviceInfos(t *testing.T) {
 					Devmem:  8192,
 					Devcore: 100,
 					Type:    "NVIDIA-V100",
+					CustomInfo: map[string]any{
+						"driver": "535.129.03",
+					},
 				},
 			},
 			wantNil: false,
@@ -2448,6 +2469,12 @@ func TestDeepCopyDeviceInfos(t *testing.T) {
 					copied[0].CustomInfo["key"] = "mutated-val"
 					assert.Equal(t, tt.original[0].CustomInfo["key"], "val")
 				}
+			}
+
+			// Verify isolation for every copied element, not just the first.
+			if len(copied) > 1 && copied[1].CustomInfo != nil {
+				copied[1].CustomInfo["driver"] = "mutated-driver"
+				assert.Equal(t, tt.original[1].CustomInfo["driver"], "535.129.03")
 			}
 		})
 	}
