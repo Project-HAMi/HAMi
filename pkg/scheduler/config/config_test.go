@@ -787,3 +787,46 @@ func Test_Resourcereqs(t *testing.T) {
 		})
 	}
 }
+
+// A count the apiserver accepts as an integer can still be too large for
+// int64, which makes Quantity.AsInt64 report failure. Every backend has to
+// fail closed on that rather than report the container as device-less, and
+// every backend has to treat an explicit zero as device-less rather than
+// invalid. Both are easy to regress one backend at a time, so assert them
+// across all of them at once.
+func TestGenerateResourceRequests_CountEdgesAcrossBackends(t *testing.T) {
+	InitDefaultDevices()
+
+	for commonWord, dev := range device.DevicesMap {
+		countName := dev.GetResourceNames().ResourceCountName
+		if countName == "" {
+			continue
+		}
+
+		t.Run(commonWord+"/too large for int64 fails closed", func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(countName): resource.MustParse("1Ei"),
+					},
+				},
+			}
+			got, err := dev.GenerateResourceRequests(ctr)
+			assert.Assert(t, err != nil, "%s accepted a count that does not fit in an int64", commonWord)
+			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
+		})
+
+		t.Run(commonWord+"/zero is device-less", func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(countName): resource.MustParse("0"),
+					},
+				},
+			}
+			got, err := dev.GenerateResourceRequests(ctr)
+			assert.NilError(t, err)
+			assert.Equal(t, got.Nums, int32(0), "%s reported devices for a zero count", commonWord)
+		})
+	}
+}

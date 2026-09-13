@@ -255,6 +255,12 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				Coresreq:         corePercentageNum,
 			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "amd device count request is not a plain integer", "container", ctr.Name, "request", count.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %s is not a plain integer", count.String())}
 	}
 	return device.ContainerDeviceRequest{}, nil
 }

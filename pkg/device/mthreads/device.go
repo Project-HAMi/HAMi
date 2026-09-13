@@ -290,6 +290,12 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 				Coresreq:         corenum,
 			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "mthreads device count request is not a plain integer", "container", ctr.Name, "request", v.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %s is not a plain integer", v.String())}
 	}
 	return device.ContainerDeviceRequest{}, nil
 }

@@ -323,7 +323,16 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 		v, ok = ctr.Resources.Requests[resourceCount]
 	}
 	if ok {
-		if n, ok := v.AsInt64(); ok && n > 0 {
+		n, isInt := v.AsInt64()
+		if !isInt {
+			// A quantity the apiserver accepts as an integer can still be too
+			// large for int64 (1Ei, 1e19). Falling through to the memory/core
+			// path would report the container as device-less, which is the
+			// fail-open this change exists to remove.
+			klog.ErrorS(nil, "enflame drs request is not a plain integer", "container", ctr.Name, "request", v.String())
+			return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("drs request %s is not a plain integer", v.String())}
+		}
+		if n > 0 {
 			klog.Info("Found enflame devices")
 			if n > math.MaxInt32 {
 				klog.ErrorS(nil, "drs request is too large", "container", ctr.Name, "request", n)

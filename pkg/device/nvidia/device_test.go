@@ -3678,4 +3678,18 @@ func TestGenerateResourceRequests_ZeroCountIsDeviceLess(t *testing.T) {
 	negativeResult, err := dev.GenerateResourceRequests(negative)
 	assert.DeepEqual(t, device.ContainerDeviceRequest{}, negativeResult)
 	assert.ErrorContains(t, err, "out of range")
+
+	// The apiserver accepts 1Ei for an extended resource, but it does not
+	// fit in an int64, so AsInt64 reports failure. That has to fail closed
+	// rather than fall through to a device-less request.
+	tooLarge := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1Ei"),
+			},
+		},
+	}
+	tooLargeResult, err := dev.GenerateResourceRequests(tooLarge)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, tooLargeResult)
+	assert.ErrorContains(t, err, "not a plain integer")
 }
