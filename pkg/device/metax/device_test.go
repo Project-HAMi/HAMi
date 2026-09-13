@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/conformance"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -1005,5 +1006,32 @@ func TestFit_CoresValidation(t *testing.T) {
 		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
+	})
+}
+
+// TestConformance runs the shared suite with topology annotations on the node,
+// so ScoreNode returns a non-zero score that MetaxDevices adapts to the policy
+// itself and must not be inverted again by the scheduler.
+func TestConformance(t *testing.T) {
+	dev := InitMetaxDevice(MetaxConfig{ResourceCountName: "metax-tech.com/gpu"})
+
+	conformance.Run(t, dev, conformance.Fixture{
+		Devices: []*device.DeviceUsage{
+			{ID: "gpu-0", Index: 0, Count: 1, Totalmem: 1024, Totalcore: 100, Type: MetaxGPUDevice, Health: true},
+			{ID: "gpu-1", Index: 1, Count: 1, Totalmem: 1024, Totalcore: 100, Type: MetaxGPUDevice, Health: true},
+		},
+		Request: device.ContainerDeviceRequest{Nums: 1, Type: MetaxGPUDevice},
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "conformance-pod", Namespace: "default"},
+		},
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "conformance-node",
+				Annotations: map[string]string{
+					MetaxAnnotationLoss:  `{"1": 100}`,
+					MetaxAnnotationScore: `{"1": 700}`,
+				},
+			},
+		},
 	})
 }

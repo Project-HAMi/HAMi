@@ -43,15 +43,6 @@ type reporter interface {
 	Errorf(format string, args ...any)
 }
 
-// policyNeutralScorer mirrors the unexported marker interface in
-// pkg/scheduler/policy. A backend whose ScoreNode returns a "higher is better"
-// score must implement it so OverrideScore can invert that score under the
-// spread policy. Go interfaces are structural, so redeclaring it here lets the
-// conformance suite check for it without importing the scheduler.
-type policyNeutralScorer interface {
-	PolicyNeutralScore()
-}
-
 // Fixture carries the vendor-specific inputs the suite cannot build for
 // itself. Node and NodeInfo are optional; the rest are required.
 type Fixture struct {
@@ -248,11 +239,19 @@ func checkFitFeasibilityIsIndependentOfDeviceOrder(r reporter, dev device.Device
 	}
 }
 
-// checkScoreNodeDeclaresPolicyNeutrality asserts that a backend returning a
-// non-zero node score also implements PolicyNeutralScore. NodeScoreList sorts
-// descending and Filter takes the last entry, so under the spread policy the
-// lowest score wins. An undeclared "higher is better" score is therefore
-// inverted and the worst node is picked (#2973).
+// checkScoreNodeDeclaresPolicyNeutrality asserts that a backend's
+// device.PolicyNeutralScorer declaration matches how its ScoreNode treats the
+// policy. NodeScoreList sorts descending and Filter takes the last entry, so
+// under the spread policy the lowest score wins, and OverrideScore inverts only
+// declared scores to compensate. Two mismatches follow:
+//
+//   - a non-zero score that ignores the policy but is not declared is never
+//     inverted, so spread picks the worst node (#2973);
+//   - a declared score that already adapts to the policy, as MetaxDevices does
+//     by hand, is inverted a second time.
+//
+// A score that varies with the policy and is not declared is the backend owning
+// the policy itself, and is accepted.
 func checkScoreNodeDeclaresPolicyNeutrality(r reporter, dev device.Devices, f Fixture) {
 	r.Helper()
 
@@ -270,21 +269,18 @@ func checkScoreNodeDeclaresPolicyNeutrality(r reporter, dev device.Devices, f Fi
 		podDevices = append(podDevices, containerDevice)
 	}
 
-	scores := false
-	for _, policy := range []string{
-		util.NodeSchedulerPolicyBinpack.String(),
-		util.NodeSchedulerPolicySpread.String(),
-	} {
-		if dev.ScoreNode(f.node(), podDevices, previous, policy) != 0 {
-			scores = true
-		}
-	}
-	if !scores {
-		return
-	}
-	if _, ok := dev.(policyNeutralScorer); !ok {
-		r.Errorf("ScoreNode returns a non-zero score but the backend does not implement PolicyNeutralScore(); " +
-			"the spread policy selects the lowest score, so this score is inverted and the worst node wins")
+	binpack := dev.ScoreNode(f.node(), podDevices, previous, util.NodeSchedulerPolicyBinpack.String())
+	spread := dev.ScoreNode(f.node(), podDevices, previous, util.NodeSchedulerPolicySpread.String())
+	_, declared := dev.(device.PolicyNeutralScorer)
+
+	switch {
+	case declared && binpack != spread:
+		r.Errorf("backend implements PolicyNeutralScore() but ScoreNode returns %v under binpack and %v under spread; "+
+			"a declared score is inverted under spread by the scheduler, so a score that already adapts to the policy is inverted twice",
+			binpack, spread)
+	case !declared && binpack != 0 && binpack == spread:
+		r.Errorf("ScoreNode returns %v under both binpack and spread but the backend does not implement PolicyNeutralScore(); "+
+			"the spread policy selects the lowest score, so this score is inverted and the worst node wins", binpack)
 	}
 }
 

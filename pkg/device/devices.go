@@ -47,6 +47,16 @@ type Devices interface {
 	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
+// PolicyNeutralScorer is an optional interface a device backend may implement to
+// declare that its ScoreNode result is policy-independent and follows a "higher
+// score is a better node" convention. Backends that implement it must not
+// inspect the scheduler policy inside ScoreNode; the scheduler weights the
+// returned score and adapts it to the active scheduling policy (for example,
+// inverting it under the Spread policy).
+type PolicyNeutralScorer interface {
+	PolicyNeutralScore()
+}
+
 type MigPlacement struct {
 	Start uint32 `json:"start"`
 	Size  uint32 `json:"size"`

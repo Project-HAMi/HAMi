@@ -27,6 +27,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const stubType = "STUB"
@@ -165,6 +166,15 @@ type neutralStubDevices struct {
 }
 
 func (n *neutralStubDevices) PolicyNeutralScore() {}
+
+// policyAwareScore handles the policy inside ScoreNode, the way MetaxDevices
+// does, so the scheduler must not invert it again.
+func policyAwareScore(policy string) float32 {
+	if policy == util.NodeSchedulerPolicySpread.String() {
+		return 1300
+	}
+	return 1900
+}
 
 func stubFixture() Fixture {
 	return Fixture{
@@ -309,6 +319,14 @@ func TestChecksRejectViolations(t *testing.T) {
 			wantMsg: "does not implement PolicyNeutralScore()",
 		},
 		{
+			name: "declares policy neutrality but scores by policy",
+			dev: &neutralStubDevices{
+				stubDevices: &stubDevices{scoreNode: policyAwareScore},
+			},
+			check:   checkScoreNodeDeclaresPolicyNeutrality,
+			wantMsg: "inverted twice",
+		},
+		{
 			name: "empty container yields a device request",
 			dev: &stubDevices{
 				generate: func(_ *corev1.Container) device.ContainerDeviceRequest {
@@ -396,6 +414,18 @@ func TestScoreNodeDeclaresPolicyNeutrality(t *testing.T) {
 			name: "a scoring backend that does not declare neutrality is rejected",
 			dev: &stubDevices{
 				scoreNode: func(_ string) float32 { return 5 },
+			},
+			wantFailed: true,
+		},
+		{
+			name:       "a backend that adapts its score to the policy itself is accepted",
+			dev:        &stubDevices{scoreNode: policyAwareScore},
+			wantFailed: false,
+		},
+		{
+			name: "a backend that adapts its score to the policy and declares neutrality is rejected",
+			dev: &neutralStubDevices{
+				stubDevices: &stubDevices{scoreNode: policyAwareScore},
 			},
 			wantFailed: true,
 		},
