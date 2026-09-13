@@ -201,8 +201,10 @@ vnpus:
 }
 
 func Test_LoadConfig(t *testing.T) {
-	var configData Config
-	err := yaml.Unmarshal([]byte(loadTestConfig()), &configData)
+	path := filepath.Join(t.TempDir(), "device-config.yaml")
+	assert.NilError(t, os.WriteFile(path, []byte(loadTestConfig()), 0o600))
+
+	configData, err := LoadConfig(path)
 	assert.NilError(t, err)
 
 	dataDrivenTests := []struct {
@@ -239,7 +241,7 @@ func TestLoadConfigRejectsInvalidFields(t *testing.T) {
 	}{
 		{
 			name:   "valid configuration",
-			config: "nvidia:\n  resourceCountName: nvidia.com/gpu\n",
+			config: loadTestConfig(),
 		},
 		{
 			name:    "unknown top-level field",
