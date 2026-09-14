@@ -59,13 +59,13 @@ func GetNode(nodename string) (*corev1.Node, error) {
 		switch {
 		case apierrors.IsNotFound(err):
 			klog.ErrorS(err, "Node not found", "nodeName", nodename)
-			return nil, fmt.Errorf("node %s not found", nodename)
+			return nil, fmt.Errorf("node %s not found: %w", nodename, err)
 		case apierrors.IsUnauthorized(err):
 			klog.ErrorS(err, "Unauthorized to access node", "nodeName", nodename)
-			return nil, fmt.Errorf("unauthorized to access node %s", nodename)
+			return nil, fmt.Errorf("unauthorized to access node %s: %w", nodename, err)
 		default:
 			klog.ErrorS(err, "Failed to get node", "nodeName", nodename)
-			return nil, fmt.Errorf("failed to get node %s: %v", nodename, err)
+			return nil, fmt.Errorf("failed to get node %s: %w", nodename, err)
 		}
 	}
 

@@ -554,9 +554,9 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 			ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
 		},
 		HygonConfig: hygon.HygonConfig{
-			ResourceCountName:  "hygon.com/dcunum",
-			ResourceMemoryName: "hygon.com/dcumem",
-			ResourceCoreName:   "hygon.com/dcucores",
+			ResourceCountName:  "hygon.com/hcunum",
+			ResourceMemoryName: "hygon.com/hcumem",
+			ResourceCoreName:   "hygon.com/hcucores",
 			// Hygon scales the requested memory by this before recording it.
 			MemoryFactor: 2,
 		},
@@ -575,26 +575,26 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 	qm.Quotas["mlu-core"] = &device.DeviceQuota{
 		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50, LimitSet: true},
 	}
-	qm.Quotas["dcu-mem"] = &device.DeviceQuota{
-		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
+	qm.Quotas["hcu-mem"] = &device.DeviceQuota{
+		"hygon.com/hcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
 	}
 	t.Cleanup(func() {
-		for _, ns := range []string{"mlu-mem", "mlu-core", "dcu-mem"} {
+		for _, ns := range []string{"mlu-mem", "mlu-core", "hcu-mem"} {
 			delete(qm.Quotas, ns)
 		}
 	})
 
-	dcuPod := func(ns, dcumem string) *corev1.Pod {
+	hcuPod := func(ns, hcumem string) *corev1.Pod {
 		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "dcu-pod", Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: "hcu-pod", Namespace: ns},
 			Spec: corev1.PodSpec{
 				SchedulerName: "hami-scheduler",
 				Containers: []corev1.Container{{
 					Name: "container1",
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
-							"hygon.com/dcunum": resource.MustParse("1"),
-							"hygon.com/dcumem": resource.MustParse(dcumem),
+							"hygon.com/hcunum": resource.MustParse("1"),
+							"hygon.com/hcumem": resource.MustParse(hcumem),
 						},
 					},
 				}},
@@ -628,13 +628,13 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 			fit:  true,
 		},
 		{
-			name: "dcu memory within quota once the factor is applied",
-			pod:  dcuPod("dcu-mem", "800"),
+			name: "hcu memory within quota once the factor is applied",
+			pod:  hcuPod("hcu-mem", "800"),
 			fit:  true,
 		},
 		{
-			name: "dcu memory over quota",
-			pod:  dcuPod("dcu-mem", "1200"),
+			name: "hcu memory over quota",
+			pod:  hcuPod("hcu-mem", "1200"),
 			fit:  false,
 		},
 	}

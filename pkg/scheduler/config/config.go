@@ -71,6 +71,14 @@ var (
 	LeaderElect                  bool
 	LeaderElectResourceName      string
 	LeaderElectResourceNamespace string
+
+	// DevicePluginNamespace and DevicePluginServiceAccount identify the
+	// device-plugin's bound ServiceAccount. The /refit endpoint authenticates
+	// callers by TokenReview and only accepts a token whose username is
+	// exactly system:serviceaccount:<DevicePluginNamespace>:<DevicePluginServiceAccount>.
+	// See issue #2878.
+	DevicePluginNamespace      string
+	DevicePluginServiceAccount string
 )
 
 type Config struct {
@@ -143,12 +151,12 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return cambricon.InitMLUDevice(cambriconConfig), nil
 		}, config.CambriconConfig},
-		{hygon.HygonDCUDevice, hygon.HygonDCUCommonWord, func(cfg any) (device.Devices, error) {
+		{hygon.HygonHCUDevice, hygon.HygonHCUCommonWord, func(cfg any) (device.Devices, error) {
 			hygonConfig, ok := cfg.(hygon.HygonConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonDCUCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonHCUCommonWord)
 			}
-			return hygon.InitDCUDevice(hygonConfig), nil
+			return hygon.InitHCUDevice(hygonConfig), nil
 		}, config.HygonConfig},
 		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
@@ -312,9 +320,9 @@ cambricon:
   resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
   resourceCoreName: "cambricon.com/mlu.smlu.vcore"
 hygon:
-  resourceCountName: "hygon.com/dcunum"
-  resourceMemoryName: "hygon.com/dcumem"
-  resourceCoreName: "hygon.com/dcucores"
+  resourceCountName: "hygon.com/hcunum"
+  resourceMemoryName: "hygon.com/hcumem"
+  resourceCoreName: "hygon.com/hcucores"
 metax:
   resourceCountName: "metax-tech.com/gpu"
 mthreads:

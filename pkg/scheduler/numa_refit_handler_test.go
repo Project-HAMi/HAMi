@@ -25,23 +25,124 @@ import (
 	"time"
 
 	"gotest.tools/v3/assert"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 const (
 	refitPodUID  = "refit-pod-uid"
 	refitPodName = "refit-pod"
 	refitNode    = "node-1"
+
+	// The device-plugin identity RefitNumaAllocation is configured to accept
+	// in these tests, standing in for the chart-populated config.DevicePluginNamespace
+	// / config.DevicePluginServiceAccount. See issue #2878.
+	devicePluginNamespace       = "hami-system"
+	devicePluginServiceAccount  = "hami-device-plugin"
+	expectedRefitCallerUsername = "system:serviceaccount:" + devicePluginNamespace + ":" + devicePluginServiceAccount
+
+	// callerPod is the bound pod a valid token's TokenReview points at; it
+	// runs on refitNode, matching the workload pod's node.
+	callerPodName = "hami-device-plugin-xyz"
+	callerPodUID  = "caller-pod-uid"
+	// callerPodWrongNode is a same-SA caller bound pod that runs on a
+	// different node, for the "right SA, wrong node" rejection case.
+	callerPodWrongNodeName = "hami-device-plugin-other"
+	callerPodWrongNodeUID  = "caller-pod-other-uid"
+
+	validRefitToken     = "valid-device-plugin-token"
+	wrongNodeRefitToken = "wrong-node-device-plugin-token"
+	wrongSARefitToken   = "wrong-sa-token"
 )
+
+// setupRefitAuth points config.DevicePluginNamespace/DevicePluginServiceAccount
+// at the fixture identity, installs a fake TokenReview responder recognizing
+// validRefitToken/wrongNodeRefitToken/wrongSARefitToken, and gives s a
+// podLister that can resolve the bound caller pods those tokens reference.
+func setupRefitAuth(t *testing.T, s *Scheduler) {
+	t.Helper()
+
+	origNamespace, origSA := config.DevicePluginNamespace, config.DevicePluginServiceAccount
+	config.DevicePluginNamespace = devicePluginNamespace
+	config.DevicePluginServiceAccount = devicePluginServiceAccount
+	t.Cleanup(func() {
+		config.DevicePluginNamespace, config.DevicePluginServiceAccount = origNamespace, origSA
+	})
+
+	fakeClient := fake.NewClientset()
+	fakeClient.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		review, ok := action.(k8stesting.CreateAction).GetObject().(*authenticationv1.TokenReview)
+		if !ok {
+			return false, nil, nil
+		}
+		review.Status = tokenReviewStatusFor(review.Spec.Token)
+		return true, review, nil
+	})
+	client.KubeClient = fakeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour)
+	indexer := informerFactory.Core().V1().Pods().Informer().GetIndexer()
+	_ = indexer.Add(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: callerPodName, Namespace: devicePluginNamespace, UID: callerPodUID},
+		Spec:       corev1.PodSpec{NodeName: refitNode},
+	})
+	_ = indexer.Add(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: callerPodWrongNodeName, Namespace: devicePluginNamespace, UID: callerPodWrongNodeUID},
+		Spec:       corev1.PodSpec{NodeName: "node-2"},
+	})
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+}
+
+// tokenReviewStatusFor stands in for the kube-apiserver's TokenReview
+// authenticator against the fixture's canned bearer tokens.
+func tokenReviewStatusFor(token string) authenticationv1.TokenReviewStatus {
+	switch token {
+	case validRefitToken:
+		return authenticationv1.TokenReviewStatus{
+			Authenticated: true,
+			User: authenticationv1.UserInfo{
+				Username: expectedRefitCallerUsername,
+				Extra: map[string]authenticationv1.ExtraValue{
+					boundPodNameExtraKey: {callerPodName},
+					boundPodUIDExtraKey:  {callerPodUID},
+				},
+			},
+		}
+	case wrongNodeRefitToken:
+		return authenticationv1.TokenReviewStatus{
+			Authenticated: true,
+			User: authenticationv1.UserInfo{
+				Username: expectedRefitCallerUsername,
+				Extra: map[string]authenticationv1.ExtraValue{
+					boundPodNameExtraKey: {callerPodWrongNodeName},
+					boundPodUIDExtraKey:  {callerPodWrongNodeUID},
+				},
+			},
+		}
+	case wrongSARefitToken:
+		return authenticationv1.TokenReviewStatus{
+			Authenticated: true,
+			User:          authenticationv1.UserInfo{Username: "system:serviceaccount:other-namespace:other-sa"},
+		}
+	default:
+		return authenticationv1.TokenReviewStatus{Authenticated: false, Error: "invalid bearer token"}
+	}
+}
 
 // refitFixture builds a cache-only scheduler tracking one pod that reserves
 // GPU-a, on a node carrying GPU-a (NUMA 1) and GPU-b (NUMA 0).
@@ -72,6 +173,7 @@ func refitFixture(t *testing.T, gpuBDevmem int32) (*Scheduler, *corev1.Pod) {
 
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	return s, pod
 }
 
@@ -114,6 +216,7 @@ func phaseAwareRefitFixture(t *testing.T, initContainers, containers []corev1.Co
 
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	return s, pod
 }
 
@@ -157,7 +260,7 @@ func TestRefitNumaAllocationPatchDeadlineReleasesFilter(t *testing.T) {
 
 	refitDone := make(chan device.NumaRefitResponse, 1)
 	go func() {
-		refitDone <- s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+		refitDone <- s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 	}()
 	select {
 	case <-patchStarted:
@@ -229,7 +332,7 @@ func TestRefitNumaAllocationMovesReservation(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	captured, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 	devices, err := device.DecodeContainerDevices(response.ContainerDevices)
@@ -259,7 +362,7 @@ func TestRefitNumaAllocationNoOpWhenAlreadyAllowed(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-a", "GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-a", "GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true)
 	devices, err := device.DecodeContainerDevices(response.ContainerDevices)
@@ -273,7 +376,7 @@ func TestRefitNumaAllocationInsufficientCapacity(t *testing.T) {
 	s, _ := refitFixture(t, 16000)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "no allowed device fits"), "reason: %s", response.FailureReason)
@@ -376,7 +479,7 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 			request := refitTestRequestFor("GPU-b")
 			request.ContainerIndex = test.containerIndex
 			request.ContainerName = test.containerName
-			response := s.RefitNumaAllocation(request)
+			response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 
 			assert.Equal(t, response.Succeeded, test.wantSucceeded, "reason: %s", response.FailureReason)
 			if !test.wantSucceeded {
@@ -411,7 +514,7 @@ func TestRefitNumaAllocationUnmatchedAllowedSet(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-a-0", "GPU-a-1"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-a-0", "GPU-a-1"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, AllowedSetUnmatched), "reason: %s", response.FailureReason)
@@ -421,7 +524,7 @@ func TestRefitNumaAllocationPatchFailureLeavesStateUntouched(t *testing.T) {
 	s, _ := refitFixture(t, 40000)
 	_, calls := stubRefitPatch(t, errors.New("apiserver unavailable"))
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "apiserver unavailable"))
@@ -436,7 +539,7 @@ func TestRefitNumaAllocationConsumedAllocation(t *testing.T) {
 	pod.Annotations[device.InRequestDevices[nvidia.NvidiaGPUDevice]] = device.EncodePodSingleDevice(device.PodSingleDevice{{}})
 	s.podManager.UpdatePod(pod)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "no pending"), "reason: %s", response.FailureReason)
@@ -448,6 +551,11 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 		name       string
 		mutate     func(*device.NumaRefitRequest)
 		wantReason string
+		// token defaults to validRefitToken; the "wrong node" case needs a
+		// token whose caller is actually bound to the mutated node so the
+		// request clears caller authentication and reaches the deeper,
+		// pod-tracking node check this case targets.
+		token string
 	}{
 		{
 			name:       "unknown pod",
@@ -463,6 +571,7 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 			name:       "wrong node",
 			mutate:     func(r *device.NumaRefitRequest) { r.NodeName = "node-2" },
 			wantReason: "tracked on node",
+			token:      wrongNodeRefitToken,
 		},
 		{
 			name:       "unknown device type",
@@ -503,7 +612,11 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 
 			request := refitTestRequestFor("GPU-b")
 			test.mutate(&request)
-			response := s.RefitNumaAllocation(request)
+			token := test.token
+			if token == "" {
+				token = validRefitToken
+			}
+			response := s.RefitNumaAllocation(context.Background(), request, token)
 
 			assert.Equal(t, response.Succeeded, false)
 			assert.Assert(t, strings.Contains(response.FailureReason, test.wantReason),
@@ -543,11 +656,12 @@ func TestRefitNumaAllocationSeedsExistingAllocations(t *testing.T) {
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: {first, second}})
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	captured, _ := stubRefitPatch(t, nil)
 
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerIndex = 1
-	response := s.RefitNumaAllocation(request)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 	toAllocate := captured[device.InRequestDevices[nvidia.NvidiaGPUDevice]]
@@ -604,6 +718,7 @@ func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 	makePod("pod-2-uid", "pod-2")
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	stubRefitPatch(t, nil)
 
 	requestFor := func(uid, name string) device.NumaRefitRequest {
@@ -613,10 +728,10 @@ func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 		}
 	}
 
-	firstResponse := s.RefitNumaAllocation(requestFor("pod-1-uid", "pod-1"))
+	firstResponse := s.RefitNumaAllocation(context.Background(), requestFor("pod-1-uid", "pod-1"), validRefitToken)
 	assert.Equal(t, firstResponse.Succeeded, true, "first refit failed: %s", firstResponse.FailureReason)
 
-	secondResponse := s.RefitNumaAllocation(requestFor("pod-2-uid", "pod-2"))
+	secondResponse := s.RefitNumaAllocation(context.Background(), requestFor("pod-2-uid", "pod-2"), validRefitToken)
 	assert.Equal(t, secondResponse.Succeeded, false)
 	assert.Assert(t, strings.Contains(secondResponse.FailureReason, "no allowed device fits"),
 		"reason: %s", secondResponse.FailureReason)
@@ -632,7 +747,7 @@ func TestRefitNumaAllocationContainerNameMismatch(t *testing.T) {
 
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerName = "sidecar"
-	response := s.RefitNumaAllocation(request)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, `is "main", not "sidecar"`), "reason: %s", response.FailureReason)
@@ -640,7 +755,7 @@ func TestRefitNumaAllocationContainerNameMismatch(t *testing.T) {
 
 	// The matching name is accepted.
 	request.ContainerName = "main"
-	response = s.RefitNumaAllocation(request)
+	response = s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 }
 
@@ -668,9 +783,10 @@ func TestRefitNumaAllocationRejectsMigDevice(t *testing.T) {
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "MIG"), "reason: %s", response.FailureReason)
@@ -707,9 +823,10 @@ func TestRefitNumaAllocationHeterogeneousReservation(t *testing.T) {
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	_, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-c", "GPU-d"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-c", "GPU-d"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "heterogeneous"), "reason: %s", response.FailureReason)
@@ -753,12 +870,13 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
 	stubRefitPatch(t, nil)
 
 	request := refitTestRequestFor("GPU-b")
 	request.ContainerIndex = 1
 	request.ContainerName = "main"
-	response := s.RefitNumaAllocation(request)
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 
 	pi, ok := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
@@ -774,6 +892,31 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 		}
 	}
 	assert.Equal(t, total, int32(20000))
+}
+
+func TestRefitNumaAllocationCallerAuthentication(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "wrong service account", token: wrongSARefitToken},
+		{name: "right service account wrong node", token: wrongNodeRefitToken},
+		{name: "missing token", token: ""},
+		{name: "invalid token", token: "garbage"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s, _ := refitFixture(t, 40000)
+			_, calls := stubRefitPatch(t, nil)
+
+			response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), test.token)
+
+			assert.Equal(t, response.Succeeded, false)
+			assert.Assert(t, strings.Contains(response.FailureReason, "caller authentication"), "reason: %s", response.FailureReason)
+			assert.Equal(t, *calls, 0)
+			assert.Equal(t, trackedUUID(t, s), "GPU-a")
+		})
+	}
 }
 
 // TestEffectivePodDeviceUsageHonorsInitRelease verifies that quota validation
@@ -836,6 +979,7 @@ func TestRefitNumaAllocationSerializesInitRelease(t *testing.T) {
 	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
 	t.Cleanup(func() { s.quotaManager.Quotas = oldQuotas })
 	s.quotaManager.AddUsage(pod, collapsed)
+	setupRefitAuth(t, s)
 
 	patchStarted := make(chan struct{})
 	releasePatch := make(chan struct{})
@@ -851,7 +995,7 @@ func TestRefitNumaAllocationSerializesInitRelease(t *testing.T) {
 	request.ContainerIndex = 1
 	request.ContainerName = "main"
 	refitDone := make(chan device.NumaRefitResponse, 1)
-	go func() { refitDone <- s.RefitNumaAllocation(request) }()
+	go func() { refitDone <- s.RefitNumaAllocation(context.Background(), request, validRefitToken) }()
 	select {
 	case <-patchStarted:
 	case <-time.After(time.Second):
@@ -967,6 +1111,7 @@ func initRefitFixture(t *testing.T, gpumemLimit int64) (*Scheduler, *corev1.Pod,
 	// Seed the namespace usage with the pod's current effective total (10000),
 	// as the scheduler cache does before a refit.
 	s.quotaManager.AddUsage(pod, collapsed)
+	setupRefitAuth(t, s)
 	return s, pod, resourceNames.ResourceMemoryName
 }
 
@@ -983,7 +1128,7 @@ func TestRefitNumaAllocationInitContainerRefitRejectedOverQuota(t *testing.T) {
 	_, calls := stubRefitPatch(t, nil)
 
 	// refitTestRequestFor targets ContainerIndex 0 - here the init container.
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "quota"), "reason: %s", response.FailureReason)
@@ -1005,7 +1150,7 @@ func TestRefitNumaAllocationInitContainerRefitRecordsCollapsedUsage(t *testing.T
 	s, _, memoryResource := initRefitFixture(t, 20000)
 	captured, calls := stubRefitPatch(t, nil)
 
-	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 	assert.Equal(t, *calls, 1)
