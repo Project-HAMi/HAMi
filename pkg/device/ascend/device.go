@@ -56,6 +56,8 @@ type Devices struct {
 	noUseUUIDAnno          string
 	handshakeAnno          string
 	hamiVnpuCore           bool
+	overwriteEnv           bool
+	runtimeClassName       string
 	allAscendResourceNames []corev1.ResourceName
 }
 
@@ -98,6 +100,8 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
 			hamiVnpuCore:           vnpus.HamiVnpuCore,
+			overwriteEnv:           vnpus.OverwriteEnv,
+			runtimeClassName:       vnpus.RuntimeClassName,
 			allAscendResourceNames: allAscendResourceNames,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
@@ -150,8 +154,24 @@ func lastEnvValueEquals(env []corev1.EnvVar, name, value string) bool {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
-		if dev.config.OverwriteEnv && !dev.containerRequestsAnyAscendResource(ctr) &&
-			!lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
+		if dev.containerRequestsAnyAscendResource(ctr) {
+			return false, nil
+		}
+		// The container-level JSON is decoded once and cached.
+		podMode, _ := util.ParsePodOverwriteEnv(p.Annotations[util.OverwriteEnvAnnotationKey])
+		if ctrMode, listed := cachedContainerOverwriteEnv(p.Annotations[util.OverwriteEnvContainersAnnotationKey], ctr.Name); listed {
+			podMode = ctrMode
+		}
+		inject := false
+		switch podMode {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.overwriteEnv
+		}
+		if inject && !lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
 				Name:  "ASCEND_VISIBLE_DEVICES",
 				Value: "",
@@ -233,8 +253,8 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	// Set runtime class name if it is not set by user and the runtime class name is configured
-	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
-		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+	if p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	return true, nil
 }
