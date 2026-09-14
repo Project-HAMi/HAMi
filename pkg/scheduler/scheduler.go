@@ -108,6 +108,20 @@ func (f *podAllocationDecodeFailures) nodes() map[string]struct{} {
 	return nodes
 }
 
+func (f *podAllocationDecodeFailures) excludeCandidates(nodes *[]string, candidates map[string]*NodeUsage, failedNodes map[string]string) {
+	if nodes == nil {
+		return
+	}
+	blockedNodes := f.nodes()
+	for _, nodeID := range *nodes {
+		if _, blocked := blockedNodes[nodeID]; !blocked {
+			continue
+		}
+		delete(candidates, nodeID)
+		failedNodes[nodeID] = unaccountedPodAllocationReason
+	}
+}
+
 type Scheduler struct {
 	*nodeManager
 	podManager    *device.PodManager
@@ -869,6 +883,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
+	defer s.allocationDecodeFailures.excludeCandidates(nodes, cachenodeMap, failedNodes)
 	allNodes, err := s.ListNodes()
 	if err != nil {
 		return &overallnodeMap, &overallnodeMap, failedNodes, err
@@ -967,12 +982,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	if nodes == nil {
 		return &cachenodeMap, &overallnodeMap, failedNodes, nil
 	}
-	blockedNodes := s.allocationDecodeFailures.nodes()
 	for _, nodeID := range *nodes {
-		if _, blocked := blockedNodes[nodeID]; blocked {
-			failedNodes[nodeID] = unaccountedPodAllocationReason
-			continue
-		}
 		node, err := s.GetNode(nodeID)
 		if err != nil {
 			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
