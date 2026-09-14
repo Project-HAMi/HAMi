@@ -344,18 +344,24 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  util.TaskPriority,
-			Value: fmt.Sprint(priority.Value()),
-		})
+		value := fmt.Sprint(priority.Value())
+		if !hasEnvVarWithValue(ctr.Env, util.TaskPriority, value) {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  util.TaskPriority,
+				Value: value,
+			})
+		}
 	}
 
 	if dev.config.GPUCorePolicy != "" &&
 		dev.config.GPUCorePolicy != DefaultCorePolicy {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  util.CoreLimitSwitch,
-			Value: string(dev.config.GPUCorePolicy),
-		})
+		value := string(dev.config.GPUCorePolicy)
+		if !hasEnvVarWithValue(ctr.Env, util.CoreLimitSwitch, value) {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  util.CoreLimitSwitch,
+				Value: value,
+			})
+		}
 	}
 
 	hasResource := dev.mutateContainerResource(ctr)

@@ -2728,6 +2728,56 @@ func TestMutateAdmission_OverwriteEnv(t *testing.T) {
 	assert.Assert(t, found, "expected NVIDIA_VISIBLE_DEVICES=none env")
 }
 
+func TestMutateAdmissionManagedEnvIsIdempotent(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []corev1.EnvVar
+	}{
+		{
+			name: "missing managed variables",
+		},
+		{
+			name: "desired values shadowed by stale entries",
+			env: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5"},
+				{Name: util.TaskPriority, Value: "1"},
+				{Name: util.CoreLimitSwitch, Value: string(ForceCorePolicy)},
+				{Name: util.CoreLimitSwitch, Value: string(DisableCorePolicy)},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &NvidiaGPUDevices{config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourcePriority:             "nvidia.com/priority",
+				GPUCorePolicy:                ForceCorePolicy,
+			}}
+			ctr := &corev1.Container{
+				Env: test.env,
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/gpu":      resource.MustParse("1"),
+					"nvidia.com/priority": resource.MustParse("5"),
+				}},
+			}
+			pod := &corev1.Pod{}
+			_, err := dev.MutateAdmission(ctr, pod)
+			assert.NilError(t, err)
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.TaskPriority, "5"))
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.CoreLimitSwitch, string(ForceCorePolicy)))
+			afterFirstMutation := ctr.DeepCopy()
+
+			_, err = dev.MutateAdmission(ctr, pod)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, ctr, afterFirstMutation)
+		})
+	}
+}
+
 func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
 	dev := &NvidiaGPUDevices{config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu", ResourceCoreName: "nvidia.com/gpucores"}}
 	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
