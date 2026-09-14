@@ -263,6 +263,8 @@ spec:
             - name: NVIDIA_DRIVER_ROOT
               value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
             {{- end }}
+            - name: HAMI_MONITOR_WHOLE_GPU
+              value: {{ .Values.devicePlugin.monitor.monitorWholeGPU | default false | quote }}
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
