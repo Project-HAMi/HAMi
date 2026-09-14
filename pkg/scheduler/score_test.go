@@ -3662,7 +3662,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						UUID:      "test-0",
 						Type:      nvidia.NvidiaGPUDevice,
 						Usedcores: int32(1),
-						Usedmem:   int32(1024),
+						Usedmem:   int32(2048),
 					},
 				},
 			},

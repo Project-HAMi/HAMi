@@ -2402,7 +2402,7 @@ func TestComputeBestCombination(t *testing.T) {
 func TestCustomFilterRule_NonMig(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{})
 	devusage := &device.DeviceUsage{Mode: ""}
-	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage)
+	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage, nil)
 	assert.Equal(t, result, true)
 }
 
