@@ -98,6 +98,11 @@ func (o *deviceListBuilder) build() (DeviceList, error) {
 		_ = o.nvmllib.Shutdown()
 	}()
 
+	return o.buildWithSession()
+}
+
+// buildWithSession borrows NVML; the caller owns its lifecycle.
+func (o *deviceListBuilder) buildWithSession() (DeviceList, error) {
 	nvmlDevices, err := o.devicelib.GetDevices()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %v", err)
@@ -179,6 +184,21 @@ func CalculateGPUScore(available []string) (ListDeviceScore, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	return scoreLinkedDevices(linkedDevices, available)
+}
+
+// CalculateGPUScoreWithNVML borrows an initialized NVML instance. The caller
+// must keep the session alive until this function returns.
+func CalculateGPUScoreWithNVML(lib nvml.Interface, available []string) (ListDeviceScore, bool, error) {
+	builder := &deviceListBuilder{nvmllib: lib, devicelib: device.New(lib)}
+	linkedDevices, err := builder.buildWithSession()
+	if err != nil {
+		return nil, false, err
+	}
+	return scoreLinkedDevices(linkedDevices, available)
+}
+
+func scoreLinkedDevices(linkedDevices DeviceList, available []string) (ListDeviceScore, bool, error) {
 	requiredDevices, err := linkedDevices.Filter(available)
 	if err != nil {
 		return nil, false, err
