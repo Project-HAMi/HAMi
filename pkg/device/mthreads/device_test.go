@@ -435,9 +435,10 @@ func Test_GetNodeDevices(t *testing.T) {
 }
 
 func Test_parseSGPUCoresLabelBounds(t *testing.T) {
-	// 2^32 exceeds maxPhysicalCardID and must be dropped, not narrowed to uint.
-	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967296-3"), []int64{0, 3})
-	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967295"), []int64{0, 4294967295})
+	// 2^32 exceeds the uint32 card-id range and must be dropped, not narrowed.
+	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967296-3"), []uint{0, 3})
+	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967295"), []uint{0, 4294967295})
+	assert.DeepEqual(t, parseSGPUCoresLabel("1,2-4"), []uint{1, 2, 4})
 }
 
 func Test_PatchAnnotations(t *testing.T) {

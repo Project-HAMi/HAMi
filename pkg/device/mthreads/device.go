@@ -225,20 +225,21 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 // e.g. "0-2-3" for cards 0, 2 and 3.
 const SGPUCoresLabel = "mthreads.com/sgpu.cores"
 
-// maxPhysicalCardID bounds a card id parsed from SGPUCoresLabel. DeviceInfo.Index
-// is a uint (32-bit on some platforms), so an out-of-range int64 must be
-// rejected here instead of narrowed silently at the conversion site.
-const maxPhysicalCardID = math.MaxUint32
-
 // parseSGPUCoresLabel parses the vendor card-id list label. Accepts '-'
 // or ',' separators, deduplicates and drops unparsable or out-of-range
-// entries while preserving the first-seen order.
-func parseSGPUCoresLabel(raw string) []int64 {
-	seen := map[int64]bool{}
-	var ids []int64
+// entries while preserving the first-seen order. Ids are parsed as unsigned
+// 32-bit values, so the result fits DeviceInfo.Index (a uint) with no
+// sign-changing or narrowing conversion.
+func parseSGPUCoresLabel(raw string) []uint {
+	seen := map[uint]bool{}
+	var ids []uint
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == '-' || r == ',' }) {
-		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
-		if err != nil || id < 0 || id > maxPhysicalCardID || seen[id] {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(part), 10, 32)
+		if err != nil {
+			continue
+		}
+		id := uint(parsed)
+		if seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -260,7 +261,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 	// NOT 0..N-1, and the scheduler-selected card index is consumed by the
 	// vendor stack as a physical card id. Synthesizing 0..N-1 would make
 	// HAMi bind containers to the wrong physical card.
-	var cardIDs []int64
+	var cardIDs []uint
 	if raw := n.Labels[SGPUCoresLabel]; raw != "" {
 		// Label path: strict — a listed card set whose capacity does not
 		// add up is a config contradiction worth surfacing.
@@ -271,7 +272,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 		}
 	} else {
 		// Fallback: contiguous derivation (upstream behavior).
-		for i := int64(0); i*coresPerMthreadsGPU < cores; i++ {
+		for i := uint(0); int64(i)*coresPerMthreadsGPU < cores; i++ {
 			cardIDs = append(cardIDs, i)
 		}
 	}
@@ -279,8 +280,8 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 
 	for _, cardID := range cardIDs {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:        uint(cardID),
-			ID:           n.Name + "-mthreads-" + strconv.FormatInt(cardID, 10),
+			Index:        cardID,
+			ID:           n.Name + "-mthreads-" + strconv.FormatUint(uint64(cardID), 10),
 			Count:        100,
 			Devmem:       devmemPerCard,
 			Devcore:      coresPerMthreadsGPU,
