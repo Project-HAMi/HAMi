@@ -1989,9 +1989,10 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 			}
 
 			if len(copy.PodInfos) > 0 {
-				originalNodeID := tt.original.PodInfos[0].NodeID
-				copy.PodInfos[0].NodeID = "mutated-node"
-				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
+				assert.Assert(t, tt.original.PodInfos[0] == copy.PodInfos[0], "PodInfos entries should be shared with the copy")
+				originalEntry := tt.original.PodInfos[0]
+				copy.PodInfos[0] = &PodInfo{NodeID: "replacement-node"}
+				assert.Assert(t, tt.original.PodInfos[0] == originalEntry, "replacing a copied slice entry must not affect the original")
 			}
 
 			if copy.CustomInfo != nil {
