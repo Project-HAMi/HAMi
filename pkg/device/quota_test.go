@@ -497,6 +497,7 @@ func TestDelQuotaNonLimitsKey(t *testing.T) {
 	coreName := "nvidia.com/gpucore"
 
 	rq := &corev1.ResourceQuota{}
+	rq.Name = "main"
 	rq.Namespace = ns
 	rq.Spec.Hard = corev1.ResourceList{
 		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
@@ -506,6 +507,7 @@ func TestDelQuotaNonLimitsKey(t *testing.T) {
 
 	// Quota with non-limits keys (including 7-character prefix key).
 	unrelatedQuota := &corev1.ResourceQuota{}
+	unrelatedQuota.Name = "unrelated"
 	unrelatedQuota.Namespace = ns
 	unrelatedQuota.Spec.Hard = corev1.ResourceList{
 		corev1.ResourceName("requests." + memName): *resource.NewQuantity(50, resource.DecimalSI),
@@ -516,6 +518,100 @@ func TestDelQuotaNonLimitsKey(t *testing.T) {
 	qm.DelQuota(unrelatedQuota)
 	if (*qm.Quotas[ns])[memName].Limit != 100 {
 		t.Errorf("DelQuota: expected memory limit 100 after deleting non-limits quota, got %d", (*qm.Quotas[ns])[memName].Limit)
+	}
+}
+
+// A delete event can carry a spec that no longer matches what the object last
+// set (events replayed out of order, object edited between events). The
+// recorded entry — not the event's spec — must drive the removal.
+func TestDelQuotaWithStaleSpec(t *testing.T) {
+	initTest()
+	ns := "stale-spec"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	// "a" was added with both resources; "b" holds gpucore at 80.
+	added := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpumem":  *resource.NewQuantity(1000, resource.DecimalSI),
+				"limits.nvidia.com/gpucore": *resource.NewQuantity(50, resource.DecimalSI),
+			},
+		},
+	}
+	other := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpucore": *resource.NewQuantity(80, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(added)
+	qm.AddQuota(other)
+
+	// The delete event's spec only mentions gpumem — a stale version of "a".
+	stale := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpumem": *resource.NewQuantity(1000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.DelQuota(stale)
+
+	// The whole recorded entry is gone: gpumem unset, and gpucore recomputed
+	// from the survivor instead of left at a's 50 or wiped by a's spec gap.
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"]; got.LimitSet {
+		t.Errorf("gpumem still limited at %d after deleting a", got.Limit)
+	}
+	if got := (*qm.Quotas[ns])["nvidia.com/gpucore"].Limit; got != 80 {
+		t.Errorf("gpucore limit = %d, want 80 recomputed from the surviving object", got)
+	}
+	if _, ok := qm.objectLimits[ns]["a"]; ok {
+		t.Error("object a's entry survived its deletion")
+	}
+}
+
+// Unrelated ResourceQuota objects (no HAMi-managed resources) must leave no
+// state behind: the scheduler watches every quota object in the cluster.
+func TestUnrelatedQuotaLeavesNoEntry(t *testing.T) {
+	initTest()
+	ns := "unrelated-obj"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	unrelated := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "cpu-only", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"requests.cpu": *resource.NewQuantity(10, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(unrelated)
+	if _, ok := qm.objectLimits[ns]; ok {
+		t.Error("an unrelated quota object left an entry in objectLimits")
+	}
+	if _, ok := qm.Quotas[ns]; ok {
+		t.Error("an unrelated quota object created a namespace slot in Quotas")
+	}
+
+	// Updating an object down to zero managed limits prunes its entry too.
+	managed := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.nvidia.com/gpumem": *resource.NewQuantity(1000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(managed)
+	qm.UpdateQuota(managed, unrelated)
+	if _, ok := qm.objectLimits[ns]; ok {
+		t.Error("an object updated to no managed limits left an entry in objectLimits")
 	}
 }
 

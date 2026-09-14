@@ -267,16 +267,27 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 	if q.objectLimits == nil {
 		q.objectLimits = make(map[string]map[string]map[string]int64)
 	}
-	if q.objectLimits[quota.Namespace] == nil {
-		q.objectLimits[quota.Namespace] = make(map[string]map[string]int64)
-	}
-	// Replace the object's entry wholesale so resources dropped from its spec
-	// are released rather than left at their old values.
 	recomputed := make(map[string]struct{})
-	for dn := range q.objectLimits[quota.Namespace][quota.Name] {
-		recomputed[dn] = struct{}{}
+	if objs, ok := q.objectLimits[quota.Namespace]; ok {
+		if old, ok := objs[quota.Name]; ok {
+			for dn := range old {
+				recomputed[dn] = struct{}{}
+			}
+		}
 	}
-	q.objectLimits[quota.Namespace][quota.Name] = newLimits
+	if len(newLimits) > 0 {
+		// Replace the object's entry wholesale so resources dropped from its
+		// spec are released rather than left at their old values.
+		if q.objectLimits[quota.Namespace] == nil {
+			q.objectLimits[quota.Namespace] = make(map[string]map[string]int64)
+		}
+		q.objectLimits[quota.Namespace][quota.Name] = newLimits
+	} else {
+		// No HAMi-managed limits in this object (or none left after an update):
+		// keep no state for it. The scheduler sees every ResourceQuota in the
+		// cluster, so unrelated objects must not accumulate entries.
+		q.pruneObjectLocked(quota.Namespace, quota.Name)
+	}
 	for dn := range newLimits {
 		recomputed[dn] = struct{}{}
 	}
@@ -285,33 +296,31 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 	}
 }
 
-// delQuotaLocked requires q.mutex to be held. It removes the object's recorded
-// limits for the resources its spec mentions and recomputes the effective
-// limit from the remaining objects. Deletion is driven by the spec so an
-// object that was never added (or a stale event) cannot wipe another object's
-// recorded limits.
+// pruneObjectLocked requires q.mutex to be held. It drops an object's entry and
+// cleans up maps that the removal leaves empty.
+func (q *QuotaManager) pruneObjectLocked(namespace, name string) {
+	if objs, ok := q.objectLimits[namespace]; ok {
+		delete(objs, name)
+		if len(objs) == 0 {
+			delete(q.objectLimits, namespace)
+		}
+	}
+}
+
+// delQuotaLocked requires q.mutex to be held. It removes the object's complete
+// recorded entry and recomputes the effective limit for every resource the
+// object had set. The recorded entry, not the event's spec, is the source of
+// truth: a delete event can carry a spec that no longer matches what the
+// object last set (e.g. events replayed out of order).
 func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
-	obj, ok := q.objectLimits[quota.Namespace][quota.Name]
+	affected, ok := q.objectLimits[quota.Namespace][quota.Name]
 	if !ok {
 		return
 	}
-	for idx := range quota.Spec.Hard {
-		dn, ok := managedQuotaName(idx)
-		if !ok {
-			continue
-		}
-		if _, recorded := obj[dn]; !recorded {
-			continue
-		}
-		delete(obj, dn)
+	q.pruneObjectLocked(quota.Namespace, quota.Name)
+	for dn := range affected {
 		klog.V(4).InfoS("quota remove:", "resource", dn, "obj", quota.Name)
 		q.recalcLimitLocked(quota.Namespace, dn)
-	}
-	if len(obj) == 0 {
-		delete(q.objectLimits[quota.Namespace], quota.Name)
-		if len(q.objectLimits[quota.Namespace]) == 0 {
-			delete(q.objectLimits, quota.Namespace)
-		}
 	}
 }
 
