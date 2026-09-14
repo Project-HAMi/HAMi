@@ -21,8 +21,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"gotest.tools/v3/assert"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
 func TestWriteWholeGPUDryRunReport(t *testing.T) {
