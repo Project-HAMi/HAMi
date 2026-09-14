@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -299,18 +300,35 @@ func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
 		t.Fatalf("collectGPUUtilizationMetrics: %v", err)
 	}
 	close(ch)
+	// NewConstMetric binds label values to names by position and only checks
+	// the count, so a reordered sendMetric call would still emit a metric.
+	// Compare each value against its label name to catch that.
+	wantLabels := map[string]string{
+		"node":         "test-node",
+		"device_index": "0",
+		"device_uuid":  "GPU-abc123",
+		"device_type":  "NVIDIA-A100",
+	}
 	var found bool
 	for m := range ch {
+		if m.Desc() != hostGPUMemoryUtilizationdesc {
+			continue
+		}
 		var dm dto.Metric
 		if err := m.Write(&dm); err != nil {
-			continue
+			t.Fatalf("write metric: %v", err)
 		}
-		if dm.Gauge == nil {
-			continue
+		if dm.Gauge == nil || dm.Gauge.GetValue() != float64(wantMemory) {
+			t.Fatalf("expected memory controller utilization value %v, got %v", wantMemory, dm.Gauge)
 		}
-		if *dm.Gauge.Value == float64(wantMemory) {
-			found = true
+		gotLabels := make(map[string]string, len(dm.Label))
+		for _, lp := range dm.Label {
+			gotLabels[lp.GetName()] = lp.GetValue()
 		}
+		if !maps.Equal(gotLabels, wantLabels) {
+			t.Errorf("labels = %v, want %v", gotLabels, wantLabels)
+		}
+		found = true
 	}
 	if !found {
 		t.Fatalf("expected memory controller utilization metric with value %v", wantMemory)
