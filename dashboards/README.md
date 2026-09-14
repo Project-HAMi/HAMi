@@ -47,8 +47,8 @@ specific Prometheus UID — Grafana asks which data source to bind on import.
 
 - **Cluster overview** — physical GPU count, total and allocated GPU memory,
   cluster memory-allocated %, and shared-container count.
-- **Physical GPUs (host)** — per-device memory used and utilization, as measured by
-  the vGPU monitor.
+- **Physical GPUs (host)** — per-device memory used, utilization, and
+  scheduler-allocated memory compared with host-used memory.
 - **Scheduler / allocation** — allocated vs limit GPU memory, per-node memory and
   core allocation ratios, and per-device shared count.
 - **vGPU / container workloads** — per-container vGPU memory used vs limit,

@@ -21,6 +21,23 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
+    create: true
+
+    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
+    name: "hami-device-plugin"
+
+# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
+selinux:
+  enabled: false
+  type: container_file_t
+  level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -33,10 +50,10 @@ mluResourceName: "cambricon.com/vmlu"
 mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
 mluResourceCores: "cambricon.com/mlu.smlu.vcore"
 
-#Hygon DCU Parameters
-dcuResourceName: "hygon.com/dcunum"
-dcuResourceMem: "hygon.com/dcumem"
-dcuResourceCores: "hygon.com/dcucores"
+#Hygon HCU Parameters
+hcuResourceName: "hygon.com/hcunum"
+hcuResourceMem: "hygon.com/hcumem"
+hcuResourceCores: "hygon.com/hcucores"
 
 #Metax sGPU Parameters
 metaxResourceName: "metax-tech.com/sgpu"
@@ -85,6 +102,16 @@ scheduler:
   kubeBurst: ""
   # kubeTimeout is in seconds; 0 means no timeout.
   kubeTimeout: ""
+  # How long Bind retries LockNode when another PodGroup member holds the node
+  # lock. Empty keeps the binary default (28s); 0 disables retry entirely.
+  nodeLockRetryTimeout: ""
+  # httpTimeout the generated scheduler configuration gives the HAMi extender, in
+  # seconds. It is applied to the KubeSchedulerConfiguration used on Kubernetes
+  # 1.22+ and to the legacy Policy format used below it, which is why it is
+  # expressed in seconds rather than as a duration: the two formats want
+  # different units. Keep it above nodeLockRetryTimeout, otherwise kube-scheduler
+  # cuts the bind call off while the extender is still retrying the node lock.
+  extenderHTTPTimeout: 30
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
@@ -275,16 +302,37 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
+    # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
     runAsUser: 2000
   service:
-    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
+    type: ClusterIP  # Default type is ClusterIP, can be changed to NodePort
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
-    httpTargetPort: 443
+    httpTargetPort: 9443
     labels: {}
     annotations: {}
+  networkPolicy:
+    # Restrict ingress on the scheduler's HTTP port (filter/bind/refit/webhook
+    # all share this one port -- NetworkPolicy can't separate them by path)
+    # to the device-plugin's pods and to the kube-system namespace, where
+    # kube-scheduler and kube-apiserver normally run. See issue #2878.
+    #
+    # Off by default: /refit's own caller authentication (TokenReview) does
+    # not depend on this and is unaffected either way -- this is only an
+    # extra layer on top. Enable it only after confirming your CNI actually
+    # matches kube-apiserver traffic against namespaceSelector/podSelector.
+    # When kube-apiserver runs as a hostNetwork pod (the kubeadm/most on-prem
+    # default), Kubernetes documents NetworkPolicy behavior for hostNetwork
+    # pods as undefined, and it is known not to match on at least Calico
+    # (projectcalico/calico#1987) and Cilium (which requires its separate
+    # Host Firewall feature for host-network traffic). If this policy blocks
+    # kube-apiserver's calls to /webhook, admissionWebhook.failurePolicy:
+    # Ignore lets pod admission continue with HAMi's mutation silently
+    # skipped -- pods can then be scheduled by the default scheduler with no
+    # GPU device allocated and no error surfaced.
+    enabled: false
 
 devicePlugin:
   enabled: true
@@ -459,7 +507,11 @@ devicePlugin:
       add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
-  tolerations: []
+  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:

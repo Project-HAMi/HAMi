@@ -51,7 +51,7 @@ hami.io/vgpu-node: {schedule decision node}
 hami.io/vgpu-time: {timestamp}
 ```
 
-`hami.io/vgpu-devices-to-allocate` is the key for NVIDIA GPUs. Each device backend registers its own key in `InRequestDevices`, and the names do not follow a single `{device-type}` pattern. For example, Cambricon MLU uses `hami.io/cambricon-mlu-devices-to-allocate`, Moore Threads uses `hami.io/mthreads-vgpu-devices-to-allocate`, and Hygon DCU uses `hami.io/dcu-devices-to-allocate`.
+`hami.io/vgpu-devices-to-allocate` is the key for NVIDIA GPUs. Each device backend registers its own key in `InRequestDevices`, and the names do not follow a single `{device-type}` pattern. For example, Cambricon MLU uses `hami.io/cambricon-mlu-devices-to-allocate`, Moore Threads uses `hami.io/mthreads-vgpu-devices-to-allocate`, and Hygon HCU uses `hami.io/hcu-devices-to-allocate`.
 
 The scheduler writes one `-devices-to-allocate` annotation per device type. A pod that asks for more than one device type, for example NVIDIA and MLU, gets one annotation per type, and each annotation lists only the devices of that type.
 

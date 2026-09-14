@@ -554,9 +554,9 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 			ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
 		},
 		HygonConfig: hygon.HygonConfig{
-			ResourceCountName:  "hygon.com/dcunum",
-			ResourceMemoryName: "hygon.com/dcumem",
-			ResourceCoreName:   "hygon.com/dcucores",
+			ResourceCountName:  "hygon.com/hcunum",
+			ResourceMemoryName: "hygon.com/hcumem",
+			ResourceCoreName:   "hygon.com/hcucores",
 			// Hygon scales the requested memory by this before recording it.
 			MemoryFactor: 2,
 		},
@@ -575,26 +575,26 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 	qm.Quotas["mlu-core"] = &device.DeviceQuota{
 		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50, LimitSet: true},
 	}
-	qm.Quotas["dcu-mem"] = &device.DeviceQuota{
-		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
+	qm.Quotas["hcu-mem"] = &device.DeviceQuota{
+		"hygon.com/hcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
 	}
 	t.Cleanup(func() {
-		for _, ns := range []string{"mlu-mem", "mlu-core", "dcu-mem"} {
+		for _, ns := range []string{"mlu-mem", "mlu-core", "hcu-mem"} {
 			delete(qm.Quotas, ns)
 		}
 	})
 
-	dcuPod := func(ns, dcumem string) *corev1.Pod {
+	hcuPod := func(ns, hcumem string) *corev1.Pod {
 		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "dcu-pod", Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: "hcu-pod", Namespace: ns},
 			Spec: corev1.PodSpec{
 				SchedulerName: "hami-scheduler",
 				Containers: []corev1.Container{{
 					Name: "container1",
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
-							"hygon.com/dcunum": resource.MustParse("1"),
-							"hygon.com/dcumem": resource.MustParse(dcumem),
+							"hygon.com/hcunum": resource.MustParse("1"),
+							"hygon.com/hcumem": resource.MustParse(hcumem),
 						},
 					},
 				}},
@@ -628,13 +628,13 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 			fit:  true,
 		},
 		{
-			name: "dcu memory within quota once the factor is applied",
-			pod:  dcuPod("dcu-mem", "800"),
+			name: "hcu memory within quota once the factor is applied",
+			pod:  hcuPod("hcu-mem", "800"),
 			fit:  true,
 		},
 		{
-			name: "dcu memory over quota",
-			pod:  dcuPod("dcu-mem", "1200"),
+			name: "hcu memory over quota",
+			pod:  hcuPod("hcu-mem", "1200"),
 			fit:  false,
 		},
 	}
@@ -1253,6 +1253,83 @@ func TestHandleNumaAlignmentAnnotation(t *testing.T) {
 			req := admission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					UID: "test-uid", Namespace: "default", Name: "numa-pod",
+					Object: runtime.RawExtension{Raw: podBytes},
+				},
+			}
+
+			wh, err := NewWebHook()
+			if err != nil {
+				t.Fatalf("Error creating webhook: %v", err)
+			}
+			resp := wh.Handle(context.Background(), req)
+
+			if test.wantDenied {
+				if resp.Allowed {
+					t.Fatalf("expected denial, got allowed: %+v", resp.Result)
+				}
+				if !strings.Contains(resp.Result.Message, "invalid") {
+					t.Fatalf("expected invalid-annotation message, got %q", resp.Result.Message)
+				}
+			} else if !resp.Allowed {
+				t.Fatalf("expected admission, got denied: %+v", resp.Result)
+			}
+		})
+	}
+}
+
+func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		t.Fatal("NVIDIA device is not registered")
+	}
+	resourceName := corev1.ResourceName(nvidiaDevice.GetResourceNames().ResourceCountName)
+
+	tests := []struct {
+		name              string
+		annotationPresent bool
+		value             string
+		hasResource       bool
+		wantDenied        bool
+	}{
+		{name: "missing annotation is admitted", hasResource: true, wantDenied: false},
+		{name: "valid weights with HAMi resource are admitted", annotationPresent: true, value: "slot=1,core=1,memory=3", hasResource: true, wantDenied: false},
+		{name: "missing dimension with HAMi resource is denied", annotationPresent: true, value: "slot=1,core=1", hasResource: true, wantDenied: true},
+		{name: "non-integer weight with HAMi resource is denied", annotationPresent: true, value: "slot=1,core=high,memory=3", hasResource: true, wantDenied: true},
+		{name: "invalid weights without HAMi resource are admitted", annotationPresent: true, value: "slot=1,core=1", wantDenied: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var annotations map[string]string
+			if test.annotationPresent {
+				annotations = map[string]string{util.DeviceScoringWeightsAnnotationKey: test.value}
+			}
+			container := corev1.Container{Name: "container1"}
+			if test.hasResource {
+				container.Resources = corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{resourceName: resource.MustParse("1")},
+				}
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "weights-pod",
+					Namespace:   "default",
+					Annotations: annotations,
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{container}},
+			}
+
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+			podBytes, err := runtime.Encode(codec, pod)
+			if err != nil {
+				t.Fatalf("Error encoding pod: %v", err)
+			}
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID: "test-uid", Namespace: "default", Name: "weights-pod",
 					Object: runtime.RawExtension{Raw: podBytes},
 				},
 			}

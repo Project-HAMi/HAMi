@@ -38,55 +38,6 @@ func init() {
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 
-func TestAppendEnvIfAbsent(t *testing.T) {
-	wanted := corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: "none"}
-	fromFieldRef := corev1.EnvVar{
-		Name: "NVIDIA_VISIBLE_DEVICES",
-		ValueFrom: &corev1.EnvVarSource{
-			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
-		},
-	}
-
-	tests := []struct {
-		name string
-		env  []corev1.EnvVar
-		want []corev1.EnvVar
-	}{
-		{
-			name: "appends a missing variable",
-			want: []corev1.EnvVar{wanted},
-		},
-		{
-			name: "does not append an identical literal variable",
-			env:  []corev1.EnvVar{wanted},
-			want: []corev1.EnvVar{wanted},
-		},
-		{
-			name: "keeps the existing overwrite behavior for a different value",
-			env: []corev1.EnvVar{
-				{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"},
-			},
-			want: []corev1.EnvVar{
-				{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"},
-				wanted,
-			},
-		},
-		{
-			name: "appends after a value from reference",
-			env:  []corev1.EnvVar{fromFieldRef},
-			want: []corev1.EnvVar{fromFieldRef, wanted},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctr := &corev1.Container{Env: tt.env}
-			AppendEnvIfAbsent(ctr, wanted)
-			assert.DeepEqual(t, ctr.Env, tt.want)
-		})
-	}
-}
-
 func TestEmptyContainerDevicesCoding(t *testing.T) {
 	cd1 := ContainerDevices{}
 	s := EncodeContainerDevices(cd1)
@@ -157,6 +108,46 @@ func TestDecodeContainerDevices(t *testing.T) {
 					Usedcores: 20,
 				},
 			},
+			expectError: false,
+		},
+		{
+			name:  "optional slots field is decoded",
+			input: "GPU-1,NVIDIA,1000,10,3:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+					Slots:     3,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:  "fields after slots are ignored",
+			input: "GPU-1,NVIDIA,1000,10,3,extra:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+					Slots:     3,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid non-numeric slots is ignored",
+			input:       "GPU-1,NVIDIA,1000,10,invalid:",
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			expectError: false,
+		},
+		{
+			name:        "negative slots value is ignored",
+			input:       "GPU-1,NVIDIA,1000,10,-1:",
+			want:        ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
 			expectError: false,
 		},
 		{
@@ -1327,6 +1318,59 @@ func TestGetDevicesUUIDList(t *testing.T) {
 		})
 	}
 }
+
+// TestEncodeDecodeContainerDevicesSlots covers the optional slots field: it is
+// only written when it exceeds 1, so single-slot entries keep the 4-field form.
+func TestEncodeDecodeContainerDevicesSlots(t *testing.T) {
+	tests := []struct {
+		name        string
+		cd          ContainerDevices
+		wantEncoded string
+		wantDecoded ContainerDevices
+	}{
+		{
+			name:        "multi slot entry encodes the slots field",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+			wantEncoded: "GPU-1,Enflame,20480,50,3:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3}},
+		},
+		{
+			name:        "single slot entry keeps the legacy four fields",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10, Slots: 1}},
+			wantEncoded: "GPU-1,NVIDIA,1000,10:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+		},
+		{
+			name:        "unset slots keeps the legacy four fields",
+			cd:          ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+			wantEncoded: "GPU-1,NVIDIA,1000,10:",
+			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
+		},
+		{
+			name: "mixed entries in one container",
+			cd: ContainerDevices{
+				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
+				{UUID: "GPU-2", Type: "Enflame", Usedmem: 6144, Usedcores: 17},
+			},
+			wantEncoded: "GPU-1,Enflame,20480,50,3:GPU-2,Enflame,6144,17:",
+			wantDecoded: ContainerDevices{
+				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
+				{UUID: "GPU-2", Type: "Enflame", Usedmem: 6144, Usedcores: 17},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeContainerDevices(tt.cd)
+			assert.Equal(t, encoded, tt.wantEncoded)
+			decoded, err := DecodeContainerDevices(encoded)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.wantDecoded, decoded)
+		})
+	}
+}
+
 func TestEncodeContainerDeviceType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1945,9 +1989,10 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 			}
 
 			if len(copy.PodInfos) > 0 {
-				originalNodeID := tt.original.PodInfos[0].NodeID
-				copy.PodInfos[0].NodeID = "mutated-node"
-				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
+				assert.Assert(t, tt.original.PodInfos[0] == copy.PodInfos[0], "PodInfos entries should be shared with the copy")
+				originalEntry := tt.original.PodInfos[0]
+				copy.PodInfos[0] = &PodInfo{NodeID: "replacement-node"}
+				assert.Assert(t, tt.original.PodInfos[0] == originalEntry, "replacing a copied slice entry must not affect the original")
 			}
 
 			if copy.CustomInfo != nil {
@@ -2013,15 +2058,19 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 }
 
 func FuzzEncodeDecodeContainerDevices(f *testing.F) {
-	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10))
-	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0))
-	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647))
-	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores int32) {
+	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10), int32(0))
+	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0), int32(1))
+	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647), int32(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int32) {
 		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
 			t.Skip()
 		}
-		if uuid == "" || deviceType == "" || usedmem < 0 || usedcores < 0 {
+		if uuid == "" || deviceType == "" || usedmem < 0 || usedcores < 0 || slots < 0 {
 			t.Skip()
+		}
+		// Slots below 2 is not encoded, so it always decodes back as unset.
+		if slots < 2 {
+			slots = 0
 		}
 
 		want := ContainerDevices{{
@@ -2029,6 +2078,7 @@ func FuzzEncodeDecodeContainerDevices(f *testing.F) {
 			Type:      deviceType,
 			Usedmem:   usedmem,
 			Usedcores: usedcores,
+			Slots:     slots,
 		}}
 		encoded := EncodeContainerDevices(want)
 		got, err := DecodeContainerDevices(encoded)

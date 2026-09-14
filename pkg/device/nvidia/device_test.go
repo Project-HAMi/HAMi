@@ -127,6 +127,84 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func hasInjectedNVDnone(env []corev1.EnvVar) bool {
+	for _, e := range env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			return true
+		}
+	}
+	return false
+}
+
+func Test_MutateAdmission_OverwriteEnvIdempotent(t *testing.T) {
+	// Webhook reinvocation (reinvocationPolicy: IfNeeded) must not append
+	// a duplicate entry.
+	dev := &NvidiaGPUDevices{config: NvidiaConfig{OverwriteEnv: true}}
+	ctr := &corev1.Container{Name: "main"}
+	pod := &corev1.Pod{}
+	for range 3 { // simulate multiple invocations
+		_, err := dev.MutateAdmission(ctr, pod)
+		assert.NilError(t, err)
+	}
+	count := 0
+	for _, e := range ctr.Env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1, "expected exactly one NVIDIA_VISIBLE_DEVICES=none")
+}
+
+func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
+	mkDev := func(overwriteEnv bool) *NvidiaGPUDevices {
+		return &NvidiaGPUDevices{
+			config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				DefaultGPUNum:                int32(1),
+				OverwriteEnv:                 overwriteEnv,
+			},
+		}
+	}
+	mkPod := func(ann map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: ann}}
+	}
+	nonGPUCtr := func() corev1.Container {
+		return corev1.Container{
+			Name:      "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		}
+	}
+
+	type tc struct {
+		name        string
+		configOn    bool
+		annotations map[string]string
+		wantInject  bool
+	}
+	cases := []tc{
+		{name: "unset config true injects none", configOn: true, wantInject: true},
+		{name: "unset config false skips", configOn: false, wantInject: false},
+		{name: "pod false skips despite config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false"}, wantInject: false},
+		{name: "pod true injects despite config false", configOn: false, annotations: map[string]string{"hami.io/overwrite-env": "true"}, wantInject: true},
+		{name: "container false overrides pod true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "true", "hami.io/overwrite-env-containers": `{"main":"false"}`}, wantInject: false},
+		{name: "container true reverse-overrides pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"true"}`}, wantInject: true},
+		{name: "invalid pod value falls back to config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "yes"}, wantInject: true},
+		{name: "invalid container value falls back to pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"maybe"}`}, wantInject: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dev := mkDev(c.configOn)
+			ctr := nonGPUCtr()
+			_, err := dev.MutateAdmission(&ctr, mkPod(c.annotations))
+			assert.NilError(t, err)
+			assert.Equal(t, hasInjectedNVDnone(ctr.Env), c.wantInject)
+		})
+	}
+}
+
 func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
@@ -2402,7 +2480,7 @@ func TestComputeBestCombination(t *testing.T) {
 func TestCustomFilterRule_NonMig(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{})
 	devusage := &device.DeviceUsage{Mode: ""}
-	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage)
+	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage, nil)
 	assert.Equal(t, result, true)
 }
 
@@ -2650,56 +2728,52 @@ func TestMutateAdmission_OverwriteEnv(t *testing.T) {
 	assert.Assert(t, found, "expected NVIDIA_VISIBLE_DEVICES=none env")
 }
 
-func TestMutateAdmissionIsIdempotent(t *testing.T) {
+func TestMutateAdmissionManagedEnvIsIdempotent(t *testing.T) {
 	tests := []struct {
 		name string
-		dev  *NvidiaGPUDevices
-		ctr  *corev1.Container
+		env  []corev1.EnvVar
 	}{
 		{
-			name: "priority and core policy",
-			dev: &NvidiaGPUDevices{config: NvidiaConfig{
-				ResourceCountName:            "nvidia.com/gpu",
-				ResourceMemoryName:           "nvidia.com/gpumem",
-				ResourceCoreName:             "nvidia.com/gpucores",
-				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
-				ResourcePriority:             "nvidia.com/priority",
-				GPUCorePolicy:                ForceCorePolicy,
-			}},
-			ctr: &corev1.Container{
-				Env: []corev1.EnvVar{{Name: "EXISTING", Value: "value"}},
-				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-					"nvidia.com/gpu":      resource.MustParse("1"),
-					"nvidia.com/priority": resource.MustParse("5"),
-				}},
-			},
+			name: "missing managed variables",
 		},
 		{
-			name: "overwrite visible devices preserves conflicting user value",
-			dev: &NvidiaGPUDevices{config: NvidiaConfig{
-				ResourceCountName:            "nvidia.com/gpu",
-				ResourceMemoryName:           "nvidia.com/gpumem",
-				ResourceCoreName:             "nvidia.com/gpucores",
-				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
-				OverwriteEnv:                 true,
-			}},
-			ctr: &corev1.Container{
-				Env:       []corev1.EnvVar{{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"}},
-				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+			name: "desired values shadowed by stale entries",
+			env: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5"},
+				{Name: util.TaskPriority, Value: "1"},
+				{Name: util.CoreLimitSwitch, Value: string(ForceCorePolicy)},
+				{Name: util.CoreLimitSwitch, Value: string(DisableCorePolicy)},
 			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			dev := &NvidiaGPUDevices{config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourcePriority:             "nvidia.com/priority",
+				GPUCorePolicy:                ForceCorePolicy,
+			}}
+			ctr := &corev1.Container{
+				Env: test.env,
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/gpu":      resource.MustParse("1"),
+					"nvidia.com/priority": resource.MustParse("5"),
+				}},
+			}
 			pod := &corev1.Pod{}
-			_, err := test.dev.MutateAdmission(test.ctr, pod)
+			_, err := dev.MutateAdmission(ctr, pod)
 			assert.NilError(t, err)
-			afterFirstMutation := test.ctr.DeepCopy()
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.TaskPriority, "5"))
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.CoreLimitSwitch, string(ForceCorePolicy)))
+			afterFirstMutation := ctr.DeepCopy()
 
-			_, err = test.dev.MutateAdmission(test.ctr, pod)
+			_, err = dev.MutateAdmission(ctr, pod)
 			assert.NilError(t, err)
-			assert.DeepEqual(t, test.ctr, afterFirstMutation)
+			assert.DeepEqual(t, ctr, afterFirstMutation)
 		})
 	}
 }

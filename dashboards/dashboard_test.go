@@ -45,7 +45,10 @@ type panel struct {
 	} `json:"targets"`
 }
 
-func TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale(t *testing.T) {
+// loadDashboard reads and parses the importable HAMi dashboard fixture.
+func loadDashboard(t *testing.T) dashboard {
+	t.Helper()
+
 	data, err := os.ReadFile("hami-vgpu-dashboard.json")
 	if err != nil {
 		t.Fatalf("read dashboard: %v", err)
@@ -55,18 +58,57 @@ func TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale(t *testing.T) {
 	if err := json.Unmarshal(data, &d); err != nil {
 		t.Fatalf("parse dashboard: %v", err)
 	}
+	return d
+}
 
-	const title = "Node GPU memory allocated ratio"
-	var got *panel
+// findPanel returns the dashboard panel with the requested title.
+func findPanel(t *testing.T, d *dashboard, title string) *panel {
+	t.Helper()
+
 	for i := range d.Panels {
 		if d.Panels[i].Title == title {
-			got = &d.Panels[i]
-			break
+			return &d.Panels[i]
 		}
 	}
-	if got == nil {
-		t.Fatalf("panel %q not found", title)
+	t.Fatalf("panel %q not found", title)
+	return nil
+}
+
+// TestHostGPUPanelsUseNativeNodeLabel verifies host panels do not depend on scheduler series.
+func TestHostGPUPanelsUseNativeNodeLabel(t *testing.T) {
+	d := loadDashboard(t)
+	tests := []struct {
+		title string
+		expr  string
+	}{
+		{
+			title: "Host GPU memory used",
+			expr:  `hami_host_gpu_memory_used_bytes{node=~"$node"}`,
+		},
+		{
+			title: "Host GPU utilization",
+			expr:  `hami_host_gpu_utilization_ratio{node=~"$node"}`,
+		},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.title, func(t *testing.T) {
+			got := findPanel(t, &d, tt.title)
+			if len(got.Targets) != 1 {
+				t.Fatalf("panel %q has %d targets, want 1", tt.title, len(got.Targets))
+			}
+			if got.Targets[0].Expr != tt.expr {
+				t.Errorf("panel %q query = %q, want %q", tt.title, got.Targets[0].Expr, tt.expr)
+			}
+		})
+	}
+}
+
+// TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale verifies the metric's 0-1 display contract.
+func TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale(t *testing.T) {
+	d := loadDashboard(t)
+	const title = "Node GPU memory allocated ratio"
+	got := findPanel(t, &d, title)
 
 	if len(got.Targets) != 1 || got.Targets[0].Expr != `hami_node_gpu_memory_allocated_ratio{node=~"$node"}` {
 		t.Fatalf("panel %q must query the node memory allocation ratio directly", title)
@@ -84,5 +126,42 @@ func TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale(t *testing.T) {
 		if step.Value != nil && (*step.Value < 0 || *step.Value > 1) {
 			t.Errorf("threshold %v is outside the metric's 0-1 scale", *step.Value)
 		}
+	}
+}
+
+func TestPhysicalGPUAllocatedVsHostUsedPanelComparesDeviceMemory(t *testing.T) {
+	data, err := os.ReadFile("hami-vgpu-dashboard.json")
+	if err != nil {
+		t.Fatalf("read dashboard: %v", err)
+	}
+
+	var d dashboard
+	if err := json.Unmarshal(data, &d); err != nil {
+		t.Fatalf("parse dashboard: %v", err)
+	}
+
+	const title = "GPU memory: allocated vs host used"
+	var got *panel
+	for i := range d.Panels {
+		if d.Panels[i].Title == title {
+			got = &d.Panels[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("panel %q not found", title)
+	}
+
+	if got.FieldConfig.Defaults.Unit != "bytes" {
+		t.Errorf("unit = %q, want bytes", got.FieldConfig.Defaults.Unit)
+	}
+	if len(got.Targets) != 2 {
+		t.Fatalf("panel %q target count = %d, want 2", title, len(got.Targets))
+	}
+	if got.Targets[0].Expr != `hami_gpu_memory_allocated_bytes{node=~"$node"}` {
+		t.Errorf("allocated expr = %q", got.Targets[0].Expr)
+	}
+	if got.Targets[1].Expr != `hami_host_gpu_memory_used_bytes{node=~"$node"}` {
+		t.Errorf("host used expr = %q", got.Targets[1].Expr)
 	}
 }

@@ -57,6 +57,10 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 		ginkgo.By("Adding node labeling")
 		_, err = utils.AddNodeLabel(clientSet, nodeName, NodeLabelKey, NodeLabelValue)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		ginkgo.By("Waiting for device-plugin to register healthy GPU devices")
+		err = utils.WaitForDevicePluginReady(clientSet, nodeName, 5*time.Minute, 2*time.Second)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "device-plugin did not become ready on node %s", nodeName)
 	})
 
 	ginkgo.AfterEach(func() {

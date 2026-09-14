@@ -3662,7 +3662,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						UUID:      "test-0",
 						Type:      nvidia.NvidiaGPUDevice,
 						Usedcores: int32(1),
-						Usedmem:   int32(1024),
+						Usedmem:   int32(2048),
 					},
 				},
 			},
@@ -3777,7 +3777,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							// test CardTypeMismatch
-							{Device: makeDevice("a", 0, hygon.HygonDCUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("a", 0, hygon.HygonHCUDevice, 1, 4, 8192, 2048, 1, 100)},
 							{Device: makeDevice("f", 0, metax.MetaxGPUDevice, 1, 4, 8192, 2048, 1, 100)},
 							// test CardUUIDMismatch
 							{Device: makeDevice("b", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
