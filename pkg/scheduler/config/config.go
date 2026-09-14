@@ -39,6 +39,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -94,6 +95,7 @@ type Config struct {
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	BirenConfig     biren.BirenConfig         `yaml:"biren"`
+	RemoteGPUConfig remotegpu.RemoteGPUConfig `yaml:"remotegpu"`
 	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
 
@@ -235,6 +237,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return biren.InitBirenDevice(birenConfig), nil
 		}, config.BirenConfig},
+		{remotegpu.RemoteGPUDevice, remotegpu.RemoteGPUCommonWord, func(cfg any) (device.Devices, error) {
+			remoteGPUConfig, ok := cfg.(remotegpu.RemoteGPUConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", remotegpu.RemoteGPUCommonWord)
+			}
+			return remotegpu.InitRemoteGPUDevice(remoteGPUConfig), nil
+		}, config.RemoteGPUConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -280,6 +289,7 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
+		!reflect.DeepEqual(config.RemoteGPUConfig, remotegpu.RemoteGPUConfig{}) ||
 		len(config.VNPUs.Configs) > 0 {
 		return nil
 	}
