@@ -734,6 +734,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if (k.MemPercentagereq < 0 || k.MemPercentagereq > 100) && k.MemPercentagereq != 101 {
+		reason[common.CardInsufficientMemory]++
+		klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "invalid MemPercentagereq", k.MemPercentagereq)
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
@@ -786,11 +791,6 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if k.Coresreq > 100 || k.Coresreq < 0 {
 			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
 			reason[common.CardInsufficientCore]++
-			continue
-		}
-		if (k.MemPercentagereq < 0 || k.MemPercentagereq > 100) && k.MemPercentagereq != 101 {
-			reason[common.CardInsufficientMemory]++
-			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "invalid MemPercentagereq", k.MemPercentagereq)
 			continue
 		}
 		if k.Memreq > 0 {

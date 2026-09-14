@@ -3478,6 +3478,75 @@ func TestFit_MemoryPercentageValidation(t *testing.T) {
 	}
 }
 
+func TestFit_MemoryPercentageValidation_MultipleDevicesIncrementsOnce(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "GPU-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8192,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      NvidiaGPUDevice,
+		},
+		{
+			ID:        "GPU-1",
+			Index:     1,
+			Count:     10,
+			Totalmem:  8192,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      NvidiaGPUDevice,
+		},
+		{
+			ID:        "GPU-2",
+			Index:     2,
+			Count:     10,
+			Totalmem:  8192,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      NvidiaGPUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "pct-validation-test",
+		},
+	}
+
+	invalidPcts := []int32{-1, 102, 150}
+	for _, pct := range invalidPcts {
+		req := device.ContainerDeviceRequest{
+			Nums:             1,
+			Type:             NvidiaGPUDevice,
+			MemPercentagereq: pct,
+		}
+		fit, _, reason := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, fit, false)
+		// Should increment CardInsufficientMemory exactly once across the request, not once per device (3)
+		assert.Equal(t, reason, "1/3 CardInsufficientMemory")
+		parsed := common.ParseReason(reason)
+		assert.Equal(t, parsed[common.CardInsufficientMemory], 1)
+	}
+}
+
 func TestFit_CoresValidation(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
