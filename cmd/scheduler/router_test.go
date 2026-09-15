@@ -33,6 +33,19 @@ const undecodableBody = "{"
 // being inside this pod's network namespace. Putting either back on the
 // router the Service publishes hands every pod in the cluster the ability to
 // drop another pod's GPU reservation and to patch arbitrary pod annotations.
+//
+// Reproduce on a cluster (issue #3030): before this fix the extender served
+// both verbs on 0.0.0.0, routed through the Service, with no NetworkPolicy by
+// default. From any pod in another namespace:
+//
+//	curl -sk -X POST https://hami-scheduler.kube-system.svc/bind \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"PodName":"does-not-exist","PodNamespace":"team-b","PodUID":"<victim-uid>","Node":"gpu-node-1"}'
+//
+// reached the scheduler and forged a reservation drop; see #3040's tests for
+// what that request then did once it arrived. This test only asserts the
+// reachability half: that the router the Service exposes never carries these
+// two paths in the first place, so that request has nowhere to land.
 func TestClusterRouterDoesNotServeExtenderVerbs(t *testing.T) {
 	router := clusterRouter(nil)
 
