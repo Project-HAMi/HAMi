@@ -181,7 +181,11 @@ func TestReconcileSessionStubs_DeletesOnlyTheStubItListed(t *testing.T) {
 	// is somebody else's replacement now.
 	var got *metav1.Preconditions
 	fakeClient.PrependReactor("delete", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		got = a.(k8stesting.DeleteAction).GetDeleteOptions().Preconditions
+		del, ok := a.(k8stesting.DeleteAction)
+		if !ok {
+			t.Fatalf("expected a DeleteAction, got %T", a)
+		}
+		got = del.GetDeleteOptions().Preconditions
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, listed.Name, nil)
 	})
 
