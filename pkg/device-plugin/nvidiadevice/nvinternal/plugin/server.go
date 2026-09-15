@@ -999,6 +999,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
 			currentCtr, devreq, err := popNextContainerDevices(current, podSingleDev)
+
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -1071,8 +1072,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
 				found := false
+				userSpecified := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+						userSpecified = true
 						// if env existed but is set to false or can not be parsed, ignore
 						t, _ := strconv.ParseBool(val.Value)
 						if !t {
@@ -1081,6 +1084,18 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						// only env existed and set to true, we mark it "found"
 						found = true
 						break
+					}
+				}
+				// auto-inject CUDA_DISABLE_CONTROL=true only when the user hasn't
+				// set it explicitly and every allocated device is a whole GPU
+				if !userSpecified {
+					isWhole := isWholeGPUAllocation(devreq, plugin.rm)
+					if isWhole {
+						response.Envs["CUDA_DISABLE_CONTROL"] = "true"
+						klog.Infof("whole-GPU allocation: injecting CUDA_DISABLE_CONTROL=true (pod=%s/%s, container=%s)",
+							current.Namespace, current.Name, currentCtr.Name)
+						// mark found so the ld.so.preload mount below is skipped
+						found = true
 					}
 				}
 				if !found {
@@ -1342,4 +1357,36 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
 	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
+}
+
+// isWholeGPUAllocation reports whether every device allocated to the container
+// is a whole GPU (full memory and full cores).
+//
+// Returns false conservatively when the allocation cannot be confirmed as
+// whole-GPU: an empty devreq, a nil ResourceManager (e.g. partially
+// initialized plugin in tests), or any device missing from the resource
+// registry. The caller treats "false" as "fall through to the default
+// ld.so.preload path", so a false negative never blocks an allocation —
+// it only forgoes the whole-card optimization.
+//
+//   - devreq: devices allocated to the container (rm.ContainerDevices)
+//   - rm: ResourceManager used to look up device details; may be nil
+func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager) bool {
+	if len(devreq) == 0 {
+		return false
+	}
+	if rm == nil {
+		return false
+	}
+	allDevices := rm.Devices()
+	for _, dev := range devreq {
+		deviceInfo := allDevices.GetByID(dev.UUID)
+		if deviceInfo == nil {
+			return false
+		}
+		if uint64(dev.Usedmem) != deviceInfo.TotalMemory || dev.Usedcores != 100 {
+			return false
+		}
+	}
+	return true
 }

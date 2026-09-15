@@ -58,6 +58,11 @@ const (
 	// unlike FilterDeviceToRegister, it takes effect immediately and needs no
 	// device-plugin restart.
 	DeviceCordonAnnotation = "hami.io/device-cordon"
+	// AllocatedDevicesAnnotation records the devices bound to a pod. Unlike
+	// InRequestDevices' "-to-allocate" annotation, the device plugin never
+	// clears this one after Allocate, so it stays readable for the lifetime
+	// of the pod.
+	AllocatedDevicesAnnotation = "hami.io/vgpu-devices-allocated"
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
@@ -166,7 +171,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	_, ok := device.InRequestDevices[NvidiaGPUDevice]
 	if !ok {
 		device.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
+		device.SupportDevices[NvidiaGPUDevice] = AllocatedDevicesAnnotation
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
 	if err := ValidateMigProfileAllowlist(nvconfig.MigProfileAllowlist); err != nil {
