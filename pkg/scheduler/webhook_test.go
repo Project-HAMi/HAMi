@@ -1404,6 +1404,14 @@ func gpuPodWithAnnotations(annotations map[string]string) *corev1.Pod {
 // The device plugin hands out devices from these annotations, so a pod must
 // not arrive already carrying them. Routing the pod at another scheduler used
 // to skip every check below, which is what made this reachable.
+//
+// Reproduce on a cluster (issue #3041): create a pod with
+// schedulerName: default-scheduler, nvidia.com/gpu: 1, and one of the
+// annotations this test iterates over set by hand, for example
+// hami.io/vgpu-devices-to-allocate: "GPU-<uuid>,NVIDIA,20000,100:;". Before
+// this fix it was admitted and the device plugin served the named GPU with
+// no HAMi accounting or quota. admitPod below is that same request replayed
+// against the webhook directly, so it needs no cluster.
 func TestForgedAllocationAnnotationsDenied(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
 	if err := config.InitDevicesWithConfig(&config.Config{
