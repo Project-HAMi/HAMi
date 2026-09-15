@@ -17,10 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Malformed on purpose: every handler rejects it while decoding, before it
@@ -86,5 +88,37 @@ func TestIsLoopbackAddr(t *testing.T) {
 		if got := isLoopbackAddr(tt.addr); got != tt.want {
 			t.Errorf("isLoopbackAddr(%q) = %v, want %v", tt.addr, got, tt.want)
 		}
+	}
+}
+
+func TestServeAnswersOnTheGivenListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to open a listener: %v", err)
+	}
+	defer listener.Close()
+
+	served := make(chan error, 1)
+	go func() { served <- serve(listener, clusterRouter(nil), nil) }()
+
+	resp, err := http.Get("http://" + listener.Addr().String() + "/healthz")
+	if err != nil {
+		t.Fatalf("healthz request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("healthz returned %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	// Closing the listener ends Serve, which is how the caller learns a
+	// listener stopped accepting.
+	listener.Close()
+	select {
+	case err := <-served:
+		if err == nil {
+			t.Error("serve returned no error after its listener closed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("serve did not return after its listener closed")
 	}
 }

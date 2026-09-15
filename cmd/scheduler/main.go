@@ -186,14 +186,28 @@ func start() error {
 		}()
 	}
 
+	// Both ports are claimed before either is served, so a port already in use
+	// fails startup outright instead of surfacing from inside a goroutine once
+	// the scheduler looks healthy.
+	extenderListener, err := net.Listen("tcp", config.ExtenderBind)
+	if err != nil {
+		return fmt.Errorf("failed to listen on the extender address %s: %w", config.ExtenderBind, err)
+	}
+	defer extenderListener.Close()
+	clusterListener, err := net.Listen("tcp", config.HTTPBind)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
+	}
+	defer clusterListener.Close()
+
 	// Either listener failing takes the process down: a scheduler that cannot
 	// answer /filter is as unusable as one that cannot answer /webhook.
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- fmt.Errorf("extender server error: %w", serve(config.ExtenderBind, extenderRouter(sher), tlsCfg))
+		errCh <- fmt.Errorf("extender server error: %w", serve(extenderListener, extenderRouter(sher), tlsCfg))
 	}()
 	go func() {
-		errCh <- fmt.Errorf("server error: %w", serve(config.HTTPBind, router, tlsCfg))
+		errCh <- fmt.Errorf("server error: %w", serve(clusterListener, router, tlsCfg))
 	}()
 	return <-errCh
 }
@@ -220,20 +234,19 @@ func clusterRouter(s *scheduler.Scheduler) *httprouter.Router {
 	return router
 }
 
-func serve(addr string, handler http.Handler, tlsCfg *tls.Config) error {
+func serve(listener net.Listener, handler http.Handler, tlsCfg *tls.Config) error {
 	server := &http.Server{
-		Addr:              addr,
 		Handler:           handler,
 		TLSConfig:         tlsCfg,
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       60 * time.Second,
 	}
 	if tlsCfg == nil {
-		klog.InfoS("Starting HTTP server", "address", addr)
-		return server.ListenAndServe()
+		klog.InfoS("Starting HTTP server", "address", listener.Addr())
+		return server.Serve(listener)
 	}
-	klog.InfoS("Starting HTTPS server", "address", addr)
-	return server.ListenAndServeTLS("", "")
+	klog.InfoS("Starting HTTPS server", "address", listener.Addr())
+	return server.ServeTLS(listener, "", "")
 }
 
 // isLoopbackAddr reports whether addr binds the loopback interface only. An
