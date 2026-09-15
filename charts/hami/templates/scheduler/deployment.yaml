@@ -1,3 +1,9 @@
+{{- /* The extender and the cluster-facing endpoints are two listeners in one
+       pod, so sharing a port means the second bind fails and the scheduler
+       never starts. Catch it at template time rather than in a crash loop. */}}
+{{- if eq (int (.Values.scheduler.extenderPort | default 9444)) (int (.Values.scheduler.service.httpTargetPort | default 9443)) }}
+{{- fail "scheduler.extenderPort and scheduler.service.httpTargetPort must be different ports" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
