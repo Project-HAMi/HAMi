@@ -942,6 +942,16 @@ func cordonedDevices(nodeInfo *device.NodeInfo) map[string]struct{} {
 }
 
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return nv.fit(devices, request, pod, nodeInfo, allocated, allocated)
+}
+
+// FitWithQuota keeps placement constraints separate from the complete Pod
+// allocation history used to calculate effective init and app container usage.
+func (nv *NvidiaGPUDevices) FitWithQuota(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated, quotaAllocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return nv.fit(devices, request, pod, nodeInfo, allocated, quotaAllocated)
+}
+
+func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated, quotaAllocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -1026,7 +1036,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			}
 			usedmem, usedcores = profile.MemoryMB, profile.Core
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(usedmem), int64(usedcores)) {
+		if !fitQuota(pod, tmpDevs, quotaAllocated, pod.Namespace, dev.ID, int64(usedmem), int64(usedcores)) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue
