@@ -91,6 +91,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.replicas` | Number of replicas | `1` |
 | `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
 | `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
+| `scheduler.hostNetwork` | Run the scheduler pod on the host network. Needed where the pod network cannot reach kube-apiserver (for example Calico with restrictive policies). The extender/webhook and metrics ports then bind on the node | `false` |
+| `scheduler.dnsPolicy` | `dnsPolicy` for the scheduler pod; empty selects `ClusterFirstWithHostNet` when `scheduler.hostNetwork` is enabled and leaves the Kubernetes default otherwise | `""` |
 
 ### Kube Scheduler Configuration
 

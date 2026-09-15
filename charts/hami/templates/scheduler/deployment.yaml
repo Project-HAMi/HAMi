@@ -37,6 +37,10 @@ spec:
     spec:
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
+      hostNetwork: {{ .Values.scheduler.hostNetwork | default false }}
+      {{- if or .Values.scheduler.dnsPolicy .Values.scheduler.hostNetwork }}
+      dnsPolicy: {{ .Values.scheduler.dnsPolicy | default "ClusterFirstWithHostNet" }}
+      {{- end }}
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
         {{- if .Values.scheduler.kubeScheduler.enabled }}

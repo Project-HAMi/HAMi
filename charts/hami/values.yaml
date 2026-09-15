@@ -199,6 +199,20 @@ scheduler:
   nodeLockExpire: "5m"
   podAnnotations: {}
   tolerations: []
+  # Run the scheduler pod on the host network. Needed on clusters where the
+  # pod network cannot reach kube-apiserver -- for example managed offerings
+  # that run Calico with restrictive policies (Gardener shoots, some kOps
+  # setups), where the extender never finishes registering and the pod is
+  # restarted. With hostNetwork the extender/webhook port
+  # (scheduler.service.httpTargetPort, 9443 by default) and the metrics port
+  # (scheduler.metricsBindAddress, :9395 by default) bind on the node itself,
+  # so make sure both are free on every node the scheduler can land on.
+  hostNetwork: false
+  # dnsPolicy for the scheduler pod. Empty selects ClusterFirstWithHostNet when
+  # hostNetwork is enabled, and otherwise leaves the Kubernetes default
+  # (ClusterFirst) in place. Set it explicitly to override, for example
+  # "Default" to use the node's own resolv.conf.
+  dnsPolicy: ""
   #serviceAccountName: "hami-vgpu-scheduler-sa"
   admissionWebhook:
     # If set to false, the admission webhook is not installed and any pods that should use HAMi must be
