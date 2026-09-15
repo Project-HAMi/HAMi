@@ -418,7 +418,7 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.NilError(t, err)
 	})
 
-	t.Run("old stale dir with tracked mapping is removed and unmapped", func(t *testing.T) {
+	t.Run("old stale dir with tracked mapping is unmapped but not removed", func(t *testing.T) {
 		dir := t.TempDir()
 		entryName := "missing-pod-uid_ctr"
 		ctrDir := filepath.Join(dir, entryName)
@@ -440,15 +440,19 @@ func Test_ContainerLister_Update(t *testing.T) {
 		_, ok := l.containers[entryName]
 		assert.Equal(t, ok, false)
 		_, err = os.Stat(ctrDir)
-		assert.Assert(t, os.IsNotExist(err))
+		assert.NilError(t, err)
 	})
 
 	t.Run("already tracked entry is left untouched", func(t *testing.T) {
 		dir := t.TempDir()
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uid1"}}
 		entryName := "uid1_ctr"
-		assert.NilError(t, os.Mkdir(filepath.Join(dir, entryName), 0755))
-		existing := &ContainerUsage{PodUID: "uid1", ContainerName: "ctr"}
+		ctrDir := filepath.Join(dir, entryName)
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		existing, err := loadCache(ctrDir)
+		assert.NilError(t, err)
+		defer func() { _ = syscall.Munmap(existing.data) }()
 		l := &ContainerLister{
 			containerPath: dir,
 			containers:    map[string]*ContainerUsage{entryName: existing},
@@ -511,6 +515,48 @@ func Test_ContainerLister_Update(t *testing.T) {
 		defer func() { _ = syscall.Munmap(got.data) }()
 	})
 
+	t.Run("externally removed directory releases tracked mapping", func(t *testing.T) {
+		dir := t.TempDir()
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uid5"}}
+		entryName := "uid5_ctr"
+		ctrDir := filepath.Join(dir, entryName)
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{},
+			podLister:     newTestPodLister(pod),
+		}
+		assert.NilError(t, l.Update())
+		assert.Equal(t, len(l.containers), 1)
+		assert.NilError(t, os.RemoveAll(ctrDir))
+		assert.NilError(t, l.Update())
+		assert.Equal(t, len(l.containers), 0)
+	})
+
+	t.Run("same-name replacement reloads mapping", func(t *testing.T) {
+		dir := t.TempDir()
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uid6"}}
+		entryName := "uid6_ctr"
+		ctrDir := filepath.Join(dir, entryName)
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		cachePath := writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{},
+			podLister:     newTestPodLister(pod),
+		}
+		assert.NilError(t, l.Update())
+		original := l.containers[entryName]
+		assert.NilError(t, os.Remove(cachePath))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		assert.NilError(t, l.Update())
+		reloaded := l.containers[entryName]
+		assert.Assert(t, reloaded != nil)
+		assert.Assert(t, reloaded != original)
+		defer func() { _ = syscall.Munmap(reloaded.data) }()
+	})
+
 	t.Run("dir without underscore in name is skipped", func(t *testing.T) {
 		dir := t.TempDir()
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "nodashes"}}
@@ -540,4 +586,23 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.NilError(t, l.Update())
 		assert.Equal(t, len(l.containers), 0)
 	})
+}
+
+func TestContainerListerCloseReleasesMappings(t *testing.T) {
+	cacheDir := t.TempDir()
+	writeCacheFile(t, cacheDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+	usage, err := loadCache(cacheDir)
+	assert.NilError(t, err)
+	l := &ContainerLister{
+		containers: map[string]*ContainerUsage{"uid_ctr": usage},
+		stopCh:     make(chan struct{}),
+	}
+	l.Close()
+	l.Close()
+	assert.Equal(t, len(l.containers), 0)
+	select {
+	case <-l.stopCh:
+	default:
+		t.Fatal("Close did not stop informer")
+	}
 }

@@ -29,10 +29,19 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // GetPlugins returns a set of plugins for the specified configuration.
-func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *nvidia.DeviceConfig) ([]plugin.Interface, error) {
+func GetPlugins(
+	ctx context.Context,
+	infolib info.Interface,
+	nvmllib nvml.Interface,
+	devicelib device.Interface,
+	config *nvidia.DeviceConfig,
+	listNodePods func() ([]*corev1.Pod, error),
+	prepareVGPUCache func(string, string) (string, error),
+) ([]plugin.Interface, error) {
 	// TODO: We could consider passing this as an argument since it should already be used to construct nvmllib.
 	driverRoot := root(*config.Flags.Plugin.ContainerDriverRoot)
 
@@ -70,6 +79,8 @@ func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interf
 		plugin.WithDeviceListStrategies(deviceListStrategies),
 		plugin.WithFailOnInitError(*config.Flags.FailOnInitError),
 		plugin.WithImexChannels(imexChannels),
+		plugin.WithNodePodList(listNodePods),
+		plugin.WithVGPUCachePreparer(prepareVGPUCache),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create plugins: %w", err)

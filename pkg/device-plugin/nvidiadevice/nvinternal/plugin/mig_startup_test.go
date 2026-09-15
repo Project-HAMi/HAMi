@@ -64,9 +64,32 @@ func TestActiveMigGPUUUIDs(t *testing.T) {
 		},
 	}
 
-	got := activeMigGPUUUIDs(pods)
+	podPointers := make([]*corev1.Pod, 0, len(pods))
+	for i := range pods {
+		podPointers = append(podPointers, &pods[i])
+	}
+	got, err := activeMigGPUUUIDs(podPointers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]struct{}{"GPU-live": {}, "GPU-pending": {}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("activeMigGPUUUIDs() = %v, want %v", got, want)
+	}
+}
+
+func TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation(t *testing.T) {
+	pods := []*corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid",
+			Namespace: "default",
+			Annotations: map[string]string{
+				nvidia.MigAllocationsAnnotation: "not-json",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}}
+	if _, err := activeMigGPUUUIDs(pods); err == nil {
+		t.Fatal("activeMigGPUUUIDs accepted an invalid active allocation annotation")
 	}
 }
