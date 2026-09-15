@@ -305,7 +305,7 @@ func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs 
 }
 
 func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
-	appIndex := 0
+	appIndex := numInitContainers
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
 			continue
@@ -372,23 +372,18 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	var initAllocs device.PodDevices
 	if numInitContainers > 0 {
 		allocs, fit, reason := allocateInitContainers(appNodeCopy, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
-		initAllocs = allocs
+		// FitQuota classifies entries by Pod container index, so app fitting must
+		// see the init-container prefix rather than an app-only allocation list.
+		score.Devices = allocs
 	}
 
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
-	}
-
-	if numInitContainers > 0 && initAllocs != nil {
-		for devType, initConList := range initAllocs {
-			score.Devices[devType] = append(initConList, score.Devices[devType]...)
-		}
 	}
 
 	applyPeakUsage(node, appNodeCopy, peakUsage)
