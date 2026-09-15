@@ -18,6 +18,10 @@ spec:
   {{- else }}
   replicas: 1
   {{- end }}
+  {{- with .Values.scheduler.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: hami-scheduler

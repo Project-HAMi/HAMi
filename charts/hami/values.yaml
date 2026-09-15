@@ -123,6 +123,15 @@ scheduler:
   podDisruptionBudget:
     minAvailable: 1
     # maxUnavailable: 1
+  # Deployment strategy for the scheduler. Empty leaves the field unset, so
+  # Kubernetes applies its own default (RollingUpdate, 25% maxUnavailable and
+  # 25% maxSurge). Set it to Recreate where the old and the new pod cannot run
+  # side by side -- a single schedulable node, or hostNetwork, where the
+  # surge pod cannot bind the extender port while the old pod still holds it:
+  #
+  #   strategy:
+  #     type: Recreate
+  strategy: {}
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true

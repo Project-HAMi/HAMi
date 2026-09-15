@@ -91,6 +91,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.replicas` | Number of replicas | `1` |
 | `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
 | `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
+| `scheduler.strategy` | Deployment strategy for the scheduler; empty leaves the field unset so Kubernetes applies its default `RollingUpdate`. Set `type: Recreate` where the old and the new pod cannot run side by side | `{}` |
 
 ### Kube Scheduler Configuration
 
