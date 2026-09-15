@@ -23,8 +23,11 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -146,15 +149,52 @@ func TestReconcileSessionStubs_LeavesAStubStillTerminatingToTheNextPass(t *testi
 		return true, nil, nil
 	})
 
-	RemoteGPUSessionImage = "socat:latest"
-	t.Cleanup(func() { RemoteGPUSessionImage = "" })
-	dev := InitRemoteGPUDevice(testConfig())
+	cfg := testConfig()
+	cfg.SessionImage = "socat:latest"
+	dev := InitRemoteGPUDevice(cfg)
+	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
 	dev.ReconcileSessionStubs(context.Background())
 
 	stubs := stubsIn(t, fakeClient)
 	assert.Equal(t, len(stubs), 1)
 	assert.Equal(t, stubEndpoint(&stubs[0]), "10.0.0.9:14833",
 		"the old stub is still the one there; no replacement was claimed over it")
+}
+
+// Stub names are fixed per node, so a delete by name alone could remove a
+// replacement another scheduler made during a leader handover. The delete is
+// pinned to the UID that was listed, and a Conflict is taken as "already
+// replaced" rather than reported.
+func TestReconcileSessionStubs_DeletesOnlyTheStubItListed(t *testing.T) {
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}
+	listed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:      sessionStubPrefix + "gpu-a",
+		Namespace: "kube-system",
+		UID:       types.UID("uid-listed"),
+		Labels:    map[string]string{sessionStubLabel: "gpu-a"},
+	}, Spec: corev1.PodSpec{Containers: []corev1.Container{{
+		Name: "relay", Env: []corev1.EnvVar{{Name: sessionEndpointEnv, Value: "10.0.0.9:14833"}},
+	}}}}
+	fakeClient := sessionScene(t, nodes, listed)
+	// The fake tracker ignores preconditions, so the apiserver's answer to a
+	// UID that no longer matches is played by hand: the pod under that name
+	// is somebody else's replacement now.
+	var got *metav1.Preconditions
+	fakeClient.PrependReactor("delete", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		got = a.(k8stesting.DeleteAction).GetDeleteOptions().Preconditions
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, listed.Name, nil)
+	})
+
+	cfg := testConfig()
+	cfg.SessionImage = "socat:latest"
+	dev := InitRemoteGPUDevice(cfg)
+	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
+	dev.ReconcileSessionStubs(context.Background())
+
+	assert.Assert(t, got != nil && got.UID != nil && *got.UID == listed.UID, "delete is pinned to the UID that was listed")
+	stubs := stubsIn(t, fakeClient)
+	assert.Equal(t, len(stubs), 1)
+	assert.Equal(t, stubEndpoint(&stubs[0]), "10.0.0.9:14833", "the pod under that name is left to whoever replaced it")
 }
 
 func TestReconcileSessionStubs_OffWithoutAnImage(t *testing.T) {

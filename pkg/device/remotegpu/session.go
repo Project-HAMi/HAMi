@@ -96,7 +96,14 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 			delete(wanted, node)
 			continue
 		}
-		if err := c.CoreV1().Pods(namespace).Delete(ctx, stub.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		// Only the pod that was listed. Stub names are fixed per node, and a
+		// leader handing over can overlap the next one for a moment: the
+		// other scheduler may already have replaced this stub under the same
+		// name, and a delete by name alone would take its replacement down.
+		// The UID precondition turns that into a Conflict, which like
+		// NotFound means the pod listed here is already gone.
+		opts := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &stub.UID}}
+		if err := c.CoreV1().Pods(namespace).Delete(ctx, stub.Name, opts); err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 			klog.ErrorS(err, "remotegpu: failed to remove session stub", "pod", stub.Name)
 		}
 	}
