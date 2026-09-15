@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -63,7 +64,8 @@ func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
 
-	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
+	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address, serving /webhook, /refit and the probes")
+	rootCmd.Flags().StringVar(&config.ExtenderBind, "extender-bind", "127.0.0.1:9444", "bind address for the scheduler extender's /filter and /bind, called by the kube-scheduler container in this pod. Point it at a routable address only when kube-scheduler runs outside this pod.")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
@@ -155,38 +157,24 @@ func start() error {
 	// start monitor metrics
 	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
 
-	// start http server
-	router := httprouter.New()
-	router.POST("/filter", routes.PredicateRoute(sher))
-	router.POST("/bind", routes.Bind(sher))
-	router.POST("/refit", routes.NumaRefit(sher))
-	router.POST("/webhook", routes.WebHookRoute())
-	router.GET("/healthz", routes.HealthzRoute())
-	router.GET("/readyz", routes.ReadyzRoute(sher))
-	klog.Info("listen on ", config.HTTPBind)
-
+	router := clusterRouter(sher)
 	if enableProfiling {
 		injectProfilingRoute(router)
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
 	}
 
-	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		server := &http.Server{
-			Addr:              config.HTTPBind,
-			Handler:           router,
-			ReadHeaderTimeout: 15 * time.Second,
-			ReadTimeout:       60 * time.Second,
-		}
-		if err := server.ListenAndServe(); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
-		}
-	} else {
+	if !isLoopbackAddr(config.ExtenderBind) {
+		klog.Warningf("--extender-bind=%s is not a loopback address: /filter and /bind authenticate no caller, "+
+			"so anyone able to reach it can drop a pod's device reservation or have its annotations patched", config.ExtenderBind)
+	}
+
+	var tlsCfg *tls.Config
+	if len(tlsCertFile) > 0 && len(tlsKeyFile) > 0 {
 		certWatcher, err := certwatcher.New(tlsCertFile, tlsKeyFile)
 		if err != nil {
 			return fmt.Errorf("failed to create cert watcher: %w", err)
 		}
-
-		tlsCfg := &tls.Config{
+		tlsCfg = &tls.Config{
 			GetCertificate: certWatcher.GetCertificate,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -196,22 +184,70 @@ func start() error {
 				klog.ErrorS(err, "cert watcher error")
 			}
 		}()
-
-		addr := config.HTTPBind
-		handler := router
-		server := &http.Server{
-			Addr:              addr,
-			Handler:           handler,
-			TLSConfig:         tlsCfg,
-			ReadHeaderTimeout: 15 * time.Second,
-			ReadTimeout:       60 * time.Second,
-		}
-		klog.InfoS("Starting HTTPS server", "address", addr)
-		if err := server.ListenAndServeTLS("", ""); err != nil {
-			return fmt.Errorf("HTTPS server error: %w", err)
-		}
 	}
-	return nil
+
+	// Either listener failing takes the process down: a scheduler that cannot
+	// answer /filter is as unusable as one that cannot answer /webhook.
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- fmt.Errorf("extender server error: %w", serve(config.ExtenderBind, extenderRouter(sher), tlsCfg))
+	}()
+	go func() {
+		errCh <- fmt.Errorf("server error: %w", serve(config.HTTPBind, router, tlsCfg))
+	}()
+	return <-errCh
+}
+
+// extenderRouter serves the scheduler extender verbs. kube-scheduler calls
+// them over the loopback interface it shares with this container, so they are
+// kept off the address the rest of the cluster reaches.
+func extenderRouter(s *scheduler.Scheduler) *httprouter.Router {
+	router := httprouter.New()
+	router.POST("/filter", routes.PredicateRoute(s))
+	router.POST("/bind", routes.Bind(s))
+	return router
+}
+
+// clusterRouter serves the endpoints whose callers live outside this pod:
+// /webhook from kube-apiserver, /refit from the device-plugin, and the probes
+// from kubelet.
+func clusterRouter(s *scheduler.Scheduler) *httprouter.Router {
+	router := httprouter.New()
+	router.POST("/refit", routes.NumaRefit(s))
+	router.POST("/webhook", routes.WebHookRoute())
+	router.GET("/healthz", routes.HealthzRoute())
+	router.GET("/readyz", routes.ReadyzRoute(s))
+	return router
+}
+
+func serve(addr string, handler http.Handler, tlsCfg *tls.Config) error {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		TLSConfig:         tlsCfg,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       60 * time.Second,
+	}
+	if tlsCfg == nil {
+		klog.InfoS("Starting HTTP server", "address", addr)
+		return server.ListenAndServe()
+	}
+	klog.InfoS("Starting HTTPS server", "address", addr)
+	return server.ListenAndServeTLS("", "")
+}
+
+// isLoopbackAddr reports whether addr binds the loopback interface only. An
+// empty host (":9444") binds every interface and is not loopback.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func main() {
