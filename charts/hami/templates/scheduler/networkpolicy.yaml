@@ -1,9 +1,11 @@
 {{- if .Values.scheduler.networkPolicy.enabled }}
-# Restricts who can reach the scheduler extender's HTTP port (serving
-# /filter, /bind, /refit and the admission /webhook -- they all share this
-# one port; NetworkPolicy has no per-path awareness to split them) to the
-# device-plugin's pods and to the kube-system namespace, where kube-scheduler
-# and kube-apiserver normally run. This is defense in depth on top of the
+# Restricts who can reach the scheduler's HTTP port (serving /refit and the
+# admission /webhook -- they share this one port; NetworkPolicy has no
+# per-path awareness to split them) to the device-plugin's pods and to the
+# kube-system namespace, where kube-scheduler and kube-apiserver normally run.
+# /filter and /bind are not on this port: they are served on
+# scheduler.extenderPort, bound to loopback, so no network policy governs them.
+# This is defense in depth on top of the
 # /refit caller authentication (see issue #2878); it does not replace it,
 # and /refit's own TokenReview check is unaffected if this policy is off.
 #
