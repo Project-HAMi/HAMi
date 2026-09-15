@@ -567,29 +567,73 @@ func hamiCoreExclusiveOccupant(dev *device.DeviceUsage) bool {
 	return false
 }
 
-// incomingHamiCoreOnDevice is this pod's cores already placed on dev in the
-// current scheduling pass (prior containers in allocated, plus devices already
-// chosen in this Fit).
-func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices) int32 {
+// incomingHamiCoreOnDevice is the cores this pod concurrently holds on dev
+// while the container being fitted is placed.
+//
+// allocated holds one row per pod container, aligned with container order and
+// including empty rows for containers that request nothing, so the row index
+// identifies the container and therefore its lifecycle stage.
+//
+// Only concurrent usage may be counted, because Kubernetes runs ordinary init
+// containers one at a time: an ordinary init container that has been placed has
+// already exited when the next container is fitted, so its rows must not count.
+// A sidecar init container (restartPolicy Always) keeps running for the whole
+// pod lifetime and stays resident, as do regular containers.
+//
+// This value feeds the `self` argument of hamiCoreIncomingExclusive, which adds
+// the request under judgement itself, so the container being fitted must NOT be
+// included here or its request would be counted twice.
+func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices, pod *corev1.Pod) int32 {
 	var sum int32
-	add := func(devs []device.ContainerDevice) {
+	add := func(devs device.ContainerDevices) {
 		for _, d := range devs {
 			if d.UUID == devID {
 				sum += d.Usedcores
 			}
 		}
 	}
+
+	numInit := 0
+	if pod != nil {
+		numInit = len(pod.Spec.InitContainers)
+	}
+
 	if allocated != nil {
 		for _, podSingle := range *allocated {
-			for _, ctrDevs := range podSingle {
+			for cidx, ctrDevs := range podSingle {
+				if !containerStillRunning(pod, cidx, numInit) {
+					continue
+				}
 				add(ctrDevs)
 			}
 		}
 	}
+
+	// Rows Fit already chose earlier in this same call, for the container being
+	// placed. They are that container's own occupancy, not the request under
+	// judgement, so they belong in `self`.
 	for _, ctrDevs := range tmpDevs {
 		add(ctrDevs)
 	}
 	return sum
+}
+
+// containerStillRunning reports whether the container at row index cidx still
+// occupies its devices while another container of the same pod is being fitted.
+//
+// Ordinary init containers run sequentially, so such a container has exited by
+// the time the next container is fitted. A sidecar init container keeps running
+// for the whole pod lifetime. Regular containers run together.
+func containerStillRunning(pod *corev1.Pod, cidx, numInit int) bool {
+	if cidx < 0 {
+		return false
+	}
+	if cidx < numInit {
+		// Only sidecars survive past the init phase.
+		return pod != nil && cidx < len(pod.Spec.InitContainers) &&
+			util.IsSidecarContainer(&pod.Spec.InitContainers[cidx])
+	}
+	return true
 }
 
 // hamiCoreOthersOnDevice sums cores already held on dev by pods other than
@@ -771,10 +815,12 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			continue
 		}
 		// Incoming pods use the same occupant rule. Fit is per container, so a
-		// pod that reaches the base across several of its own requests must
-		// not share an oversold card once another tenant is already there.
+		// pod that reaches the base across several of its own concurrent
+		// requests must not share an oversold card once another tenant is
+		// already there. Sequential ordinary init containers have already
+		// exited; a sidecar stays counted through the app phase.
 		if (isHAMiCore || nodeSupportHamiCore || dev.Totalcore >= hamiCorePercentBase) &&
-			hamiCoreIncomingExclusive(dev, pod, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs), k.Coresreq) {
+			hamiCoreIncomingExclusive(dev, pod, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs, pod), k.Coresreq) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores, "request cores", k.Coresreq)
 			continue

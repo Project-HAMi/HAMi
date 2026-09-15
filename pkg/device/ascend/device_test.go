@@ -4128,6 +4128,196 @@ func TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity(t *testing.T) {
 // vnpu-mode annotation. Without the annotation isHAMiCore is false, so the
 // budget stays at the advertised Totalcore and the base-equality arm of the
 // exclusivity guard no longer holds once the plugin oversells.
+
+// TestDevices_Fit_HamiCoreOversellSequentialInitConcurrency covers the two
+// lifecycle mistakes of summing every allocated row:
+//
+// Ordinary init containers run one at a time, so an init container that has
+// been placed has already exited when the next container is fitted. Counting its
+// rows as live usage makes sequential init containers look like concurrent
+// tenants and wrongly rejects a pod from an oversold card it can use.
+// alwaysRestartPolicy marks a container as a sidecar (restartPolicy Always).
+var alwaysRestartPolicy = corev1.ContainerRestartPolicyAlways
+
+func TestDevices_Fit_HamiCoreOversellSequentialInitConcurrency(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := func(pod *corev1.Pod) *corev1.Pod {
+		if pod.Annotations == nil {
+			pod.Annotations = map[string]string{}
+		}
+		pod.Annotations[VNPUModeAnnotation] = VNPUModeHamiCore
+		return pod
+	}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+	}
+	applyTenant := func(dev *device.DeviceUsage, cores int32) {
+		tenant := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "default", UID: "tenant-uid"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		dev.Used++
+		dev.Usedcores += cores
+		dev.Usedmem += 4096
+		dev.PodInfos = append(dev.PodInfos, &device.PodInfo{
+			Pod:    tenant,
+			NodeID: "node1",
+			Devices: device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: cores}},
+				},
+			},
+		})
+	}
+
+	t.Run("sequential init containers are not concurrent tenants", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}}, share, pod, nodeInfo, &allocated)
+		if !fit {
+			t.Fatalf("exited init containers must not block the app container, got reason=%s", reason)
+		}
+	})
+
+	t.Run("a resident sidecar is counted while its app container is fitted", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "sidecar-app", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "sc", RestartPolicy: &alwaysRestartPolicy}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 60 {
+			t.Fatalf("a resident sidecar must be counted, got %d want 60", got)
+		}
+	})
+
+	t.Run("exited ordinary init containers are not counted", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 0 {
+			t.Fatalf("exited ordinary init containers must not be summed, got %d want 0", got)
+		}
+	})
+
+	t.Run("regular containers are concurrent with each other", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "two-apps", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app-a"}, {Name: "app-b"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 40}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 40 {
+			t.Fatalf("app containers run together, got %d want 40", got)
+		}
+	})
+
+	t.Run("a sidecar plus app reaching the base refuses another tenant", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "sidecar-app", Namespace: "default", UID: "incoming-uid"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "sc", RestartPolicy: &alwaysRestartPolicy}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyTenant(held, 50)
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, pod, nodeInfo, &allocated)
+		if fit {
+			t.Fatalf("sidecar 50 + app 50 must not share with another tenant")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("sequential inits with another tenant still admit the app", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default", UID: "incoming-uid"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+			},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyTenant(held, 50)
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, pod, nodeInfo, &allocated)
+		if !fit {
+			t.Fatalf("exited sequential inits must not make the pod exclusive, got reason=%s", reason)
+		}
+	})
+}
+
 func TestDevices_Fit_HamiCoreOversellLegacyFullCore(t *testing.T) {
 	enableAscend = true
 	cfg := []VNPUConfig{{
