@@ -924,6 +924,11 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		// Old event still present plus one new event.
 		assert.Equal(t, 2, len(events.Items))
 	})
+
+	t.Run("nil node does not panic", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		EmitNodeWarningEvent(nil, reason, msg1, dedupWindow)
+	})
 }
 
 func TestIsSidecarContainer(t *testing.T) {

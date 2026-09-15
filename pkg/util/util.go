@@ -415,6 +415,10 @@ func IsSidecarContainer(c *corev1.Container) bool {
 
 // EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.
 func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow time.Duration) {
+	if node == nil {
+		klog.Warningf("cannot emit node event: node is nil")
+		return
+	}
 	c := client.GetClient()
 	if c == nil {
 		klog.Warningf("cannot emit node event for %s: Kubernetes client not initialized", node.Name)
