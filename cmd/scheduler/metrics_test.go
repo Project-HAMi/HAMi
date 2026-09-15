@@ -27,6 +27,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -576,6 +577,75 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
 		})
+	}
+}
+
+// The lupine pool is handed to every client node, so the per-node metrics
+// would list each remote card once per node. Those entries are dropped and the
+// pool is exported once, by the server that owns each card.
+func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
+	remote := func() *device.DeviceUsage {
+		return &device.DeviceUsage{ID: "gpu-a/GPU-1", Totalmem: 1024, Totalcore: 100, Type: remotegpu.RemoteGPUCommonWord, Health: true}
+	}
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"cpu-1": {Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{
+			{Device: remote()},
+			{Device: &device.DeviceUsage{ID: "GPU-local", Totalmem: 2048, Totalcore: 100, Usedmem: 512, Type: "NVIDIA", Mode: "hami-core"}},
+		}}},
+		"cpu-2": {Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{{Device: remote()}}}},
+	}
+	prev := remoteGPUPool
+	remoteGPUPool = func() []remotegpu.PoolDevice {
+		return []remotegpu.PoolDevice{
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true,
+				Device: device.DeviceInfo{ID: "gpu-a/GPU-1", Index: 0, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833",
+				Device: device.DeviceInfo{ID: "gpu-a/GPU-2", Index: 1, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
+		}
+	}
+	t.Cleanup(func() { remoteGPUPool = prev })
+
+	cc := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{Zone: "test-zone"},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   device.NewPodManager(),
+		},
+	}
+	want := `
+# HELP hami_gpu_memory_limit_bytes Device memory limit for a certain GPU
+# TYPE hami_gpu_memory_limit_bytes gauge
+hami_gpu_memory_limit_bytes{device_index="0",device_type="NVIDIA",device_uuid="GPU-local",node="cpu-1"} 2.147483648e+09
+# HELP hami_node_gpu_overview GPU overview on a certain node
+# TYPE hami_node_gpu_overview gauge
+hami_node_gpu_overview{device_cores="100",device_index="0",device_memory_limit="2048",device_type="NVIDIA",device_uuid="GPU-local",node="cpu-1"} 5.36870912e+08
+# HELP hami_remote_gpu_allocated 1 if a pod holds this lupine-served GPU, 0 if it is free
+# TYPE hami_remote_gpu_allocated gauge
+hami_remote_gpu_allocated{device_index="0",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1
+hami_remote_gpu_allocated{device_index="1",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 0
+# HELP hami_remote_gpu_memory_limit_bytes Device memory limit for a lupine-served GPU
+# TYPE hami_remote_gpu_memory_limit_bytes gauge
+hami_remote_gpu_memory_limit_bytes{device_index="0",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+hami_remote_gpu_memory_limit_bytes{device_index="1",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+# HELP hami_remote_gpu_overview Memory allocated on a lupine-served GPU, with its server and capacity
+# TYPE hami_remote_gpu_overview gauge
+hami_remote_gpu_overview{device_cores="100",device_index="0",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+hami_remote_gpu_overview{device_cores="100",device_index="1",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 0
+`
+	if err := promtestutil.CollectAndCompare(cc, strings.NewReader(want),
+		"hami_node_gpu_overview", "hami_gpu_memory_limit_bytes",
+		"hami_remote_gpu_allocated", "hami_remote_gpu_memory_limit_bytes", "hami_remote_gpu_overview",
+	); err != nil {
+		t.Errorf("unexpected metrics:\n%s", err)
+	}
+}
+
+// Without the remote-gpu backend configured the collector reports nothing for
+// the pool and does not fail the scrape.
+func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
+	if got := remoteGPUPool(); got != nil {
+		t.Errorf("expected no pool without the backend, got %v", got)
 	}
 }
 

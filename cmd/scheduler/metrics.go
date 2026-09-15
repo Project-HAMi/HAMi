@@ -29,6 +29,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -106,7 +107,18 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectNodeMetrics(ch, nu, legacy)
 	cc.collectQuotaMetrics(ch, legacy)
 	cc.collectContainerMetrics(ch, nu, legacy)
+	cc.collectRemoteGPUMetrics(ch)
 	cc.collectSchedulerStateMetrics(ch)
+}
+
+// remoteGPUPool reads the lupine fleet when the remote-gpu backend is
+// configured and reports nothing otherwise. Swappable for tests.
+var remoteGPUPool = func() []remotegpu.PoolDevice {
+	dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices)
+	if !ok {
+		return nil
+	}
+	return dev.Inspect()
 }
 
 // collectNodeMetrics emits node-level GPU metrics (memory/core limits and
@@ -210,6 +222,13 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
+			if devs.Device.Type == remotegpu.RemoteGPUCommonWord {
+				// The lupine pool is handed to every client node, so reporting
+				// it here would list each card once per node, under a node
+				// that does not own it. collectRemoteGPUMetrics reports the
+				// pool once, by server.
+				continue
+			}
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
 			if devs.Device.Mode == "mig" {
 				for _, allocation := range devs.Device.MigAllocationsInUse {
@@ -408,6 +427,45 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 					}
 				}
 			}
+		}
+	}
+}
+
+// collectRemoteGPUMetrics exports the lupine fleet once, keyed by the server
+// that owns each card rather than the client nodes that can reach it. A card
+// is handed out whole, so allocation is a flag and allocated memory is either
+// the whole card or nothing.
+func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.Metric) {
+	labels := []string{"server", "endpoint", "device_uuid", "device_index", "device_type"}
+	memoryLimitDesc := prometheus.NewDesc(
+		"hami_remote_gpu_memory_limit_bytes",
+		"Device memory limit for a lupine-served GPU",
+		labels, nil,
+	)
+	allocatedDesc := prometheus.NewDesc(
+		"hami_remote_gpu_allocated",
+		"1 if a pod holds this lupine-served GPU, 0 if it is free",
+		labels, nil,
+	)
+	overviewDesc := prometheus.NewDesc(
+		"hami_remote_gpu_overview",
+		"Memory allocated on a lupine-served GPU, with its server and capacity",
+		[]string{"server", "endpoint", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
+	)
+	for _, pd := range remoteGPUPool() {
+		d := pd.Device
+		allocated, usedmem := 0.0, int32(0)
+		if pd.Reserved {
+			allocated, usedmem = 1, d.Devmem
+		}
+		if err := sendMetric(ch, memoryLimitDesc, prometheus.GaugeValue, mibToBytes(d.Devmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_memory_limit_bytes metric: %v", err)
+		}
+		if err := sendMetric(ch, allocatedDesc, prometheus.GaugeValue, allocated, pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_allocated metric: %v", err)
+		}
+		if err := sendMetric(ch, overviewDesc, prometheus.GaugeValue, mibToBytes(usedmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), fmt.Sprint(d.Devcore), fmt.Sprint(d.Devmem), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_overview metric: %v", err)
 		}
 	}
 }
