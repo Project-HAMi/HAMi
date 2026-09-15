@@ -184,6 +184,19 @@ func (dev *NvidiaGPUDevices) CommonWord() string {
 	return NvidiaGPUDevice
 }
 
+// NormalizeDeviceModel returns the card model string HAMi uses for a GPU, both
+// in the node register annotation and in the device_type metric label. NVML
+// reports names with and without the vendor prefix depending on driver
+// generation ("NVIDIA A100-SXM4-40GB" but "Tesla V100-SXM2-16GB"), so only an
+// unprefixed name gets one. Callers must share this so the plugin and the
+// vGPU monitor label the same physical GPU identically.
+func NormalizeDeviceModel(model string) string {
+	if strings.HasPrefix(model, NvidiaGPUDevice) {
+		return model
+	}
+	return NvidiaGPUDevice + "-" + model
+}
+
 func ParseConfig(fs *flag.FlagSet) {
 }
 
