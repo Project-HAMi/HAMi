@@ -112,7 +112,14 @@ type NvidiaConfig struct {
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
 	RuntimeClassName string `yaml:"runtimeClassName"`
+	// SandboxRuntimeClassNames lists the runtime classes that skip the libvgpu.so preload
+	// injection. Empty means DefaultSandboxRuntimeClassNames.
+	SandboxRuntimeClassNames []string `yaml:"sandboxRuntimeClassNames"`
 }
+
+// DefaultSandboxRuntimeClassNames are the gVisor runtime class names: "gvisor" is the
+// conventional RuntimeClass name, "runsc" the handler it registers.
+var DefaultSandboxRuntimeClassNames = []string{"gvisor", "runsc"}
 
 // These configs can be specified for each node by using Nodeconfig.
 type NodeDefaultConfig struct {

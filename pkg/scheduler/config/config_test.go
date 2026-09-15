@@ -229,6 +229,44 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
 }
 
+// Test_LoadConfig_SandboxRuntimeClassNames pins the yaml key the Helm chart renders for the
+// runtime classes that skip the preload injection.
+func Test_LoadConfig_SandboxRuntimeClassNames(t *testing.T) {
+	testCases := []struct {
+		name     string
+		yamlData string
+		expected []string
+	}{
+		{
+			name: "AbsentKeyLeavesTheListEmpty",
+			yamlData: `
+nvidia:
+  resourceCountName: nvidia.com/gpu
+`,
+			expected: nil,
+		},
+		{
+			name: "ListIsParsed",
+			yamlData: `
+nvidia:
+  sandboxRuntimeClassNames:
+  - gvisor
+  - my-sandbox
+`,
+			expected: []string{"gvisor", "my-sandbox"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var configData Config
+			err := yaml.Unmarshal([]byte(testCase.yamlData), &configData)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, testCase.expected, configData.NvidiaConfig.SandboxRuntimeClassNames)
+		})
+	}
+}
+
 func createNvidiaConfig() nvidia.NvidiaConfig {
 	return nvidia.NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
