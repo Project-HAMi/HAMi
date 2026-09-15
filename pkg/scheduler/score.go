@@ -307,7 +307,7 @@ func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs 
 }
 
 func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
-	appIndex := 0
+	appIndex := numInitContainers
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
 			continue
