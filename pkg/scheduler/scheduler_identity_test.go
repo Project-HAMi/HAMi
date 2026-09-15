@@ -87,6 +87,13 @@ func initNvidiaDevices(t *testing.T) {
 // The node chosen during filtering is the only node a pod may be bound to.
 // Honouring a different one would leave the reservation on the scheduled node
 // while the pod consumed devices somewhere else.
+//
+// Reproduce on a cluster: after Filter has picked node-1 for a pod (so the
+// scheduler cache holds that reservation), send /bind for the same pod naming
+// a different node, for example node-2. Before this fix the extender bound
+// it there anyway, since args.Node was trusted outright; the reservation
+// stayed on node-1 while the pod actually ran on node-2. The AddPod call
+// below stands in for that completed Filter step.
 func TestBindRejectsNodeDifferentFromScheduledNode(t *testing.T) {
 	pod := gpuPod("team-a", "gpu-pod", "gpu-pod-uid")
 	s := schedulerWithPods(t, pod)
@@ -111,6 +118,20 @@ func TestBindRejectsNodeDifferentFromScheduledNode(t *testing.T) {
 // The reported attack: a bind request pairs a running pod's UID with a pod
 // name that does not exist. The lookup fails, and the stale-allocation
 // cleanup that follows must not free the devices of whoever holds that UID.
+//
+// Reproduce on a cluster (issue #3030): run team-a/victim with
+// nvidia.com/gpumem: 20000 on a node with one 24 GiB GPU, then from any other
+// pod on that node's network:
+//
+//	curl -sk -X POST https://hami-scheduler.kube-system.svc/bind \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"PodName":"does-not-exist","PodNamespace":"team-b","PodUID":"<victim-uid>","Node":"gpu-node-1"}'
+//
+// Before this fix, the log showed "Pod taken and deleted"
+// pod="team-b/does-not-exist", the victim's GPU memory was freed, and a
+// second pod could be placed on the same GPU. The setup below is that same
+// state (a cached reservation under victim-uid) with the forged request
+// replayed directly against Bind, so it needs no cluster or curl.
 func TestBindDoesNotDropAnotherPodsReservation(t *testing.T) {
 	victim := gpuPod("team-a", "victim", "victim-uid")
 	s := schedulerWithPods(t, victim)
@@ -136,6 +157,13 @@ func TestBindDoesNotDropAnotherPodsReservation(t *testing.T) {
 // A filter request carrying an identity that no longer matches the live pod
 // must be refused before it reserves anything, and before it patches
 // annotations onto the pod whose name it borrowed.
+//
+// Reproduce on a cluster: send /filter with a Pod object naming a real,
+// running pod (team-a/gpu-pod) but a UID that pod no longer has, for example
+// one left over from a prior pod of the same name. Before this fix, Filter
+// scored and reserved devices for that name/namespace and patched
+// hami.io/vgpu-node onto whatever pod team-a/gpu-pod currently is, without
+// ever checking the UID matched.
 func TestFilterRejectsForgedPodIdentityBeforeReservation(t *testing.T) {
 	initNvidiaDevices(t)
 
