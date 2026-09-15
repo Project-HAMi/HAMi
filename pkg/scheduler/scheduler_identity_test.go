@@ -185,3 +185,37 @@ func TestFilterRejectsPodAlreadyAssignedToNode(t *testing.T) {
 	assert.Equal(t, true, ok, "the running pod's reservation was released")
 	assert.Equal(t, 1, len(pi.Devices[nvidia.NvidiaGPUDevice]))
 }
+
+// Leaving the UID out must not be a way around the identity check.
+func TestBindRejectsRequestWithoutUID(t *testing.T) {
+	pod := gpuPod("team-a", "gpu-pod", "gpu-pod-uid")
+	s := schedulerWithPods(t, pod)
+	s.podManager.AddPod(pod, "node-1", device.PodDevices{})
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName:      "gpu-pod",
+		PodNamespace: "team-a",
+		Node:         "node-1",
+	})
+
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(res.Error, "no UID"), "bind result: %q", res.Error)
+}
+
+func TestFilterRejectsRequestWithoutUID(t *testing.T) {
+	initNvidiaDevices(t)
+
+	live := gpuPod("team-a", "gpu-pod", "gpu-pod-uid")
+	s := schedulerWithPods(t, live)
+
+	_, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod:       gpuPod("team-a", "gpu-pod", ""),
+		NodeNames: &[]string{"node-1"},
+	})
+
+	assert.Assert(t, err != nil, "a filter request with no UID should be refused")
+	assert.Assert(t, strings.Contains(err.Error(), "no UID"), "error: %v", err)
+
+	_, cached := s.podManager.GetPod(live)
+	assert.Equal(t, false, cached, "the request reserved devices despite carrying no UID")
+}

@@ -1035,7 +1035,12 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 // annotation patch and the binding itself, all driven by fields the caller
 // supplied.
 func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, current *corev1.Pod) error {
-	if args.PodUID != "" && current.UID != args.PodUID {
+	// An absent UID is refused rather than waved through, otherwise omitting
+	// the field is all it takes to skip the identity check below.
+	if args.PodUID == "" {
+		return fmt.Errorf("bind request for pod %s/%s carries no UID", args.PodNamespace, args.PodName)
+	}
+	if current.UID != args.PodUID {
 		return fmt.Errorf("pod %s/%s has UID %s, bind request carries UID %s",
 			args.PodNamespace, args.PodName, current.UID, args.PodUID)
 	}
@@ -1154,7 +1159,12 @@ func (s *Scheduler) authoritativePod(claimed *corev1.Pod) (*corev1.Pod, error) {
 }
 
 func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
-	if claimed.UID != "" && live.UID != claimed.UID {
+	// An absent UID is refused rather than waved through, otherwise omitting
+	// the field is all it takes to skip the identity check below.
+	if claimed.UID == "" {
+		return nil, fmt.Errorf("filter request for pod %s/%s carries no UID", claimed.Namespace, claimed.Name)
+	}
+	if live.UID != claimed.UID {
 		return nil, fmt.Errorf("pod %s/%s has UID %s, filter request carries UID %s",
 			claimed.Namespace, claimed.Name, live.UID, claimed.UID)
 	}
