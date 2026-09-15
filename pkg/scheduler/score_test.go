@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"flag"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,10 +26,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -4628,5 +4631,312 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 			usage := (*nodes)["node1"].Devices.DeviceLists[0].Device
 			assert.Equal(t, usage.Usedmem, tc.wantUsedmem)
 		})
+	}
+}
+
+// Test_calcScore_AscendHamiCoreOversellConcurrency covers the reported bug that a
+// pod is judged against an allocation history rather than its concurrent usage.
+// Kubernetes runs ordinary init containers one at a time, while sidecar init
+// containers keep running for the whole pod lifetime, and the two differ when a
+// card's exclusivity is decided.
+func Test_calcScore_AscendHamiCoreOversellConcurrency(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	fs := flag.NewFlagSet("ascend-oversell-concurrency", flag.ContinueOnError)
+	ascend.ParseConfig(fs)
+	if err := fs.Parse([]string{"--enable-ascend=true"}); err != nil {
+		t.Fatalf("failed to enable the ascend backend: %v", err)
+	}
+	t.Cleanup(func() {
+		restore := flag.NewFlagSet("ascend-oversell-concurrency-restore", flag.ContinueOnError)
+		ascend.ParseConfig(restore)
+		_ = restore.Parse([]string{"--enable-ascend=false"})
+	})
+
+	sConfig := &config.Config{
+		VNPUs: ascend.VNPUs{
+			HamiVnpuCore: true,
+			Configs: []ascend.VNPUConfig{{
+				CommonWord:         "Ascend910B3",
+				ChipName:           "910B3",
+				ResourceName:       "huawei.com/Ascend910B3",
+				ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+				ResourceCoreName:   "huawei.com/Ascend910B3-core",
+				MemoryAllocatable:  65536,
+				MemoryFactor:       1,
+			}},
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+	if _, ok := device.GetDevices()["Ascend910B3"]; !ok {
+		t.Fatal("the ascend backend was not registered, the test would pass vacuously")
+	}
+
+	always := corev1.ContainerRestartPolicyAlways
+
+	newOversoldNode := func() *map[string]*NodeUsage {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Annotations: map[string]string{
+				ascend.VNPUNodeSelectorAnnotation: "true",
+			},
+		}}
+		return &map[string]*NodeUsage{
+			"node1": {
+				Node:     node,
+				NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+				Devices: policy.DeviceUsageList{
+					Policy: util.GPUSchedulerPolicyBinpack.String(),
+					DeviceLists: []*policy.DeviceListsScore{
+						{Device: &device.DeviceUsage{
+							ID: "dev-0", Index: 0, Type: "Ascend910B3", Health: true,
+							Count: 8, Used: 0,
+							Totalcore: 150, Usedcores: 0,
+							Totalmem: 65536, Usedmem: 0,
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	occupyWithTenant := func(cores int32) *map[string]*NodeUsage {
+		nodes := newOversoldNode()
+		tenant := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "default", UID: types.UID("tenant-uid")},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		for _, dl := range (*nodes)["node1"].Devices.DeviceLists {
+			dl.Device.Used = 1
+			dl.Device.Usedcores = cores
+			dl.Device.Usedmem = 8192
+			dl.Device.PodInfos = []*device.PodInfo{{
+				Pod:    tenant,
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Ascend910B3": device.PodSingleDevice{
+						{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: cores}},
+					},
+				},
+			}}
+		}
+		return nodes
+	}
+
+	ascendReq := func(cores int32, mem int32) device.ContainerDeviceRequests {
+		return device.ContainerDeviceRequests{
+			"Ascend910B3": {
+				Nums: 1, Type: "Ascend910B3",
+				Memreq: mem, MemPercentagereq: 101, Coresreq: cores,
+			},
+		}
+	}
+
+	hamiCorePod := func(name string, initCtrs, ctrs []corev1.Container) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: "default",
+				UID: types.UID(name + "-uid"),
+				Annotations: map[string]string{
+					util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+					util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+					ascend.VNPUModeAnnotation:             ascend.VNPUModeHamiCore,
+				},
+			},
+			Spec: corev1.PodSpec{InitContainers: initCtrs, Containers: ctrs},
+		}
+	}
+
+	plain := func(name string, sidecar bool) corev1.Container {
+		c := corev1.Container{Name: name}
+		if sidecar {
+			c.RestartPolicy = &always
+		}
+		return c
+	}
+
+	t.Run("sequential ordinary init containers do not block the pod", func(t *testing.T) {
+		pod := hamiCorePod("seq-init",
+			[]corev1.Container{plain("init-a", false), plain("init-b", false)},
+			[]corev1.Container{plain("app", false)})
+		reqs := device.PodDeviceRequests{
+			ascendReq(60, 8192),
+			ascendReq(60, 8192),
+			ascendReq(50, 8192),
+		}
+		nodes := newOversoldNode()
+		failedNodes := map[string]string{}
+		got, err := (&Scheduler{}).calcScoreWithOptions(nodes, reqs, pod, failedNodes, false, false)
+		assert.NilError(t, err)
+		assert.Equal(t, len(failedNodes), 0)
+		if len(got.NodeList) != 1 {
+			t.Fatalf("expected the pod to be admitted, got %d nodes", len(got.NodeList))
+		}
+	})
+
+	t.Run("sequential inits with another tenant are still admitted", func(t *testing.T) {
+		// Tenant 50 plus one live init of 60 is 110, which fits 150. Summing
+		// both sequential inits would look like 120 and trip exclusivity.
+		pod := hamiCorePod("seq-init-shared",
+			[]corev1.Container{plain("init-a", false), plain("init-b", false)},
+			[]corev1.Container{plain("app", false)})
+		reqs := device.PodDeviceRequests{
+			ascendReq(60, 8192),
+			ascendReq(60, 8192),
+			ascendReq(50, 8192),
+		}
+		failedNodes := map[string]string{}
+		got, err := (&Scheduler{}).calcScoreWithOptions(occupyWithTenant(50), reqs, pod, failedNodes, false, false)
+		assert.NilError(t, err)
+		assert.Equal(t, len(failedNodes), 0)
+		if len(got.NodeList) != 1 {
+			t.Fatalf("sequential inits must not be treated as a 100-core occupant, got failed=%v", failedNodes)
+		}
+	})
+
+	t.Run("a sidecar and its app container are admitted", func(t *testing.T) {
+		pod := hamiCorePod("sidecar-app",
+			[]corev1.Container{plain("sc", true)},
+			[]corev1.Container{plain("app", false)})
+		reqs := device.PodDeviceRequests{
+			ascendReq(60, 8192),
+			ascendReq(50, 8192),
+		}
+		nodes := newOversoldNode()
+		failedNodes := map[string]string{}
+		got, err := (&Scheduler{}).calcScoreWithOptions(nodes, reqs, pod, failedNodes, false, false)
+		assert.NilError(t, err)
+		assert.Equal(t, len(failedNodes), 0)
+		if len(got.NodeList) != 1 {
+			t.Fatalf("expected the pod to be admitted, got %d nodes", len(got.NodeList))
+		}
+	})
+
+	t.Run("sidecar plus app totaling 100 refuses another tenant", func(t *testing.T) {
+		// App-phase allocated used to omit the sidecar (it stayed in initAllocs),
+		// so 50+50 was admitted beside an existing tenant. The sidecar is still
+		// running, so this pod reaches the exclusive base.
+		pod := hamiCorePod("sidecar-exclusive",
+			[]corev1.Container{plain("sc", true)},
+			[]corev1.Container{plain("app", false)})
+		reqs := device.PodDeviceRequests{
+			ascendReq(50, 8192),
+			ascendReq(50, 8192),
+		}
+		failedNodes := map[string]string{}
+		got, err := (&Scheduler{}).calcScoreWithOptions(occupyWithTenant(50), reqs, pod, failedNodes, false, false)
+		assert.NilError(t, err)
+		if len(got.NodeList) != 0 {
+			t.Fatalf("sidecar 50 + app 50 must not share with another tenant")
+		}
+		if len(failedNodes) == 0 {
+			t.Fatalf("expected a recorded rejection reason")
+		}
+	})
+}
+
+// Test_calcScore_AllocationRowsStayInLockstep pins the invariant the ascend
+// hami-core exclusivity check relies on: the scheduler records exactly one row
+// per pod container for every device type, so all types have the same number of
+// rows and that number is the index of the container being fitted.
+func Test_calcScore_AllocationRowsStayInLockstep(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	fs := flag.NewFlagSet("ascend-row-lockstep", flag.ContinueOnError)
+	ascend.ParseConfig(fs)
+	if err := fs.Parse([]string{"--enable-ascend=true"}); err != nil {
+		t.Fatalf("failed to enable the ascend backend: %v", err)
+	}
+	t.Cleanup(func() {
+		restore := flag.NewFlagSet("ascend-row-lockstep-restore", flag.ContinueOnError)
+		ascend.ParseConfig(restore)
+		_ = restore.Parse([]string{"--enable-ascend=false"})
+	})
+
+	sConfig := &config.Config{
+		VNPUs: ascend.VNPUs{
+			HamiVnpuCore: true,
+			Configs: []ascend.VNPUConfig{
+				{
+					CommonWord:         "Ascend910B3",
+					ChipName:           "910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					MemoryAllocatable:  65536,
+					MemoryFactor:       1,
+				},
+				{
+					CommonWord:         "Ascend910B4",
+					ChipName:           "910B4",
+					ResourceName:       "huawei.com/Ascend910B4",
+					ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B4-core",
+					MemoryAllocatable:  65536,
+					MemoryFactor:       1,
+				},
+			},
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "lockstep", Namespace: "default",
+			UID: types.UID("lockstep-uid"),
+			Annotations: map[string]string{
+				util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+				util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+				ascend.VNPUModeAnnotation:             ascend.VNPUModeHamiCore,
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+	}
+	reqs := device.PodDeviceRequests{
+		{"Ascend910B3": {Nums: 1, Type: "Ascend910B3", Memreq: 8192, MemPercentagereq: 101, Coresreq: 20}},
+		{"Ascend910B4": {Nums: 1, Type: "Ascend910B4", Memreq: 8192, MemPercentagereq: 101, Coresreq: 20}},
+	}
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        "node1",
+		Annotations: map[string]string{ascend.VNPUNodeSelectorAnnotation: "true"},
+	}}
+	var lists []*policy.DeviceListsScore
+	for _, typ := range []string{"Ascend910B3", "Ascend910B4"} {
+		lists = append(lists, &policy.DeviceListsScore{Device: &device.DeviceUsage{
+			ID: "dev-" + typ, Index: 0, Type: typ, Health: true,
+			Count: 8, Totalcore: 150, Totalmem: 65536,
+		}})
+	}
+	nodes := map[string]*NodeUsage{
+		"node1": {
+			Node:     node,
+			NodeInfo: &device.NodeInfo{ID: "node1", Node: node},
+			Devices:  policy.DeviceUsageList{Policy: util.GPUSchedulerPolicyBinpack.String(), DeviceLists: lists},
+		},
+	}
+
+	failedNodes := map[string]string{}
+	got, err := (&Scheduler{}).calcScoreWithOptions(&nodes, reqs, pod, failedNodes, false, false)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+	if len(got.NodeList) != 1 {
+		t.Fatalf("expected the pod to be admitted, got %d nodes", len(got.NodeList))
+	}
+
+	wantRows := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
+	for typ, rows := range got.NodeList[0].Devices {
+		if len(rows) != wantRows {
+			t.Fatalf("device type %s recorded %d rows, want %d (one per container); "+
+				"pkg/device/ascend derives the container index from this row count",
+				typ, len(rows), wantRows)
+		}
 	}
 }
