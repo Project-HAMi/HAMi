@@ -155,16 +155,29 @@ func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	return pi.Snapshot(), true
 }
 
+// TakeAndDeletePod removes the cached allocation for pod and returns it. The
+// UID keys the map, but the name and namespace are checked against the cached
+// pod as well: /filter and /bind take all three from the request body, so a
+// caller pairing one pod's UID with another pod's name must not be able to
+// free a reservation that is still in use.
 func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	pi, ok := m.pods[pod.UID]
-	if ok {
-		delete(m.pods, pod.UID)
-		klog.InfoS("Pod taken and deleted", "pod", klog.KRef(pod.Namespace, pod.Name), "nodeID", pi.NodeID)
+	if !ok {
+		return nil, false
 	}
-	return pi, ok
+	if pi.Pod != nil && (pi.Pod.Name != pod.Name || pi.Pod.Namespace != pod.Namespace) {
+		klog.InfoS("Refusing to delete cached pod, the request names a different pod than the UID holds",
+			"requested", klog.KRef(pod.Namespace, pod.Name),
+			"cached", klog.KObj(pi.Pod),
+			"uid", pod.UID)
+		return nil, false
+	}
+	delete(m.pods, pod.UID)
+	klog.InfoS("Pod taken and deleted", "pod", klog.KRef(pod.Namespace, pod.Name), "nodeID", pi.NodeID)
+	return pi, true
 }
 
 // ReplacePodDevices swaps the tracked devices for pod and returns the
