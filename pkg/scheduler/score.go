@@ -83,7 +83,15 @@ func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
 	return types
 }
 
+type quotaAwareDevice interface {
+	FitWithQuota(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated, quotaAllocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string)
+}
+
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices, weights util.DeviceScoringWeights) (bool, string) {
+	return fitInDevicesWithQuota(node, requests, pod, nodeInfo, devinput, devinput, weights)
+}
+
+func fitInDevicesWithQuota(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput, quotaInput *device.PodDevices, weights util.DeviceScoringWeights) (bool, string) {
 	// Compute scores for all devices based on the request.
 	for index := range node.Devices.DeviceLists {
 		node.Devices.DeviceLists[index].ComputeScore(requests, weights)
@@ -110,7 +118,14 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 			return false, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(typeDevices)}, int(k.Nums))
 		}
 
-		fit, tmpDevs, reason := devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
+		var fit bool
+		var tmpDevs map[string]device.ContainerDevices
+		var reason string
+		if quotaAware, ok := devPlugin.(quotaAwareDevice); ok {
+			fit, tmpDevs, reason = quotaAware.FitWithQuota(typeDevices, k, pod, nodeInfo, devinput, quotaInput)
+		} else {
+			fit, tmpDevs, reason = devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
+		}
 		if !fit {
 			return false, reason
 		}
@@ -264,6 +279,32 @@ func sidecarInitIndexes(task *corev1.Pod) map[int]struct{} {
 	return idx
 }
 
+func activeInitAllocations(initAllocs device.PodDevices, sidecarIdx map[int]struct{}) device.PodDevices {
+	active := make(device.PodDevices, len(initAllocs))
+	for devType, rows := range initAllocs {
+		active[devType] = make(device.PodSingleDevice, len(rows))
+		for idx := range rows {
+			if _, isSidecar := sidecarIdx[idx]; isSidecar {
+				active[devType][idx] = rows[idx].DeepCopy()
+			}
+		}
+	}
+	return active
+}
+
+func completeAllocationHistory(initAllocs, activeAllocs device.PodDevices, numInitContainers int) device.PodDevices {
+	complete := initAllocs.DeepCopy()
+	for devType, rows := range activeAllocs {
+		if _, ok := complete[devType]; !ok {
+			complete[devType] = make(device.PodSingleDevice, numInitContainers)
+		}
+		if len(rows) > numInitContainers {
+			complete[devType] = append(complete[devType], rows[numInitContainers:].DeepCopy()...)
+		}
+	}
+	return complete
+}
+
 func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
 	initAllocs := make(device.PodDevices)
 
@@ -304,8 +345,8 @@ func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs 
 	return initAllocs, true, ""
 }
 
-func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
-	appIndex := 0
+func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, initAllocs device.PodDevices, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
+	appIndex := numInitContainers
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
 			continue
@@ -321,7 +362,11 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			appIndex++
 			continue
 		}
-		fit, reason := fitInDevices(appNodeCopy, n, task, nodeInfo, &score.Devices, weights)
+		quotaAllocs := score.Devices
+		if numInitContainers > 0 {
+			quotaAllocs = completeAllocationHistory(initAllocs, score.Devices, numInitContainers)
+		}
+		fit, reason := fitInDevicesWithQuota(appNodeCopy, n, task, nodeInfo, &score.Devices, &quotaAllocs, weights)
 		if !fit {
 			klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 			return reason, false
@@ -379,16 +424,14 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 			return nodeScoreResult{reason: reason}
 		}
 		initAllocs = allocs
+		score.Devices = activeInitAllocations(initAllocs, sidecarIdx)
 	}
 
-	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
+	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, initAllocs, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
-
-	if numInitContainers > 0 && initAllocs != nil {
-		for devType, initConList := range initAllocs {
-			score.Devices[devType] = append(initConList, score.Devices[devType]...)
-		}
+	if numInitContainers > 0 {
+		score.Devices = completeAllocationHistory(initAllocs, score.Devices, numInitContainers)
 	}
 
 	applyPeakUsage(node, appNodeCopy, peakUsage)

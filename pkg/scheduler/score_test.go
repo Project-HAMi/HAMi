@@ -33,6 +33,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -56,6 +57,113 @@ func TestMain(m *testing.M) {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 	m.Run()
+}
+
+func TestScoreNodeQuotaPreservesInitContainerPositions(t *testing.T) {
+	const namespace = "score-init-position-quota"
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-memory", Namespace: namespace},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			"limits.hami.io/gpumem": resource.MustParse("24000"),
+		}},
+	}
+	manager := device.NewQuotaManager()
+	manager.AddQuota(quota)
+	t.Cleanup(func() { manager.DelQuota(quota) })
+
+	gpuContainer := func(name string, percentage int64, sidecar bool) corev1.Container {
+		container := corev1.Container{
+			Name: name,
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":               resource.MustParse("1"),
+				"hami.io/gpumem-percentage": *resource.NewQuantity(percentage, resource.DecimalSI),
+			}},
+		}
+		if sidecar {
+			always := corev1.ContainerRestartPolicyAlways
+			container.RestartPolicy = &always
+		}
+		return container
+	}
+
+	tests := []struct {
+		name   string
+		inits  []corev1.Container
+		apps   []corev1.Container
+		fits   bool
+		usedMB int32
+	}{
+		{name: "no init over quota", apps: []corev1.Container{gpuContainer("app-a", 40, false), gpuContainer("app-b", 40, false)}},
+		{name: "non-GPU init does not hide an app", inits: []corev1.Container{{Name: "setup"}}, apps: []corev1.Container{gpuContainer("app-a", 40, false), gpuContainer("app-b", 40, false)}},
+		{name: "GPU init does not hide an app", inits: []corev1.Container{gpuContainer("init", 30, false)}, apps: []corev1.Container{gpuContainer("app-a", 40, false), gpuContainer("app-b", 40, false)}},
+		{name: "native sidecar and app are concurrent", inits: []corev1.Container{gpuContainer("sidecar", 40, true)}, apps: []corev1.Container{gpuContainer("app", 40, false)}},
+		{name: "sequential GPU init and app reuse", inits: []corev1.Container{gpuContainer("init", 50, false)}, apps: []corev1.Container{gpuContainer("app", 40, false)}, fits: true, usedMB: 20000},
+		{name: "non-GPU init leaves valid apps unchanged", inits: []corev1.Container{{Name: "setup"}}, apps: []corev1.Container{gpuContainer("app-a", 20, false), gpuContainer("app-b", 20, false)}, fits: true, usedMB: 16000},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "quota-test", Namespace: namespace},
+				Spec:       corev1.PodSpec{InitContainers: tc.inits, Containers: tc.apps},
+			}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-node"}}
+			usage := &NodeUsage{
+				Node:     node,
+				NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+				Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{{
+					Device: &device.DeviceUsage{ID: "gpu-0", Type: nvidia.NvidiaGPUDevice, Health: true, Count: 10, Totalmem: 40000, Totalcore: 100},
+				}}},
+			}
+			nodes := map[string]*NodeUsage{node.Name: usage}
+			failedNodes := map[string]string{}
+			got, err := (&Scheduler{}).calcScoreWithOptions(&nodes, device.Resourcereqs(pod), pod, failedNodes, false, false)
+			assert.NilError(t, err)
+			if !tc.fits {
+				assert.Equal(t, len(got.NodeList), 0)
+				assert.Assert(t, strings.Contains(failedNodes[node.Name], common.ResourceQuotaNotFit), "failure reason: %q", failedNodes[node.Name])
+				assert.Equal(t, usage.Devices.DeviceLists[0].Device.Usedmem, int32(0))
+				return
+			}
+			assert.Equal(t, len(got.NodeList), 1)
+			assert.Equal(t, len(got.NodeList[0].Devices[nvidia.NvidiaGPUDevice]), len(tc.inits)+len(tc.apps))
+			assert.Equal(t, usage.Devices.DeviceLists[0].Device.Usedmem, tc.usedMB)
+		})
+	}
+}
+
+func TestScoreNodeRegularMthreadsInitDoesNotConstrainAppPlacement(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mthreads-init", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+	}
+	requests := device.PodDeviceRequests{
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 8000, Coresreq: 10}},
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 2000, Coresreq: 50}},
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "mthreads-node"}}
+	usage := &NodeUsage{
+		Node:     node,
+		NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+		Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{
+			{Device: &device.DeviceUsage{ID: "gpu-a", Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 4000, Totalcore: 100}},
+			{Device: &device.DeviceUsage{ID: "gpu-b", Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 10000, Totalcore: 20}},
+		}},
+	}
+	nodes := map[string]*NodeUsage{node.Name: usage}
+	failedNodes := map[string]string{}
+
+	got, err := (&Scheduler{}).calcScoreWithOptions(&nodes, requests, pod, failedNodes, false, false)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+	assert.Equal(t, len(got.NodeList), 1)
+	allocations := got.NodeList[0].Devices[mthreads.MthreadsGPUDevice]
+	assert.Equal(t, len(allocations), 2)
+	assert.Equal(t, allocations[0][0].UUID, "gpu-b")
+	assert.Equal(t, allocations[1][0].UUID, "gpu-a")
 }
 
 // test case matrix
