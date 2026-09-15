@@ -1100,7 +1100,20 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-	resourceReqs := device.Resourcereqs(args.Pod)
+	resourceReqs, reqErr := device.Resourcereqs(args.Pod)
+	if reqErr != nil {
+		// A container declared HAMi resources but the request is invalid
+		// (for example a core limit out of the 0-100 range). Failing closed
+		// rejects the pod here; treating it as device-less would bind it
+		// with no device at all.
+		err := fmt.Errorf("invalid device request for pod %v: %w", args.Pod.Name, reqErr)
+		klog.ErrorS(nil, "Rejecting pod with an invalid device request", "pod", klog.KObj(args.Pod), "error", reqErr)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		return &extenderv1.ExtenderFilterResult{
+			FailedNodes: map[string]string{},
+			Error:       err.Error(),
+		}, err
+	}
 
 	hasHAMiResource := false
 

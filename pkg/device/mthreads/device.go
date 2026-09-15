@@ -199,7 +199,7 @@ func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 	return true, true
 }
 
-func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count mthreads devices for container ", ctr.Name)
 	mthreadsResourceCount := corev1.ResourceName(MthreadsResourceCount)
 	mthreadsResourceMem := corev1.ResourceName(MthreadsResourceMemory)
@@ -213,8 +213,13 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			klog.InfoS("Detected mthreads device request",
 				"container", ctr.Name,
 				"deviceCount", n)
-			if n <= 0 || n > math.MaxInt32 {
-				return device.ContainerDeviceRequest{}
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mthreadsResourceMem]
@@ -226,7 +231,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "mthreads memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 				klog.InfoS("Memory allocation calculated",
@@ -241,9 +246,33 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			}
 			if ok {
 				corenums, ok := core.AsInt64()
-				if !ok || corenums < 0 || corenums > 100 {
-					klog.ErrorS(nil, "mthreads core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
-					return device.ContainerDeviceRequest{}
+				if !ok || corenums < 0 {
+					klog.ErrorS(nil, "mthreads core request is not a non-negative integer", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %s is not a non-negative integer", core.String())}
+				}
+				// Coresreq is a per card value. With more than one device the
+				// limit held here is always a total across the cards, never a
+				// per card value, because MutateAdmission overwrites the core
+				// limit with count*coresPerMthreadsGPU (16) whenever count > 1.
+				// So the total is divided back unconditionally.
+				//
+				// This deliberately does not copy the iluvatar backend's
+				// "corenums > 100 && n > 1" gate. That gate works there because
+				// iluvatar writes count*100, so every multi card total exceeds
+				// 100. Here a total is count*16, which for 2 to 6 cards is 32 to
+				// 96, all at or below 100, so gating on > 100 would leave those
+				// totals undivided and report 16 times too many cores per card.
+				// The per card limit is still enforced, just after the division.
+				if n > 1 {
+					if corenums%n != 0 {
+						klog.ErrorS(nil, "mthreads core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d does not divide evenly across %d devices", corenums, n)}
+					}
+					corenums /= n
+				}
+				if corenums > 100 {
+					klog.ErrorS(nil, "mthreads core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
 				corenum = int32(corenums)
 			}
@@ -258,11 +287,17 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				Type:             MthreadsGPUDevice,
 				Memreq:           int32(memnum) / int32(n),
 				MemPercentagereq: int32(mempnum),
-				Coresreq:         corenum / int32(n),
-			}
+				Coresreq:         corenum,
+			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "mthreads device count request is not a plain integer", "container", ctr.Name, "request", v.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %s is not a plain integer", v.String())}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *MthreadsDevices) customFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, device *device.DeviceUsage) bool {

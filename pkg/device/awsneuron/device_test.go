@@ -649,7 +649,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			dev := InitAWSNeuronDevice(config)
 			dev.coresPerAWSNeuron = 2
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

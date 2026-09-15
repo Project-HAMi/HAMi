@@ -18,6 +18,7 @@ package mthreads
 
 import (
 	"flag"
+	"fmt"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -709,7 +710,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			InitMthreadsDevice(config)
 			dev := MthreadsDevices{}
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -1445,4 +1446,134 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
 	})
+}
+
+// TestGenerateResourceRequests_MultiCardCoresDivision covers the case from
+// issue #2987: MutateAdmission rewrites the core limit to count*16 when more
+// than one device is requested, and GenerateResourceRequests has to divide it
+// back to the per card value instead of silently dropping or misreporting it.
+func TestGenerateResourceRequests_MultiCardCoresDivision(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu": resource.MustParse("7"),
+			},
+		},
+	}
+	// What MutateAdmission writes for a 7 card request without explicit
+	// per card cores.
+	mutated, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Assert(t, mutated)
+	mutatedCore := ctr.Resources.Limits["mthreads.com/sgpu-core"]
+	assert.Equal(t, mutatedCore.Value(), int64(112))
+
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
+	assert.Equal(t, result.Nums, int32(7))
+	assert.Equal(t, result.Coresreq, int32(16))
+}
+
+// TestGenerateResourceRequests_UnevenCoresFailsClosed makes sure a core total
+// that does not divide evenly across the requested cards is rejected instead
+// of producing a device-less pod.
+func TestGenerateResourceRequests_UnevenCoresFailsClosed(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu":      resource.MustParse("3"),
+				"mthreads.com/sgpu-core": resource.MustParse("130"),
+			},
+		},
+	}
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+	assert.ErrorContains(t, err, "does not divide evenly")
+}
+
+// TestGenerateResourceRequests_MultiCardCoresPerCard makes sure that with
+// multiple devices every core total, including ones at or below 100 that
+// MutateAdmission can produce (count*16), is divided back to the per card
+// value and checked against the per card limit.
+func TestGenerateResourceRequests_MultiCardCoresPerCard(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	for cards := int64(2); cards <= 6; cards++ {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"mthreads.com/vgpu":      resource.MustParse(fmt.Sprint(cards)),
+					"mthreads.com/sgpu-core": resource.MustParse(fmt.Sprint(cards * 16)),
+				},
+			},
+		}
+		result, err := dev.GenerateResourceRequests(ctr)
+		assert.NilError(t, err)
+		assert.Equal(t, result.Nums, int32(cards))
+		assert.Equal(t, result.Coresreq, int32(16))
+	}
+}
+
+// TestGenerateResourceRequests_MultiCardCoresAreAlwaysATotal pins why the
+// division above is unconditional for n > 1 rather than gated on a value above
+// 100 the way the iluvatar backend gates it.
+//
+// A user-supplied per card value cannot survive to GenerateResourceRequests
+// when more than one card is requested: MutateAdmission overwrites the core
+// limit with count*16 first. So a spec asking for 2 cards at 60 cores each is
+// rewritten to a total of 32 and read back as 16 per card, and the "60 becomes
+// 30" reading never arises. Gating the division on a value above 100 would
+// instead leave the count*16 totals for 2 to 6 cards (32 to 96) undivided.
+func TestGenerateResourceRequests_MultiCardCoresAreAlwaysATotal(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	InitMthreadsDevice(config)
+	dev := MthreadsDevices{}
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"mthreads.com/vgpu":      resource.MustParse("2"),
+				"mthreads.com/sgpu-core": resource.MustParse("60"),
+			},
+		},
+	}
+
+	mutated, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Assert(t, mutated)
+
+	// The per card 60 is gone by the time the request is generated.
+	rewritten := ctr.Resources.Limits["mthreads.com/sgpu-core"]
+	assert.Equal(t, rewritten.Value(), int64(32))
+
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
+	assert.Equal(t, result.Nums, int32(2))
+	assert.Equal(t, result.Coresreq, int32(16))
 }

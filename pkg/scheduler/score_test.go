@@ -4437,8 +4437,8 @@ func (m *fitMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, err
 }
 func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *fitMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 func (m *fitMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil

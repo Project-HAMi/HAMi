@@ -610,7 +610,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			dev := HCUDevices{}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -687,7 +687,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			dev := HCUDevices{}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -713,7 +713,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 			},
 		},
 	}
-	result := dev.GenerateResourceRequests(ctr)
+	result, _ := dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
@@ -1574,7 +1574,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
 				assert.Equal(t, req.Nums, int32(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)

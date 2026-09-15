@@ -127,8 +127,8 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			return admission.Denied("pod has node assigned")
 		}
 	}
-	if !fitResourceQuota(pod) {
-		return admission.Denied("exceeding resource quota")
+	if err := fitResourceQuota(pod); err != nil {
+		return admission.Denied(err.Error())
 	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
@@ -158,7 +158,7 @@ func isPrivilegedContainer(ctr *corev1.Container) bool {
 		*ctr.SecurityContext.Privileged
 }
 
-func fitResourceQuota(pod *corev1.Pod) bool {
+func fitResourceQuota(pod *corev1.Pod) error {
 	for deviceName, dev := range device.GetDevices() {
 		resourceNames := dev.GetResourceNames()
 		if len(resourceNames.ResourceMemoryName) == 0 && len(resourceNames.ResourceCoreName) == 0 {
@@ -171,7 +171,10 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// so this keeps admission and the scheduler on the same numbers.
 		var appMemoryReq, appCoresReq int64
 		for i := range pod.Spec.Containers {
-			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+			req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if reqErr != nil {
+				return reqErr
+			}
 			if req.Nums == 0 {
 				continue
 			}
@@ -183,7 +186,10 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		var sidecarMemoryReq, sidecarCoresReq int64
 		for i := range pod.Spec.InitContainers {
 			c := &pod.Spec.InitContainers[i]
-			req := dev.GenerateResourceRequests(c)
+			req, reqErr := dev.GenerateResourceRequests(c)
+			if reqErr != nil {
+				return reqErr
+			}
 			if req.Nums == 0 {
 				continue
 			}
@@ -209,8 +215,8 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		klog.V(5).Infof("Checking quota for device %s: memory %d, cores %d, factor %d", deviceName, memoryReq, coresReq, resourceNames.MemoryFactor)
 		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, resourceNames.MemoryFactor, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
-			return false
+			return fmt.Errorf("exceeding resource quota for device %s", deviceName)
 		}
 	}
-	return true
+	return nil
 }

@@ -1428,14 +1428,14 @@ func (m *mockDevices) GetNodeDevices(_ corev1.Node) ([]*DeviceInfo, error) {
 }
 func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *mockDevices) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest {
+func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) (ContainerDeviceRequest, error) {
 	// Return the mock request only if the container has the resource annotation we look for
 	for rName := range ctr.Resources.Limits {
 		if string(rName) == "nvidia.com/gpu" {
-			return m.resourceRequest
+			return m.resourceRequest, nil
 		}
 	}
-	return ContainerDeviceRequest{}
+	return ContainerDeviceRequest{}, nil
 }
 func (m *mockDevices) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ PodDevices) map[string]string {
 	return nil
@@ -1485,7 +1485,7 @@ func TestResourcereqs_OnlyRegularContainers(t *testing.T) {
 		},
 	}
 
-	counts := Resourcereqs(pod)
+	counts, _ := Resourcereqs(pod)
 
 	// No init containers, so length == number of regular containers
 	assert.Equal(t, len(counts), 1)
@@ -1542,7 +1542,7 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 		},
 	}
 
-	counts := Resourcereqs(pod)
+	counts, _ := Resourcereqs(pod)
 
 	assert.Equal(t, len(counts), 3, "Should have 3 container request maps")
 
@@ -1568,7 +1568,7 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 
 func TestResourcereqs_EmptyPod(t *testing.T) {
 	pod := &corev1.Pod{Spec: corev1.PodSpec{}}
-	counts := Resourcereqs(pod)
+	counts, _ := Resourcereqs(pod)
 	assert.Equal(t, len(counts), 0)
 }
 
@@ -1612,7 +1612,7 @@ func TestResourcereqs_NoDeviceRequests(t *testing.T) {
 		},
 	}
 
-	counts := Resourcereqs(pod)
+	counts, _ := Resourcereqs(pod)
 
 	// Total = 1 init + 1 regular = 2
 	assert.Equal(t, len(counts), 2)
@@ -1681,7 +1681,7 @@ func TestResourcereqs_MultipleInitAndRegularContainers(t *testing.T) {
 		},
 	}
 
-	counts := Resourcereqs(pod)
+	counts, _ := Resourcereqs(pod)
 
 	// Total = 2 init + 2 regular = 4
 	assert.Equal(t, len(counts), 4)
