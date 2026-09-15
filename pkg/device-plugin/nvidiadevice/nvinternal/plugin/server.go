@@ -62,6 +62,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
@@ -119,12 +120,20 @@ type NvidiaDevicePlugin struct {
 	// Protected by applyMutex; only UUIDs of successfully destroyed instances.
 	pendingCDIRemovals map[string]struct{}
 	deviceCache        string
+	listNodePods       func() ([]*corev1.Pod, error)
+	prepareCache       func(string, string) (string, error)
 
 	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
 	// mutation (enable, allocate, disable). Construction does not initialize
 	// NVML; Start/Stop pair Init and Shutdown. The annotation reconciler runs
 	// only when operatingMode == "mig".
 	migMgr *MigInstanceManager
+	// migPrimed prevents reconciliation from releasing instances before the
+	// manager has adopted the informer snapshot's active allocations.
+	migPrimed bool
+	// migResetDeviceCount retains the startup allowlist decision for delayed
+	// initialization. Both fields are protected by applyMutex.
+	migResetDeviceCount int
 
 	imexChannels imex.Channels
 
@@ -260,6 +269,8 @@ func (o *options) newNvidiaDevicePlugin(
 		migMgr:                     migMgr,
 		imexChannels:               o.imexChannels,
 		deviceCache:                "",
+		listNodePods:               o.listNodePods,
+		prepareCache:               o.prepareVGPUCache,
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -354,14 +365,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	if err = plugin.applyStartupMigMode(deviceNumbers, deviceNames); err != nil {
 		return err
 	}
-	if plugin.operatingMode == nvidia.MigMode && plugin.deviceListStrategies.AnyCDIEnabled() {
-		if err := plugin.recoverDynamicMIGCDI(); err != nil {
-			return fmt.Errorf("recover dynamic MIG CDI entries: %w", err)
-		}
-		if err := plugin.cdiHandler.CreateSpecFile(); err != nil {
-			return fmt.Errorf("create parent GPU CDI spec after MIG recovery: %w", err)
-		}
-	}
 
 	err = plugin.Serve()
 	if err != nil {
@@ -405,10 +408,12 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	return nil
 }
 
-func (plugin *NvidiaDevicePlugin) activeMigAllocationKeys(pods []corev1.Pod) (map[migAllocationKey]struct{}, error) {
+func (plugin *NvidiaDevicePlugin) activeMigAllocationKeys(pods []*corev1.Pod) (map[migAllocationKey]struct{}, error) {
 	active := make(map[migAllocationKey]struct{})
-	for i := range pods {
-		pod := &pods[i]
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
@@ -477,9 +482,44 @@ func uint32Ptr(value uint32) *uint32 {
 }
 
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
-	active, err := plugin.listActiveMigAllocationKeys()
+	plugin.applyMutex.Lock()
+	defer plugin.applyMutex.Unlock()
+	return plugin.reconcileActiveMigAllocationsLocked()
+}
+
+// reconcileActiveMigAllocationsLocked requires applyMutex, also held throughout
+// Allocate so recovery and cleanup cannot interleave with instance creation.
+func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
+	pods, err := plugin.listNodePodSnapshot()
 	if err != nil {
 		return err
+	}
+	active, err := plugin.activeMigAllocationKeys(pods)
+	if err != nil {
+		return err
+	}
+	if !plugin.migPrimed {
+		if err := plugin.primeMigManagerFromPods(pods); err != nil {
+			return fmt.Errorf("prime MIG manager from Pod cache: %w", err)
+		}
+		inUse, err := plugin.migMgr.collectInUseGPUs(pods)
+		if err != nil {
+			return err
+		}
+		reset, err := plugin.migMgr.ResetIdleGPUs(plugin.migResetDeviceCount, inUse)
+		if err != nil {
+			return fmt.Errorf("reset idle GPUs during MIG initialization: %w", err)
+		}
+		klog.InfoS("mig init: resolved startup layout", "inUseGPUs", sortedIntSetKeys(inUse), "resetGPUs", reset)
+		if plugin.deviceListStrategies.AnyCDIEnabled() {
+			if err := plugin.recoverDynamicMIGCDI(); err != nil {
+				return fmt.Errorf("recover dynamic MIG CDI entries: %w", err)
+			}
+			if err := plugin.cdiHandler.CreateSpecFile(); err != nil {
+				return fmt.Errorf("create parent GPU CDI spec after MIG recovery: %w", err)
+			}
+		}
+		plugin.migPrimed = true
 	}
 	destroyed, err := plugin.migMgr.ReconcileActiveAllocationsWithDestroyed(active)
 	if !plugin.deviceListStrategies.AnyCDIEnabled() {
@@ -512,25 +552,18 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
 	return err
 }
 
-func (plugin *NvidiaDevicePlugin) listActiveMigAllocationKeys() (map[migAllocationKey]struct{}, error) {
-	pods, err := client.GetClient().CoreV1().Pods("").List(plugin.operationContext(), metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + os.Getenv(util.NodeNameEnvName),
-	})
-	if err != nil {
-		return nil, err
+func (plugin *NvidiaDevicePlugin) listNodePodSnapshot() ([]*corev1.Pod, error) {
+	if plugin.listNodePods == nil {
+		return nil, errors.New("node Pod informer is not configured")
 	}
-	return plugin.activeMigAllocationKeys(pods.Items)
+	return plugin.listNodePods()
 }
 
-func (plugin *NvidiaDevicePlugin) primeMigManagerFromAnnotations(_ []string) error {
-	pods, err := client.GetClient().CoreV1().Pods("").List(plugin.operationContext(), metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + os.Getenv(util.NodeNameEnvName),
-	})
-	if err != nil {
-		return err
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
+func (plugin *NvidiaDevicePlugin) primeMigManagerFromPods(pods []*corev1.Pod) error {
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
@@ -539,6 +572,12 @@ func (plugin *NvidiaDevicePlugin) primeMigManagerFromAnnotations(_ []string) err
 			return err
 		}
 		for _, allocation := range allocations {
+			// A Pending Pod can have scheduler reservations before Allocate
+			// creates any runtime identity. Its placement remains in active.
+			// DecodeMigAllocations already rejects partially populated identity.
+			if allocation.MigUUID == "" && pod.Status.Phase == corev1.PodPending {
+				continue
+			}
 			if allocation.MigUUID == "" || allocation.GPUInstanceID == nil || allocation.ComputeInstanceID == nil {
 				return fmt.Errorf("active pod %s/%s MIG allocation lacks runtime identity", pod.Namespace, pod.Name)
 			}
@@ -634,13 +673,11 @@ func (plugin *NvidiaDevicePlugin) runMigAnnotationReconciler(interval time.Durat
 		case <-plugin.operationContext().Done():
 			return
 		case <-ticker.C:
-			plugin.applyMutex.Lock()
 			if err := plugin.reconcileActiveMigAllocations(); err != nil {
 				// Reconciliation is destructive, so API or annotation errors are
 				// fail-closed and leave current MIG instances untouched.
 				klog.InfoS("periodic MIG reconciliation skipped", "err", err)
 			}
-			plugin.applyMutex.Unlock()
 		}
 	}
 }
@@ -655,7 +692,28 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 	if plugin.migMgr == nil {
 		return fmt.Errorf("MIG manager is not configured")
 	}
-	inUse, detectErr := plugin.migMgr.collectInUseGPUs(plugin.operationContext(), os.Getenv(util.NodeNameEnvName))
+	plugin.applyMutex.Lock()
+	defer plugin.applyMutex.Unlock()
+	if plugin.operatingMode == nvidia.MigMode {
+		// Init clears allocations for each NVML session. Defer both hardware
+		// recovery and CDI publication until the shared Pod cache is synced.
+		plugin.migPrimed = false
+		plugin.migResetDeviceCount = deviceNumbers
+		if err := plugin.reconcileActiveMigAllocationsLocked(); err != nil {
+			// CDI recovery errors must still fail startup. An unsynced informer
+			// is retried before Allocate can publish a new dynamic MIG device.
+			if plugin.deviceListStrategies.AnyCDIEnabled() && !errors.Is(err, nodepodinformer.ErrNotSynced) {
+				return err
+			}
+			klog.InfoS("mig init: initialization deferred", "err", err)
+		}
+		return nil
+	}
+	pods, detectErr := plugin.listNodePodSnapshot()
+	var inUse map[int]struct{}
+	if detectErr == nil {
+		inUse, detectErr = plugin.migMgr.collectInUseGPUs(pods)
+	}
 	if detectErr != nil {
 		// Startup reset/disable is destructive. If Kubernetes allocation
 		// state cannot be read reliably, preserve every GPU rather than
@@ -667,19 +725,6 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 		for i := 0; i < deviceNumbers; i++ {
 			inUse[i] = struct{}{}
 		}
-	}
-	if plugin.operatingMode == nvidia.MigMode {
-		reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
-		if err != nil {
-			klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
-		}
-		klog.InfoS("mig init: resolved startup layout",
-			"inUseGPUs", sortedIntSetKeys(inUse),
-			"resetGPUs", reset)
-		if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
-			klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
-		}
-		return nil
 	}
 	disabled, err := plugin.migMgr.DisableIdleGPUs(deviceNumbers, inUse)
 	if err != nil {
@@ -1236,11 +1281,15 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				if plugin.schedulerConfig.DisableCoreLimit {
 					response.Envs[util.CoreLimitSwitch] = "disable"
 				}
-				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-				os.RemoveAll(cacheFileHostDirectory)
-
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
+				if plugin.prepareCache == nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, errors.New("vGPU cache manager is not configured")
+				}
+				cacheFileHostDirectory, err := plugin.prepareCache(string(current.UID), currentCtr.Name)
+				if err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("prepare vGPU cache directory: %w", err)
+				}
 				if err := prepareHostPIDLockParentForAllocation(); err != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf(

@@ -21,13 +21,12 @@ import (
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"google.golang.org/grpc"
-	"k8s.io/client-go/kubernetes/fake"
+	corev1 "k8s.io/api/core/v1"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // Unix socket paths are limited to about 100 bytes, including the temporary
@@ -278,9 +277,7 @@ func TestApplyStartupMigModeDisableRequiresReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.migMgr.Shutdown()
-	previous := client.KubeClient
-	client.KubeClient = fake.NewSimpleClientset()
-	defer func() { client.KubeClient = previous }()
+	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
 	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
 	if err == nil {
 		t.Fatal("expected pending-reset error")
@@ -356,9 +353,7 @@ func idleA100Device(setCalls *int, afterSetCurrent, afterSetPending int) *nvmlmo
 func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
-	previous := client.KubeClient
-	client.KubeClient = fake.NewSimpleClientset()
-	defer func() { client.KubeClient = previous }()
+	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
 	if err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"}); err != nil {
 		t.Fatal(err)
 	}
@@ -370,9 +365,7 @@ func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
-	previous := client.KubeClient
-	client.KubeClient = fake.NewSimpleClientset()
-	defer func() { client.KubeClient = previous }()
+	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
 	if err := p.applyStartupMigMode(1, []string{"NVIDIA H100 80GB HBM3"}); err != nil {
 		t.Fatal(err)
 	}
@@ -384,9 +377,7 @@ func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
 func TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
-	previous := client.KubeClient
-	client.KubeClient = nil
-	defer func() { client.KubeClient = previous }()
+	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, errors.New("snapshot unavailable") }
 	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
 	if err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("applyStartupMigMode error = %v, want in-use fail-closed", err)
@@ -436,5 +427,28 @@ func TestRegistrationRequiresRunningMigManagerSession(t *testing.T) {
 	}
 	if nvmlInitCalls != 0 || scoreCalls != 0 {
 		t.Fatalf("fell back to package NVML (init=%d score=%d)", nvmlInitCalls, scoreCalls)
+	}
+}
+
+func TestMigReconcilerTicksAndStopsAfterSnapshotRead(t *testing.T) {
+	p, _ := lifecyclePlugin(t)
+	p.initialize()
+	read := make(chan struct{}, 1)
+	p.listNodePods = func() ([]*corev1.Pod, error) {
+		select {
+		case read <- struct{}{}:
+		default:
+		}
+		return nil, errors.New("snapshot unavailable")
+	}
+	p.workers.Add(1)
+	go func() { defer p.workers.Done(); p.runMigAnnotationReconciler(time.Millisecond) }()
+	select {
+	case <-read:
+	case <-time.After(time.Second):
+		t.Fatal("periodic reconciliation did not reach the Pod snapshot")
+	}
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -172,7 +172,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.tag` | Monitor image tag | `""` |
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
-| `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.resyncInterval` | Pod informer resync interval and stale cache GC grace period | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 

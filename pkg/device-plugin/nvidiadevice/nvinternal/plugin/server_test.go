@@ -49,6 +49,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
@@ -83,13 +84,19 @@ func TestDynamicMIGCDIResponseUsesPublishedClass(t *testing.T) {
 
 type recordingDynamicMIGCDI struct {
 	*cdi.InterfaceMock
-	live []cdi.DynamicMIGDevice
+	live   []cdi.DynamicMIGDevice
+	remove func(string) error
 }
 
 func (r *recordingDynamicMIGCDI) EnsureDynamicMIGDevice(cdi.DynamicMIGDevice) (string, error) {
 	return "", nil
 }
-func (r *recordingDynamicMIGCDI) RemoveDynamicMIGDevice(string) error { return nil }
+func (r *recordingDynamicMIGCDI) RemoveDynamicMIGDevice(uuid string) error {
+	if r.remove != nil {
+		return r.remove(uuid)
+	}
+	return nil
+}
 func (r *recordingDynamicMIGCDI) ReplaceDynamicMIGDevices(live []cdi.DynamicMIGDevice) error {
 	r.live = live
 	return nil
@@ -258,16 +265,17 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 }
 
-// TestNewNvidiaDevicePluginPropagatesImexChannels guards the wiring from options
-// into the plugin: WithImexChannels stores the channels on options, and the
-// plugin the constructor builds must carry them, otherwise updateResponseForCDI,
-// updateResponseForImexChannelsEnvVar, updateResponseForDeviceMounts, and
-// apiDeviceSpecs all see an empty list and IMEX channels are never exposed to the
-// container.
-func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
+// TestNewNvidiaDevicePluginPropagatesOptions verifies constructor dependency wiring.
+func TestNewNvidiaDevicePluginPropagatesOptions(t *testing.T) {
 	channels := imex.Channels{{ID: "0"}, {ID: "1"}}
+	listNodePods := func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "cached"}}}, nil
+	}
+	prepareCache := func(string, string) (string, error) { return "/cache", nil }
 	o := &options{
-		imexChannels: channels,
+		imexChannels:     channels,
+		listNodePods:     listNodePods,
+		prepareVGPUCache: prepareCache,
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -297,6 +305,12 @@ func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
 
 	require.Equal(t, channels, plugin.imexChannels,
 		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+	pods, err := plugin.listNodePods()
+	require.NoError(t, err)
+	require.Equal(t, "cached", pods[0].Name)
+	cachePath, err := plugin.prepareCache("uid", "container")
+	require.NoError(t, err)
+	require.Equal(t, "/cache", cachePath)
 }
 
 // TestUpdateResponseForImexChannelsEnvVarExposesChannels covers the container-facing
@@ -859,6 +873,7 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	logLevel := nvidia.Error
 
 	plugin := &NvidiaDevicePlugin{
+		prepareCache: testCachePreparer(t),
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -985,6 +1000,7 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	logLevel := nvidia.Error
 
 	plugin := &NvidiaDevicePlugin{
+		prepareCache: testCachePreparer(t),
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -1210,4 +1226,62 @@ func TestResolveOperatingMode(t *testing.T) {
 			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
 		})
 	}
+}
+
+func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})
+	require.NoError(t, err)
+	specErr := errors.New("CDI write failed")
+	specCalls := 0
+	handler := &recordingDynamicMIGCDI{InterfaceMock: &cdi.InterfaceMock{
+		CreateSpecFileFunc: func() error { specCalls++; return specErr },
+	}, live: []cdi.DynamicMIGDevice{{MIGUUID: "MIG-existing"}}}
+	plugin := &NvidiaDevicePlugin{
+		operatingMode: nvidia.MigMode, migMgr: manager,
+		deviceListStrategies: strategies, cdiHandler: handler,
+		listNodePods: func() ([]*corev1.Pod, error) { return nil, nodepodinformer.ErrNotSynced },
+	}
+	require.NoError(t, plugin.applyStartupMigMode(0, nil))
+	require.False(t, plugin.migPrimed)
+	require.Equal(t, "MIG-existing", handler.live[0].MIGUUID)
+	require.Zero(t, specCalls)
+	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	require.ErrorIs(t, plugin.applyStartupMigMode(0, nil), specErr)
+	require.False(t, plugin.migPrimed)
+	require.Equal(t, 1, specCalls)
+	specErr = nil
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.True(t, plugin.migPrimed)
+	require.Empty(t, handler.live)
+	require.Equal(t, 2, specCalls)
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Equal(t, 2, specCalls)
+}
+
+func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})
+	require.NoError(t, err)
+	removeErr := errors.New("CDI remove failed")
+	calls := 0
+	handler := &recordingDynamicMIGCDI{remove: func(uuid string) error {
+		require.Equal(t, "MIG-destroyed", uuid)
+		calls++
+		return removeErr
+	}}
+	plugin := &NvidiaDevicePlugin{
+		migMgr: manager, migPrimed: true, cdiHandler: handler, deviceListStrategies: strategies,
+		pendingCDIRemovals: map[string]struct{}{"MIG-destroyed": {}},
+		listNodePods:       func() ([]*corev1.Pod, error) { return nil, nodepodinformer.ErrNotSynced },
+	}
+	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
+	require.Zero(t, calls)
+	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), removeErr)
+	require.Contains(t, plugin.pendingCDIRemovals, "MIG-destroyed")
+	removeErr = nil
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Empty(t, plugin.pendingCDIRemovals)
+	require.Equal(t, 2, calls)
 }
