@@ -19,11 +19,16 @@ package config
 import (
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v2"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -262,13 +267,18 @@ func InitDevicesWithConfig(config *Config) error {
 		return fmt.Errorf("errors occurred during initialization: %v", initErrors)
 	}
 
+	if err := validateRegisteredDevices(device.DevicesMap); err != nil {
+		return fmt.Errorf("invalid device configuration: %w", err)
+	}
+
 	klog.Info("All devices initialized successfully")
 	return nil
 }
 
-// validateConfig validates the configuration object to ensure it is complete.
-func validateConfig(config *Config) error {
-	if !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}) ||
+// anyDeviceConfigured reports whether at least one backend has been given a
+// configuration block.
+func anyDeviceConfigured(config *Config) bool {
+	return !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}) ||
 		!reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{}) ||
 		!reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{}) ||
 		len(config.IluvatarConfig) > 0 ||
@@ -280,10 +290,85 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
-		len(config.VNPUs.Configs) > 0 {
-		return nil
+		len(config.VNPUs.Configs) > 0
+}
+
+// validateConfig validates the configuration object to ensure it is complete.
+//
+// It checks only the values that no backend can reinterpret later. Resource
+// names are deliberately left to validateRegisteredDevices, which reads them
+// back after each backend has applied its own defaults.
+func validateConfig(config *Config) error {
+	if !anyDeviceConfigured(config) {
+		return fmt.Errorf("all configurations are empty")
 	}
-	return fmt.Errorf("all configurations are empty")
+
+	var errs []error
+	// defaultCores is injected as a percentage of one GPU, so a value outside
+	// 0-100 can never be satisfied. Zero is valid and means "do not inject".
+	if config.NvidiaConfig.DefaultCores < 0 || config.NvidiaConfig.DefaultCores > 100 {
+		errs = append(errs, fmt.Errorf("nvidia: defaultCores is a percentage and must be between 0 and 100, got %d", config.NvidiaConfig.DefaultCores))
+	}
+	if config.NvidiaConfig.DefaultMemory < 0 {
+		errs = append(errs, fmt.Errorf("nvidia: defaultMemory must not be negative, got %d", config.NvidiaConfig.DefaultMemory))
+	}
+	return utilerrors.NewAggregate(errs)
+}
+
+// validateRegisteredDevices checks the resource names the backends advertise
+// once initialization has applied each backend's own defaults.
+//
+// Reading the names back through GetResourceNames keeps this uniform across
+// backends whose configuration structs differ, covers the ones that register
+// more than one device from a single configuration block, and sees the value a
+// backend substituted for an empty field rather than the empty field itself.
+//
+// An empty name is not an error: it means the backend does not offer that
+// dimension, or has not been configured at all, and the default configuration
+// registers several backends in exactly that state.
+func validateRegisteredDevices(devices map[string]device.Devices) error {
+	var errs []error
+	owners := make(map[string]string, len(devices))
+
+	for _, commonWord := range slices.Sorted(maps.Keys(devices)) {
+		dev := devices[commonWord]
+		if dev == nil {
+			continue
+		}
+		names := dev.GetResourceNames()
+
+		for _, named := range []struct{ field, value string }{
+			{"resourceCountName", names.ResourceCountName},
+			{"resourceMemoryName", names.ResourceMemoryName},
+			{"resourceCoreName", names.ResourceCoreName},
+		} {
+			if named.value == "" {
+				continue
+			}
+			// A malformed name is reported rather than rejected: it cannot
+			// match a node resource, but it is the operator's name to choose
+			// and failing startup over it would be a breaking change.
+			if reasons := validation.IsQualifiedName(named.value); len(reasons) > 0 {
+				klog.ErrorS(nil, "Device resource name is not a valid Kubernetes qualified name and can never match a node resource",
+					"device", commonWord, "field", named.field, "value", named.value, "reason", strings.Join(reasons, "; "))
+			}
+		}
+
+		if names.MemoryFactor < 0 {
+			errs = append(errs, fmt.Errorf("%s: memoryFactor must not be negative, got %d", commonWord, names.MemoryFactor))
+		}
+
+		if names.ResourceCountName == "" {
+			continue
+		}
+		if previous, taken := owners[names.ResourceCountName]; taken {
+			errs = append(errs, fmt.Errorf("%s and %s both claim resource %q; a container requesting it would be allocated devices by both", previous, commonWord, names.ResourceCountName))
+			continue
+		}
+		owners[names.ResourceCountName] = commonWord
+	}
+
+	return utilerrors.NewAggregate(errs)
 }
 
 func InitDevices() {

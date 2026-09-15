@@ -514,26 +514,193 @@ func Test_validateConfig(t *testing.T) {
 		BirenConfig: biren.BirenConfig{ResourceCountName: "birentech.com/gpu"},
 	}
 
+	coresTooHigh := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultCores: 101},
+	}
+	coresNegative := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultCores: -1},
+	}
+	memoryNegative := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultMemory: -1},
+	}
+	// DefaultGPUNum is zero whenever the key is omitted, and nvidia reads it as
+	// "do not inject a default", so it must stay acceptable.
+	noDefaultGPUNum := &Config{
+		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultGPUNum: 0},
+	}
+
 	tests := []struct {
-		name        string
-		config      *Config
-		expectError bool
+		name    string
+		config  *Config
+		wantErr string
 	}{
-		{"Valid config", validConfig, false},
-		{"Empty config", emptyConfig, true},
-		{"Vastai only", vastaiOnly, false},
-		{"Biren only", birenOnly, false},
+		{"Valid config", validConfig, ""},
+		{"Empty config", emptyConfig, "all configurations are empty"},
+		{"Vastai only", vastaiOnly, ""},
+		{"Biren only", birenOnly, ""},
+		{"DefaultCores above 100", coresTooHigh, "defaultCores is a percentage"},
+		{"DefaultCores negative", coresNegative, "defaultCores is a percentage"},
+		{"DefaultMemory negative", memoryNegative, "defaultMemory must not be negative"},
+		{"DefaultGPUNum zero is accepted", noDefaultGPUNum, ""},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			err := validateConfig(test.config)
-			if test.expectError {
-				assert.ErrorContains(t, err, "all configurations are empty")
-			} else {
+			if test.wantErr == "" {
 				assert.NilError(t, err)
+				return
 			}
+			assert.ErrorContains(t, err, test.wantErr)
 		})
+	}
+}
+
+func Test_validateConfig_ReportsEveryViolation(t *testing.T) {
+	err := validateConfig(&Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "nvidia.com/gpu",
+			DefaultCores:      101,
+			DefaultMemory:     -1,
+		},
+	})
+	assert.ErrorContains(t, err, "defaultCores is a percentage")
+	assert.ErrorContains(t, err, "defaultMemory must not be negative")
+}
+
+// stubDevices is a device.Devices whose only meaningful behaviour is the
+// resource names it advertises, which is all validateRegisteredDevices reads.
+// Real backends set package-level globals in their constructors, which would
+// leak between tests.
+type stubDevices struct {
+	names device.ResourceNames
+}
+
+func (s stubDevices) GetResourceNames() device.ResourceNames { return s.names }
+func (s stubDevices) CommonWord() string                     { return "stub" }
+func (s stubDevices) NodeCleanUp(nn string) error            { return nil }
+
+func (s stubDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (s stubDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) { return true, true }
+func (s stubDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	return nil, nil
+}
+func (s stubDevices) LockNode(n *corev1.Node, p *corev1.Pod) error        { return nil }
+func (s stubDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error { return nil }
+func (s stubDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	return device.ContainerDeviceRequest{}
+}
+
+func (s stubDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
+	return *annoinput
+}
+
+func (s stubDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
+	return 0
+}
+
+func (s stubDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	return nil
+}
+
+func (s stubDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return false, nil, ""
+}
+
+func Test_validateRegisteredDevices(t *testing.T) {
+	tests := []struct {
+		name    string
+		devices map[string]device.Devices
+		wantErr string
+	}{
+		{
+			name:    "no devices registered",
+			devices: map[string]device.Devices{},
+		},
+		{
+			name: "distinct resource names",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceCountName: "a.com/gpu"}},
+				"B": stubDevices{names: device.ResourceNames{ResourceCountName: "b.com/gpu"}},
+			},
+		},
+		{
+			name: "two backends claiming one resource",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceCountName: "shared.com/gpu"}},
+				"B": stubDevices{names: device.ResourceNames{ResourceCountName: "shared.com/gpu"}},
+			},
+			wantErr: `A and B both claim resource "shared.com/gpu"`,
+		},
+		{
+			// Unconfigured backends advertise no count name. The default
+			// configuration registers several of them, so this must not be
+			// mistaken for a collision.
+			name: "unconfigured backends are not a collision",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{}},
+				"B": stubDevices{names: device.ResourceNames{}},
+			},
+		},
+		{
+			name: "negative memory factor",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceCountName: "a.com/gpu", MemoryFactor: -1}},
+			},
+			wantErr: "memoryFactor must not be negative",
+		},
+		{
+			// A malformed name cannot match a node resource, but it is the
+			// operator's to choose, so it is logged and not rejected.
+			name: "malformed resource name is reported, not rejected",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceCountName: "not a valid name"}},
+			},
+		},
+		{
+			name: "nil backend is skipped",
+			devices: map[string]device.Devices{
+				"A": nil,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRegisteredDevices(test.devices)
+			if test.wantErr == "" {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, test.wantErr)
+		})
+	}
+}
+
+// Test_InitDevicesWithConfig_RejectsDuplicateResourceName covers the wiring:
+// the collision is only caught if InitDevicesWithConfig calls the check after
+// the backends have registered.
+func Test_InitDevicesWithConfig_RejectsDuplicateResourceName(t *testing.T) {
+	err := InitDevicesWithConfig(&Config{
+		AMDGPUConfig: amd.AMDConfig{ResourceCountName: "shared.com/gpu"},
+		BirenConfig:  biren.BirenConfig{ResourceCountName: "shared.com/gpu"},
+	})
+	assert.ErrorContains(t, err, "invalid device configuration")
+	assert.ErrorContains(t, err, `both claim resource "shared.com/gpu"`)
+}
+
+func Test_validateRegisteredDevices_CollisionMessageIsStable(t *testing.T) {
+	// Map iteration is random, so the pair is sorted before reporting to keep
+	// the message reproducible across runs.
+	devices := map[string]device.Devices{
+		"Zebra": stubDevices{names: device.ResourceNames{ResourceCountName: "shared.com/gpu"}},
+		"Alpha": stubDevices{names: device.ResourceNames{ResourceCountName: "shared.com/gpu"}},
+	}
+	for range 20 {
+		err := validateRegisteredDevices(devices)
+		assert.ErrorContains(t, err, `Alpha and Zebra both claim resource "shared.com/gpu"`)
 	}
 }
 
