@@ -336,9 +336,21 @@ scheduler:
 
 devicePlugin:
   enabled: true
+  # Gate the device plugin on the toolkit-ready file that NVIDIA GPU Operator
+  # writes once nvidia-container-toolkit is installed on the node.
   gpuOperatorToolkitReady:
     enabled: false
     hostPath: "/run/nvidia/validations"
+    # How long the init container waits for <hostPath>/toolkit-ready before it
+    # gives up. 0 waits forever, which is the behaviour on clusters that do run
+    # GPU Operator. Set a bound on nodes whose image already ships
+    # nvidia-container-toolkit and therefore never write the file: without one
+    # the init container hangs silently and the device plugin never starts.
+    timeoutSeconds: 0
+    # What to do when timeoutSeconds elapses. false fails the init container, so
+    # the problem is visible in the pod status; true logs and continues, for
+    # nodes that are known to be ready without GPU Operator having said so.
+    skipIfMissing: false
     securityContext:
       privileged: true
       runAsUser: 0

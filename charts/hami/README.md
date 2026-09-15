@@ -196,6 +196,11 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
 | `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
+| `devicePlugin.gpuOperatorToolkitReady.enabled` | Gate the device plugin on the `toolkit-ready` file NVIDIA GPU Operator writes once nvidia-container-toolkit is installed on the node | `false` |
+| `devicePlugin.gpuOperatorToolkitReady.hostPath` | Host directory holding `toolkit-ready` | `"/run/nvidia/validations"` |
+| `devicePlugin.gpuOperatorToolkitReady.timeoutSeconds` | How long the init container waits for `toolkit-ready`; `0` waits forever | `0` |
+| `devicePlugin.gpuOperatorToolkitReady.skipIfMissing` | When `timeoutSeconds` elapses, continue instead of failing the init container | `false` |
+| `devicePlugin.gpuOperatorToolkitReady.securityContext` | Security context of the `toolkit-validation` init container | `{"privileged":true,"runAsUser":0}` |
 
 When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
 `/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a

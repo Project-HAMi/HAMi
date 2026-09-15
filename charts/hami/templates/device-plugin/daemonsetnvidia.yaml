@@ -94,10 +94,24 @@ spec:
           command: ["sh", "-c"]
           args:
             - |
+              set -u
+              ready="{{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready"
+              timeout={{ .Values.devicePlugin.gpuOperatorToolkitReady.timeoutSeconds | default 0 }}
+              skip={{ .Values.devicePlugin.gpuOperatorToolkitReady.skipIfMissing | default false }}
+              elapsed=0
               echo "Waiting for NVIDIA Toolkit to be ready..."
-              until [ -f {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready ]; do 
-                echo "Waiting for {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready..."
+              while [ ! -f "$ready" ]; do
+                if [ "$timeout" -gt 0 ] && [ "$elapsed" -ge "$timeout" ]; then
+                  if [ "$skip" = "true" ]; then
+                    echo "$ready did not appear within ${timeout}s, continuing anyway"
+                    exit 0
+                  fi
+                  echo "$ready did not appear within ${timeout}s" >&2
+                  exit 1
+                fi
+                echo "Waiting for $ready..."
                 sleep 5
+                elapsed=$((elapsed + 5))
               done
               echo "NVIDIA Toolkit is ready!"
           volumeMounts:
