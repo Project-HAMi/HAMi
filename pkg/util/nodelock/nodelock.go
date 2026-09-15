@@ -292,12 +292,23 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return nil
 	} else if ns != "" && previousPodName != "" {
 		// Check dangling nodeLock
-		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
+		previousPod, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{})
+		switch {
+		case err != nil:
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)
 				return err
 			}
 			klog.InfoS("Previous pod of NodeLock not found, releasing lock", "podName", previousPodName, "namespace", ns, "nodeLock", node.Annotations[NodeLockKey])
+			skipOwnerCheck = true
+		case isPodTerminal(previousPod):
+			// The owner is still an object in the API, so the NotFound branch
+			// above does not fire, but it has already reached a terminal phase:
+			// rejected at admission, evicted, preempted, or simply finished. It
+			// will never reach Allocate and therefore will never release the
+			// lock itself, so without this the node stays blocked for every
+			// other HAMi pod until NodeLockTimeout expires.
+			klog.InfoS("Previous pod of NodeLock has terminated, releasing lock", "podName", previousPodName, "namespace", ns, "phase", previousPod.Status.Phase, "nodeLock", node.Annotations[NodeLockKey])
 			skipOwnerCheck = true
 		}
 	}
@@ -312,6 +323,15 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	}
 
 	return fmt.Errorf("node %s has been locked within %v: %w", nodeName, NodeLockTimeout, ErrNodeLockContention)
+}
+
+// isPodTerminal reports whether a pod has reached a phase it can never leave.
+// Such a pod holds no devices and will never release a node lock on its own.
+func isPodTerminal(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {

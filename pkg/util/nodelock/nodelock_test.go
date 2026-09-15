@@ -1347,3 +1347,103 @@ func TestSetNodeLockNilPod(t *testing.T) {
 		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
 	}
 }
+
+// TestLockNodeTerminalOwner covers the lock owner that still exists but has
+// already reached a terminal phase: a pod rejected at admission
+// (UnexpectedAdmissionError surfaces as Failed), evicted, preempted, or simply
+// finished. Such a pod will never call Allocate and therefore will never
+// release the lock itself, so the node stays blocked for every other HAMi pod
+// until NodeLockTimeout expires. The existence-only dangling check does not
+// catch it, because the Pod object is still there.
+func TestLockNodeTerminalOwner(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			ResetNodeLocksForTest()
+
+			originalTimeout := NodeLockTimeout
+			NodeLockTimeout = time.Minute * 5
+			defer func() { NodeLockTimeout = originalTimeout }()
+
+			nodeName := "terminal-owner-node"
+			ownerNs, ownerName := "test-ns", "terminated-owner"
+			// Fresh lock, so the NodeLockTimeout recovery path cannot mask this.
+			lockValue := time.Now().Format(time.RFC3339) + NodeLockSep + ownerNs + NodeLockSep + ownerName
+
+			if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{NodeLockKey: lockValue},
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("Failed to create node: %v", err)
+			}
+
+			// The owner still exists, so the NotFound dangling path does not fire.
+			if _, err := client.KubeClient.CoreV1().Pods(ownerNs).Create(context.TODO(), &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: ownerName, Namespace: ownerNs},
+				Status:     corev1.PodStatus{Phase: phase},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("Failed to create owner pod: %v", err)
+			}
+
+			newPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next-pod", Namespace: "test-ns"}}
+			if err := LockNode(nodeName, "nvidia", newPod); err != nil {
+				t.Fatalf("LockNode should take over a lock held by a %s pod, got: %v", phase, err)
+			}
+
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("Failed to get node: %v", err)
+			}
+			want := NodeLockSep + GeneratePodNamespaceName(newPod, NodeLockSep)
+			if got := node.Annotations[NodeLockKey]; !strings.HasSuffix(got, want) {
+				t.Fatalf("expected node lock to be owned by the new pod (suffix %q), got %q", want, got)
+			}
+		})
+	}
+}
+
+// TestLockNodePreservesRunningOwner is the guard on the other side: a lock held
+// by a live, non-terminal pod must still contend, or a running pod could lose
+// the node lock out from under it.
+func TestLockNodePreservesRunningOwner(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodPending, corev1.PodRunning} {
+		t.Run(string(phase), func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			ResetNodeLocksForTest()
+
+			originalTimeout := NodeLockTimeout
+			NodeLockTimeout = time.Minute * 5
+			defer func() { NodeLockTimeout = originalTimeout }()
+
+			nodeName := "running-owner-node"
+			ownerNs, ownerName := "test-ns", "running-owner"
+			lockValue := time.Now().Format(time.RFC3339) + NodeLockSep + ownerNs + NodeLockSep + ownerName
+
+			if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{NodeLockKey: lockValue},
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("Failed to create node: %v", err)
+			}
+			if _, err := client.KubeClient.CoreV1().Pods(ownerNs).Create(context.TODO(), &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: ownerName, Namespace: ownerNs},
+				Status:     corev1.PodStatus{Phase: phase},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("Failed to create owner pod: %v", err)
+			}
+
+			newPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next-pod", Namespace: "test-ns"}}
+			err := LockNode(nodeName, "nvidia", newPod)
+			if err == nil {
+				t.Fatalf("LockNode should not steal a lock held by a %s pod", phase)
+			}
+			if !IsNodeLockContention(err) {
+				t.Fatalf("expected node lock contention for a %s owner, got: %v", phase, err)
+			}
+		})
+	}
+}
