@@ -29,6 +29,12 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
       {{- end }}
+      {{- /* Known gap, tracked in issue #3041: a namespace carrying this
+             label skips admission entirely, at the API server, before any
+             HAMi code runs. A pod placed there could carry the hami.io/
+             allocation annotations PR #3042 otherwise denies at create time.
+             Restrict who may set this label with policy (OPA/Kyverno,
+             PodSecurity admission) if that matters in your cluster. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -49,6 +55,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchLabels | nindent 8 }}
       {{- end }}
+      {{- /* Same gap as the namespaceSelector note above, at the object
+             level: a pod carrying this label skips admission regardless of
+             its namespace. See issue #3041. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -63,6 +72,13 @@ webhooks:
           - ""
         apiVersions:
           - v1
+        {{- /* Known gap, tracked in issue #3041: CREATE only. The
+               hami.io/ allocation annotations PR #3042 denies at create
+               time can still be added afterward with a plain PATCH by
+               anyone holding update/patch on pods, since nothing revisits
+               them past this point. Adding UPDATE here needs webhook.go to
+               tell an unrelated field patch from one touching these
+               annotations, so it stays a separate change. */}}
         operations:
           - CREATE
         resources:
