@@ -11,18 +11,15 @@
 package plugin
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // sortedIntSetKeys returns the keys of a set-style map sorted ascending.
@@ -45,10 +42,10 @@ func sortedIntSetKeys(s map[int]struct{}) []int {
 // Failure to read Pod annotations is returned to the caller because startup
 // reset must not proceed without the authoritative allocation state. NVML
 // process detection is an additional safeguard and remains best effort.
-func (m *MigInstanceManager) collectInUseGPUs(ctx context.Context, nodeName string) (map[int]struct{}, error) {
+func (m *MigInstanceManager) collectInUseGPUs(pods []*corev1.Pod) (map[int]struct{}, error) {
 	out := make(map[int]struct{})
 
-	annotated, err := m.kubernetesAllocatedMigGPUs(ctx, nodeName)
+	annotated, err := m.kubernetesAllocatedMigGPUs(pods)
 	if err != nil {
 		return out, fmt.Errorf("list Kubernetes MIG allocations: %w", err)
 	}
@@ -70,16 +67,18 @@ func (m *MigInstanceManager) collectInUseGPUs(ctx context.Context, nodeName stri
 // activeMigGPUUUIDs returns physical GPU UUIDs referenced by live HAMi MIG
 // allocations. The annotation preserves the physical GPU identity across a
 // device-plugin restart even though the MIG UUID is created at Allocate time.
-func activeMigGPUUUIDs(pods []corev1.Pod) map[string]struct{} {
+func activeMigGPUUUIDs(pods []*corev1.Pod) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
-	for i := range pods {
-		pod := &pods[i]
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
 		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("decode MIG allocations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		for _, allocation := range allocations {
 			if strings.HasPrefix(allocation.GPUUUID, "GPU-") {
@@ -87,23 +86,17 @@ func activeMigGPUUUIDs(pods []corev1.Pod) map[string]struct{} {
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (m *MigInstanceManager) kubernetesAllocatedMigGPUs(ctx context.Context, nodeName string) (map[int]struct{}, error) {
-	kubeClient := client.GetClient()
-	if kubeClient == nil {
-		return nil, fmt.Errorf("Kubernetes client is not initialized")
-	}
-	pods, err := kubeClient.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + nodeName,
-	})
+func (m *MigInstanceManager) kubernetesAllocatedMigGPUs(pods []*corev1.Pod) (map[int]struct{}, error) {
+	uuids, err := activeMigGPUUUIDs(pods)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make(map[int]struct{})
-	for gpuUUID := range activeMigGPUUUIDs(pods.Items) {
+	for gpuUUID := range uuids {
 		idx, ok := m.gpuUUIDToIndex(gpuUUID)
 		if !ok {
 			return nil, fmt.Errorf("resolve GPU UUID %s", gpuUUID)

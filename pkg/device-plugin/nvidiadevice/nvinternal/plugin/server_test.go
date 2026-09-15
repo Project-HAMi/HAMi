@@ -207,16 +207,17 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 }
 
-// TestNewNvidiaDevicePluginPropagatesImexChannels guards the wiring from options
-// into the plugin: WithImexChannels stores the channels on options, and the
-// plugin the constructor builds must carry them, otherwise updateResponseForCDI,
-// updateResponseForImexChannelsEnvVar, updateResponseForDeviceMounts, and
-// apiDeviceSpecs all see an empty list and IMEX channels are never exposed to the
-// container.
-func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
+// TestNewNvidiaDevicePluginPropagatesOptions verifies constructor dependency wiring.
+func TestNewNvidiaDevicePluginPropagatesOptions(t *testing.T) {
 	channels := imex.Channels{{ID: "0"}, {ID: "1"}}
+	listNodePods := func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "cached"}}}, nil
+	}
+	prepareCache := func(string, string) (string, error) { return "/cache", nil }
 	o := &options{
-		imexChannels: channels,
+		imexChannels:     channels,
+		listNodePods:     listNodePods,
+		prepareVGPUCache: prepareCache,
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -246,6 +247,12 @@ func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
 
 	require.Equal(t, channels, plugin.imexChannels,
 		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+	pods, err := plugin.listNodePods()
+	require.NoError(t, err)
+	require.Equal(t, "cached", pods[0].Name)
+	cachePath, err := plugin.prepareCache("uid", "container")
+	require.NoError(t, err)
+	require.Equal(t, "/cache", cachePath)
 }
 
 // TestUpdateResponseForImexChannelsEnvVarExposesChannels covers the container-facing
@@ -808,6 +815,7 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	logLevel := nvidia.Error
 
 	plugin := &NvidiaDevicePlugin{
+		prepareCache: testCachePreparer(t),
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -934,6 +942,7 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	logLevel := nvidia.Error
 
 	plugin := &NvidiaDevicePlugin{
+		prepareCache: testCachePreparer(t),
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{

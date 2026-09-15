@@ -20,9 +20,38 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
+
+func TestResolveVGPUCacheConfigReusesExistingEnvironment(t *testing.T) {
+	t.Setenv(vgpuCacheRootEnvName, "/var/lib/hami/containers")
+	t.Setenv(vgpuCacheGracePeriodEnvName, "7m")
+	config := resolveVGPUCacheConfig()
+	if config.Root != "/var/lib/hami/containers" {
+		t.Fatalf("Root = %q", config.Root)
+	}
+	if config.GracePeriod != 7*time.Minute {
+		t.Fatalf("GracePeriod = %v", config.GracePeriod)
+	}
+	if config.ScanInterval != defaultVGPUCacheScanInterval {
+		t.Fatalf("ScanInterval = %v", config.ScanInterval)
+	}
+}
+
+func TestResolveVGPUCacheConfigDefaultsFromHookPath(t *testing.T) {
+	t.Setenv(vgpuCacheRootEnvName, "")
+	t.Setenv(vgpuCacheGracePeriodEnvName, "invalid")
+	t.Setenv("HOOK_PATH", "/opt/hami")
+	config := resolveVGPUCacheConfig()
+	if config.Root != "/opt/hami/vgpu/containers" {
+		t.Fatalf("Root = %q", config.Root)
+	}
+	if config.GracePeriod != defaultVGPUCacheGracePeriod {
+		t.Fatalf("GracePeriod = %v", config.GracePeriod)
+	}
+}
 
 func TestResolveNvidiaDriverRootFromGPUOperatorContract(t *testing.T) {
 	contractPath := filepath.Join(t.TempDir(), "driver-ready")
