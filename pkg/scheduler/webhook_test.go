@@ -1353,3 +1353,105 @@ func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
 		})
 	}
 }
+
+// admitPod runs the webhook over pod and returns the response.
+func admitPod(t *testing.T, pod *corev1.Pod) admission.Response {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to build the scheme: %v", err)
+	}
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("failed to encode the pod: %v", err)
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("failed to create the webhook: %v", err)
+	}
+	return wh.Handle(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "test-uid",
+			Namespace: pod.Namespace,
+			Name:      pod.Name,
+			Object:    runtime.RawExtension{Raw: podBytes},
+		},
+	})
+}
+
+func gpuPodWithAnnotations(annotations map[string]string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "forged",
+			Namespace:   "team-b",
+			Annotations: annotations,
+		},
+		Spec: corev1.PodSpec{
+			SchedulerName: "different-scheduler",
+			Containers: []corev1.Container{{
+				Name: "main",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{"hami.io/gpu": resource.MustParse("1")},
+				},
+			}},
+		},
+	}
+}
+
+// The device plugin hands out devices from these annotations, so a pod must
+// not arrive already carrying them. Routing the pod at another scheduler used
+// to skip every check below, which is what made this reachable.
+func TestForgedAllocationAnnotationsDenied(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	for _, key := range []string{
+		util.AssignedNodeAnnotations,
+		util.BindTimeAnnotations,
+		util.DeviceBindPhase,
+		device.InRequestDevices[nvidia.NvidiaGPUDevice],
+		device.SupportDevices[nvidia.NvidiaGPUDevice],
+	} {
+		t.Run(key, func(t *testing.T) {
+			resp := admitPod(t, gpuPodWithAnnotations(map[string]string{key: "forged"}))
+			if resp.Allowed {
+				t.Fatalf("pod presetting %s was admitted", key)
+			}
+			if !strings.Contains(resp.Result.Message, key) {
+				t.Errorf("denial message %q does not name %s", resp.Result.Message, key)
+			}
+		})
+	}
+}
+
+// Unrelated annotations, including other hami.io keys the scheduler does not
+// own, must still be admitted.
+func TestUnrelatedAnnotationsStillAdmitted(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	resp := admitPod(t, gpuPodWithAnnotations(map[string]string{
+		"team.example.com/owner":             "team-b",
+		util.GPUSchedulerPolicyAnnotationKey: "spread",
+	}))
+	if !resp.Allowed {
+		t.Fatalf("a pod with unrelated annotations was denied: %v", resp.Result)
+	}
+}
