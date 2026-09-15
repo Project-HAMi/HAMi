@@ -770,3 +770,20 @@ func TestGetPodReturnsDetachedCopy(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, missing)
 }
+
+// The UID keys the cache, but /filter and /bind take the UID, name and
+// namespace from the request body as three independent fields. Pairing a live
+// pod's UID with some other name must not free that pod's devices.
+func TestTakeAndDeletePodRejectsMismatchedIdentity(t *testing.T) {
+	pm := NewPodManager()
+	victim := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "victim-uid", Name: "victim", Namespace: "team-a"}}
+	pm.AddPod(victim, "gpu-node-1", PodDevices{})
+
+	forged := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "victim-uid", Name: "does-not-exist", Namespace: "team-b"}}
+	pi, ok := pm.TakeAndDeletePod(forged)
+	assert.False(t, ok)
+	assert.Nil(t, pi)
+
+	_, stillCached := pm.GetPod(victim)
+	assert.True(t, stillCached, "the victim's reservation was dropped by a request naming another pod")
+}

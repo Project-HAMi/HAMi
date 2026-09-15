@@ -30,6 +30,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -1029,6 +1030,34 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 	}
 }
 
+// verifyBindTarget rejects a bind request that does not describe the live pod
+// it names. Everything below it acts on privileged state: node locks, an
+// annotation patch and the binding itself, all driven by fields the caller
+// supplied.
+func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, current *corev1.Pod) error {
+	// An absent UID is refused rather than waved through, otherwise omitting
+	// the field is all it takes to skip the identity check below.
+	if args.PodUID == "" {
+		return fmt.Errorf("bind request for pod %s/%s carries no UID", args.PodNamespace, args.PodName)
+	}
+	if current.UID != args.PodUID {
+		return fmt.Errorf("pod %s/%s has UID %s, bind request carries UID %s",
+			args.PodNamespace, args.PodName, current.UID, args.PodUID)
+	}
+	if current.Spec.NodeName != "" {
+		return fmt.Errorf("pod %s/%s is already assigned to node %s",
+			args.PodNamespace, args.PodName, current.Spec.NodeName)
+	}
+	// The node the filter phase picked is the only node this pod may be bound
+	// to. Binding it elsewhere would leave the reservation on the scheduled
+	// node while the pod consumes devices on another.
+	if pi, ok := s.podManager.GetPod(current); ok && pi.NodeID != "" && pi.NodeID != args.Node {
+		return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
+			args.PodNamespace, args.PodName, pi.NodeID, args.Node)
+	}
+	return nil
+}
+
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
@@ -1049,6 +1078,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 			},
 		})
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
+	}
+
+	if err := s.verifyBindTarget(args, current); err != nil {
+		klog.ErrorS(err, "Rejecting bind request", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 	}
 
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
@@ -1098,9 +1132,65 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
 }
 
+// authoritativePod resolves the pod an extender request names and refuses the
+// request unless the live object still matches the identity the request
+// carries and is still unscheduled. /filter and /bind authenticate no caller,
+// so the pod in the request body is input, not evidence: a caller is free to
+// pair a running pod's identity with a spec of its own, and the device
+// reservation and annotation patch further down would act on it.
+func (s *Scheduler) authoritativePod(claimed *corev1.Pod) (*corev1.Pod, error) {
+	if s.podLister != nil {
+		live, err := s.podLister.Pods(claimed.Namespace).Get(claimed.Name)
+		if err == nil {
+			return matchesClaimedPod(claimed, live)
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		// A pod created moments ago may not have reached the informer yet, so
+		// a cache miss falls through to the API server rather than being
+		// trusted or rejected on its own.
+	}
+	live, err := s.kubeClient.CoreV1().Pods(claimed.Namespace).Get(context.Background(), claimed.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return matchesClaimedPod(claimed, live)
+}
+
+func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
+	// An absent UID is refused rather than waved through, otherwise omitting
+	// the field is all it takes to skip the identity check below.
+	if claimed.UID == "" {
+		return nil, fmt.Errorf("filter request for pod %s/%s carries no UID", claimed.Namespace, claimed.Name)
+	}
+	if live.UID != claimed.UID {
+		return nil, fmt.Errorf("pod %s/%s has UID %s, filter request carries UID %s",
+			claimed.Namespace, claimed.Name, live.UID, claimed.UID)
+	}
+	if live.Spec.NodeName != "" {
+		return nil, fmt.Errorf("pod %s/%s is already assigned to node %s",
+			claimed.Namespace, claimed.Name, live.Spec.NodeName)
+	}
+	return live, nil
+}
+
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-	resourceReqs := device.Resourcereqs(args.Pod)
+
+	// Simulation callers describe pods that need not exist, and the path they
+	// take reserves nothing, so only the scheduling path resolves the pod.
+	pod := args.Pod
+	if args.Nodes == nil {
+		live, err := s.authoritativePod(args.Pod)
+		if err != nil {
+			klog.ErrorS(err, "Rejecting filter request", "pod", klog.KObj(args.Pod))
+			return nil, err
+		}
+		pod = live
+	}
+
+	resourceReqs := device.Resourcereqs(pod)
 
 	hasHAMiResource := false
 
@@ -1112,7 +1202,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 
 	if !hasHAMiResource {
-		klog.V(1).InfoS("Pod does not request any resources", "pod", args.Pod.Name)
+		klog.V(1).InfoS("Pod does not request any resources", "pod", pod.Name)
 		// Simulation callers such as the cluster autoscaler send Nodes
 		// instead of NodeNames; echo both back so a pod without HAMi
 		// resources keeps every candidate node on either protocol shape.
@@ -1130,26 +1220,26 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
-	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
-		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
+		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
-	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
+	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
 		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
 	}
-	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
+	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, pod, failedNodes)
 	if err != nil {
-		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		err := fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
+		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		klog.V(4).InfoS("No available nodes meet the required scores", "pod", pod.Name)
+		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -1158,8 +1248,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	sort.Sort(nodeScores)
 	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
 	klog.InfoS("Scheduling pod to node",
-		"podNamespace", args.Pod.Namespace,
-		"podName", args.Pod.Name,
+		"podNamespace", pod.Namespace,
+		"podName", pod.Name,
 		"nodeID", m.NodeID,
 		"devices", m.Devices)
 	annotations := make(map[string]string)
@@ -1167,29 +1257,29 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
+		val.PatchAnnotations(pod, &annotations, m.Devices)
 	}
 
 	rawDevices := m.Devices
-	effectiveDevices := device.CollapseInitContainerUsage(args.Pod, rawDevices)
+	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 	if args.Nodes == nil {
-		added := s.podManager.AddPod(args.Pod, m.NodeID, effectiveDevices)
+		added := s.podManager.AddPod(pod, m.NodeID, effectiveDevices)
 		if added {
-			s.quotaManager.AddUsage(args.Pod, effectiveDevices) // use collapsed
+			s.quotaManager.AddUsage(pod, effectiveDevices) // use collapsed
 		}
-		err = util.PatchPodAnnotations(args.Pod, annotations)
+		err = util.PatchPodAnnotations(pod, annotations)
 		if err != nil {
-			s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+			s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 			if added {
-				s.quotaManager.RmUsage(args.Pod, effectiveDevices)
+				s.quotaManager.RmUsage(pod, effectiveDevices)
 			}
-			s.podManager.DelPod(args.Pod)
+			s.podManager.DelPod(pod)
 			return nil, err
 		}
 	}
 
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
-	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
+	s.recordScheduleFilterResultEvent(pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
 }

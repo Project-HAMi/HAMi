@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -1170,4 +1171,36 @@ func TestGetNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A merge patch is addressed by name alone, so a patch computed for one pod
+// can land on a different pod that later took the same name. Carrying the UID
+// makes the write conditional: Kubernetes refuses an update that changes it.
+func TestPatchPodAnnotationsPinsPodUID(t *testing.T) {
+	fakeClient := fake.NewClientset()
+	var patchBody []byte
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patch, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		patchBody = patch.GetPatch()
+		return true, &corev1.Pod{}, nil
+	})
+	oldClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod", Namespace: "team-a", UID: "gpu-pod-uid"},
+	}
+	assert.NilError(t, PatchPodAnnotations(pod, map[string]string{AssignedNodeAnnotations: "node-1"}))
+
+	var patch struct {
+		Metadata struct {
+			UID types.UID `json:"uid"`
+		} `json:"metadata"`
+	}
+	assert.NilError(t, json.Unmarshal(patchBody, &patch))
+	assert.Equal(t, types.UID("gpu-pod-uid"), patch.Metadata.UID, "the patch does not pin the pod's UID")
 }
