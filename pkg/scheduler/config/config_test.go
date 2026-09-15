@@ -18,6 +18,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"testing"
 
@@ -785,4 +786,49 @@ func Test_Resourcereqs(t *testing.T) {
 			assert.DeepEqual(t, test.want, got)
 		})
 	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	t.Run("file does not exist", func(t *testing.T) {
+		_, err := LoadConfig("/nonexistent/path/config.yaml")
+		assert.ErrorContains(t, err, "no such file or directory")
+	})
+
+	t.Run("invalid yaml", func(t *testing.T) {
+		path := t.TempDir() + "/config.yaml"
+		assert.NilError(t, os.WriteFile(path, []byte("nvidia: [this is not a map"), 0600))
+
+		_, err := LoadConfig(path)
+		assert.ErrorContains(t, err, "yaml")
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		path := t.TempDir() + "/config.yaml"
+		assert.NilError(t, os.WriteFile(path, []byte(""), 0600))
+
+		cfg, err := LoadConfig(path)
+		assert.NilError(t, err)
+		assert.Equal(t, cfg.NvidiaConfig.ResourceCountName, "")
+	})
+
+	t.Run("valid config", func(t *testing.T) {
+		path := t.TempDir() + "/config.yaml"
+		content := `
+nvidia:
+  resourceCountName: nvidia.com/gpu
+  resourceMemoryName: nvidia.com/gpumem
+  defaultMemory: 3000
+  defaultCores: 0
+hygon:
+  resourceCountName: hygon.com/dcunum
+`
+		assert.NilError(t, os.WriteFile(path, []byte(content), 0600))
+
+		cfg, err := LoadConfig(path)
+		assert.NilError(t, err)
+		assert.Equal(t, cfg.NvidiaConfig.ResourceCountName, "nvidia.com/gpu")
+		assert.Equal(t, cfg.NvidiaConfig.ResourceMemoryName, "nvidia.com/gpumem")
+		assert.Equal(t, cfg.NvidiaConfig.DefaultMemory, int32(3000))
+		assert.Equal(t, cfg.HygonConfig.ResourceCountName, "hygon.com/dcunum")
+	})
 }
