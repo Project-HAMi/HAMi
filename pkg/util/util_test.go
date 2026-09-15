@@ -1180,7 +1180,11 @@ func TestPatchPodAnnotationsPinsPodUID(t *testing.T) {
 	fakeClient := fake.NewClientset()
 	var patchBody []byte
 	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
-		patchBody = action.(k8stesting.PatchAction).GetPatch()
+		patch, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		patchBody = patch.GetPatch()
 		return true, &corev1.Pod{}, nil
 	})
 	oldClient := client.KubeClient

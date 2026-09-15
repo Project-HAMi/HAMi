@@ -168,7 +168,7 @@ func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	if !ok {
 		return nil, false
 	}
-	if pi.Pod != nil && (pi.Pod.Name != pod.Name || pi.Pod.Namespace != pod.Namespace) {
+	if pi.Pod != nil && (pi.Name != pod.Name || pi.Namespace != pod.Namespace) {
 		klog.InfoS("Refusing to delete cached pod, the request names a different pod than the UID holds",
 			"requested", klog.KRef(pod.Namespace, pod.Name),
 			"cached", klog.KObj(pi.Pod),
