@@ -117,10 +117,10 @@ type NvidiaDevicePlugin struct {
 	operatingMode string
 	deviceCache   string
 
-	// migMgr tracks live MIG GI+CI instances so we can destroy and recreate
-	// them per-task rather than resharding the whole card. Only set when
-	// operatingMode == "mig". Construction does not initialize NVML; Start/Stop
-	// pair Init and Shutdown for that session.
+	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
+	// mutation (enable, allocate, disable). Construction does not initialize
+	// NVML; Start/Stop pair Init and Shutdown. The annotation reconciler runs
+	// only when operatingMode == "mig".
 	migMgr *MigInstanceManager
 
 	imexChannels imex.Channels
@@ -193,11 +193,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
 		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
 	}
-	var migMgr *MigInstanceManager
-	if mode == "mig" {
-		migMgr = newMigInstanceManager(o.nvmllib)
-	}
-	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
+	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, newMigInstanceManager(o.nvmllib)), nil
 }
 
 // newNvidiaDevicePlugin assembles an NvidiaDevicePlugin from the options and the
@@ -284,26 +280,14 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 			resultErr = errors.Join(resultErr, plugin.stopLocked())
 		}
 	}()
-	if plugin.operatingMode == nvidia.MigMode {
-		if plugin.migMgr == nil {
-			return fmt.Errorf("MIG manager is not configured")
-		}
-		if err := plugin.migMgr.Init(); err != nil {
-			return fmt.Errorf("init MIG instance manager: %w", err)
-		}
+	if plugin.migMgr == nil {
+		return fmt.Errorf("MIG manager is not configured")
+	}
+	if err := plugin.migMgr.Init(); err != nil {
+		return fmt.Errorf("init MIG instance manager: %w", err)
 	}
 
-	var deviceNumbers int
-	var deviceNames []string
-	var err error
-	if plugin.operatingMode == nvidia.MigMode {
-		deviceNumbers, deviceNames, err = plugin.migMgr.deviceInventory()
-	} else {
-		deviceNumbers, err = GetDeviceNums()
-		if err == nil {
-			deviceNames, err = GetDeviceNames()
-		}
-	}
+	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()
 	if err != nil {
 		return err
 	}
@@ -527,12 +511,12 @@ func (plugin *NvidiaDevicePlugin) devicesSupportMig(deviceNames []string) bool {
 	return true
 }
 
-// applyStartupMigMode prepares idle MIG-capable GPUs when operatingMode is mig.
+// applyStartupMigMode converges hardware MIG state with operatingMode using
+// the start-cycle NVML session. Enabling remains best-effort so a busy card
+// can keep running instances; disabling fails the start cycle so hami-core
+// is never advertised while GPUs remain in MIG.
 func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceNames []string) error {
 	if !plugin.devicesSupportMig(deviceNames) {
-		return nil
-	}
-	if plugin.operatingMode != nvidia.MigMode {
 		return nil
 	}
 	if plugin.migMgr == nil {
@@ -540,8 +524,8 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 	}
 	inUse, detectErr := plugin.migMgr.collectInUseGPUs(plugin.operationContext(), os.Getenv(util.NodeNameEnvName))
 	if detectErr != nil {
-		// Startup reset is destructive. If Kubernetes allocation state
-		// cannot be read reliably, preserve every GPU rather than risk
+		// Startup reset/disable is destructive. If Kubernetes allocation
+		// state cannot be read reliably, preserve every GPU rather than
 		// removing an allocation that is still active.
 		klog.InfoS("mig init: allocation detection failed; preserving all GPUs", "err", detectErr)
 		if inUse == nil {
@@ -551,16 +535,31 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 			inUse[i] = struct{}{}
 		}
 	}
-	reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
+	if plugin.operatingMode == nvidia.MigMode {
+		reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
+		if err != nil {
+			klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
+		}
+		klog.InfoS("mig init: resolved startup layout",
+			"inUseGPUs", sortedIntSetKeys(inUse),
+			"resetGPUs", reset)
+		if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
+			klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
+		}
+		return nil
+	}
+	disabled, err := plugin.migMgr.DisableIdleGPUs(deviceNumbers, inUse)
 	if err != nil {
-		klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
+		if errors.Is(err, errMigModeNeedsReset) {
+			klog.ErrorS(err, "MIG disable needs manual operator action",
+				"mode", plugin.operatingMode)
+		}
+		return fmt.Errorf("disable MIG for %s: %w", plugin.operatingMode, err)
 	}
-	klog.InfoS("mig init: resolved startup layout",
+	klog.InfoS("mig init: disabled idle GPUs for non-MIG mode",
+		"mode", plugin.operatingMode,
 		"inUseGPUs", sortedIntSetKeys(inUse),
-		"resetGPUs", reset)
-	if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
-		klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
-	}
+		"disabledGPUs", disabled)
 	return nil
 }
 
