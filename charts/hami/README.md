@@ -224,6 +224,45 @@ become ready and restart the HAMi device plugin DaemonSet.
 
 ## Device Configuration
 
+### Device configuration defaults
+
+Use the following parameters in your values file to customize the generated `device-config.yaml`. Default values are defined in `values.yaml`.
+
+| Parameter | Device configuration field | Default Value |
+|-----------|----------------------------|---------------|
+| `devices.nvidia.defaultMemory` | `nvidia.defaultMemory`: default memory per GPU in MiB; `0` uses full GPU memory. Not scaled by `memoryFactor`. | `0` |
+| `devices.nvidia.defaultCores` | `nvidia.defaultCores`: default core percentage when omitted by the container; `0` means no limit. | `0` |
+| `devices.nvidia.defaultGPUNum` | `nvidia.defaultGPUNum`: count inserted for memory/core-only requests; `0` disables insertion. | `1` |
+| `devices.nvidia.memoryFactor` | `nvidia.memoryFactor`: positive integer multiplier converting explicit memory requests to MiB. | `1` |
+| `devices.nvidia.migProfileAllowlist` | `nvidia.migProfileAllowlist`: allowed profiles grouped by GPU model. | Complete list in [values.yaml](values.yaml) |
+| `devices.hygon.memoryFactor` | `hygon.memoryFactor`: positive integer multiplier converting explicit memory requests to MiB. | `1` |
+| `devices.metax.resourceCountName` | `metax.resourceCountName`; also used in the scheduler's managed resource list. | `metax-tech.com/gpu` |
+| `devices.enflame.resourceNameGCU` | `enflame.resourceNameGCU` | `enflame.com/gcu` |
+| `devices.mthreads.resourceCountName` | `mthreads.resourceCountName` | `mthreads.com/vgpu` |
+| `devices.mthreads.resourceMemoryName` | `mthreads.resourceMemoryName` | `mthreads.com/sgpu-memory` |
+| `devices.mthreads.resourceCoreName` | `mthreads.resourceCoreName` | `mthreads.com/sgpu-core` |
+| `devices.awsneuron.resourceCountName` | `awsneuron.resourceCountName` | `aws.amazon.com/neuron` |
+| `devices.awsneuron.resourceCoreName` | `awsneuron.resourceCoreName` | `aws.amazon.com/neuroncore` |
+| `devices.amd.resourceCountName` | `amd.resourceCountName` | `amd.com/gpu` |
+| `devices.amd.resourceMemoryName` | `amd.resourceMemoryName` | `amd.com/gpumem` |
+| `devices.amd.resourceCoreName` | `amd.resourceCoreName` | `amd.com/gpucores` |
+| `devices.iluvatar.configs` | `iluvatars`: chip names and resource names. | Complete list in [values.yaml](values.yaml) |
+| `devices.ascend.configs` | `vnpus.configs`: chip specifications and partition templates. | Complete list in [values.yaml](values.yaml) |
+
+For a scalar change, supply only the required value:
+
+```yaml
+devices:
+  nvidia:
+    defaultMemory: 2048
+```
+
+Helm merges mapping fields, but replaces lists as a whole. When changing `migProfileAllowlist`, `devices.ascend.configs`, or `devices.iluvatar.configs`, include every entry that must remain. An explicit `[]` produces an empty list. Zero and false values are preserved.
+
+The `devices.<vendor>.customresources` lists control scheduler resource handling separately. When renaming device resources for these vendors, update the corresponding `customresources` list as well.
+
+`device-config.content` provides a complete replacement for `device-config.yaml`, followed in priority by the chart-bundled `files/device-config.yaml`, then the generated configuration. These custom sources are not merged with individual values. Leave them unset when using the structured parameters above.
+
 ### AWS Neuron
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|

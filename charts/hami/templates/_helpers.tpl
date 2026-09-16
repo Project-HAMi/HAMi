@@ -211,7 +211,7 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" .Values.hcuResourceMem "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.hcuResourceCores "ignoredByScheduler" true) -}}
 {{/* Metax resources */}}
-{{- $resources = append $resources (dict "name" "metax-tech.com/gpu" "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceCountName "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.metaxResourceName "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.metaxResourceCore "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.metaxResourceMem "ignoredByScheduler" true) -}}
