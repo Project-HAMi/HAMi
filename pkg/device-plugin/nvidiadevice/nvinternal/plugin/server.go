@@ -492,33 +492,13 @@ func (plugin *NvidiaDevicePlugin) runMigAnnotationReconciler(interval time.Durat
 	}
 }
 
-func (plugin *NvidiaDevicePlugin) devicesSupportMig(deviceNames []string) bool {
-	if len(deviceNames) == 0 {
-		return false
-	}
-	for _, name := range deviceNames {
-		supported := false
-		for _, allowlist := range plugin.schedulerConfig.MigProfileAllowlist {
-			if containsModel(name, allowlist.Models) {
-				supported = true
-				break
-			}
-		}
-		if !supported {
-			return false
-		}
-	}
-	return true
-}
-
 // applyStartupMigMode converges hardware MIG state with operatingMode using
-// the start-cycle NVML session. Enabling remains best-effort so a busy card
-// can keep running instances; disabling fails the start cycle so hami-core
-// is never advertised while GPUs remain in MIG.
+// the start-cycle NVML session. Hardware capability comes from NVML
+// (GetMigMode NOT_SUPPORTED is a no-op); MigProfileAllowlist is not used here
+// because it only controls exposed scheduling profiles. Enabling remains
+// best-effort so a busy card can keep running instances; disabling fails the
+// start cycle so hami-core is never advertised while GPUs remain in MIG.
 func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceNames []string) error {
-	if !plugin.devicesSupportMig(deviceNames) {
-		return nil
-	}
 	if plugin.migMgr == nil {
 		return fmt.Errorf("MIG manager is not configured")
 	}

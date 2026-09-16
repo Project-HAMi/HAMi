@@ -366,6 +366,20 @@ func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 	}
 }
 
+func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
+	setCalls := 0
+	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	defer func() { client.KubeClient = previous }()
+	if err := p.applyStartupMigMode(1, []string{"NVIDIA H100 80GB HBM3"}); err != nil {
+		t.Fatal(err)
+	}
+	if setCalls != 1 {
+		t.Fatalf("SetMigMode calls = %d, want 1 for MIG-capable GPU outside MigProfileAllowlist", setCalls)
+	}
+}
+
 func TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
