@@ -130,14 +130,19 @@ func Test_addCoreUsage_FourCoreDevice(t *testing.T) {
 		{"empty device, request 1 of 4", map[string]any{}, 1, 4, 0b0001},
 		{"empty device, request 3 of 4", map[string]any{}, 3, 4, 0b0111},
 		{"empty device, request 4 of 4", map[string]any{}, 4, 4, 0b1111},
-		{"2 already used, request 1 more of 4", map[string]any{AWSUsageInfo: 0b0011}, 1, 4, 0b0111},
+		// addCoreUsage returns only the newly assigned bits, not the union
+		// with prev: bit 2 is the one new bit picked here, not 0b0111.
+		{"2 already used, request 1 more of 4", map[string]any{AWSUsageInfo: 0b0011}, 1, 4, 0b0100},
 		{"2-core device unaffected", map[string]any{}, 2, 2, 0b11},
 		{"2-core device single-core unaffected", map[string]any{}, 1, 2, 0b01},
+		{"device full, request 1 more returns no new bits", map[string]any{AWSUsageInfo: 0b1111}, 1, 4, 0b0000},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := addCoreUsage(test.prev, test.require, test.maxCores)
-			assert.Equal(t, got[AWSUsageInfo].(int), test.want)
+			gotVal, ok := got[AWSUsageInfo].(int)
+			assert.Assert(t, ok, "expected AWSUsageInfo to be an int")
+			assert.Equal(t, gotVal, test.want)
 		})
 	}
 }

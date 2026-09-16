@@ -220,7 +220,7 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 							value = value + fmt.Sprint(val.Idx) + ","
 						}
 					} else {
-						for bit := 0; bit < int(dev.coresPerDevice()); bit++ {
+						for bit := range int(dev.coresPerDevice()) {
 							if (val.Usedcores & (1 << uint(bit))) != 0 {
 								value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+uint(bit)) + ","
 								(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
@@ -370,6 +370,13 @@ func countMaskAvailable(mask int32) int32 {
 // bit positions are in use on a device. It finds `require` free bit
 // positions among the device's maxCores addressable cores, marks them used,
 // and preserves cores already marked used in prev.
+// addCoreUsage finds `require` free NeuronCore bit positions among the
+// device's maxCores addressable cores, given the mask of cores already in
+// use (from prev). It returns only the bit mask newly selected in this
+// call, not the union with prev: callers (Fit, AddResourceUsage) add this
+// delta into their own separately tracked aggregate device usage, so
+// returning the cumulative mask here would double-count already-used
+// cores on every allocation after the first.
 func addCoreUsage(prev map[string]any, require int, maxCores int) map[string]any {
 	used := 0
 	if v, ok := prev[AWSUsageInfo]; ok {
@@ -377,15 +384,16 @@ func addCoreUsage(prev map[string]any, require int, maxCores int) map[string]any
 			used = iv
 		}
 	}
+	newlyAssigned := 0
 	assigned := 0
 	for bit := 0; bit < maxCores && assigned < require; bit++ {
 		mask := 1 << bit
 		if used&mask == 0 {
-			used |= mask
+			newlyAssigned |= mask
 			assigned++
 		}
 	}
-	return map[string]any{AWSUsageInfo: used}
+	return map[string]any{AWSUsageInfo: newlyAssigned}
 }
 func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
