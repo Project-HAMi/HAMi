@@ -693,12 +693,32 @@ func Test_splitCoreRequest(t *testing.T) {
 			wantErr:           "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
 		},
 		{
-			// An Inferentia chip has four cores, but only two are addressable.
-			name:              "per-device cores above the addressable limit are bounded",
+			// Inf1: all four physical NeuronCores on the chip are now addressable.
+			name:              "inf1 four-core device is addressed fully",
 			coresPerAWSNeuron: 4,
 			cores:             4,
+			wantNums:          1,
+			wantCoresreq:      4,
+		},
+		{
+			name:              "inf1 partial request fits within one four-core device",
+			coresPerAWSNeuron: 4,
+			cores:             3,
+			wantNums:          1,
+			wantCoresreq:      3,
+		},
+		{
+			name:              "inf1 whole four-core devices divide evenly",
+			coresPerAWSNeuron: 4,
+			cores:             8,
 			wantNums:          2,
-			wantCoresreq:      2,
+			wantCoresreq:      4,
+		},
+		{
+			name:              "inf1 odd count above one four-core device has no representable shape",
+			coresPerAWSNeuron: 4,
+			cores:             5,
+			wantErr:           "aws.amazon.com/neuroncore must be 1 or a multiple of 4, got 5",
 		},
 		{
 			name:         "unknown per-device cores falls back to the addressable limit",

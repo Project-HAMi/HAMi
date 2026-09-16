@@ -27,13 +27,14 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
-// On inf1 hardware a NeuronDevice exposes four cores, but addCoreUsage tracks
-// a two-bit mask and PatchAnnotations emits only the first two core indexes.
-// A whole-device request must therefore reserve the capped core count, and the
-// registered core mask must stay within the same cap, or a second pod can be
-// packed onto a device that is already fully owned.
+// On inf1 hardware a NeuronDevice exposes four cores, and addCoreUsage /
+// PatchAnnotations track all of them (not just the first two, as older
+// versions of this backend assumed). A whole-device request must therefore
+// reserve the real per-device core count, and the registered core mask must
+// span exactly that many bits, or a second pod could be packed onto a device
+// that is already fully owned.
 
-func Test_GenerateResourceRequests_WholeDeviceCapsCores(t *testing.T) {
+func Test_GenerateResourceRequests_WholeDeviceUsesObservedCores(t *testing.T) {
 	dev := &AWSNeuronDevices{
 		resourceCountName: "aws.amazon.com/neuron",
 		resourceCoreName:  "aws.amazon.com/neuroncore",
@@ -48,10 +49,28 @@ func Test_GenerateResourceRequests_WholeDeviceCapsCores(t *testing.T) {
 		},
 	}
 	req := dev.GenerateResourceRequests(ctr)
-	assert.Equal(t, req.Coresreq, int32(maxCoresPerNeuronDevice))
+	assert.Equal(t, req.Coresreq, int32(4))
 }
 
-func Test_GetNodeDevices_CoreMaskCappedOnFourCoreHardware(t *testing.T) {
+func Test_GenerateResourceRequests_WholeDeviceTwoCoreHardwareUnaffected(t *testing.T) {
+	dev := &AWSNeuronDevices{
+		resourceCountName: "aws.amazon.com/neuron",
+		resourceCoreName:  "aws.amazon.com/neuroncore",
+		coresPerAWSNeuron: 2,
+	}
+	ctr := &corev1.Container{
+		Name: "ctr",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"aws.amazon.com/neuron": resource.MustParse("1"),
+			},
+		},
+	}
+	req := dev.GenerateResourceRequests(ctr)
+	assert.Equal(t, req.Coresreq, int32(2))
+}
+
+func Test_GetNodeDevices_CoreMaskMatchesFourCoreHardware(t *testing.T) {
 	dev := InitAWSNeuronDevice(AWSNeuronConfig{
 		ResourceCountName: "aws.amazon.com/neuron",
 		ResourceCoreName:  "aws.amazon.com/neuroncore",
@@ -71,8 +90,100 @@ func Test_GetNodeDevices_CoreMaskCappedOnFourCoreHardware(t *testing.T) {
 	devices, err := dev.GetNodeDevices(node)
 	assert.NilError(t, err)
 	assert.Equal(t, len(devices), 4)
-	// Two addressable cores yield the two-bit mask 3, not the four-bit mask 15.
+	// Four addressable cores yield the four-bit mask 15, covering all of Inf1's
+	// real per-chip capacity.
+	assert.Equal(t, devices[0].Devcore, int32(15))
+}
+
+func Test_GetNodeDevices_CoreMaskUnaffectedOnTwoCoreHardware(t *testing.T) {
+	dev := InitAWSNeuronDevice(AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	})
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "trn1-node",
+			Labels: map[string]string{"node.kubernetes.io/instance-type": "trn1.2xlarge"},
+		},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				"aws.amazon.com/neuron":     resource.MustParse("1"),
+				"aws.amazon.com/neuroncore": resource.MustParse("2"),
+			},
+		},
+	}
+	devices, err := dev.GetNodeDevices(node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(devices), 1)
+	// Trn1/Inf2 behavior is unchanged: two addressable cores, two-bit mask.
 	assert.Equal(t, devices[0].Devcore, int32(3))
+}
+
+func Test_addCoreUsage_FourCoreDevice(t *testing.T) {
+	tests := []struct {
+		name     string
+		prev     map[string]any
+		require  int
+		maxCores int
+		want     int
+	}{
+		{"empty device, request 1 of 4", map[string]any{}, 1, 4, 0b0001},
+		{"empty device, request 3 of 4", map[string]any{}, 3, 4, 0b0111},
+		{"empty device, request 4 of 4", map[string]any{}, 4, 4, 0b1111},
+		{"2 already used, request 1 more of 4", map[string]any{AWSUsageInfo: 0b0011}, 1, 4, 0b0111},
+		{"2-core device unaffected", map[string]any{}, 2, 2, 0b11},
+		{"2-core device single-core unaffected", map[string]any{}, 1, 2, 0b01},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := addCoreUsage(test.prev, test.require, test.maxCores)
+			assert.Equal(t, got[AWSUsageInfo].(int), test.want)
+		})
+	}
+}
+
+func Test_PatchAnnotations_Inf1FourCore(t *testing.T) {
+	config := AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	}
+	dev := InitAWSNeuronDevice(config)
+	dev.coresPerAWSNeuron = 4
+
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": resource.MustParse("3"),
+						},
+					},
+				},
+			},
+		},
+	}
+	annoinput := map[string]string{}
+	pd := device.PodDevices{
+		AWSNeuronDevice: device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					Idx:       0,
+					UUID:      "test1",
+					Type:      AWSNeuronDevice,
+					Usedmem:   int32(0),
+					Usedcores: int32(0b0111), // cores 0,1,2 of 4 used
+					CustomInfo: map[string]any{
+						AWSUsageInfo: 0b0111,
+					},
+				},
+			},
+		},
+	}
+	result := dev.PatchAnnotations(&pod, &annoinput, pd)
+	// All three used cores (0,1,2) must be reported, not just the first two.
+	assert.Equal(t, result[AWSNeuronAssignedIndex], "0,1,2")
+	assert.Equal(t, result[AWSNeuronResourceType], "aws.amazon.com/neuroncore")
 }
 
 func Test_Fit_WholeDeviceNotShared(t *testing.T) {
@@ -85,7 +196,7 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 		ID:         "node-AWSNeuron-0",
 		Index:      0,
 		Count:      4,
-		Totalcore:  3,
+		Totalcore:  15,
 		Type:       AWSNeuronDevice,
 		Health:     true,
 		CustomInfo: map[string]any{AWSNodeType: "inf1.6xlarge"},

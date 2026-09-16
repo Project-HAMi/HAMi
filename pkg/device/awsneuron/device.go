@@ -54,10 +54,12 @@ const (
 	AWSUsageInfo             = "awsusageinfo"
 	AWSNodeType              = "AWSNodeType"
 	maxAWSNeuronDeviceCount  = int64(math.MaxInt32)
-	// maxCoresPerNeuronDevice caps per-device cores: addCoreUsage builds a
-	// two-bit mask and PatchAnnotations only emits the first two core indexes.
-	maxCoresPerNeuronDevice = int64(2)
-	maxAWSNeuronCoreCount   = maxAWSNeuronDeviceCount * maxCoresPerNeuronDevice
+	// defaultCoresPerNeuronDevice is used only as a fallback before a node's
+	// real per-device core count has been observed. It is not a hard cap:
+	// actual per-device capacity (Inf1=4, Inf2/Trn1=2) is taken from the
+	// node's reported capacity in coresPerDevice().
+	defaultCoresPerNeuronDevice = int64(2)
+	maxAWSNeuronCoreCount       = maxAWSNeuronDeviceCount * defaultCoresPerNeuronDevice
 )
 
 type AWSNeuronConfig struct {
@@ -131,9 +133,9 @@ func validateResourceRequest(quantity resource.Quantity, resourceName string, ma
 func (dev *AWSNeuronDevices) coresPerDevice() int64 {
 	observed := int64(dev.coresPerAWSNeuron)
 	if observed <= 0 {
-		return maxCoresPerNeuronDevice
+		return defaultCoresPerNeuronDevice
 	}
-	return min(observed, maxCoresPerNeuronDevice)
+	return observed
 }
 
 // splitCoreRequest maps a NeuronCore count onto devices. One core count applies
@@ -164,8 +166,8 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if dev.coresPerAWSNeuron == 0 {
 		dev.coresPerAWSNeuron = uint(coresTotal) / uint(counts)
 	}
-	// The mask must stay within the addressable cores addCoreUsage can track,
-	// even when the hardware exposes more cores per device (inf1 has four).
+	// coremask spans exactly coresPerDevice() bits, whatever the observed
+	// per-device core count is (4 on Inf1, 2 on Inf2/Trn1).
 	dev.coremask = 0
 	for i < int(dev.coresPerDevice()) {
 		dev.coremask *= 2
@@ -218,13 +220,11 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 							value = value + fmt.Sprint(val.Idx) + ","
 						}
 					} else {
-						if (val.Usedcores & 1) != 0 {
-							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)) + ","
-							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
-						}
-						if (val.Usedcores & 2) != 0 {
-							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+1) + ","
-							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
+						for bit := 0; bit < int(dev.coresPerDevice()); bit++ {
+							if (val.Usedcores & (1 << uint(bit))) != 0 {
+								value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+uint(bit)) + ","
+								(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
+							}
 						}
 					}
 				}
@@ -366,28 +366,26 @@ func countMaskAvailable(mask int32) int32 {
 	return ret
 }
 
-func addCoreUsage(prev map[string]any, require int) map[string]any {
-	res := map[string]any{}
-	count, ok := prev[AWSUsageInfo]
-	if !ok {
-		count = 0
-	}
-	if count == 0 {
-		if require == 2 {
-			res[AWSUsageInfo] = 3
-			return res
-		}
-		if require == 1 {
-			res[AWSUsageInfo] = 1
-			return res
+// addCoreUsage returns an updated CustomInfo map recording which NeuronCore
+// bit positions are in use on a device. It finds `require` free bit
+// positions among the device's maxCores addressable cores, marks them used,
+// and preserves cores already marked used in prev.
+func addCoreUsage(prev map[string]any, require int, maxCores int) map[string]any {
+	used := 0
+	if v, ok := prev[AWSUsageInfo]; ok {
+		if iv, ok := v.(int); ok {
+			used = iv
 		}
 	}
-	if countValue, ok := count.(int); ok {
-		res[AWSUsageInfo] = 3 - countValue
-	} else {
-		res[AWSUsageInfo] = 3
+	assigned := 0
+	for bit := 0; bit < maxCores && assigned < require; bit++ {
+		mask := 1 << bit
+		if used&mask == 0 {
+			used |= mask
+			assigned++
+		}
 	}
-	return res
+	return map[string]any{AWSUsageInfo: used}
 }
 func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
@@ -459,7 +457,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		for _, dev := range alloc {
 			for _, val := range devices {
 				if val.Index == uint(dev) {
-					customInfo := addCoreUsage(val.CustomInfo, int(k.Coresreq))
+					customInfo := addCoreUsage(val.CustomInfo, int(k.Coresreq), int(neuron.coresPerDevice()))
 					tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 						Idx:        int(val.Index),
 						UUID:       val.ID,
@@ -522,7 +520,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		}
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-		customInfo := addCoreUsage(dev.CustomInfo, int(k.Coresreq))
+		customInfo := addCoreUsage(dev.CustomInfo, int(k.Coresreq), int(neuron.coresPerDevice()))
 		usedcores := 0
 		if countValue, ok := customInfo[AWSUsageInfo].(int); ok {
 			usedcores = countValue
