@@ -1316,7 +1316,7 @@ func TestPatchPodAnnotationsRejectsStaleUID(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod", Namespace: "team-a", UID: staleUID},
 	}
 	patchErr := PatchPodAnnotations(stalePodRef, map[string]string{AssignedNodeAnnotations: "node-1"})
-	assert.Assert(t, patchErr != nil, "a patch carrying a stale UID must be rejected")
+	assert.Assert(t, apierrors.IsConflict(patchErr), "a patch carrying a stale UID must return a conflict, got: %v", patchErr)
 
 	current, err := fakeClient.CoreV1().Pods("team-a").Get(context.TODO(), "gpu-pod", metav1.GetOptions{})
 	assert.NilError(t, err)
