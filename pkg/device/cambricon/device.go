@@ -120,7 +120,7 @@ func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
 	}
 	if err != nil {
-		return fmt.Errorf("setNodeLock exceeds retry count %d", retry)
+		return fmt.Errorf("setNodeLock exceeds retry count %d: %w", retry, err)
 	}
 	klog.InfoS("Node lock set", "node", node.Name)
 	return nil
@@ -189,7 +189,7 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	}
 	if err != nil {
-		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
+		return fmt.Errorf("releaseNodeLock exceeds retry count %d: %w", retry, err)
 	}
 	klog.InfoS("Node lock released", "node", nodeName)
 	return nil
