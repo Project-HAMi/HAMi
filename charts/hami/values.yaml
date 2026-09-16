@@ -112,6 +112,15 @@ scheduler:
   # different units. Keep it above nodeLockRetryTimeout, otherwise kube-scheduler
   # cuts the bind call off while the extender is still retrying the node lock.
   extenderHTTPTimeout: 30
+  # Port the extender serves /filter and /bind on, bound to 127.0.0.1 so only
+  # the kube-scheduler container sharing this pod's network namespace can call
+  # them. It is deliberately not the port the Service publishes: that one also
+  # carries /webhook and /refit, which must stay reachable from the cluster,
+  # and /filter and /bind have no caller authentication of their own. Change
+  # this only if 9444 is already taken inside the pod; if you run kube-scheduler
+  # outside this pod, override the bind address through
+  # scheduler.extender.extraArgs instead.
+  extenderPort: 9444
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
@@ -314,9 +323,10 @@ scheduler:
     labels: {}
     annotations: {}
   networkPolicy:
-    # Restrict ingress on the scheduler's HTTP port (filter/bind/refit/webhook
-    # all share this one port -- NetworkPolicy can't separate them by path)
-    # to the device-plugin's pods and to the kube-system namespace, where
+    # Restrict ingress on the scheduler's HTTP port (refit and webhook share
+    # this one port -- NetworkPolicy can't separate them by path; filter and
+    # bind are not on it, they are served on scheduler.extenderPort, bound to
+    # loopback) to the device-plugin's pods and to the kube-system namespace, where
     # kube-scheduler and kube-apiserver normally run. See issue #2878.
     #
     # Off by default: /refit's own caller authentication (TokenReview) does

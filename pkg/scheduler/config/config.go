@@ -52,6 +52,13 @@ var (
 	SchedulerName      string
 	MetricsBindAddress string
 
+	// ExtenderBind is where /filter and /bind are served. They are the
+	// scheduler extender's own endpoints, called by the kube-scheduler
+	// container sharing this pod's network namespace, so they are kept off
+	// HTTPBind: that address also serves /webhook and /refit and must stay
+	// reachable from the rest of the cluster.
+	ExtenderBind string
+
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
 
