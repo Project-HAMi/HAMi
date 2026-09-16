@@ -3551,3 +3551,76 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
 	s.lock.RUnlock()
 }
+
+// benchNodeInfo builds a registered node carrying gpus idle NVIDIA devices.
+func testNodeInfo(name string, gpus int) *device.NodeInfo {
+	infos := make([]device.DeviceInfo, 0, gpus)
+	for j := range gpus {
+		infos = append(infos, device.DeviceInfo{
+			ID:           fmt.Sprintf("%s-gpu-%d", name, j),
+			Index:        uint(j),
+			Count:        10,
+			Devmem:       8192,
+			Devcore:      100,
+			Type:         nvidia.NvidiaGPUDevice,
+			Numa:         j % 2,
+			Health:       true,
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+		})
+	}
+	return &device.NodeInfo{
+		ID:      name,
+		Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: infos},
+	}
+}
+
+// Test_getNodesUsage_BuildsOnlyCandidateNodes pins the narrowing: Filter passes
+// a candidate list and discards the second return value, so nodes outside that
+// list must not be snapshotted at all.
+func Test_getNodesUsage_BuildsOnlyCandidateNodes(t *testing.T) {
+	nodeMage := newNodeManager()
+	for _, name := range []string{"node1", "node2", "node3"} {
+		nodeMage.addNode(name, testNodeInfo(name, 2))
+	}
+	s := Scheduler{nodeManager: nodeMage, podManager: device.NewPodManager()}
+
+	candidates := []string{"node2"}
+	cachenodeMap, overallnodeMap, failedNodes, err := s.getNodesUsage(&candidates, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+
+	assert.Equal(t, len(*cachenodeMap), 1)
+	assert.Equal(t, len(*overallnodeMap), 1)
+	for _, absent := range []string{"node1", "node3"} {
+		_, present := (*overallnodeMap)[absent]
+		assert.Assert(t, !present, "%s was snapshotted but is not a candidate", absent)
+	}
+	_, present := (*cachenodeMap)["node2"]
+	assert.Assert(t, present, "node2 is a candidate and must be snapshotted")
+}
+
+// Test_getNodesUsage_NilCandidatesBuildsEveryNode covers the register loop's
+// contract: it needs usage for every node, because s.overviewstatus drives the
+// node metrics.
+func Test_getNodesUsage_NilCandidatesBuildsEveryNode(t *testing.T) {
+	nodeMage := newNodeManager()
+	for _, name := range []string{"node1", "node2", "node3"} {
+		nodeMage.addNode(name, testNodeInfo(name, 2))
+	}
+	s := Scheduler{nodeManager: nodeMage, podManager: device.NewPodManager()}
+
+	cachenodeMap, overallnodeMap, _, err := s.getNodesUsage(nil, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*overallnodeMap), 3)
+	// The candidate map stays empty when no candidate list was supplied.
+	assert.Equal(t, len(*cachenodeMap), 0)
+}
+
+// Test_buildNodeUsage_LeavesPodInfosNil documents that the per-device PodInfos
+// slice is not preallocated. Every consumer ranges over it or appends to it.
+func Test_buildNodeUsage_LeavesPodInfosNil(t *testing.T) {
+	usage := buildNodeUsage(testNodeInfo("node1", 1), nil)
+	assert.Equal(t, len(usage.Devices.DeviceLists), 1)
+	assert.Assert(t, usage.Devices.DeviceLists[0].Device.PodInfos == nil)
+}
