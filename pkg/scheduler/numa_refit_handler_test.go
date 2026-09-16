@@ -281,6 +281,13 @@ func TestRefitNumaAllocationPatchDeadlineReleasesFilter(t *testing.T) {
 			}},
 		}}},
 	}
+	// Filter resolves the pod it is asked about against the API server, so the
+	// waiting pod has to exist there.
+	s.kubeClient = client.KubeClient
+	if _, err := client.KubeClient.CoreV1().Pods(filterPod.Namespace).Create(context.Background(), filterPod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create the waiting pod: %v", err)
+	}
+
 	go func() {
 		close(filterStarted)
 		_, err := s.Filter(extenderv1.ExtenderArgs{Pod: filterPod, NodeNames: &[]string{}})

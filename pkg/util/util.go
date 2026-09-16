@@ -203,6 +203,12 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 		return fmt.Errorf("pod is nil")
 	}
 	type patchMetadata struct {
+		// UID makes the patch conditional on the object's identity. A merge
+		// patch is addressed by name, so without it a patch computed for one
+		// pod can land on a different pod that later took the same name.
+		// Kubernetes rejects an update that changes the UID, so a mismatch
+		// fails the request instead of writing to the wrong object.
+		UID         k8stypes.UID      `json:"uid,omitempty"`
 		Annotations map[string]string `json:"annotations,omitempty"`
 		Labels      map[string]string `json:"labels,omitempty"`
 	}
@@ -211,6 +217,7 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	}
 
 	p := patchPod{}
+	p.Metadata.UID = pod.UID
 	p.Metadata.Annotations = annotations
 	label := make(map[string]string)
 	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
