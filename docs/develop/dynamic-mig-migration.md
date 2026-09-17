@@ -200,6 +200,25 @@ GPU Operator can continue to provide the driver, Container Toolkit, DCGM, and ot
 
 ## Validation checklist
 
+### CDI injection for dynamic MIG
+
+When the NVIDIA device plugin uses `cdi-cri` or `cdi-annotations`, it writes one
+CDI file per live HAMi-managed MIG instance under `/var/run/cdi`. The container
+runtime must be configured to read this directory and support the selected CDI
+response method. HAMi publishes the file before returning the allocation and
+removes it only after the corresponding GI/CI is destroyed. On restart, it
+rebuilds files for verified live allocations and removes stale HAMi-owned
+files. Without a CDI device-list strategy, the existing NVIDIA injection path
+is unchanged.
+
+Do not run another MIG lifecycle controller against the same physical GPUs.
+The current dynamic MIG operating mode is selected per node, so all GPUs
+managed by that plugin require exclusive HAMi ownership. Static and dynamic
+MIG management of the same GPU is unsupported.
+
+Before using CDI in production, validate the selected runtime, NVIDIA driver,
+GPU model, allocation, restart recovery, and cleanup on real MIG hardware.
+
 ### Node capability
 
 - The registered GPU `mode` is `mig`.
