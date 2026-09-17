@@ -66,6 +66,12 @@ test:
 	mkdir -p ./_output/coverage/
 	bash hack/unit-test.sh
 
+# Runs every Go benchmark to completion. Set BENCHTIME for a longer, more
+# meaningful local measurement, e.g. BENCHTIME=1s make bench.
+.PHONY: bench
+bench:
+	bash hack/bench.sh
+
 lint:
 	bash hack/verify-staticcheck.sh
 
