@@ -481,6 +481,41 @@ func TestAllocate_WritesOverrideEnvFileAndMount(t *testing.T) {
 	require.Contains(t, overrideEnv, "GPU_CORE_UTILIZATION_POLICY=force\n")
 }
 
+func TestAllocate_RejectsOverrideEnvLineBreaks(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "c0", Env: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5\nCUDA_DEVICE_MEMORY_LIMIT_0=0"},
+			}}},
+		},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Nil(t, response)
+	require.ErrorContains(t, err, "failed to write allocation override env")
+	require.ErrorContains(t, err, "line break")
+}
+
 func TestAllocate_MultiContainer_EachGetsOwnDevice(t *testing.T) {
 	setupInRequestDevices(t)
 	plugin := newTestPlugin(t)
