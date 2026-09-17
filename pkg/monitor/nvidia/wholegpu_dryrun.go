@@ -97,7 +97,7 @@ func RunWholeGPUDryRun(ctx context.Context, client kubernetes.Interface, nvmllib
 	if err != nil {
 		return nil, err
 	}
-	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName)})
+	pods, err := client.CoreV1().Pods(opts.Namespace).List(ctx, metav1.ListOptions{FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods on node %s: %w", nodeName, err)
 	}

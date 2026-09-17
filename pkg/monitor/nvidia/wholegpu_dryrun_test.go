@@ -47,7 +47,7 @@ func TestRunWholeGPUDryRun(t *testing.T) {
 	wholePod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "workloads", Name: "whole", UID: types.UID("whole-uid"),
-			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 		},
 		Spec: corev1.PodSpec{NodeName: nodeName, Containers: []corev1.Container{{Name: "main"}}},
 	}
@@ -89,8 +89,8 @@ func TestRunWholeGPUDryRun(t *testing.T) {
 		filteredPod := wholePod.DeepCopy()
 		filteredPod.Spec.Containers = append(filteredPod.Spec.Containers, corev1.Container{Name: "sidecar"})
 		filteredPod.Annotations = wholeGPUAnnotation(
-			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000}},
-			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000}},
+			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}},
+			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}},
 		)
 		client := fake.NewClientset(node, filteredPod)
 		nvmllib := successfulWholeGPUNVML(gpuUUID)
@@ -106,8 +106,8 @@ func TestRunWholeGPUDryRun(t *testing.T) {
 		pod.Spec.InitContainers = []corev1.Container{{Name: "prepare"}}
 		pod.Spec.Containers = []corev1.Container{{Name: "main"}}
 		pod.Annotations = wholeGPUAnnotation(
-			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000}},
-			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000}},
+			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}},
+			device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}},
 		)
 		report, err := RunWholeGPUDryRun(context.Background(), fake.NewClientset(node, pod), successfulWholeGPUNVML(gpuUUID), nodeName, WholeGPUDryRunOptions{})
 		assert.NilError(t, err)
@@ -122,7 +122,7 @@ func TestRunWholeGPUDryRun(t *testing.T) {
 		partialPod.Annotations = wholeGPUAnnotation(device.ContainerDevices{{UUID: gpuUUID, Type: nv.NvidiaGPUDevice, Usedmem: 4000}})
 		unknownPod := wholePod.DeepCopy()
 		unknownPod.Name = "unknown"
-		unknownPod.Annotations = wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-missing", Type: nv.NvidiaGPUDevice, Usedmem: 8000}})
+		unknownPod.Annotations = wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-missing", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}})
 		client := fake.NewClientset(node, partialPod, unknownPod)
 		initialized := 0
 		nvmllib := &mock.Interface{InitFunc: func() nvml.Return { initialized++; return nvml.SUCCESS }}

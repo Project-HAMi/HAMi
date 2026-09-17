@@ -19,7 +19,9 @@ package nvidia
 import (
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"gotest.tools/v3/assert"
@@ -82,13 +84,13 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 	})
 
 	t.Run("full memory allocation on a non-MIG device is confirmed", func(t *testing.T) {
-		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000}}
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}
 		assert.Equal(t, evaluateContainerWholeGPU(ctrDevs, nodeDevs), confirmedWholeGPU)
 	})
 
 	t.Run("over-allocation still counts as whole", func(t *testing.T) {
-		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 9000}}
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 9000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}
 		assert.Equal(t, evaluateContainerWholeGPU(ctrDevs, nodeDevs), confirmedWholeGPU)
 	})
@@ -122,8 +124,8 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 
 	t.Run("multi-device container confirmed only when every device is whole", func(t *testing.T) {
 		ctrDevs := device.ContainerDevices{
-			{UUID: "GPU-1", Usedmem: 8000},
-			{UUID: "GPU-2", Usedmem: 8000},
+			{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100},
+			{UUID: "GPU-2", Usedmem: 8000, Usedcores: 100},
 		}
 		nodeDevs := map[string]*device.DeviceInfo{
 			"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""},
@@ -137,6 +139,7 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 	newHandle := func(mem nvml.Memory, memRet nvml.Return, utilization nvml.Utilization, utilRet nvml.Return) *mock.Device {
 		return &mock.Device{
 			GetMemoryInfoFunc:       func() (nvml.Memory, nvml.Return) { return mem, memRet },
+			IsMigDeviceHandleFunc:   func() (bool, nvml.Return) { return false, nvml.SUCCESS },
 			GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { return utilization, utilRet },
 		}
 	}
@@ -241,13 +244,69 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 		assert.Equal(t, u.DeviceMemoryLimit(-1), uint64(0))
 		assert.Equal(t, u.DeviceSmUtil(5), uint64(0))
 	})
+
+	t.Run("DeviceSmUtil on a MIG device goes through DCGM, not NVML", func(t *testing.T) {
+		fake := &fakeLatestValuesQuerier{vals: []dcgm.FieldValue_v1{{FieldID: dcgm.DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO, FieldType: dcgm.DCGM_FT_DOUBLE, Status: 0, Value: dcgmDoubleBytes(66)}}}
+		col := newDCGMWholeGPUCollector(fake)
+		col.initOnce.Do(func() {}) // mark initialized, skip the real embedded engine
+		u := &wholeGPUUsage{
+			uuids: []string{"MIG-GPU-parent-uuid/1/0"},
+			nvmllib: &mock.Interface{
+				DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+					return &mock.Device{
+						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+						// If the code still calls NVML for a MIG device, the test catches it.
+						GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { panic("must not call NVML for MIG") },
+					}, nvml.SUCCESS
+				},
+			},
+			dcgm: col,
+		}
+		assert.Equal(t, u.DeviceSmUtil(0), uint64(66))
+		assert.Equal(t, fake.lastEntityGroup, dcgm.FE_GPU_I)
+		assert.Equal(t, fake.lastID, uint(3))
+		assert.DeepEqual(t, fake.lastFields, migProfUtilFields)
+	})
+
+	t.Run("MIG device with no DCGM collector returns 0, not a crash", func(t *testing.T) {
+		u := &wholeGPUUsage{
+			uuids: []string{"MIG-GPU-parent-uuid/1/0"},
+			nvmllib: &mock.Interface{
+				DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+					return &mock.Device{
+						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+					}, nvml.SUCCESS
+				},
+			},
+			dcgm: nil,
+		}
+		assert.Equal(t, u.DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("MIG device whose GPU instance id lookup fails returns 0", func(t *testing.T) {
+		u := &wholeGPUUsage{
+			uuids: []string{"MIG-GPU-parent-uuid/1/0"},
+			nvmllib: &mock.Interface{
+				DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+					return &mock.Device{
+						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 0, nvml.ERROR_NOT_SUPPORTED },
+					}, nvml.SUCCESS
+				},
+			},
+			dcgm: newDCGMWholeGPUCollector(&fakeLatestValuesQuerier{}),
+		}
+		assert.Equal(t, u.DeviceSmUtil(0), uint64(0))
+	})
 }
 
 func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p", Namespace: "default", UID: "uid1",
-			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 	}
@@ -257,6 +316,7 @@ func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
 			nvmllib:         &mock.Interface{},
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
+			firstSeenAt:     make(map[string]time.Time),
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}, nil
 			},
@@ -288,7 +348,7 @@ func Test_reconcileWholeGPU_replacesRealShmEntry(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p", Namespace: "default", UID: "uid2",
-			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 	}
@@ -299,6 +359,7 @@ func Test_reconcileWholeGPU_replacesRealShmEntry(t *testing.T) {
 			nvmllib:         &mock.Interface{},
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
+			firstSeenAt:     make(map[string]time.Time),
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}, nil
 			},
@@ -318,7 +379,7 @@ func Test_reconcileWholeGPU_prunesOnPodDeletion(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p", Namespace: "default", UID: "uid3",
-			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 	}
@@ -328,6 +389,7 @@ func Test_reconcileWholeGPU_prunesOnPodDeletion(t *testing.T) {
 			nvmllib:         &mock.Interface{},
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
+			firstSeenAt:     make(map[string]time.Time),
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}, nil
 			},
@@ -362,6 +424,7 @@ func Test_reconcileWholeGPU_verdictCached_noNodeGet(t *testing.T) {
 			nvmllib:         &mock.Interface{},
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
+			firstSeenAt:     make(map[string]time.Time),
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				calls++
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}, nil
@@ -383,7 +446,7 @@ func Test_reconcileWholeGPU_noFlapOnNodeTableFailure(t *testing.T) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid5",
-				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 			},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 		}
@@ -393,6 +456,7 @@ func Test_reconcileWholeGPU_noFlapOnNodeTableFailure(t *testing.T) {
 				nvmllib:         &mock.Interface{},
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
+				firstSeenAt:     make(map[string]time.Time),
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					if *fail {
 						return nil, errors.New("apiserver unavailable")
@@ -440,7 +504,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid7",
-				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 			},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 		}
@@ -461,7 +525,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid8",
-				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000}}),
+				Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
 			},
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
 		}
@@ -473,6 +537,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 				nvmllib:         &mock.Interface{},
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
+				firstSeenAt:     make(map[string]time.Time),
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: ""}}, nil
 				},

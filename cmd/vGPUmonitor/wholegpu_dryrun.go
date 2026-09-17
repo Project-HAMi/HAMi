@@ -92,13 +92,17 @@ func loadWholeGPUDryRunKubeConfig() (*rest.Config, error) {
 	if kubeconfig == "" {
 		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err == nil {
+	if kubeconfig != "" {
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load explicit kubeconfig %s: %w", kubeconfig, err)
+		}
 		return config, nil
 	}
-	inClusterConfig, inClusterErr := rest.InClusterConfig()
-	if inClusterErr != nil {
-		return nil, fmt.Errorf("kubeconfig %s: %v; in-cluster config: %w", kubeconfig, err, inClusterErr)
+
+	inClusterConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("in-cluster config: %w", err)
 	}
 	return inClusterConfig, nil
 }
