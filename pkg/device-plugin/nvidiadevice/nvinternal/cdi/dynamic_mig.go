@@ -8,6 +8,7 @@ package cdi
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,7 +22,6 @@ import (
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
 	nvcdspec "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/spec"
 	"k8s.io/klog/v2"
-	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
 	cdspec "tags.cncf.io/container-device-interface/specs-go"
 )
@@ -87,46 +87,52 @@ func (cdi *cdiHandler) EnsureDynamicMIGDevice(dev DynamicMIGDevice) (string, err
 	}
 	unlock := cdi.lockDynamicMIG(name)
 	defer unlock()
-	geometry := fmt.Sprintf("%d:%d:%d", dev.ParentMinor, dev.GPUInstanceID, dev.ComputeInstanceID)
-	gi, ci, err := cdi.dynamicMIGCapabilityNodes(dev)
+	expected, err := cdi.dynamicMIGSpec(dev, name)
 	if err != nil {
 		return "", err
 	}
-	// Existing files are reused only when the recorded live identity matches.
+	// Existing files are reused only when the complete, transformed spec matches.
+	// This includes NVIDIA common edits, parent-GPU edits, hooks, and root paths.
 	if raw, err := os.ReadFile(path); err == nil {
-		var saved cdspec.Spec
-		if json.Unmarshal(raw, &saved) == nil && saved.Kind == cdi.vendor+"/"+DynamicMIGClass &&
-			len(saved.Devices) == 1 && saved.Devices[0].Name == name &&
-			saved.Devices[0].Annotations[dynamicMIGUUIDAnnotation] == dev.MIGUUID &&
-			saved.Devices[0].Annotations[dynamicMIGParentAnnotation] == dev.ParentGPUUUID &&
-			saved.Devices[0].Annotations[dynamicMIGGeometryAnnotation] == geometry &&
-			containsCapabilityNode(saved.Devices[0].ContainerEdits.DeviceNodes, gi) &&
-			containsCapabilityNode(saved.Devices[0].ContainerEdits.DeviceNodes, ci) {
-			if _, err := cdiapi.ReadSpec(path, 0); err == nil {
-				klog.V(4).InfoS("reused dynamic MIG CDI entry", "uuid", dev.MIGUUID, "path", path)
-				return qualified, nil
-			}
+		if dynamicMIGSpecMatches(raw, expected.Raw()) {
+			klog.V(4).InfoS("reused dynamic MIG CDI entry", "uuid", dev.MIGUUID, "path", path)
+			return qualified, nil
 		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
+	if err := expected.Save(path); err != nil {
+		return "", fmt.Errorf("publish dynamic MIG CDI spec: %w", err)
+	}
+	klog.InfoS("published dynamic MIG CDI entry", "uuid", dev.MIGUUID, "path", path)
+	return qualified, nil
+}
+
+// dynamicMIGSpec creates the complete CDI spec that a live MIG instance needs.
+// It must be called before deciding whether an existing file may be reused.
+func (cdi *cdiHandler) dynamicMIGSpec(dev DynamicMIGDevice, name string) (nvcdspec.Interface, error) {
+	geometry := fmt.Sprintf("%d:%d:%d", dev.ParentMinor, dev.GPUInstanceID, dev.ComputeInstanceID)
+	gi, ci, err := cdi.dynamicMIGCapabilityNodes(dev)
+	if err != nil {
+		return nil, err
+	}
 	lib, ok := cdi.cdilibs["gpu"].(nvcdi.Interface)
 	if !ok {
-		return "", fmt.Errorf("NVIDIA CDI library does not support device edits")
+		return nil, fmt.Errorf("NVIDIA CDI library does not support device edits")
 	}
 	common, err := lib.GetCommonEdits()
 	if err != nil {
-		return "", fmt.Errorf("get common NVIDIA CDI edits: %w", err)
+		return nil, fmt.Errorf("get common NVIDIA CDI edits: %w", err)
 	}
 	if common == nil || common.ContainerEdits == nil {
-		return "", fmt.Errorf("NVIDIA CDI library returned no common edits")
+		return nil, fmt.Errorf("NVIDIA CDI library returned no common edits")
 	}
 	parent, err := lib.GetDeviceSpecsByID(dev.ParentGPUUUID)
 	if err != nil {
-		return "", fmt.Errorf("get parent GPU CDI edits for %q: %w", dev.ParentGPUUUID, err)
+		return nil, fmt.Errorf("get parent GPU CDI edits for %q: %w", dev.ParentGPUUUID, err)
 	}
 	if len(parent) != 1 {
-		return "", fmt.Errorf("expected one CDI entry for parent GPU %q, got %d", dev.ParentGPUUUID, len(parent))
+		return nil, fmt.Errorf("expected one CDI entry for parent GPU %q, got %d", dev.ParentGPUUUID, len(parent))
 	}
 	entry := parent[0]
 	entry.Name = name
@@ -139,27 +145,27 @@ func (cdi *cdiHandler) EnsureDynamicMIGDevice(dev DynamicMIGDevice) (string, err
 	spec, err := nvcdspec.New(nvcdspec.WithVendor(cdi.vendor), nvcdspec.WithClass(DynamicMIGClass),
 		nvcdspec.WithDeviceSpecs([]cdspec.Device{entry}), nvcdspec.WithEdits(*common.ContainerEdits))
 	if err != nil {
-		return "", fmt.Errorf("build dynamic MIG CDI spec: %w", err)
+		return nil, fmt.Errorf("build dynamic MIG CDI spec: %w", err)
 	}
 	if err := cdi.getRootTransformer().Transform(spec.Raw()); err != nil {
-		return "", fmt.Errorf("transform dynamic MIG CDI spec: %w", err)
+		return nil, fmt.Errorf("transform dynamic MIG CDI spec: %w", err)
 	}
-	if err := spec.Save(path); err != nil {
-		return "", fmt.Errorf("publish dynamic MIG CDI spec: %w", err)
-	}
-	klog.InfoS("published dynamic MIG CDI entry", "uuid", dev.MIGUUID, "path", path)
-	return qualified, nil
+	return spec, nil
 }
 
-func containsCapabilityNode(nodes []*cdspec.DeviceNode, expected *cdspec.DeviceNode) bool {
-	for _, node := range nodes {
-		if node != nil && node.Path == expected.Path && node.Type == expected.Type &&
-			node.Major == expected.Major && node.Minor == expected.Minor &&
-			node.FileMode != nil && expected.FileMode != nil && *node.FileMode == *expected.FileMode {
-			return true
-		}
+func dynamicMIGSpecMatches(savedJSON []byte, expected *cdspec.Spec) bool {
+	// Decode to an untyped value so unknown JSON fields are part of the
+	// comparison too. Decoding into cdspec.Spec would silently discard them.
+	var saved any
+	if err := json.Unmarshal(savedJSON, &saved); err != nil {
+		return false
 	}
-	return false
+	savedJSON, err := json.Marshal(saved)
+	if err != nil {
+		return false
+	}
+	expectedJSON, err := json.Marshal(expected)
+	return err == nil && bytes.Equal(savedJSON, expectedJSON)
 }
 
 // RemoveDynamicMIGDevice touches only the HAMi-owned file for this UUID.
@@ -170,14 +176,41 @@ func (cdi *cdiHandler) RemoveDynamicMIGDevice(uuid string) error {
 	}
 	unlock := cdi.lockDynamicMIG(name)
 	defer unlock()
-	err = os.Remove(path)
-	if os.IsNotExist(err) {
+	if err := cdi.validateDynamicMIGFile(path, uuid, name); os.IsNotExist(err) {
 		return nil
+	} else if err != nil {
+		return err
 	}
+	err = os.Remove(path)
 	if err == nil {
 		klog.InfoS("removed dynamic MIG CDI entry", "uuid", uuid, "path", path)
 	}
 	return err
+}
+
+// validateDynamicMIGFile proves the path contains the one HAMi-owned entry for uuid.
+// Shared CDI directories may also contain administrator or runtime-managed files.
+func (cdi *cdiHandler) validateDynamicMIGFile(path, uuid, name string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var saved cdspec.Spec
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		return fmt.Errorf("refusing to remove dynamic MIG CDI file %q: invalid CDI spec: %w", path, err)
+	}
+	if saved.Kind != cdi.vendor+"/"+DynamicMIGClass || len(saved.Devices) != 1 ||
+		saved.Devices[0].Name != name || saved.Devices[0].Annotations[dynamicMIGUUIDAnnotation] != uuid {
+		return fmt.Errorf("refusing to remove CDI file %q: it is not the HAMi dynamic MIG entry for %q", path, uuid)
+	}
+	expectedPath, expectedName, err := cdi.dynamicMIGPath(uuid)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(path) != filepath.Clean(expectedPath) || name != expectedName {
+		return fmt.Errorf("refusing to remove CDI file %q: filename does not match MIG UUID %q", path, uuid)
+	}
+	return nil
 }
 
 type dynamicMIGLock struct {
@@ -237,6 +270,19 @@ func (cdi *cdiHandler) ReplaceDynamicMIGDevices(live []DynamicMIGDevice) error {
 		path := filepath.Join(root, file.Name())
 		if _, ok := wanted[path]; ok {
 			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var saved cdspec.Spec
+		if err := json.Unmarshal(raw, &saved); err != nil || len(saved.Devices) != 1 {
+			return fmt.Errorf("refusing to remove CDI file %q: it is not a valid HAMi dynamic MIG entry", path)
+		}
+		uuid := saved.Devices[0].Annotations[dynamicMIGUUIDAnnotation]
+		name := saved.Devices[0].Name
+		if err := cdi.validateDynamicMIGFile(path, uuid, name); err != nil {
+			return err
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err

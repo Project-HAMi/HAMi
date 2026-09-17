@@ -21,16 +21,19 @@ import (
 	cdspec "tags.cncf.io/container-device-interface/specs-go"
 )
 
-type fakeDynamicMIGLib struct{}
+type fakeDynamicMIGLib struct {
+	commonEnv  string
+	parentPath string
+}
 
 func (fakeDynamicMIGLib) GetSpec(...string) (nvcdspec.Interface, error) { return nil, nil }
 func (fakeDynamicMIGLib) GetAllDeviceSpecs() ([]cdspec.Device, error)   { return nil, nil }
-func (fakeDynamicMIGLib) GetCommonEdits() (*cdiapi.ContainerEdits, error) {
-	return &cdiapi.ContainerEdits{ContainerEdits: &cdspec.ContainerEdits{Env: []string{"NVIDIA_VISIBLE_DEVICES=void"}}}, nil
+func (f *fakeDynamicMIGLib) GetCommonEdits() (*cdiapi.ContainerEdits, error) {
+	return &cdiapi.ContainerEdits{ContainerEdits: &cdspec.ContainerEdits{Env: []string{f.commonEnv}}}, nil
 }
-func (fakeDynamicMIGLib) GetDeviceSpecsByID(...string) ([]cdspec.Device, error) {
+func (f *fakeDynamicMIGLib) GetDeviceSpecsByID(...string) ([]cdspec.Device, error) {
 	return []cdspec.Device{{Name: "GPU-parent", ContainerEdits: cdspec.ContainerEdits{
-		DeviceNodes: []*cdspec.DeviceNode{{Path: "/dev/nvidia0", Type: "c", Major: 195, Minor: 0}},
+		DeviceNodes: []*cdspec.DeviceNode{{Path: f.parentPath, Type: "c", Major: 195, Minor: 0}},
 	}}}, nil
 }
 
@@ -45,7 +48,7 @@ func testDynamicMIGHandler(t *testing.T) *cdiHandler {
 	require.NoError(t, os.WriteFile(filepath.Join(base, "ci2/access"), []byte("DeviceFileMinor: 43\nDeviceFileMode: 438\n"), 0600))
 	return &cdiHandler{
 		vendor: "k8s.device-plugin.nvidia.com", dynamicMIGRoot: root, dynamicMIGProcRoot: proc,
-		cdilibs: map[string]nvcdi.SpecGenerator{"gpu": fakeDynamicMIGLib{}}, driverRoot: "/", devRoot: "/",
+		cdilibs: map[string]nvcdi.SpecGenerator{"gpu": &fakeDynamicMIGLib{commonEnv: "NVIDIA_VISIBLE_DEVICES=void", parentPath: "/dev/nvidia0"}}, driverRoot: "/", devRoot: "/",
 	}
 }
 
@@ -103,6 +106,95 @@ func TestDynamicMIGCDIStartupRecovery(t *testing.T) {
 	livePath, _, err := h.dynamicMIGPath(dev.MIGUUID)
 	require.NoError(t, err)
 	_, err = cdiapi.ReadSpec(livePath, 0)
+	require.NoError(t, err)
+}
+
+func TestDynamicMIGCDIRegeneratesWhenCompleteSpecChanges(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-live", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	// This simulates a toolkit/driver update that changes common NVIDIA edits.
+	lib := h.cdilibs["gpu"].(*fakeDynamicMIGLib)
+	lib.commonEnv = "NVIDIA_VISIBLE_DEVICES=all"
+	_, err = h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NotEqual(t, before, after)
+	var saved cdspec.Spec
+	require.NoError(t, json.Unmarshal(after, &saved))
+	require.Contains(t, saved.ContainerEdits.Env, "NVIDIA_VISIBLE_DEVICES=all")
+}
+
+func TestDynamicMIGCDIRemovalPreservesUnownedFile(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-live", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var saved cdspec.Spec
+	require.NoError(t, json.Unmarshal(raw, &saved))
+	saved.Kind = "example.com/administrator-owned"
+	raw, err = json.Marshal(saved)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0600))
+
+	err = h.RemoveDynamicMIGDevice(dev.MIGUUID)
+	require.Error(t, err)
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+}
+
+func TestDynamicMIGCDIRemovalRejectsFilenameUUIDMismatch(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-live", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var saved cdspec.Spec
+	require.NoError(t, json.Unmarshal(raw, &saved))
+	saved.Devices[0].Annotations[dynamicMIGUUIDAnnotation] = "MIG-different"
+	raw, err = json.Marshal(saved)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0600))
+
+	err = h.RemoveDynamicMIGDevice(dev.MIGUUID)
+	require.Error(t, err)
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+}
+
+func TestDynamicMIGCDIStartupRecoveryPreservesUnownedFile(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-stale", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var saved cdspec.Spec
+	require.NoError(t, json.Unmarshal(raw, &saved))
+	saved.Kind = "example.com/administrator-owned"
+	raw, err = json.Marshal(saved)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0600))
+
+	err = h.ReplaceDynamicMIGDevices(nil)
+	require.Error(t, err)
+	_, err = os.Stat(path)
 	require.NoError(t, err)
 }
 
