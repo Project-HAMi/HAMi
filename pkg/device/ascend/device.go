@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"sort"
@@ -47,6 +48,15 @@ const (
 	VNPUModeHamiCore           = "hami-core"
 	VNPUModeTemplate           = "template"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
+	// deferredMemoryTrimAnnotation marks a mode-agnostic request whose memory
+	// must be resolved by Fit after a candidate node is known. It is internal
+	// bookkeeping and is never consumed by the device plugin.
+	deferredMemoryTrimAnnotation = "hami.io/ascend-defer-memory-trim"
+	// resolvedVNPUModeKey is carried only in the in-memory allocation result.
+	// It lets PatchAnnotations distinguish a mode-agnostic request resolved to
+	// a hami-core node from one resolved to a template node. CustomInfo is not
+	// serialized into pod annotations.
+	resolvedVNPUModeKey = "hami.io/ascend-resolved-vnpu-mode"
 )
 
 type Devices struct {
@@ -217,6 +227,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 				p.Annotations = map[string]string{}
 			}
 			p.Annotations[VNPUModeAnnotation] = VNPUModeHamiCore
+			vnpuMode = VNPUModeHamiCore
 			isHAMiCore = true
 			klog.InfoS("Inferred hami-core vnpu mode from core request", "pod", klog.KObj(p), "core", coreQ.Value())
 		}
@@ -225,8 +236,14 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
-		if isHAMiCore {
+		// An omitted mode is resolved after the scheduler has a candidate node.
+		// Keep the user's value intact here; Fit applies template rounding only
+		// for a legacy node and leaves it untouched on a hami-core node.
+		if isHAMiCore || vnpuMode == "" {
 			trimMem = memory.Value()
+			if vnpuMode == "" && memory.Value() > dev.config.MemoryCapacity {
+				return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, memory.Value())
+			}
 		} else {
 			trimMem, _ = dev.trimMemory(memory.Value())
 			if trimMem <= 0 {
@@ -234,10 +251,16 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			}
 		}
 	}
+	if vnpuMode == "" && ok && p != nil {
+		if p.Annotations == nil {
+			p.Annotations = map[string]string{}
+		}
+		p.Annotations[deferredMemoryTrimAnnotation] = "true"
+	}
 	// count, not reqNum: the 910C SuperPod rewrite to 2 is HAMi's module
 	// packaging rule, not a multi device request, and #2005 added 910C vNPU
 	// templates so a single device fractional request stays schedulable.
-	if count.Value() > 1 && !isHAMiCore {
+	if count.Value() > 1 && !isHAMiCore && vnpuMode != "" {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
@@ -310,8 +333,15 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 			for _, val := range dp {
 				info := RuntimeInfo{UUID: val.UUID}
 
-				// If is hami core, populate Memory and Core directly without using Temp
-				if vnpuMode == VNPUModeHamiCore {
+				resolvedMode := vnpuMode
+				if mode, ok := val.CustomInfo[resolvedVNPUModeKey].(string); ok {
+					resolvedMode = mode
+				}
+
+				// If is hami core, populate Memory and Core directly without using Temp.
+				// For a mode-agnostic request, Fit records the node-resolved mode in
+				// CustomInfo so this remains correct after node selection.
+				if resolvedMode == VNPUModeHamiCore {
 					info.Memory = int64(val.Usedmem)
 					info.Core = val.Usedcores
 				} else {
@@ -331,6 +361,13 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 		(*annoInput)[allocateStr] = string(s)
 	}
 	return *annoInput
+}
+
+func withResolvedVNPUMode(info map[string]any, mode string) map[string]any {
+	resolved := make(map[string]any, len(info)+1)
+	maps.Copy(resolved, info)
+	resolved[resolvedVNPUModeKey] = mode
+	return resolved
 }
 
 func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -711,6 +748,33 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(4).InfoS("Node filtered: pod requests template mode but node uses hami-core", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
 	}
+	resolvedMode := vnpuMode
+	if resolvedMode != VNPUModeHamiCore && resolvedMode != VNPUModeTemplate {
+		if nodeSupportHamiCore {
+			resolvedMode = VNPUModeHamiCore
+		} else {
+			resolvedMode = VNPUModeTemplate
+		}
+	}
+	// Mode-agnostic requests cannot be rounded in MutateAdmission because the
+	// candidate node determines whether templates are used. Resolve the value
+	// locally for this candidate so evaluating another node cannot observe a
+	// mutated request.
+	deferredMemoryTrim := pod != nil && pod.Annotations[deferredMemoryTrimAnnotation] == "true"
+	if vnpuMode == "" && deferredMemoryTrim && !nodeSupportHamiCore && nodeInfo != nil && nodeInfo.Node != nil && k.Memreq > 0 {
+		trimmed, _ := npu.trimMemory(int64(k.Memreq))
+		if trimmed <= 0 || trimmed > math.MaxInt32 {
+			reason[common.CardInsufficientMemory]++
+			klog.V(4).InfoS("Node filtered: mode-agnostic memory cannot fit a template", "pod", klog.KObj(pod), "memory", k.Memreq)
+			return false, nil, common.GenReason(reason, len(devices))
+		}
+		k.Memreq = int32(trimmed)
+		k.MemPercentagereq = 0
+	}
+	if originReq > 1 && vnpuMode == "" && deferredMemoryTrim && !nodeSupportHamiCore &&
+		int64(k.Memreq) != npu.config.MemoryAllocatable {
+		return false, nil, "vNPU not supported for multiple devices"
+	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
 
 	needTopology := false
@@ -836,7 +900,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				Type:       k.Type,
 				Usedmem:    memreq,
 				Usedcores:  k.Coresreq,
-				CustomInfo: dev.CustomInfo,
+				CustomInfo: withResolvedVNPUMode(dev.CustomInfo, resolvedMode),
 			})
 		}
 		if k.Nums == 0 && !needTopology && !pair910C {

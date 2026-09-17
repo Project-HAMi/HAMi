@@ -1484,7 +1484,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantCore:      20,
 		},
 		{
-			name: "no vnpu-mode annotation: no postStart, memory trimmed",
+			name: "no vnpu-mode annotation: no postStart, memory preserved",
 			args: struct {
 				ctr corev1.Container
 				pod corev1.Pod
@@ -1505,7 +1505,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 				pod: corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
 			},
 			wantPostStart: false,
-			wantMem:       32768, // no template configured -> MemoryAllocatable
+			wantMem:       15360, // mode-agnostic requests are resolved after node selection
 			wantCore:      0,
 		},
 		{
@@ -1674,6 +1674,91 @@ func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
 			}
 			assert.Equal(t, pod.Annotations[VNPUModeAnnotation], test.wantVNPUMode)
 		})
+	}
+}
+
+func TestModeAgnosticMemoryResolvedPerNode(t *testing.T) {
+	dev := &Devices{config: VNPUConfig{
+		CommonWord:         "Ascend910B4",
+		ResourceName:       "huawei.com/Ascend910B4",
+		ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+		MemoryAllocatable:  32768,
+		MemoryCapacity:     32768,
+		Templates: []Template{
+			{Name: "vir05_1c_8g", Memory: 8192},
+			{Name: "vir10_3c_16g", Memory: 16384},
+		},
+	}}
+	newContainer := func() corev1.Container {
+		return corev1.Container{Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910B4":        resource.MustParse("1"),
+				"huawei.com/Ascend910B4-memory": resource.MustParse("10000"),
+			},
+			Requests: corev1.ResourceList{
+				"huawei.com/Ascend910B4":        resource.MustParse("1"),
+				"huawei.com/Ascend910B4-memory": resource.MustParse("10000"),
+			},
+		}}
+	}
+	newPod := func() *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+	}
+	newDevice := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Type: "Ascend910B4", Count: 100, Totalmem: 16384,
+			Totalcore: 100, Health: true,
+		}}
+	}
+
+	legacyCtr := newContainer()
+	legacyPod := newPod()
+	if found, err := dev.MutateAdmission(&legacyCtr, legacyPod); err != nil || !found {
+		t.Fatalf("mode-agnostic admission failed: found=%v err=%v", found, err)
+	}
+	memoryLimit := legacyCtr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	if got := memoryLimit.Value(); got != 10000 {
+		t.Fatalf("mode-agnostic admission changed memory to %d, want 10000", got)
+	}
+	request := dev.GenerateResourceRequests(&legacyCtr)
+
+	legacyInfo := &device.NodeInfo{Node: &corev1.Node{}}
+	legacyFit, legacyDevices, legacyReason := dev.Fit(newDevice(), request, legacyPod, legacyInfo, &device.PodDevices{})
+	if !legacyFit {
+		t.Fatalf("legacy node rejected mode-agnostic request: %s", legacyReason)
+	}
+	if got := legacyDevices[dev.CommonWord()][0].Usedmem; got != 16384 {
+		t.Fatalf("legacy node recorded %d MiB, want template size 16384", got)
+	}
+
+	hamiPod := newPod()
+	hamiCtr := newContainer()
+	if found, err := dev.MutateAdmission(&hamiCtr, hamiPod); err != nil || !found {
+		t.Fatalf("mode-agnostic admission failed for hami-core node: found=%v err=%v", found, err)
+	}
+	hamiRequest := dev.GenerateResourceRequests(&hamiCtr)
+	hamiInfo := &device.NodeInfo{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+	}}}
+	hamiFit, hamiDevices, hamiReason := dev.Fit(newDevice(), hamiRequest, hamiPod, hamiInfo, &device.PodDevices{})
+	if !hamiFit {
+		t.Fatalf("hami-core node rejected mode-agnostic request: %s", hamiReason)
+	}
+	if got := hamiDevices[dev.CommonWord()][0].Usedmem; got != 10000 {
+		t.Fatalf("hami-core node recorded %d MiB, want raw request 10000", got)
+	}
+
+	legacyAnnos := dev.PatchAnnotations(legacyPod, &map[string]string{}, device.PodDevices{
+		dev.CommonWord(): device.PodSingleDevice{legacyDevices[dev.CommonWord()]},
+	})
+	if !strings.Contains(legacyAnnos["huawei.com/Ascend910B4"], `"temp":"vir10_3c_16g"`) {
+		t.Fatalf("legacy allocation lost template metadata: %s", legacyAnnos["huawei.com/Ascend910B4"])
+	}
+	hamiAnnos := dev.PatchAnnotations(hamiPod, &map[string]string{}, device.PodDevices{
+		dev.CommonWord(): device.PodSingleDevice{hamiDevices[dev.CommonWord()]},
+	})
+	if strings.Contains(hamiAnnos["huawei.com/Ascend910B4"], `"temp"`) {
+		t.Fatalf("hami-core allocation unexpectedly contains template metadata: %s", hamiAnnos["huawei.com/Ascend910B4"])
 	}
 }
 
