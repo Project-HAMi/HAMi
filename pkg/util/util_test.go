@@ -1257,18 +1257,10 @@ func TestPatchPodAnnotationsPinsPodUID(t *testing.T) {
 	assert.Equal(t, types.UID("gpu-pod-uid"), patch.Metadata.UID, "the patch does not pin the pod's UID")
 }
 
-// TestPatchPodAnnotationsRejectsStaleUID drives the race the pinned UID exists
-// to close: a caller resolves a pod, the pod is deleted and a new pod takes
-// the same name and namespace with a different UID, and the caller's
-// already-computed patch (still carrying the old UID) reaches the API server.
-//
-// client-go's fake clientset does not itself enforce that a merge patch
-// leaves metadata.uid unchanged, unlike a real API server (see
-// k8s.io/apimachinery's ValidateObjectMetaUpdate, which treats uid as an
-// immutable field). The reactor installed here stands in for exactly that
-// one check, so the test can assert what a real cluster would do: reject the
-// patch and leave the recreated pod untouched, rather than silently applying
-// a stale write meant for the object that no longer exists.
+// TestPatchPodAnnotationsRejectsStaleUID covers delete-and-recreate: same
+// name and namespace, new UID, and a caller still holding a patch built for
+// the old one. The fake clientset does not enforce UID immutability like a
+// real API server does, so the reactor below stands in for that check.
 func TestPatchPodAnnotationsRejectsStaleUID(t *testing.T) {
 	const (
 		staleUID = types.UID("old-pod-uid")
