@@ -988,6 +988,9 @@ func writeAllocationOverrideEnv(path string, responseEnvs map[string]string, con
 
 	var builder strings.Builder
 	for _, key := range keys {
+		if strings.ContainsAny(key, "\r\n") || strings.ContainsAny(envs[key], "\r\n") {
+			return fmt.Errorf("allocation override env contains line break in key or value for %q", key)
+		}
 		fmt.Fprintf(&builder, "%s=%s\n", key, envs[key])
 	}
 	return os.WriteFile(path, []byte(builder.String()), 0644)

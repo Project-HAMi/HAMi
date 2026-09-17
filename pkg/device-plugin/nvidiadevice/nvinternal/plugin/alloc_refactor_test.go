@@ -372,6 +372,55 @@ func TestWriteAllocationOverrideEnvIncludesContainerRuntimePolicies(t *testing.T
 	require.NotContains(t, overrideEnv, "IGNORED_CONTAINER_ENV")
 }
 
+func TestWriteAllocationOverrideEnvRejectsLineBreaks(t *testing.T) {
+	tests := []struct {
+		name          string
+		responseEnvs  map[string]string
+		containerEnvs []corev1.EnvVar
+	}{
+		{
+			name: "response env value with newline",
+			responseEnvs: map[string]string{
+				"CUDA_DEVICE_MEMORY_LIMIT_0": "2048m\nCUDA_DEVICE_MEMORY_LIMIT_0=0",
+			},
+		},
+		{
+			name: "response env key with carriage return",
+			responseEnvs: map[string]string{
+				"CUDA_DEVICE_MEMORY_LIMIT_0\rCUDA_DEVICE_MEMORY_LIMIT_0": "2048m",
+			},
+		},
+		{
+			name: "container runtime policy value with newline",
+			responseEnvs: map[string]string{
+				"CUDA_DEVICE_MEMORY_LIMIT_0": "2048m",
+			},
+			containerEnvs: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5\nCUDA_DEVICE_MEMORY_LIMIT_0=0"},
+			},
+		},
+		{
+			name: "selected response env key with newline",
+			responseEnvs: map[string]string{
+				"CUDA_DEVICE_MEMORY_LIMIT_0\nCUDA_DEVICE_MEMORY_LIMIT_1": "2048m",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := t.TempDir() + "/overrideEnv"
+
+			err := writeAllocationOverrideEnv(path, tc.responseEnvs, tc.containerEnvs)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "line break")
+
+			_, readErr := os.ReadFile(path)
+			require.ErrorIs(t, readErr, os.ErrNotExist)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Allocate — end-to-end tests
 // ---------------------------------------------------------------------------
