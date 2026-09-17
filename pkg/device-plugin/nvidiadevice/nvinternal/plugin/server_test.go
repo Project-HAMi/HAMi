@@ -786,6 +786,10 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 }
 
 func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
+	prevHostHookPath := hostHookPath
+	hostHookPath = t.TempDir()
+	defer func() { hostHookPath = prevHostHookPath }()
+
 	t.Setenv(hostpid.EnvironmentVariable, "1")
 	prepareCalls := 0
 	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
@@ -928,10 +932,18 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 }
 
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
+	prevHostHookPath := hostHookPath
+	hostHookPath = t.TempDir()
+	defer func() { hostHookPath = prevHostHookPath }()
+
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
 	logLevel := nvidia.Error
+
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() { enableGetPreferredAllocation = previousEnableGetPreferredAllocation }()
 
 	plugin := &NvidiaDevicePlugin{
 		config: &nvidia.DeviceConfig{

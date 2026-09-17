@@ -34,6 +34,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -341,9 +342,95 @@ func TestPatchErasedAnnotation(t *testing.T) {
 	require.Equal(t, 1, nonEmpty, "one container should remain after pop")
 }
 
+func TestWriteAllocationOverrideEnvIncludesContainerRuntimePolicies(t *testing.T) {
+	path := t.TempDir() + "/overrideEnv"
+
+	err := writeAllocationOverrideEnv(path,
+		map[string]string{
+			"CUDA_DEVICE_MEMORY_LIMIT_0":      "3000m",
+			"CUDA_DEVICE_MEMORY_SHARED_CACHE": "/tmp/hami-cache",
+			util.CoreLimitSwitch:              "disable",
+			"IGNORED_RESPONSE_ENV":            "ignored",
+		},
+		[]corev1.EnvVar{
+			{Name: util.TaskPriority, Value: "5"},
+			{Name: util.CoreLimitSwitch, Value: "force"},
+			{Name: "IGNORED_CONTAINER_ENV", Value: "ignored"},
+		})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	overrideEnv := string(content)
+
+	require.Contains(t, overrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=3000m\n")
+	require.Contains(t, overrideEnv, "CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/hami-cache\n")
+	require.Contains(t, overrideEnv, "CUDA_TASK_PRIORITY=5\n")
+	require.Contains(t, overrideEnv, "GPU_CORE_UTILIZATION_POLICY=disable\n")
+	require.NotContains(t, overrideEnv, "GPU_CORE_UTILIZATION_POLICY=force\n")
+	require.NotContains(t, overrideEnv, "IGNORED_RESPONSE_ENV")
+	require.NotContains(t, overrideEnv, "IGNORED_CONTAINER_ENV")
+}
+
 // ---------------------------------------------------------------------------
 // Allocate — end-to-end tests
 // ---------------------------------------------------------------------------
+
+func TestAllocate_WritesOverrideEnvFileAndMount(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "c0", Env: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5"},
+				{Name: util.CoreLimitSwitch, Value: "force"},
+			}}},
+		},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+
+	var overrideMount *kubeletdevicepluginv1beta1.Mount
+	for _, mount := range response.ContainerResponses[0].Mounts {
+		if mount.ContainerPath == allocationOverrideEnvContainerPath {
+			overrideMount = mount
+			break
+		}
+	}
+	require.NotNil(t, overrideMount)
+	require.True(t, overrideMount.ReadOnly)
+	require.Contains(t, overrideMount.HostPath, "/vgpu/override-env/")
+	require.NotContains(t, overrideMount.HostPath, "/vgpu/containers/")
+
+	content, err := os.ReadFile(overrideMount.HostPath)
+	require.NoError(t, err)
+	overrideEnv := string(content)
+
+	require.Contains(t, overrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=3000m\n")
+	require.Contains(t, overrideEnv, "CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/hami-test-hookpath/vgpu/")
+	require.Contains(t, overrideEnv, "CUDA_DEVICE_SM_LIMIT=50\n")
+	require.Contains(t, overrideEnv, "CUDA_TASK_PRIORITY=5\n")
+	require.Contains(t, overrideEnv, "GPU_CORE_UTILIZATION_POLICY=force\n")
+}
 
 func TestAllocate_MultiContainer_EachGetsOwnDevice(t *testing.T) {
 	setupInRequestDevices(t)
@@ -384,6 +471,47 @@ func TestAllocate_MultiContainer_EachGetsOwnDevice(t *testing.T) {
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "60", response.ContainerResponses[1].Envs["CUDA_DEVICE_SM_LIMIT"])
+
+	var c0OverrideMount, c1OverrideMount *kubeletdevicepluginv1beta1.Mount
+	for _, mount := range response.ContainerResponses[0].Mounts {
+		if mount.ContainerPath == allocationOverrideEnvContainerPath {
+			c0OverrideMount = mount
+			break
+		}
+	}
+	for _, mount := range response.ContainerResponses[1].Mounts {
+		if mount.ContainerPath == allocationOverrideEnvContainerPath {
+			c1OverrideMount = mount
+			break
+		}
+	}
+	require.NotNil(t, c0OverrideMount)
+	require.NotNil(t, c1OverrideMount)
+	require.True(t, c0OverrideMount.ReadOnly)
+	require.True(t, c1OverrideMount.ReadOnly)
+	require.NotEqual(t, c0OverrideMount.HostPath, c1OverrideMount.HostPath)
+	require.Contains(t, c0OverrideMount.HostPath, "/vgpu/override-env/")
+	require.Contains(t, c1OverrideMount.HostPath, "/vgpu/override-env/")
+	require.NotContains(t, c0OverrideMount.HostPath, "/vgpu/containers/")
+	require.NotContains(t, c1OverrideMount.HostPath, "/vgpu/containers/")
+
+	c0OverrideEnvBytes, err := os.ReadFile(c0OverrideMount.HostPath)
+	require.NoError(t, err)
+	c1OverrideEnvBytes, err := os.ReadFile(c1OverrideMount.HostPath)
+	require.NoError(t, err)
+
+	c0OverrideEnv := string(c0OverrideEnvBytes)
+	c1OverrideEnv := string(c1OverrideEnvBytes)
+
+	require.Contains(t, c0OverrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=3000m\n")
+	require.Contains(t, c0OverrideEnv, "CUDA_DEVICE_SM_LIMIT=50\n")
+	require.NotContains(t, c0OverrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=4000m\n")
+	require.NotContains(t, c0OverrideEnv, "CUDA_DEVICE_SM_LIMIT=60\n")
+
+	require.Contains(t, c1OverrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=4000m\n")
+	require.Contains(t, c1OverrideEnv, "CUDA_DEVICE_SM_LIMIT=60\n")
+	require.NotContains(t, c1OverrideEnv, "CUDA_DEVICE_MEMORY_LIMIT_0=3000m\n")
+	require.NotContains(t, c1OverrideEnv, "CUDA_DEVICE_SM_LIMIT=50\n")
 }
 
 func TestAllocate_MultiContainer_CUDA_DISABLE_CONTROL_SecondContainer(t *testing.T) {

@@ -41,6 +41,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -944,6 +945,54 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 }
 
 // Allocate which return list of devices.
+
+const allocationOverrideEnvContainerPath = "/overrideEnv"
+
+func shouldWriteAllocationOverrideEnv(key string) bool {
+	switch {
+	case strings.HasPrefix(key, "CUDA_DEVICE_MEMORY_LIMIT"):
+		return true
+	case key == "CUDA_DEVICE_SM_LIMIT",
+		key == "CUDA_DEVICE_MEMORY_SHARED_CACHE",
+		key == "CUDA_OVERSUBSCRIBE",
+		key == "LIBCUDA_LOG_LEVEL",
+		key == util.TaskPriority,
+		key == util.CoreLimitSwitch:
+		return true
+	default:
+		return false
+	}
+}
+
+func writeAllocationOverrideEnv(path string, responseEnvs map[string]string, containerEnvs []corev1.EnvVar) error {
+	envs := make(map[string]string, len(responseEnvs)+len(containerEnvs))
+	for _, env := range containerEnvs {
+		switch env.Name {
+		case util.TaskPriority, util.CoreLimitSwitch:
+			if env.ValueFrom == nil {
+				envs[env.Name] = env.Value
+			}
+		}
+	}
+	for key, value := range responseEnvs {
+		if shouldWriteAllocationOverrideEnv(key) {
+			envs[key] = value
+		}
+	}
+
+	keys := make([]string, 0, len(envs))
+	for key := range envs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&builder, "%s=%s\n", key, envs[key])
+	}
+	return os.WriteFile(path, []byte(builder.String()), 0644)
+}
+
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	// Kubelet may issue Allocate calls concurrently. The pending-pod
 	// annotation protocol and dynamic MIG preparation are node-global, so keep
@@ -1051,10 +1100,33 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					response.Envs[util.CoreLimitSwitch] = "disable"
 				}
 				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-				os.RemoveAll(cacheFileHostDirectory)
+				overrideEnvHostDirectory := filepath.Join(hostHookPath, "vgpu", "override-env", fmt.Sprintf("%s_%s", current.UID, currentCtr.Name))
+				if err := os.RemoveAll(cacheFileHostDirectory); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to remove stale allocation cache directory: %w", err)
+				}
+				if err := os.RemoveAll(overrideEnvHostDirectory); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to remove stale allocation override env directory: %w", err)
+				}
 
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
+				if err := os.MkdirAll(cacheFileHostDirectory, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to create allocation cache directory: %w", err)
+				}
+				if err := os.Chmod(cacheFileHostDirectory, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to chmod allocation cache directory: %w", err)
+				}
+				if err := os.MkdirAll(overrideEnvHostDirectory, 0755); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to create allocation override env directory: %w", err)
+				}
+				overrideEnvHostPath := filepath.Join(overrideEnvHostDirectory, "overrideEnv")
+				if err := writeAllocationOverrideEnv(overrideEnvHostPath, response.Envs, currentCtr.Env); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to write allocation override env: %w", err)
+				}
 				if err := prepareHostPIDLockParentForAllocation(); err != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf(
@@ -1067,6 +1139,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 						HostPath: cacheFileHostDirectory,
 						ReadOnly: false},
+					&kubeletdevicepluginv1beta1.Mount{ContainerPath: allocationOverrideEnvContainerPath,
+						HostPath: overrideEnvHostPath,
+						ReadOnly: true},
 				)
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
