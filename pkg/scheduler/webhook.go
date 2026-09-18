@@ -192,13 +192,16 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 // vendor's device plugin working wherever it is deployed, and turns away a
 // workload service account that only holds update on pods.
 //
-// A review that cannot be run leaves the guard off rather than stopping the
-// scheduler from binding: the chart grants the permission this needs.
+// A review that cannot be run refuses the change rather than waving it
+// through: a guard that turns itself off on an error is the bypass it exists to
+// close. The chart grants the create permission this needs, and a scheduler
+// missing it fails loudly at its own bind patch instead of silently trusting
+// every caller.
 func canWriteNodes(ctx context.Context, user authenticationv1.UserInfo) bool {
 	kubeClient := client.GetClient()
 	if kubeClient == nil {
-		klog.Warning("No client to review node write access with, allowing the annotation change")
-		return true
+		klog.Error("No client to review node write access with, refusing the annotation change")
+		return false
 	}
 	extra := make(map[string]authorizationv1.ExtraValue, len(user.Extra))
 	for key, value := range user.Extra {
@@ -217,8 +220,8 @@ func canWriteNodes(ctx context.Context, user authenticationv1.UserInfo) bool {
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		klog.Warningf("Failed to review node write access for %s, allowing the annotation change: %v", user.Username, err)
-		return true
+		klog.Errorf("Failed to review node write access for %s, refusing the annotation change: %v", user.Username, err)
+		return false
 	}
 	return review.Status.Allowed
 }

@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"strings"
 	"testing"
@@ -1627,9 +1628,9 @@ func TestNodeWriterUpdateOnForeignPodDenied(t *testing.T) {
 	}
 }
 
-// Without a client there is no review to run, and blocking every write would
-// stop the scheduler from binding.
-func TestUpdateAllowedWhenReviewUnavailable(t *testing.T) {
+// A review that cannot be run is not a reason to trust the caller: the guard
+// would otherwise turn itself off exactly when the API server is not answering.
+func TestUpdateDeniedWhenReviewUnavailable(t *testing.T) {
 	initHAMiScheduler(t)
 	previous := client.KubeClient
 	client.KubeClient = nil
@@ -1638,9 +1639,29 @@ func TestUpdateAllowedWhenReviewUnavailable(t *testing.T) {
 
 	oldPod := scheduledGPUPod("hami-scheduler", nil)
 	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
-	resp := updatePod(t, oldPod, newPod, "kubernetes-admin")
-	if !resp.Allowed {
-		t.Fatalf("the update was denied with no review to run: %v", resp.Result)
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:hami-system:hami-scheduler")
+	if resp.Allowed {
+		t.Fatal("the update was allowed with no review to run")
+	}
+}
+
+// A review the API server refuses to answer is treated the same way.
+func TestUpdateDeniedWhenReviewFails(t *testing.T) {
+	initHAMiScheduler(t)
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("the api server is not answering")
+	})
+	previous := client.KubeClient
+	client.KubeClient = kubeClient
+	t.Cleanup(func() { client.KubeClient = previous })
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:hami-system:hami-scheduler")
+	if resp.Allowed {
+		t.Fatal("the update was allowed with the review failing")
 	}
 }
 
