@@ -187,7 +187,7 @@ func (l *ContainerLister) Update() error {
 
 	pods, err := l.podLister.List(labels.Everything())
 	if err != nil {
-		return fmt.Errorf("failed to list pods: %v", err)
+		return fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	podUIDs := make(map[string]bool, len(pods))

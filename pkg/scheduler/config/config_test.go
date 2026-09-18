@@ -40,6 +40,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 )
 
@@ -429,6 +430,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		amd.AMDDevice:                amd.AMDDevice,
 		vastai.VastaiDevice:          vastai.VastaiCommonWord,
 		biren.BirenDevice:            biren.BirenCommonWord,
+		remotegpu.RemoteGPUDevice:    remotegpu.RemoteGPUCommonWord,
 	}
 
 	return expectedDevices, device.DevicesMap

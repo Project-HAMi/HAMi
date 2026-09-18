@@ -36,3 +36,15 @@ The device plugin relabels shared vGPU host directories under
 directory permissions. Uninstalling this Helm release does not restore the host
 SELinux labels or directory permissions; restore them manually if required.
 {{- end }}
+{{- if .Values.scheduler.networkPolicy.enabled }}
+
+WARNING: scheduler.networkPolicy.enabled is true. This restricts the
+scheduler's HTTP port, which also serves the admission /webhook, to the
+device-plugin's pods and the kube-system namespace. If kube-apiserver runs
+hostNetwork (kubeadm/most on-prem clusters) and your CNI doesn't match
+hostNetwork traffic against namespaceSelector, this can silently block the
+webhook -- with admissionWebhook.failurePolicy: Ignore, pods then admit
+without HAMi's mutation (no GPU resource injected, no error). Verify your
+CNI matches kube-apiserver traffic against this policy before relying on
+it in production.
+{{- end }}
