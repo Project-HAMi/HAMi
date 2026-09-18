@@ -114,7 +114,7 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "reject odd neuron core count greater than one",
+			name: "accept three neuron cores for Inferentia1 placement",
 			args: struct {
 				ctr *corev1.Container
 				p   *corev1.Pod
@@ -130,11 +130,10 @@ func Test_MutateAdmission(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{},
 				},
 			},
-			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3"),
+			want: true,
 		},
 		{
-			name: "reject request-only odd neuron core count greater than one",
+			name: "accept request-only three neuron cores for Inferentia1 placement",
 			args: struct {
 				ctr *corev1.Container
 				p   *corev1.Pod
@@ -148,8 +147,7 @@ func Test_MutateAdmission(t *testing.T) {
 				},
 				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
 			},
-			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3"),
+			want: true,
 		},
 		{
 			name: "reject zero neuron core count",
@@ -188,7 +186,7 @@ func Test_MutateAdmission(t *testing.T) {
 			err:  fmt.Errorf("aws.amazon.com/neuroncore must be greater than 0"),
 		},
 		{
-			name: "reject neuron core count that overflows device count",
+			name: "reject neuron core count that exceeds the supported maximum",
 			args: struct {
 				ctr *corev1.Container
 				p   *corev1.Pod
@@ -196,14 +194,14 @@ func Test_MutateAdmission(t *testing.T) {
 				ctr: &corev1.Container{
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
-							"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*2+2, resource.DecimalSI),
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*4+4, resource.DecimalSI),
 						},
 					},
 				},
 				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
 			},
 			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuroncore must not exceed 4294967294"),
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must not exceed 8589934588"),
 		},
 		{
 			name: "no neuron devices",
@@ -550,7 +548,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Type:             AWSNeuronDevice,
 				Memreq:           int32(0),
 				MemPercentagereq: int32(0),
-				Coresreq:         int32(2),
+				Coresreq:         int32(0),
 			},
 		},
 		{
@@ -585,7 +583,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "reject odd neuron core request when admission is bypassed",
+			name: "allocate three neuron cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -596,10 +594,14 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     AWSNeuronDevice,
+				Coresreq: 3,
+			},
 		},
 		{
-			name: "reject request-only odd neuron core request when admission is bypassed",
+			name: "allocate request-only three neuron cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
@@ -607,7 +609,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     AWSNeuronDevice,
+				Coresreq: 3,
+			},
 		},
 		{
 			name: "reject zero neuron core request when admission is bypassed",
@@ -632,11 +638,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "reject neuron core request that overflows device count when admission is bypassed",
+			name: "reject neuron core request that exceeds the supported maximum when admission is bypassed",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*2+2, resource.DecimalSI),
+						"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*4+4, resource.DecimalSI),
 					},
 				},
 			},
@@ -672,31 +678,31 @@ func Test_splitCoreRequest(t *testing.T) {
 			wantCoresreq: 1,
 		},
 		{
-			name:         "a full addressable device is one device",
+			name:         "two cores take one device",
 			cores:        2,
 			wantNums:     1,
 			wantCoresreq: 2,
 		},
 		{
-			name:         "whole devices divide evenly",
-			cores:        6,
-			wantNums:     3,
-			wantCoresreq: 2,
+			name:         "three cores take one Inferentia1 device",
+			cores:        3,
+			wantNums:     1,
+			wantCoresreq: 3,
 		},
 		{
-			name:    "odd count above one has no representable shape",
-			cores:   3,
-			wantErr: "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
+			name:    "partial multi-device request has no representable shape",
+			cores:   6,
+			wantErr: "aws.amazon.com/neuroncore must be 1 or a multiple of 4, got 6",
 		},
 		{
-			name:         "four cores use two addressable devices",
+			name:         "four cores take one Inferentia1 device",
 			cores:        4,
-			wantNums:     2,
-			wantCoresreq: 2,
+			wantNums:     1,
+			wantCoresreq: 4,
 		},
 		{
 			name:    "device count stays within int32",
-			cores:   int64(math.MaxInt32)*2 + 2,
+			cores:   int64(math.MaxInt32)*4 + 4,
 			wantErr: "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
 		},
 	}
