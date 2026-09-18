@@ -1008,6 +1008,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
+			if err := validateContainerAllocation(plugin.operatingMode, &currentCtr, devreq); err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+			}
 
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)

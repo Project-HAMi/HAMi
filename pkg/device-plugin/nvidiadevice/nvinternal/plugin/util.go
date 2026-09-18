@@ -127,6 +127,44 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 	return corev1.Container{}, nil, errors.New("no pending device allocation found")
 }
 
+// validateContainerAllocation rejects an allocation handing the container more
+// than its own resource limits ask for.
+//
+// The numbers come from the annotation the scheduler writes, and nothing on
+// this side proves the scheduler wrote it: a pod arriving with values of its
+// own is served them as-is, and the memory and core limits below are what the
+// container then runs with (issue #3041). Limits cannot be raised once the pod
+// exists, so they are the one figure here its owner cannot inflate.
+//
+// Only an explicit request is compared. A pod asking for a percentage of a
+// card, or leaving memory and cores to the defaults, names no fixed number to
+// check against. MIG is skipped for the same reason: a slice is charged its
+// profile's capacity, which is rounded up from the request by design.
+func validateContainerAllocation(mode string, ctr *corev1.Container, devices device.ContainerDevices) error {
+	if mode == "mig" {
+		return nil
+	}
+	dev, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		return nil
+	}
+	req := dev.GenerateResourceRequests(ctr)
+	// A percentage request leaves Memreq at 0 unless both were set, in which
+	// case the scheduler sized the slice from the percentage against the card.
+	byPercentage := req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100
+	for _, allocated := range devices {
+		if req.Memreq > 0 && !byPercentage && allocated.Usedmem > req.Memreq {
+			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
+				ctr.Name, allocated.Usedmem, allocated.UUID, req.Memreq)
+		}
+		if req.Coresreq > 0 && allocated.Usedcores > req.Coresreq {
+			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
+				ctr.Name, allocated.Usedcores, allocated.UUID, req.Coresreq)
+		}
+	}
+	return nil
+}
+
 // patchErasedAnnotation patches the pod's device annotation with the given
 // podSingleDev (which has had some containers popped). It also updates
 // pod.Annotations in place so that subsequent Allocate calls within the same

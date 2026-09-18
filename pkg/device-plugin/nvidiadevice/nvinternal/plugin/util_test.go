@@ -22,11 +22,14 @@ import (
 
 	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -729,5 +732,113 @@ func TestCheckCDISpec(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func gpuContainer(limits corev1.ResourceList) *corev1.Container {
+	return &corev1.Container{
+		Name:      "main",
+		Resources: corev1.ResourceRequirements{Limits: limits},
+	}
+}
+
+// The allocation reaching the device plugin is only as trustworthy as the
+// annotation it was read from, and that annotation is reachable by the pod's
+// owner (issue #3041). The container's own limits are not: Kubernetes fixes
+// them at create, so an allocation larger than they ask for was not the
+// scheduler's.
+//
+// Reproduce on a cluster: schedule a pod requesting nvidia.com/gpumem: 3000,
+// then rewrite hami.io/vgpu-devices-to-allocate on it to name 20000 MB before
+// the kubelet allocates. Before this check the container came up with
+// CUDA_DEVICE_MEMORY_LIMIT=20000m, eight times the memory HAMi had accounted
+// for on that card.
+func TestValidateContainerAllocation(t *testing.T) {
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		mode      string
+		limits    corev1.ResourceList
+		allocated device.ContainerDevices
+		wantErr   bool
+	}{
+		{
+			name:      "within the requested memory",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedmem: 3000}},
+		},
+		{
+			name:      "more memory than requested",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}},
+			wantErr:   true,
+		},
+		{
+			name:      "more cores than requested",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpucores": resource.MustParse("10")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedcores: 100}},
+			wantErr:   true,
+		},
+		{
+			name:      "memory asked for as a percentage",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}},
+		},
+		{
+			name:      "memory left to the default",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}},
+		},
+		{
+			name:      "mig slice charged its profile",
+			mode:      "mig",
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateContainerAllocation(tt.mode, gpuContainer(tt.limits), tt.allocated)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("the allocation was accepted")
+				}
+				if !strings.Contains(err.Error(), "main") {
+					t.Errorf("error %q does not name the container", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("the allocation was rejected: %v", err)
+			}
+		})
+	}
+}
+
+// A device plugin built without the nvidia backend registered has no request to
+// compare against, and must not reject the allocation on that account.
+func TestValidateContainerAllocationWithoutDevices(t *testing.T) {
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+	device.DevicesMap = nil
+
+	limits := corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")}
+	if err := validateContainerAllocation("", gpuContainer(limits), device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}}); err != nil {
+		t.Fatalf("the allocation was rejected: %v", err)
 	}
 }
