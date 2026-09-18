@@ -265,15 +265,18 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					Index:        uint(0),
-					ID:           "test-AWSNeuron-0",
-					Count:        int32(2),
-					Devmem:       int32(0),
-					Devcore:      int32(3),
-					Type:         AWSNeuronDevice,
-					Numa:         0,
-					Health:       true,
-					CustomInfo:   map[string]any{"AWSNodeType": string("inf2")},
+					Index:   uint(0),
+					ID:      "test-AWSNeuron-0",
+					Count:   int32(2),
+					Devmem:  int32(0),
+					Devcore: int32(3),
+					Type:    AWSNeuronDevice,
+					Numa:    0,
+					Health:  true,
+					CustomInfo: map[string]any{
+						AWSNodeType:             string("inf2"),
+						AWSCoresPerNeuronDevice: int32(2),
+					},
 					DeviceVendor: AWSNeuronCommonWord,
 				},
 			},
@@ -457,7 +460,6 @@ func Test_PatchAnnotations(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			dev.coresPerAWSNeuron = 2
 			result := dev.PatchAnnotations(&test.args.pod, test.args.annoinput, test.args.pd)
 			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
 			assert.Equal(t, result[AWSNeuronAssignedIndex], test.want[AWSNeuronAssignedIndex])
@@ -648,7 +650,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			dev.coresPerAWSNeuron = 2
 			result := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
@@ -658,60 +659,45 @@ func Test_GenerateResourceRequests(t *testing.T) {
 // Test_splitCoreRequest covers the one place the core request shape is decided.
 func Test_splitCoreRequest(t *testing.T) {
 	tests := []struct {
-		name              string
-		coresPerAWSNeuron uint
-		cores             int64
-		wantNums          int32
-		wantCoresreq      int32
-		wantErr           string
+		name         string
+		cores        int64
+		wantNums     int32
+		wantCoresreq int32
+		wantErr      string
 	}{
 		{
-			name:              "single core takes one device",
-			coresPerAWSNeuron: 2,
-			cores:             1,
-			wantNums:          1,
-			wantCoresreq:      1,
+			name:         "single core takes one device",
+			cores:        1,
+			wantNums:     1,
+			wantCoresreq: 1,
 		},
 		{
-			name:              "a full device is one device",
-			coresPerAWSNeuron: 2,
-			cores:             2,
-			wantNums:          1,
-			wantCoresreq:      2,
+			name:         "a full addressable device is one device",
+			cores:        2,
+			wantNums:     1,
+			wantCoresreq: 2,
 		},
 		{
-			name:              "whole devices divide evenly",
-			coresPerAWSNeuron: 2,
-			cores:             6,
-			wantNums:          3,
-			wantCoresreq:      2,
+			name:         "whole devices divide evenly",
+			cores:        6,
+			wantNums:     3,
+			wantCoresreq: 2,
 		},
 		{
-			name:              "odd count above one has no representable shape",
-			coresPerAWSNeuron: 2,
-			cores:             3,
-			wantErr:           "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
+			name:    "odd count above one has no representable shape",
+			cores:   3,
+			wantErr: "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
 		},
 		{
-			// An Inferentia chip has four cores, but only two are addressable.
-			name:              "per-device cores above the addressable limit are bounded",
-			coresPerAWSNeuron: 4,
-			cores:             4,
-			wantNums:          2,
-			wantCoresreq:      2,
-		},
-		{
-			name:         "unknown per-device cores falls back to the addressable limit",
+			name:         "four cores use two addressable devices",
 			cores:        4,
 			wantNums:     2,
 			wantCoresreq: 2,
 		},
 		{
-			// One core per device divides evenly, leaving only the count bound.
-			name:              "device count stays within int32",
-			coresPerAWSNeuron: 1,
-			cores:             int64(math.MaxInt32) + 1,
-			wantErr:           "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
+			name:    "device count stays within int32",
+			cores:   int64(math.MaxInt32)*2 + 2,
+			wantErr: "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
 		},
 	}
 	for _, test := range tests {
@@ -720,8 +706,6 @@ func Test_splitCoreRequest(t *testing.T) {
 				ResourceCountName: "aws.amazon.com/neuron",
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			})
-			dev.coresPerAWSNeuron = test.coresPerAWSNeuron
-
 			nums, coresreq, err := dev.splitCoreRequest(test.cores)
 			if test.wantErr != "" {
 				assert.Error(t, err, test.wantErr)
