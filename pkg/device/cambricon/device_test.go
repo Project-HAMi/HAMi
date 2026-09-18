@@ -18,8 +18,10 @@ package cambricon
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -798,6 +800,47 @@ func Test_setNodeLock(t *testing.T) {
 	}
 }
 
+func Test_setNodeLock_ExhaustedRetries(t *testing.T) {
+	cs := fake.NewClientset()
+	client.KubeClient = cs
+	ctx := context.Background()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-lock-exhaust",
+			Annotations: map[string]string{},
+		},
+	}
+	_, err := cs.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+	defer cs.CoreV1().Nodes().Delete(ctx, node.Name, metav1.DeleteOptions{})
+
+	injectedErr := apierrors.NewInternalError(fmt.Errorf("simulated API failure"))
+	cs.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, injectedErr
+	})
+
+	dev := CambriconDevices{}
+	err = dev.setNodeLock(node)
+
+	// Must return an error.
+	if err == nil {
+		t.Fatal("setNodeLock() expected error when all retries exhausted, got nil")
+	}
+
+	// The returned error must wrap the injected API error.
+	if !errors.Is(err, injectedErr) {
+		t.Errorf("setNodeLock() error does not wrap injected error.\n  got:  %v\n  want wrapping: %v", err, injectedErr)
+	}
+
+	// The message must mention the retry count.
+	if !strings.Contains(err.Error(), "setNodeLock exceeds retry count") {
+		t.Errorf("setNodeLock() error message missing context.\n  got: %v", err)
+	}
+}
+
 // Setup function to initialize resources for each test case.
 func setupTest(t *testing.T) (*corev1.Node, *corev1.Pod, func(), *fake.Clientset) {
 	ctx := context.Background()
@@ -1137,6 +1180,48 @@ func Test_ReleaseNodeLock(t *testing.T) {
 		err = dev.ReleaseNodeLock(node, &corev1.Pod{})
 		if err == nil {
 			t.Error("ReleaseNodeLock() expected error but got nil")
+		}
+	})
+
+	t.Run("patch exhausts all retries — error wraps original", func(t *testing.T) {
+		cs := fake.NewClientset()
+		client.KubeClient = cs
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-retry-exhaust",
+				Annotations: map[string]string{
+					DsmluLockTime: time.Now().Format(time.RFC3339),
+				},
+			},
+		}
+		_, err := cs.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+		defer cs.CoreV1().Nodes().Delete(ctx, "node-retry-exhaust", metav1.DeleteOptions{})
+
+		injectedErr := apierrors.NewInternalError(fmt.Errorf("simulated patch failure"))
+		cs.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, injectedErr
+		})
+
+		dev := CambriconDevices{}
+		err = dev.ReleaseNodeLock(node, &corev1.Pod{})
+
+		// Must return an error.
+		if err == nil {
+			t.Fatal("ReleaseNodeLock() expected error when all retries exhausted, got nil")
+		}
+
+		// The returned error must wrap the injected API error.
+		if !errors.Is(err, injectedErr) {
+			t.Errorf("ReleaseNodeLock() error does not wrap injected error.\n  got:  %v\n  want wrapping: %v", err, injectedErr)
+		}
+
+		// The message must mention the retry count.
+		if !strings.Contains(err.Error(), "releaseNodeLock exceeds retry count") {
+			t.Errorf("ReleaseNodeLock() error message missing context.\n  got: %v", err)
 		}
 	})
 }
