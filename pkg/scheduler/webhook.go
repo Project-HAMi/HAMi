@@ -21,10 +21,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
@@ -34,13 +36,10 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
-
-// serviceAccountPrefix starts the username the API server reports for a
-// service account, as opposed to a person or an external client.
-const serviceAccountPrefix = "system:serviceaccount:"
 
 type webhook struct {
 	decoder admission.Decoder
@@ -57,7 +56,7 @@ func NewWebHook() (*admission.Webhook, error) {
 	return wh, nil
 }
 
-func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Response {
+func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.Response {
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
@@ -65,7 +64,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if req.Operation == admissionv1.Update {
-		return h.handleUpdate(req, pod)
+		return h.handleUpdate(ctx, req, pod)
 	}
 	if len(pod.Spec.Containers) == 0 {
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
@@ -163,7 +162,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 // accounted for. An update that leaves those keys alone is not ours to judge
 // and passes through as-is, which also keeps the create path's mutation off an
 // existing pod, whose schedulerName the API server will not let us change.
-func (h *webhook) handleUpdate(req admission.Request, pod *corev1.Pod) admission.Response {
+func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *corev1.Pod) admission.Response {
 	oldPod := &corev1.Pod{}
 	if err := h.decoder.DecodeRaw(req.OldObject, oldPod); err != nil {
 		klog.Errorf("Failed to decode old object: %v", err)
@@ -175,17 +174,53 @@ func (h *webhook) handleUpdate(req admission.Request, pod *corev1.Pod) admission
 	}
 	// HAMi rewrites these itself once a pod is admitted: the scheduler patches
 	// them as it filters and binds, and a device plugin rewrites them as each
-	// container gets its devices. Those writers are service accounts and they
-	// only ever touch a pod this scheduler was asked to place, so a request
-	// failing either test is not one of them. A vendor's device plugin can run
-	// in its own namespace, which is why the account itself is not pinned here.
-	if !strings.HasPrefix(req.UserInfo.Username, serviceAccountPrefix) {
+	// container gets its devices. Both hold node write access for the locks they
+	// take around that work, and both only ever touch a pod this scheduler was
+	// asked to place, so a request failing either test is neither of them.
+	if !canWriteNodes(ctx, req.UserInfo) {
 		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
 	}
 	if len(config.SchedulerName) > 0 && pod.Spec.SchedulerName != config.SchedulerName {
 		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
 	}
 	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+// canWriteNodes asks the API server whether the caller may patch nodes, the
+// permission HAMi's own writers already need for their node locks and node
+// annotations. Reviewing the permission rather than matching an account keeps a
+// vendor's device plugin working wherever it is deployed, and turns away a
+// workload service account that only holds update on pods.
+//
+// A review that cannot be run leaves the guard off rather than stopping the
+// scheduler from binding: the chart grants the permission this needs.
+func canWriteNodes(ctx context.Context, user authenticationv1.UserInfo) bool {
+	kubeClient := client.GetClient()
+	if kubeClient == nil {
+		klog.Warning("No client to review node write access with, allowing the annotation change")
+		return true
+	}
+	extra := make(map[string]authorizationv1.ExtraValue, len(user.Extra))
+	for key, value := range user.Extra {
+		extra[key] = authorizationv1.ExtraValue(value)
+	}
+	review, err := kubeClient.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:   user.Username,
+			UID:    user.UID,
+			Groups: user.Groups,
+			Extra:  extra,
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Verb:     "patch",
+				Resource: "nodes",
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		klog.Warningf("Failed to review node write access for %s, allowing the annotation change: %v", user.Username, err)
+		return true
+	}
+	return review.Status.Allowed
 }
 
 func denySchedulerOwnedAnnotation(pod *corev1.Pod, username, annotation string) admission.Response {

@@ -24,11 +24,14 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -39,6 +42,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestHandle(t *testing.T) {
@@ -1486,6 +1490,29 @@ func initHAMiScheduler(t *testing.T) {
 	initNvidiaDevices(t)
 }
 
+// allowNodeWriters answers the webhook's access review the way RBAC answers it
+// for HAMi's own writers: allowed for the given usernames, refused for the rest.
+func allowNodeWriters(t *testing.T, usernames ...string) {
+	t.Helper()
+
+	allowed := make(map[string]bool, len(usernames))
+	for _, username := range usernames {
+		allowed[username] = true
+	}
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "subjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		review, ok := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SubjectAccessReview)
+		if !ok {
+			return false, nil, nil
+		}
+		review.Status.Allowed = allowed[review.Spec.User]
+		return true, review, nil
+	})
+	previous := client.KubeClient
+	client.KubeClient = kubeClient
+	t.Cleanup(func() { client.KubeClient = previous })
+}
+
 func scheduledGPUPod(schedulerName string, annotations map[string]string) *corev1.Pod {
 	pod := gpuPodWithAnnotations(annotations)
 	pod.Spec.SchedulerName = schedulerName
@@ -1504,6 +1531,7 @@ func scheduledGPUPod(schedulerName string, annotations map[string]string) *corev
 // named GPU.
 func TestPatchedAllocationAnnotationsDenied(t *testing.T) {
 	initHAMiScheduler(t)
+	allowNodeWriters(t)
 
 	for _, key := range []string{
 		util.AssignedNodeAnnotations,
@@ -1526,11 +1554,27 @@ func TestPatchedAllocationAnnotationsDenied(t *testing.T) {
 	}
 }
 
+// A workload service account holding update on pods is the caller the create
+// path already turns away, and holds none of the node access HAMi's writers do.
+func TestWorkloadServiceAccountUpdateDenied(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "forged"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-b:builder")
+	if resp.Allowed {
+		t.Fatal("a workload service account wrote an allocation")
+	}
+}
+
 // Rewriting or dropping a value the scheduler already wrote is the same
 // forgery: it points the device plugin at another GPU, or hides the pod's
 // usage from it.
 func TestSchedulerOwnedAnnotationRewriteDenied(t *testing.T) {
 	initHAMiScheduler(t)
+	allowNodeWriters(t)
 	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
 
 	t.Run("rewrite", func(t *testing.T) {
@@ -1555,6 +1599,7 @@ func TestSchedulerOwnedAnnotationRewriteDenied(t *testing.T) {
 // them as each container gets its devices.
 func TestSchedulerComponentUpdateAllowed(t *testing.T) {
 	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
 	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
 
 	oldPod := scheduledGPUPod("hami-scheduler", nil)
@@ -1565,24 +1610,44 @@ func TestSchedulerComponentUpdateAllowed(t *testing.T) {
 	}
 }
 
-// A vendor's device plugin can run in its own namespace, so the account is not
-// pinned, but it still only writes to a pod this scheduler placed. A service
-// account patching a pod routed elsewhere is forging one.
-func TestServiceAccountUpdateOnForeignPodDenied(t *testing.T) {
+// A vendor's device plugin can run in its own namespace, and is recognised by
+// the node access it holds rather than by its account. It still only writes to
+// a pod this scheduler placed, so the same account writing to a pod routed
+// elsewhere is forging one.
+func TestNodeWriterUpdateOnForeignPodDenied(t *testing.T) {
 	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:kube-system:ascend-device-plugin")
 	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
 
 	oldPod := scheduledGPUPod("different-scheduler", nil)
 	newPod := scheduledGPUPod("different-scheduler", map[string]string{key: "forged"})
-	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-b:builder")
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:kube-system:ascend-device-plugin")
 	if resp.Allowed {
 		t.Fatal("a pod on another scheduler was given an allocation")
+	}
+}
+
+// Without a client there is no review to run, and blocking every write would
+// stop the scheduler from binding.
+func TestUpdateAllowedWhenReviewUnavailable(t *testing.T) {
+	initHAMiScheduler(t)
+	previous := client.KubeClient
+	client.KubeClient = nil
+	t.Cleanup(func() { client.KubeClient = previous })
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	resp := updatePod(t, oldPod, newPod, "kubernetes-admin")
+	if !resp.Allowed {
+		t.Fatalf("the update was denied with no review to run: %v", resp.Result)
 	}
 }
 
 // Everything else about a pod stays the owner's to change.
 func TestUnrelatedUpdateAllowed(t *testing.T) {
 	initHAMiScheduler(t)
+	allowNodeWriters(t)
 
 	oldPod := scheduledGPUPod("hami-scheduler", map[string]string{"team.example.com/owner": "team-b"})
 	newPod := scheduledGPUPod("hami-scheduler", map[string]string{
