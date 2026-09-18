@@ -817,7 +817,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							slots := max(udevice.Slots, 1)
 							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
-							d.Device.Usedcores += udevice.Usedcores
+							if accounting, ok := device.GetDevices()[udevice.Type].(device.CoreMaskAccounting); ok {
+								d.Device.Usedcores = accounting.AccumulateCores(d.Device.Usedcores, udevice.Usedcores)
+							} else {
+								d.Device.Usedcores += udevice.Usedcores
+							}
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
 							if allocations := allocationsByGPU[udevice.UUID]; len(allocations) > 0 {

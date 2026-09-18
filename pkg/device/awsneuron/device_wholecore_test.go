@@ -17,6 +17,7 @@ limitations under the License.
 package awsneuron
 
 import (
+	"maps"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -106,7 +107,7 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 	assert.Equal(t, fitB, false)
 }
 
-func Test_Fit_FourCoreRequestRequiresInferentia1(t *testing.T) {
+func Test_Fit_FourCoreRequestNeedsEnoughDeviceCapacity(t *testing.T) {
 	dev := InitAWSNeuronDevice(AWSNeuronConfig{
 		ResourceCountName: "aws.amazon.com/neuron",
 		ResourceCoreName:  "aws.amazon.com/neuroncore",
@@ -116,7 +117,7 @@ func Test_Fit_FourCoreRequestRequiresInferentia1(t *testing.T) {
 			"aws.amazon.com/neuroncore": resource.MustParse("4"),
 		}},
 	})
-	assert.Equal(t, request.Coresreq, int32(4))
+	assert.Equal(t, request.TotalCoresreq, int64(4))
 
 	inf1Devices, err := dev.GetNodeDevices(newNeuronNode("inf1", "inf1.6xlarge", 1, 4))
 	assert.NilError(t, err)
@@ -147,6 +148,79 @@ func Test_Fit_FourCoreRequestRequiresInferentia1(t *testing.T) {
 	}
 	fit, _, _ = dev.Fit([]*device.DeviceUsage{inf2Usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
+}
+
+func Test_Fit_SharedCoresAreDistinctAndReplayable(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1", "inf1.6xlarge", 1, 4))
+	assert.NilError(t, err)
+	usage := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	replayed := usage.DeepCopy()
+	request := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{"aws.amazon.com/neuroncore": resource.MustParse("1")},
+	}})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+	for _, wantMask := range []int32{1, 2, 4, 8} {
+		fit, allocations, reason := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, fit, true, reason)
+		allocation := allocations[AWSNeuronDevice][0]
+		assert.Equal(t, allocation.Usedcores, wantMask)
+		assert.Equal(t, allocation.CustomInfo[AWSUsageInfo], int(wantMask))
+		assert.NilError(t, dev.AddResourceUsage(pod, usage, &allocation))
+		replayedAllocation := allocation
+		replayedAllocation.CustomInfo = nil // Encoded Pod allocations do not retain CustomInfo.
+		assert.NilError(t, dev.AddResourceUsage(pod, replayed, &replayedAllocation))
+		assert.Equal(t, usage.Usedcores, replayed.Usedcores)
+		assert.Equal(t, usage.CustomInfo[AWSUsageInfo], int(usage.Usedcores))
+	}
+	assert.Equal(t, usage.Usedcores, int32(15))
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func Test_Fit_MultiDeviceCoreRequestUsesNodeGeometry(t *testing.T) {
+	tests := []struct {
+		name      string
+		coresEach int64
+		requested string
+		wantMasks []int32
+	}{
+		{name: "four cores on two-core devices", coresEach: 2, requested: "4", wantMasks: []int32{3, 3}},
+		{name: "six cores on two-core devices", coresEach: 2, requested: "6", wantMasks: []int32{3, 3, 3}},
+		{name: "six cores on four-core devices", coresEach: 4, requested: "6", wantMasks: []int32{15, 3}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := newNeuronBackend()
+			count := int64(len(test.wantMasks))
+			registered, err := dev.GetNodeDevices(newNeuronNode("node", "inf2.8xlarge", count, count*test.coresEach))
+			assert.NilError(t, err)
+			usages := make([]*device.DeviceUsage, len(registered))
+			for i, info := range registered {
+				usages[i] = &device.DeviceUsage{
+					ID: info.ID, Index: info.Index, Count: info.Count,
+					Totalcore: info.Devcore, Type: info.Type, Health: true,
+					CustomInfo: maps.Clone(info.CustomInfo),
+				}
+			}
+			request := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"aws.amazon.com/neuroncore": resource.MustParse(test.requested)},
+			}})
+			assert.Equal(t, request.Nums, int32(1))
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+			fit, allocations, reason := dev.Fit(usages, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, true, reason)
+			assert.Equal(t, len(allocations[AWSNeuronDevice]), len(test.wantMasks))
+			for i, want := range test.wantMasks {
+				assert.Equal(t, allocations[AWSNeuronDevice][i].Usedcores, want)
+			}
+		})
+	}
 }
 
 func Test_PatchAnnotations_EmitsAllInferentia1CoreIndexes(t *testing.T) {

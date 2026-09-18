@@ -579,7 +579,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Type:             AWSNeuronDevice,
 				Memreq:           int32(0),
 				MemPercentagereq: int32(0),
-				Coresreq:         int32(1),
+				TotalCoresreq:    1,
 			},
 		},
 		{
@@ -595,9 +595,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:     1,
-				Type:     AWSNeuronDevice,
-				Coresreq: 3,
+				Nums:          1,
+				Type:          AWSNeuronDevice,
+				TotalCoresreq: 3,
 			},
 		},
 		{
@@ -610,9 +610,9 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:     1,
-				Type:     AWSNeuronDevice,
-				Coresreq: 3,
+				Nums:          1,
+				Type:          AWSNeuronDevice,
+				TotalCoresreq: 3,
 			},
 		},
 		{
@@ -658,68 +658,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			dev := InitAWSNeuronDevice(config)
 			result := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
-		})
-	}
-}
-
-// Test_splitCoreRequest covers the one place the core request shape is decided.
-func Test_splitCoreRequest(t *testing.T) {
-	tests := []struct {
-		name         string
-		cores        int64
-		wantNums     int32
-		wantCoresreq int32
-		wantErr      string
-	}{
-		{
-			name:         "single core takes one device",
-			cores:        1,
-			wantNums:     1,
-			wantCoresreq: 1,
-		},
-		{
-			name:         "two cores take one device",
-			cores:        2,
-			wantNums:     1,
-			wantCoresreq: 2,
-		},
-		{
-			name:         "three cores take one Inferentia1 device",
-			cores:        3,
-			wantNums:     1,
-			wantCoresreq: 3,
-		},
-		{
-			name:    "partial multi-device request has no representable shape",
-			cores:   6,
-			wantErr: "aws.amazon.com/neuroncore must be 1 or a multiple of 4, got 6",
-		},
-		{
-			name:         "four cores take one Inferentia1 device",
-			cores:        4,
-			wantNums:     1,
-			wantCoresreq: 4,
-		},
-		{
-			name:    "device count stays within int32",
-			cores:   int64(math.MaxInt32)*4 + 4,
-			wantErr: "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := InitAWSNeuronDevice(AWSNeuronConfig{
-				ResourceCountName: "aws.amazon.com/neuron",
-				ResourceCoreName:  "aws.amazon.com/neuroncore",
-			})
-			nums, coresreq, err := dev.splitCoreRequest(test.cores)
-			if test.wantErr != "" {
-				assert.Error(t, err, test.wantErr)
-				return
-			}
-			assert.NilError(t, err)
-			assert.Equal(t, nums, test.wantNums)
-			assert.Equal(t, coresreq, test.wantCoresreq)
 		})
 	}
 }

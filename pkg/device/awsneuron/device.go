@@ -93,12 +93,8 @@ func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if !coreRequested {
 		return false, nil
 	}
-	coreCount, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
+	_, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
 	if err != nil {
-		return false, err
-	}
-	// Defer to the conversion path so the two cannot disagree.
-	if _, _, err := dev.splitCoreRequest(coreCount); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -124,24 +120,6 @@ func validateResourceRequest(quantity resource.Quantity, resourceName string, ma
 		return 0, fmt.Errorf("%s must not exceed %d", resourceName, maxValue)
 	}
 	return value, nil
-}
-
-// splitCoreRequest maps a NeuronCore count onto devices. A request of up to
-// four cores occupies one device; larger requests must be whole four-core
-// devices. Fit validates the selected device's actual core geometry.
-func (dev *AWSNeuronDevices) splitCoreRequest(cores int64) (int32, int32, error) {
-	coresPerDevice := maxCoresPerNeuronDevice
-	if cores <= coresPerDevice {
-		return 1, int32(cores), nil
-	}
-	if cores%coresPerDevice != 0 {
-		return 0, 0, fmt.Errorf("%s must be 1 or a multiple of %d, got %d", dev.resourceCoreName, coresPerDevice, cores)
-	}
-	nums := cores / coresPerDevice
-	if nums > maxAWSNeuronDeviceCount {
-		return 0, 0, fmt.Errorf("%s needs %d devices, which exceeds the maximum of %d", dev.resourceCoreName, nums, maxAWSNeuronDeviceCount)
-	}
-	return int32(nums), int32(coresPerDevice), nil
 }
 
 func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -228,7 +206,7 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 					} else {
 						coresPerDevice := coresPerNeuronDevice(val.CustomInfo)
 						coreOffset := int64(val.Idx) * int64(coresPerDevice)
-						for core := int32(0); core < min(coresPerDevice, int32(maxCoresPerNeuronDevice)); core++ {
+						for core := range min(coresPerDevice, int32(maxCoresPerNeuronDevice)) {
 							if (val.Usedcores & (1 << core)) != 0 {
 								value = value + fmt.Sprint(coreOffset+int64(core)) + ","
 								(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
@@ -325,20 +303,15 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
 				return device.ContainerDeviceRequest{}
 			}
-			nums, coresreq, err := dev.splitCoreRequest(n)
-			if err != nil {
-				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
-				return device.ContainerDeviceRequest{}
-			}
 			klog.InfoS("Detected awsNeuron device request",
 				"container", ctr.Name,
 				"deviceCores", n)
 			return device.ContainerDeviceRequest{
-				Nums:             nums,
+				Nums:             1,
 				Type:             AWSNeuronDevice,
 				Memreq:           0,
 				MemPercentagereq: 0,
-				Coresreq:         coresreq,
+				TotalCoresreq:    n,
 			}
 		}
 	}
@@ -351,19 +324,21 @@ func (dev *AWSNeuronDevices) ScoreNode(node *corev1.Node, podDevices device.PodS
 
 func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
-	n.Usedcores += ctr.Usedcores
+	n.Usedcores = dev.AccumulateCores(n.Usedcores, ctr.Usedcores)
 	n.Usedmem += ctr.Usedmem
-
-	num, ok := n.CustomInfo[AWSUsageInfo]
-	if !ok || num == nil {
-		n.CustomInfo[AWSUsageInfo] = 0
+	if n.CustomInfo == nil {
+		n.CustomInfo = map[string]any{}
 	}
-	if nValue, ok := n.CustomInfo[AWSUsageInfo].(int); ok {
-		if ctrValue, ok2 := ctr.CustomInfo[AWSUsageInfo].(int); ok2 {
-			n.CustomInfo[AWSUsageInfo] = nValue + ctrValue
-		}
-	}
+	n.CustomInfo[AWSUsageInfo] = int(n.Usedcores)
 	return nil
+}
+
+func (dev *AWSNeuronDevices) AccumulateCores(used, allocated int32) int32 {
+	return used | allocated
+}
+
+func (dev *AWSNeuronDevices) CountAllocatedCores(allocated int32) int64 {
+	return int64(countMaskAvailable(allocated))
 }
 
 func countMaskAvailable(mask int32) int32 {
@@ -376,24 +351,25 @@ func countMaskAvailable(mask int32) int32 {
 	return ret
 }
 
-func addCoreUsage(prev map[string]any, require, capacity int) map[string]any {
-	res := maps.Clone(prev)
-	if res == nil {
-		res = map[string]any{}
-	}
-	used := 0
-	if value, ok := res[AWSUsageInfo].(int); ok {
-		used = value
-	}
-	for core := 0; core < capacity && require > 0; core++ {
-		bit := 1 << core
-		if used&bit == 0 {
-			used |= bit
-			require--
+func allocateCoreMask(used, available int32, required int32) int32 {
+	var selected int32
+	for core := int32(0); core < int32(maxCoresPerNeuronDevice) && required > 0; core++ {
+		bit := int32(1) << core
+		if available&bit != 0 && used&bit == 0 {
+			selected |= bit
+			required--
 		}
 	}
-	res[AWSUsageInfo] = used
-	return res
+	return selected
+}
+
+func coreAllocationInfo(info map[string]any, selected int32) map[string]any {
+	result := maps.Clone(info)
+	if result == nil {
+		result = map[string]any{}
+	}
+	result[AWSUsageInfo] = int(selected)
+	return result
 }
 
 // continuousDeviceAvailable reports the device indexes of a free run of count
@@ -474,12 +450,26 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	remainingCores := k.TotalCoresreq
+	if remainingCores > 0 && len(devices) > 0 {
+		coresPerDevice := int64(countMaskAvailable(devices[0].Totalcore))
+		if coresPerDevice == 0 {
+			return false, tmpDevs, common.GenReason(map[string]int{common.CardInsufficientCore: 1}, len(devices))
+		}
+		deviceCount := (remainingCores-1)/coresPerDevice + 1
+		if deviceCount > int64(len(devices)) {
+			return false, tmpDevs, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(devices)}, int(deviceCount))
+		}
+		k.Nums = int32(deviceCount)
+	}
 	if k.Nums > 1 {
 		candidates := make([]*device.DeviceUsage, len(devices))
 		for i, candidate := range devices {
 			copy := candidate.DeepCopy()
 			requiredCores := k.Coresreq
-			if requiredCores == 0 {
+			if remainingCores > 0 {
+				requiredCores = int32(min(remainingCores, int64(countMaskAvailable(copy.Totalcore))))
+			} else if requiredCores == 0 {
 				requiredCores = countMaskAvailable(copy.Totalcore)
 			}
 			if countMaskAvailable(copy.Totalcore)-countMaskAvailable(copy.Usedcores) < requiredCores {
@@ -487,27 +477,30 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			}
 			candidates[i] = copy
 		}
-		alloc := graphSelect(candidates, int(request.Nums))
+		alloc := graphSelect(candidates, int(k.Nums))
 		if len(alloc) == 0 {
 			reason[common.NumaNotFit]++
-			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
 			return false, tmpDevs, common.GenReason(reason, len(devices))
 		}
 		for _, dev := range alloc {
 			for _, val := range devices {
 				if val.Index == uint(dev) {
 					requiredCores := k.Coresreq
-					if requiredCores == 0 {
+					if remainingCores > 0 {
+						requiredCores = int32(min(remainingCores, int64(countMaskAvailable(val.Totalcore))))
+						remainingCores -= int64(requiredCores)
+					} else if requiredCores == 0 {
 						requiredCores = countMaskAvailable(val.Totalcore)
 					}
-					customInfo := addCoreUsage(val.CustomInfo, int(requiredCores), int(countMaskAvailable(val.Totalcore)))
+					selected := allocateCoreMask(val.Usedcores, val.Totalcore, requiredCores)
 					tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 						Idx:        int(val.Index),
 						UUID:       val.ID,
 						Type:       request.Type,
 						Usedmem:    val.Totalmem,
-						Usedcores:  val.Totalcore,
-						CustomInfo: customInfo,
+						Usedcores:  selected,
+						CustomInfo: coreAllocationInfo(val.CustomInfo, selected),
 					})
 					break
 				}
@@ -517,10 +510,6 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	}
 	for i, v := range slices.Backward(devices) {
 		dev := v
-		_, ok := dev.CustomInfo[AWSUsageInfo]
-		if !ok {
-			dev.CustomInfo[AWSUsageInfo] = int(dev.Usedcores)
-		}
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
@@ -557,7 +546,9 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		}
 
 		requiredCores := k.Coresreq
-		if requiredCores == 0 {
+		if remainingCores > 0 {
+			requiredCores = int32(remainingCores)
+		} else if requiredCores == 0 {
 			requiredCores = countMaskAvailable(dev.Totalcore)
 		}
 		if countMaskAvailable(dev.Totalcore)-countMaskAvailable(dev.Usedcores) < requiredCores {
@@ -567,18 +558,14 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		}
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-		customInfo := addCoreUsage(dev.CustomInfo, int(requiredCores), int(countMaskAvailable(dev.Totalcore)))
-		usedcores := 0
-		if countValue, ok := customInfo[AWSUsageInfo].(int); ok {
-			usedcores = countValue
-		}
+		selected := allocateCoreMask(dev.Usedcores, dev.Totalcore, requiredCores)
 		tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
 			Type:       k.Type,
 			Usedmem:    0,
-			Usedcores:  int32(usedcores),
-			CustomInfo: customInfo,
+			Usedcores:  selected,
+			CustomInfo: coreAllocationInfo(dev.CustomInfo, selected),
 		})
 		klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 		return true, tmpDevs, ""
