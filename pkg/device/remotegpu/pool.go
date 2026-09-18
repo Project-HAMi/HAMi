@@ -64,11 +64,11 @@ const (
 	// list every pod in the cluster once per node.
 	forceInterval = time.Second
 
-	// poolFetchTimeout caps the API calls one refresh makes. The client they
-	// go through carries no timeout by default, and both entry points run
-	// under a scheduler lock: Fit under allocLock, GetNodeDevices under the
-	// register lock. An apiserver that stops answering would otherwise hold
-	// either for as long as it stays quiet.
+	// poolFetchTimeout caps the API and server calls one refresh makes. The
+	// client they go through carries no timeout by default, and both entry
+	// points run under a scheduler lock: Fit under allocLock, GetNodeDevices
+	// under the register lock. An apiserver that stops answering would
+	// otherwise hold either for as long as it stays quiet.
 	poolFetchTimeout = 10 * time.Second
 )
 
@@ -133,6 +133,7 @@ type pool struct {
 	devices    []*device.DeviceInfo
 	inUse      map[string]struct{} // device ID held by a live pod
 	held       map[string]booking  // device ID booked since the last refresh
+	busy       map[string]struct{} // device ID a server reports a client on
 }
 
 func newPool(defaultPort int) *pool {
@@ -141,6 +142,7 @@ func newPool(defaultPort int) *pool {
 		endpoints:   map[string]string{},
 		inUse:       map[string]struct{}{},
 		held:        map[string]booking{},
+		busy:        map[string]struct{}{},
 	}
 }
 
@@ -168,12 +170,12 @@ func serverOf(id string) string {
 
 // refresh rebuilds the pool from the API server and the lupine fleet.
 //
-// The node list and the pod list run with the lock released: they are the
-// slow, network-bound part, the client they go through carries no timeout by
-// default, and holding the lock across them would stall every other pool
-// operation (hold, reserved, endpoint, snapshot) for as long as a stalled
-// apiserver takes to answer. Only the decision to fetch (the TTL and in-flight
-// checks) and the swap of the new state in run under the lock.
+// The fetch itself (the node list, the pod list, and one call per lupine
+// server) runs with the lock released: it is the slow, network-bound part,
+// and holding the lock across it would stall every other pool operation
+// (hold, reserved, endpoint, snapshot) for as long as the slowest or least
+// reachable server takes to time out. Only the decision to fetch (the TTL and
+// in-flight checks) and the swap of the new state in run under the lock.
 func (p *pool) refresh(ctx context.Context) {
 	p.mu.Lock()
 	if !p.fetchedAt.IsZero() && time.Since(p.fetchedAt) < poolTTL {
@@ -200,6 +202,7 @@ func (p *pool) refresh(ctx context.Context) {
 	done := make(chan struct{})
 	p.refreshed = done
 	previousInUse := p.inUse
+	previousBusy := p.busy
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -257,6 +260,9 @@ func (p *pool) refresh(ctx context.Context) {
 	} else {
 		inUse, listed = reservations(ctx, previousInUse)
 	}
+	// Ask every server concurrently: one unreachable server pays its own
+	// metricsTimeout instead of adding it to everyone else's.
+	busy := askServers(ctx, endpoints, previousBusy)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -266,6 +272,7 @@ func (p *pool) refresh(ctx context.Context) {
 	p.endpoints = endpoints
 	p.devices = devices
 	p.inUse = inUse
+	p.busy = busy
 	p.fetchedAt = time.Now()
 	// A hold is only needed until the pod list catches up with it. Drop the
 	// ones it has, and the ones so old that the pod they were taken for is
@@ -282,7 +289,8 @@ func (p *pool) refresh(ctx context.Context) {
 		}
 	}
 	klog.V(4).InfoS("remotegpu: pool refreshed",
-		"servers", len(endpoints), "devices", len(devices), "reserved", len(p.inUse))
+		"servers", len(endpoints), "devices", len(devices),
+		"reserved", len(p.inUse), "busyOnServer", len(p.busy))
 }
 
 func (p *pool) endpointOf(n *corev1.Node) (string, bool) {
@@ -407,10 +415,6 @@ func (p *pool) snapshot(ctx context.Context) []*device.DeviceInfo {
 	return out
 }
 
-// refreshNow re-reads the fleet without waiting for poolTTL to lapse, so a
-// caller about to reject a pod over a booking can be sure the booking is real.
-// It is rate limited to one read per forceInterval; a caller that hits the
-// limit is already looking at data that fresh.
 // sameFleet reports whether two snapshots describe the same cards.
 //
 // Cards are compared on their whole scheduling contract rather than a chosen
@@ -455,6 +459,10 @@ func (p *pool) deviceIDs() map[string]struct{} {
 	return ids
 }
 
+// refreshNow re-reads the fleet without waiting for poolTTL to lapse, so a
+// caller about to reject a pod over a booking can be sure the booking is real.
+// It is rate limited to one read per forceInterval; a caller that hits the
+// limit is already looking at data that fresh.
 func (p *pool) refreshNow(ctx context.Context) {
 	p.mu.Lock()
 	if !p.forcedAt.IsZero() && time.Since(p.forcedAt) < forceInterval {
@@ -511,8 +519,54 @@ func (p *pool) reserved(id string) bool {
 	if _, ok := p.inUse[id]; ok {
 		return true
 	}
-	_, ok := p.held[id]
+	if _, ok := p.held[id]; ok {
+		return true
+	}
+	_, ok := p.busy[id]
 	return ok
+}
+
+// askServers collects the cards each lupine server reports a client on. A
+// server that cannot be reached keeps whatever it last reported rather than
+// dropping to nothing, the same way an API error keeps the previous snapshot:
+// a monitoring endpoint going quiet is not evidence that the cards behind it
+// were freed, and forgetting them would hand a card an outside client is
+// holding to a pod as well.
+//
+// Every server is asked concurrently: fetchBusyDevices carries its own
+// metricsTimeout, and asking sequentially would make one unreachable server
+// add its timeout to every other server's, one at a time.
+func askServers(ctx context.Context, endpoints map[string]string, previous map[string]struct{}) map[string]struct{} {
+	busy := map[string]struct{}{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for node, endpoint := range endpoints {
+		wg.Add(1)
+		go func(node, endpoint string) {
+			defer wg.Done()
+			uuids, err := fetchBusyDevices(ctx, endpoint)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				klog.V(4).InfoS("remotegpu: no usage from lupine server, keeping what it last reported",
+					"node", node, "endpoint", endpoint, "error", err)
+				// ponytail: a scan of the previous set per unreachable server.
+				// Index it by server if a fleet ever grows large enough for
+				// this to show up.
+				for id := range previous {
+					if serverOf(id) == node {
+						busy[id] = struct{}{}
+					}
+				}
+				return
+			}
+			for uuid := range uuids {
+				busy[deviceID(node, uuid)] = struct{}{}
+			}
+		}(node, endpoint)
+	}
+	wg.Wait()
+	return busy
 }
 
 // endpoint returns the "host:port" a client should point LUPINE_SERVER at.

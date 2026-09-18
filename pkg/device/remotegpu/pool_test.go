@@ -19,8 +19,10 @@ package remotegpu
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"gotest.tools/v3/assert"
@@ -37,7 +39,35 @@ func stubFleet(t *testing.T, nodes []corev1.Node, pods []corev1.Pod, nodeErr err
 	prevNodes, prevPods := listLupineNodes, listPods
 	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nodeErr }
 	listPods = func(context.Context) ([]corev1.Pod, error) { return pods, nil }
-	t.Cleanup(func() { listLupineNodes, listPods = prevNodes, prevPods })
+	// Servers report nothing unless a test says otherwise, so existing cases
+	// keep exercising the local bookkeeping on its own.
+	prevBusy := fetchBusyDevices
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		return nil, errNoServerMetrics
+	}
+	t.Cleanup(func() {
+		listLupineNodes, listPods, fetchBusyDevices = prevNodes, prevPods, prevBusy
+	})
+}
+
+var errNoServerMetrics = errors.New("no metrics stubbed for this test")
+
+// stubServerUsage makes the fleet report a client on the given GPU UUIDs.
+func stubServerUsage(t *testing.T, byEndpoint map[string][]string) {
+	t.Helper()
+	prev := fetchBusyDevices
+	fetchBusyDevices = func(_ context.Context, endpoint string) (map[string]struct{}, error) {
+		uuids, ok := byEndpoint[endpoint]
+		if !ok {
+			return nil, errNoServerMetrics
+		}
+		out := map[string]struct{}{}
+		for _, u := range uuids {
+			out[u] = struct{}{}
+		}
+		return out, nil
+	}
+	t.Cleanup(func() { fetchBusyDevices = prev })
 }
 
 func lupineNode(name, ip, portLabel string, gpus []*device.DeviceInfo) corev1.Node {
@@ -59,63 +89,6 @@ func lupineNode(name, ip, portLabel string, gpus []*device.DeviceInfo) corev1.No
 
 func gpu(uuid string, mem int32) *device.DeviceInfo {
 	return &device.DeviceInfo{ID: uuid, Count: 10, Devmem: mem, Devcore: 100, Type: "NVIDIA", Health: true, Mode: nvidia.RemoteMode}
-}
-
-// The plugin publishes one registration annotation whatever mode it runs in.
-// A card still in a local mode belongs to its node's kubelet, so the pool must
-// leave it there rather than offer the same GPU twice.
-func TestPool_TakesOnlyTheCardsServedRemotely(t *testing.T) {
-	local := gpu("GPU-2", 40000)
-	local.Mode = "hami-core"
-	stubFleet(t, []corev1.Node{
-		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), local}),
-	}, nil, nil)
-
-	p := newPool(DefaultLupinePort)
-	devices := p.snapshot(context.Background())
-	assert.Equal(t, len(devices), 1)
-	assert.Equal(t, devices[0].ID, "gpu-a/GPU-1")
-}
-
-// refresh() must not hold the pool lock across the API calls: the client they
-// go through carries no timeout by default, and reserved(), hold() and
-// endpoint() are what Fit and PatchAnnotations call on the hot path.
-func TestPool_RefreshDoesNotBlockReservedDuringATheList(t *testing.T) {
-	release := make(chan struct{})
-	entered := make(chan struct{})
-	var once sync.Once
-	prev := listLupineNodes
-	listLupineNodes = func(context.Context) ([]corev1.Node, error) {
-		once.Do(func() { close(entered) })
-		<-release
-		return nil, nil
-	}
-	prevPods := listPods
-	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
-	t.Cleanup(func() { listLupineNodes, listPods = prev, prevPods })
-
-	p := newPool(DefaultLupinePort)
-	refreshDone := make(chan struct{})
-	go func() {
-		p.refresh(context.Background())
-		close(refreshDone)
-	}()
-	<-entered
-
-	answered := make(chan struct{})
-	go func() {
-		p.reserved("gpu-a/GPU-1")
-		p.hold("gpu-a/GPU-1")
-		p.endpoint("gpu-a")
-		close(answered)
-	}()
-	select {
-	case <-answered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the pool lock was held across the node list")
-	}
-	close(release)
-	<-refreshDone
 }
 
 func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
@@ -411,4 +384,162 @@ func TestGetNodeDevices_DisabledWhenUnconfigured(t *testing.T) {
 
 	_, err := dev.GetNodeDevices(corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cpu-1"}})
 	assert.Assert(t, errors.Is(err, errNoPool))
+}
+
+// The scheduler's own records only cover pods it placed. A card can also be
+// busy with a client it did not place, an interactive session or one pointed
+// at the server by hand, and only the server can see that.
+func TestPool_HonoursUsageReportedByTheServer(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+	}
+	stubFleet(t, nodes, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-2"}})
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assert.Assert(t, !p.reserved("gpu-a/GPU-1"), "a card nobody is on stays available")
+	assert.Assert(t, p.reserved("gpu-a/GPU-2"), "a card the server reports a client on is taken")
+}
+
+// A monitoring endpoint going quiet says nothing about the cards behind it, so
+// it must not hand them out; the local records still stand on their own.
+func TestPool_UnreachableServerDoesNotFreeItsCards(t *testing.T) {
+	held := device.EncodePodSingleDevice(device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
+	})
+	pods := []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "live", Annotations: map[string]string{AllocatedAnnos: held}},
+		Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+	}}
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+	}, pods, nil)
+	// fetchBusyDevices keeps failing, the default from stubFleet.
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "the pod's own booking survives")
+	assert.Assert(t, !p.reserved("gpu-a/GPU-2"), "an unreachable server does not make everything busy")
+}
+
+func TestParseBusyDevices(t *testing.T) {
+	body := `# HELP lupine_host_gpu_memory_total_bytes Total GPU memory in bytes.
+# TYPE lupine_host_gpu_memory_total_bytes gauge
+lupine_host_gpu_memory_total_bytes{device_uuid="GPU-1",device_index="0"} 85520809984
+lupine_monitor_nvml_up 1
+# TYPE lupine_client_device_memory_used_bytes gauge
+lupine_client_device_memory_used_bytes{client_id="10.0.0.9:pod-a:4026532:7",client_address="10.0.0.9",client_hostname="pod-a",client_name="python3",device_uuid="GPU-1",device_index="0"} 83886080
+lupine_client_device_utilization_percent{client_id="10.0.0.9:pod-a:4026532:7",client_address="10.0.0.9",client_hostname="pod-a",client_name="python3",device_uuid="GPU-9",device_index="1"} 12
+`
+	busy, err := parseBusyDevices(strings.NewReader(body))
+	assert.NilError(t, err)
+	assert.Equal(t, len(busy), 1, "only the client memory metric names a busy card")
+	_, ok := busy["GPU-1"]
+	assert.Assert(t, ok)
+}
+
+// A body that breaks part way through is not a shorter list of busy cards: the
+// lines that never arrived are the ones this would otherwise call free.
+func TestParseBusyDevicesReportsATruncatedBody(t *testing.T) {
+	_, err := parseBusyDevices(iotest.TimeoutReader(strings.NewReader(
+		"lupine_client_device_memory_used_bytes{device_uuid=\"GPU-1\"} 1\nlupine_client_device_memory_used_bytes{device_uuid=\"GPU-2\"} 1\n")))
+	assert.ErrorContains(t, err, "timeout")
+}
+
+// A refresh whose metrics call fails must keep what the server last said.
+// Forgetting it would free a card an outside client is still holding and let
+// the scheduler put a pod on top of it.
+func TestPool_FailedMetricsRefreshKeepsTheLastReportedUsage(t *testing.T) {
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+	}, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-2"}})
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	assert.Assert(t, p.reserved("gpu-a/GPU-2"), "the server reported a client on it")
+
+	// The server goes quiet on the next round.
+	prev := fetchBusyDevices
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		return nil, errNoServerMetrics
+	}
+	t.Cleanup(func() { fetchBusyDevices = prev })
+	p.refreshNow(context.Background())
+
+	assert.Assert(t, p.reserved("gpu-a/GPU-2"), "a quiet server does not release the card it reported")
+	assert.Assert(t, !p.reserved("gpu-a/GPU-1"), "and says nothing new about the others")
+}
+
+// The plugin publishes one registration annotation whatever mode it runs in.
+// A card still in a local mode belongs to its node's kubelet, so the pool must
+// leave it there rather than offer the same GPU twice.
+func TestPool_TakesOnlyTheCardsServedRemotely(t *testing.T) {
+	local := gpu("GPU-2", 40000)
+	local.Mode = "hami-core"
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), local}),
+	}, nil, nil)
+
+	p := newPool(DefaultLupinePort)
+	devices := p.snapshot(context.Background())
+	assert.Equal(t, len(devices), 1)
+	assert.Equal(t, devices[0].ID, "gpu-a/GPU-1")
+}
+
+// refresh() must not hold the pool lock across the network fetch: every other
+// server has to pay its own metricsTimeout, not everyone else's turn in line.
+// reserved(), hold() and endpoint() are what Fit and PatchAnnotations call on
+// the hot path, so a slow or unreachable server must not stall them.
+func TestPool_RefreshDoesNotBlockReservedDuringAServerFetch(t *testing.T) {
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+	}, nil, nil)
+
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var once sync.Once
+	prevBusy := fetchBusyDevices
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		once.Do(func() { close(entered) })
+		<-release
+		return nil, errNoServerMetrics
+	}
+	t.Cleanup(func() { fetchBusyDevices = prevBusy })
+
+	p := newPool(DefaultLupinePort)
+	refreshDone := make(chan struct{})
+	go func() {
+		p.refresh(context.Background())
+		close(refreshDone)
+	}()
+
+	// Wait until refresh() is provably inside the blocking server call before
+	// checking whether reserved() can still proceed.
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		close(release)
+		<-refreshDone
+		t.Fatal("fetchBusyDevices was never called; the test setup is broken")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		p.reserved("gpu-a/GPU-1")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		close(release)
+		<-refreshDone
+		t.Fatal("reserved() blocked while a lupine server fetch was still in flight")
+	}
+	close(release)
+	<-refreshDone
 }
