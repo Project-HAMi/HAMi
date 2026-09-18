@@ -48,6 +48,7 @@ type schedulerMetricsProvider interface {
 	// can emit hami_scheduler_is_leader without importing the scheduler package
 	// directly in metrics.go.
 	GetLeaderManager() leaderelection.LeaderManager
+	GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics
 	// IsSynced reports whether the scheduler's internal cache has completed at
 	// least one successful sync and is ready to serve scheduling requests.
 	IsSynced() bool
@@ -139,6 +140,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectContainerMetrics(ch, deviceMetaByUUID, legacy)
 	cc.collectRemoteGPUMetrics(ch)
 	cc.collectSchedulerStateMetrics(ch)
+	cc.collectSchedulerOutcomeMetrics(ch)
 }
 
 // remoteGPUPool reads the lupine fleet when the remote-gpu backend is
@@ -529,6 +531,15 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	}
 	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
+	}
+}
+
+// collectSchedulerOutcomeMetrics emits allocation and recovery counters owned
+// by the scheduler. The metrics object is optional so lightweight collector
+// tests and embedders can omit scheduler lifecycle metrics.
+func (cc ClusterManagerCollector) collectSchedulerOutcomeMetrics(ch chan<- prometheus.Metric) {
+	if outcome := cc.metricsProvider.GetAllocationMetrics(); outcome != nil {
+		outcome.Collect(ch)
 	}
 }
 
