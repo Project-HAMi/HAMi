@@ -81,13 +81,29 @@ type assignedContainerInfo struct {
 	InstanceUUID string `json:"instanceUUID,omitempty"`
 }
 
+// InitEnflameDevice initializes the enflame DRS-GCU backend. The resource
+// name is resolved as: yaml (new key > legacy key) > new flag > legacy
+// flag alias > default (issue #3016).
 func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
+	if enflameDRSGCUFlagName != "" && enflameVGCULegacyFlagName != "" && enflameDRSGCUFlagName != enflameVGCULegacyFlagName {
+		klog.Warningf("both --enflame-drs-gcu-resource-name (%s) and --enflame-vgcu-resource-name (%s) are set; using %s",
+			enflameDRSGCUFlagName, enflameVGCULegacyFlagName, enflameDRSGCUFlagName)
+	}
+	if (config.ResourceNameDRSGCU != "" || config.ResourceNameVGCU != "") && (enflameDRSGCUFlagName != "" || enflameVGCULegacyFlagName != "") {
+		klog.Warning("the enflame resource name flags are ignored because the yaml config already sets the resource name")
+	}
 	EnflameResourceNameDRSGCU = config.ResourceNameDRSGCU
 	if EnflameResourceNameDRSGCU == "" {
 		EnflameResourceNameDRSGCU = config.ResourceNameVGCU
 	}
 	if EnflameResourceNameDRSGCU == "" {
-		EnflameResourceNameDRSGCU = "enflame.com/drs-gcu"
+		EnflameResourceNameDRSGCU = enflameDRSGCUFlagName
+	}
+	if EnflameResourceNameDRSGCU == "" {
+		EnflameResourceNameDRSGCU = enflameVGCULegacyFlagName
+	}
+	if EnflameResourceNameDRSGCU == "" {
+		EnflameResourceNameDRSGCU = defaultEnflameDRSGCUResourceName
 	}
 	EnflameResourceNameGCUMemory = config.ResourceNameMemory
 	if EnflameResourceNameGCUMemory == "" {
