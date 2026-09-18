@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -879,5 +880,66 @@ func TestValidateContainerAllocationWithoutDevices(t *testing.T) {
 	plugin := cardPlugin("hami-core", "GPU-1", 24000, 1)
 	if err := plugin.validateContainerAllocation(gpuContainer(limits), device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}}); err != nil {
 		t.Fatalf("the allocation was rejected: %v", err)
+	}
+}
+
+// Alignment can move an annotated entry onto the card the kubelet picked, so
+// the share has to be measured against that card rather than the one the
+// annotation named. Half of an 80 GB card is 40 GB, and carrying that onto a
+// 24 GB card would hand the container a limit past the whole device.
+func TestAllocate_PercentageCheckedAgainstAlignedDevice(t *testing.T) {
+	setupInRequestDevices(t)
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	annotated := &rm.Device{TotalMemory: 80000 * 1024 * 1024}
+	annotated.ID = "GPU-aaa"
+	selected := &rm.Device{TotalMemory: 24000 * 1024 * 1024}
+	selected.ID = "GPU-bbb"
+	plugin := newTestPluginWithRM(t, map[string]*rm.Device{"GPU-aaa": annotated, "GPU-bbb": selected})
+
+	previous := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	t.Cleanup(func() { enableGetPreferredAllocation = previous })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "aligned-pod", Namespace: "default", UID: "aligned-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,40000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c0",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			}},
+		}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	_, err := plugin.Allocate(context.Background(), &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-bbb"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("the allocation was accepted on the smaller card")
+	}
+	if !strings.Contains(err.Error(), "GPU-bbb") {
+		t.Errorf("error %q does not name the card the container got", err)
 	}
 }

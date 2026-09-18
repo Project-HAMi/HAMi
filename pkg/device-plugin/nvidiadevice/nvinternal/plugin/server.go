@@ -1008,11 +1008,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
-			if err := plugin.validateContainerAllocation(&currentCtr, devreq); err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
-				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
-			}
-
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
 				if err != nil {
@@ -1020,6 +1015,14 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 				}
 				devreq = alignedDevreq
+			}
+			// After alignment, so a share is measured against the card the
+			// container actually gets: alignment can move an unmatched entry onto
+			// the device the kubelet picked while carrying its memory across, and
+			// that memory is what the limits below are built from.
+			if err := plugin.validateContainerAllocation(&currentCtr, devreq); err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			requestIDs, err := plugin.GetContainerDeviceStrArray(devreq, current, currentCtr.Name)
 			if err != nil {
