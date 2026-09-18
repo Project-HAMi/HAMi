@@ -193,7 +193,7 @@ HAMi 社区欢迎用户、贡献者、硬件厂商和构建 Kubernetes AI 基础
 - 邮件列表：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [会议记录和议程](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
 - 中文社区周会：每周五 16:00 UTC+8，[会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- 英文社区双周会：隔周三 16:00 UTC+8，[会议链接](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
+- 英文社区双周会：隔周三 16:30 UTC+8，[会议链接](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
 
 ## 演讲和参考资料
 

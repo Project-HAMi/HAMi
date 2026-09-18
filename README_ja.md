@@ -193,7 +193,7 @@ HAMi コミュニティは、ユーザー、コントリビューター、ハー
 - メーリングリスト：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [ミーティングノートとアジェンダ](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
 - 中国語コミュニティミーティング：毎週金曜日 16:00 UTC+8、[ミーティングリンク](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- 英語コミュニティミーティング：隔週水曜日 16:00 UTC+8、[ミーティングリンク](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
+- 英語コミュニティミーティング：隔週水曜日 16:30 UTC+8、[ミーティングリンク](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
 
 ## 講演と参考資料
 

@@ -193,7 +193,7 @@ The HAMi community is open to users, contributors, hardware vendors, and platfor
 - Mailing list: [hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [Meeting notes and agenda](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
 - Chinese community meeting: Friday 16:00 UTC+8, weekly, [Meeting link](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- English community meeting: Wednesday 16:00 UTC+8, biweekly, [Meeting link](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
+- English community meeting: Wednesday 16:30 UTC+8, biweekly, [Meeting link](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
 
 ## Talks And References
 
