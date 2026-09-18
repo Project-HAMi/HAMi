@@ -374,8 +374,9 @@ func Test_onAddPod_DecodeFailureRequiresScheduledHAMiPod(t *testing.T) {
 		mutate func(*corev1.Pod)
 	}{
 		{
-			name: "manually bound pod",
+			name: "bound pending pod without scheduling confirmation",
 			mutate: func(pod *corev1.Pod) {
+				pod.Status.Phase = corev1.PodPending
 				pod.Status.Conditions = nil
 			},
 		},
@@ -406,7 +407,7 @@ func Test_onAddPod_DecodeFailureRequiresScheduledHAMiPod(t *testing.T) {
 	}
 }
 
-func Test_onUpdatePod_RemovedAssignmentClearsDecodeFailure(t *testing.T) {
+func Test_onUpdatePod_RemovedAssignmentKeepsUnaccountedNodeBlocked(t *testing.T) {
 	initReplayDevices(t)
 	s := NewScheduler()
 	addReplayNode(s, "node1")
@@ -419,6 +420,92 @@ func Test_onUpdatePod_RemovedAssignmentClearsDecodeFailure(t *testing.T) {
 
 	nodes := []string{"node1"}
 	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*candidates), 0)
+	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
+
+	terminated := updated.DeepCopy()
+	terminated.Status.Phase = corev1.PodSucceeded
+	s.onUpdatePod(updated, terminated)
+	candidates, _, failedNodes, err = s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+	_, ok := (*candidates)["node1"]
+	assert.Equal(t, ok, true)
+}
+
+func Test_onUpdatePod_RemovedAssignmentQuarantinesUncachedRunningPod(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	addReplayNode(s, "node1")
+	pod := newMalformedAllocatedPod("decode-update-uid", "decode-update", "decode-update-ns", "node1")
+	updated := pod.DeepCopy()
+	delete(updated.Annotations, util.AssignedNodeAnnotations)
+	s.onUpdatePod(pod, updated)
+
+	nodes := []string{"node1"}
+	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*candidates), 0)
+	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
+}
+
+func Test_onUpdatePod_TerminatedWithoutAssignmentRemovesCachedUsage(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	addReplayNode(s, "node1")
+	pod := newMalformedAllocatedPod("decode-cached-terminal-uid", "decode-cached-terminal", "decode-cached-terminal-ns", "node1")
+	maps.Copy(pod.Annotations, validAllocatedAnnotations())
+	s.onAddPod(pod)
+	t.Cleanup(func() { s.onDelPod(pod) })
+
+	terminated := pod.DeepCopy()
+	terminated.Status.Phase = corev1.PodSucceeded
+	delete(terminated.Annotations, util.AssignedNodeAnnotations)
+	s.onUpdatePod(pod, terminated)
+
+	_, cached := s.podManager.GetPod(terminated)
+	assert.Equal(t, cached, false)
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"), int64(0))
+	nodes := []string{"node1"}
+	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+	_, ok := (*candidates)["node1"]
+	assert.Equal(t, ok, true)
+}
+
+func Test_onAddPod_RunningWithoutScheduledConditionBlocksUnaccountedNode(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	addReplayNode(s, "node1")
+	pod := newMalformedAllocatedPod("decode-running-uid", "decode-running", "decode-running-ns", "node1")
+	pod.Status.Conditions = nil
+	s.onAddPod(pod)
+
+	nodes := []string{"node1"}
+	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*candidates), 0)
+	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
+}
+
+func Test_onAddPod_RunningWithoutAssignmentBlocksUntilDeletion(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	addReplayNode(s, "node1")
+	pod := newMalformedAllocatedPod("decode-no-assignment-uid", "decode-no-assignment", "decode-no-assignment-ns", "node1")
+	delete(pod.Annotations, util.AssignedNodeAnnotations)
+	s.onAddPod(pod)
+
+	nodes := []string{"node1"}
+	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*candidates), 0)
+	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
+
+	s.onDelPod(pod)
+	candidates, _, failedNodes, err = s.getNodesUsage(&nodes, nil)
 	assert.NilError(t, err)
 	assert.Equal(t, len(failedNodes), 0)
 	_, ok := (*candidates)["node1"]

@@ -210,10 +210,10 @@ func (s *Scheduler) recordAllocationDecodeFailure(pod *corev1.Pod, nodeID string
 		return false
 	}
 
-	// A Pod author can set spec.nodeName and HAMi annotations directly. Only
-	// quarantine the node when Kubernetes confirms that the Pod was scheduled
-	// and the Pod actually requests a device managed by this scheduler.
-	scheduled := false
+	// A Pod author can set spec.nodeName and HAMi annotations directly. A
+	// running Pod may still hold a device even when PodScheduled is absent, so
+	// treat its phase as evidence that the bound allocation must be accounted.
+	scheduled := pod.Status.Phase == corev1.PodRunning
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled &&
 			condition.Status == corev1.ConditionTrue {
@@ -241,14 +241,17 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
-	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
 	if util.IsPodInTerminatedState(pod) {
 		s.allocationDecodeFailures.clearPod(pod.UID)
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
+		}
+		return
+	}
+	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
+		if _, cached := s.podManager.GetPod(pod); !cached {
+			s.recordAllocationDecodeFailure(pod, pod.Spec.NodeName)
 		}
 		return
 	}
@@ -293,9 +296,6 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	if util.IsPodInTerminatedState(newPod) {
 		s.allocationDecodeFailures.clearPod(newPod.UID)
-		if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
-			return
-		}
 		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
 			s.quotaManager.RmUsage(newPod, pi.Devices)
 		}
@@ -303,7 +303,14 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
-		s.allocationDecodeFailures.clearPod(newPod.UID)
+		if _, cached := s.podManager.GetPod(newPod); cached {
+			s.podManager.UpdatePod(newPod)
+		} else {
+			// The Pod remains bound, but its allocation is still unknown.
+			// Preserve any existing failure and quarantine a running Pod whose
+			// assignment disappeared before it could be accounted.
+			s.recordAllocationDecodeFailure(newPod, newPod.Spec.NodeName)
+		}
 		return
 	}
 
