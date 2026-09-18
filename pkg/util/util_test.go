@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1254,4 +1255,65 @@ func TestPatchPodAnnotationsPinsPodUID(t *testing.T) {
 	}
 	assert.NilError(t, json.Unmarshal(patchBody, &patch))
 	assert.Equal(t, types.UID("gpu-pod-uid"), patch.Metadata.UID, "the patch does not pin the pod's UID")
+}
+
+// TestPatchPodAnnotationsRejectsStaleUID covers delete-and-recreate: same
+// name and namespace, new UID, and a caller still holding a patch built for
+// the old one. The fake clientset does not enforce UID immutability like a
+// real API server does, so the reactor below stands in for that check.
+func TestPatchPodAnnotationsRejectsStaleUID(t *testing.T) {
+	const (
+		staleUID = types.UID("old-pod-uid")
+		liveUID  = types.UID("new-pod-uid")
+	)
+
+	fakeClient := fake.NewClientset()
+	live := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "gpu-pod",
+			Namespace:   "team-a",
+			UID:         liveUID,
+			Annotations: map[string]string{"pre-existing": "untouched"},
+		},
+	}
+	_, err := fakeClient.CoreV1().Pods(live.Namespace).Create(context.TODO(), live, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		var patch struct {
+			Metadata struct {
+				UID types.UID `json:"uid"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(patchAction.GetPatch(), &patch); err != nil {
+			return false, nil, err
+		}
+		if patch.Metadata.UID != "" && patch.Metadata.UID != liveUID {
+			return true, nil, apierrors.NewConflict(
+				corev1.Resource("pods"), patchAction.GetName(),
+				fmt.Errorf("Precondition failed: UID in precondition: %q, UID in object meta: %q", patch.Metadata.UID, liveUID),
+			)
+		}
+		return false, nil, nil
+	})
+	oldClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
+	stalePodRef := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod", Namespace: "team-a", UID: staleUID},
+	}
+	patchErr := PatchPodAnnotations(stalePodRef, map[string]string{AssignedNodeAnnotations: "node-1"})
+	assert.Assert(t, apierrors.IsConflict(patchErr), "a patch carrying a stale UID must return a conflict, got: %v", patchErr)
+
+	current, err := fakeClient.CoreV1().Pods("team-a").Get(context.TODO(), "gpu-pod", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, liveUID, current.UID, "the recreated pod's identity changed")
+	_, forged := current.Annotations[AssignedNodeAnnotations]
+	assert.Equal(t, false, forged, "the stale patch landed on the pod that replaced the original")
+	assert.Equal(t, "untouched", current.Annotations["pre-existing"])
 }
