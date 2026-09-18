@@ -266,14 +266,20 @@ func sidecarInitIndexes(task *corev1.Pod) map[int]struct{} {
 
 func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
 	initAllocs := make(device.PodDevices)
+	for typ := range allocTypes {
+		initAllocs[typ] = make(device.PodSingleDevice, 0, numInitContainers)
+	}
 
 	for i, req := range resourceReqs {
 		if i >= numInitContainers {
 			break
 		}
+		expectedLen := i + 1
 		if len(req) == 0 {
 			for typ := range allocTypes {
-				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
+				for len(initAllocs[typ]) < expectedLen {
+					initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
+				}
 			}
 			continue
 		}
@@ -296,7 +302,7 @@ func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs 
 			updatePeakUsage(peakUsage, nodeCopy)
 		}
 		for typ := range allocTypes {
-			if len(initAllocs[typ]) == i {
+			for len(initAllocs[typ]) < expectedLen {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
 			}
 		}
@@ -310,13 +316,16 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 		if ctrid < numInitContainers {
 			continue
 		}
+		expectedLen := numInitContainers + appIndex + 1
 		sums := 0
 		for _, k := range n {
 			sums += int(k.Nums)
 		}
 		if sums == 0 {
 			for typ := range allocTypes {
-				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+				for len(score.Devices[typ]) < expectedLen {
+					score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+				}
 			}
 			appIndex++
 			continue
@@ -327,7 +336,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			return reason, false
 		}
 		for typ := range allocTypes {
-			if len(score.Devices[typ]) == numInitContainers+appIndex {
+			for len(score.Devices[typ]) < expectedLen {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
 		}
@@ -381,8 +390,12 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 		// usage and so row indices match the pod spec. Ordinary init rows
 		// stay present for the annotation layout; Fit skips them when
 		// computing live occupancy.
-		for devType, initConList := range allocs {
-			score.Devices[devType] = append(device.PodSingleDevice{}, initConList...)
+		for typ := range allocTypes {
+			if initConList, ok := allocs[typ]; ok {
+				score.Devices[typ] = append(device.PodSingleDevice{}, initConList...)
+			} else {
+				score.Devices[typ] = make(device.PodSingleDevice, numInitContainers)
+			}
 		}
 	}
 

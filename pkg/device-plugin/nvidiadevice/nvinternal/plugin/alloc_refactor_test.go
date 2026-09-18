@@ -283,6 +283,46 @@ func TestPopNextContainerDevices_AfterDecode(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPopNextContainerDevices_WithNonGPUInitContainer(t *testing.T) {
+	setupInRequestDevices(t)
+
+	// Encoded annotation for a pod with 1 init container (empty slot) and 1 app container with GPU
+	input := device.EncodePodSingleDevice(device.PodSingleDevice{
+		{},
+		{cd("uuid-app", "NVIDIA", 4000, 30)},
+	})
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": input,
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{Name: "dummy-init"},
+			},
+			Containers: []corev1.Container{
+				{Name: "gpu-main"},
+			},
+		},
+	}
+
+	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, pod)
+	require.NoError(t, err)
+
+	// Pop must resolve to gpu-main (not dummy-init)
+	ctr, got, err := popNextContainerDevices(pod, podSingleDev)
+	require.NoError(t, err)
+	require.Equal(t, "gpu-main", ctr.Name)
+	require.Equal(t, "uuid-app", got[0].UUID)
+	require.Equal(t, int32(4000), got[0].Usedmem)
+	require.Equal(t, int32(30), got[0].Usedcores)
+
+	// Subsequent pop must return error (no more pending allocations)
+	_, _, err = popNextContainerDevices(pod, podSingleDev)
+	require.Error(t, err)
+}
+
 // ---------------------------------------------------------------------------
 // patchErasedAnnotation — unit tests
 // ---------------------------------------------------------------------------

@@ -4940,3 +4940,79 @@ func Test_calcScore_AllocationRowsStayInLockstep(t *testing.T) {
 		}
 	}
 }
+
+func Test_InitContainerNonGPUAppContainerGPU(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-with-init",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name:  "dummy-init",
+					Image: "busybox",
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:  "gpu-main",
+					Image: "cuda",
+				},
+			},
+		},
+	}
+
+	reqs := device.PodDeviceRequests{
+		// dummy-init has no GPU requests
+		{},
+		// gpu-main requests 1 GPU
+		{
+			nvidia.NvidiaGPUDevice: {
+				Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: 4000, Coresreq: 30,
+			},
+		},
+	}
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	nodes := &map[string]*NodeUsage{
+		"node1": {
+			Node:     node,
+			NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+			Devices: policy.DeviceUsageList{
+				Policy: util.GPUSchedulerPolicyBinpack.String(),
+				DeviceLists: []*policy.DeviceListsScore{
+					{Device: &device.DeviceUsage{
+						ID: "gpu-0", Index: 0, Type: nvidia.NvidiaGPUDevice, Health: true,
+						Count: 10, Used: 0, Totalcore: 100, Usedcores: 0, Totalmem: 8000, Usedmem: 0,
+					}},
+				},
+			},
+		},
+	}
+
+	s := &Scheduler{}
+	failedNodes := make(map[string]string)
+	scores, err := s.calcScoreWithOptions(nodes, reqs, pod, failedNodes, false, false)
+	assert.NilError(t, err)
+	assert.Assert(t, len(scores.NodeList) > 0)
+
+	best := scores.NodeList[0]
+	nvidiaDevs, ok := best.Devices[nvidia.NvidiaGPUDevice]
+	assert.Assert(t, ok)
+	assert.Equal(t, len(nvidiaDevs), 2)
+	// Index 0 (dummy-init) must be empty
+	assert.Equal(t, len(nvidiaDevs[0]), 0)
+	// Index 1 (gpu-main) must contain the allocated device
+	assert.Equal(t, len(nvidiaDevs[1]), 1)
+	assert.Equal(t, nvidiaDevs[1][0].Usedmem, int32(4000))
+	assert.Equal(t, nvidiaDevs[1][0].Usedcores, int32(30))
+
+	annos := make(map[string]string)
+	for _, val := range device.GetDevices() {
+		val.PatchAnnotations(pod, &annos, best.Devices)
+	}
+
+	allocatedStr := annos[device.SupportDevices[nvidia.NvidiaGPUDevice]]
+	assert.Assert(t, strings.HasPrefix(allocatedStr, ";gpu-0,NVIDIA,4000,30:;"), "expected leading semicolon representing empty init container slot, got: %s", allocatedStr)
+}
