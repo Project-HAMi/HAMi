@@ -22,6 +22,7 @@ import (
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
 	nvcdspec "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/spec"
 	"k8s.io/klog/v2"
+	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
 	cdspec "tags.cncf.io/container-device-interface/specs-go"
 )
@@ -98,6 +99,9 @@ func (cdi *cdiHandler) EnsureDynamicMIGDevice(dev DynamicMIGDevice) (string, err
 			klog.V(4).InfoS("reused dynamic MIG CDI entry", "uuid", dev.MIGUUID, "path", path)
 			return qualified, nil
 		}
+		if err := cdi.validateDynamicMIGFileContents(path, dev.MIGUUID, name, raw); err != nil {
+			return "", fmt.Errorf("refusing to replace existing CDI file: %w", err)
+		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -150,22 +154,38 @@ func (cdi *cdiHandler) dynamicMIGSpec(dev DynamicMIGDevice, name string) (nvcdsp
 	if err := cdi.getRootTransformer().Transform(spec.Raw()); err != nil {
 		return nil, fmt.Errorf("transform dynamic MIG CDI spec: %w", err)
 	}
+	// spec.Save applies this same transformation. Do it before comparison so a
+	// successfully saved entry is reused instead of being rewritten on every
+	// allocation solely because its minimum CDI version was normalized.
+	version, err := cdiapi.MinimumRequiredVersion(spec.Raw())
+	if err != nil {
+		return nil, fmt.Errorf("determine minimum CDI spec version: %w", err)
+	}
+	spec.Raw().Version = version
 	return spec, nil
 }
 
 func dynamicMIGSpecMatches(savedJSON []byte, expected *cdspec.Spec) bool {
 	// Decode to an untyped value so unknown JSON fields are part of the
 	// comparison too. Decoding into cdspec.Spec would silently discard them.
-	var saved any
-	if err := json.Unmarshal(savedJSON, &saved); err != nil {
-		return false
-	}
-	savedJSON, err := json.Marshal(saved)
+	savedJSON, err := canonicalJSON(savedJSON)
 	if err != nil {
 		return false
 	}
 	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return false
+	}
+	expectedJSON, err = canonicalJSON(expectedJSON)
 	return err == nil && bytes.Equal(savedJSON, expectedJSON)
+}
+
+func canonicalJSON(raw []byte) ([]byte, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 // RemoveDynamicMIGDevice touches only the HAMi-owned file for this UUID.
@@ -195,9 +215,13 @@ func (cdi *cdiHandler) validateDynamicMIGFile(path, uuid, name string) error {
 	if err != nil {
 		return err
 	}
+	return cdi.validateDynamicMIGFileContents(path, uuid, name, raw)
+}
+
+func (cdi *cdiHandler) validateDynamicMIGFileContents(path, uuid, name string, raw []byte) error {
 	var saved cdspec.Spec
 	if err := json.Unmarshal(raw, &saved); err != nil {
-		return fmt.Errorf("refusing to remove dynamic MIG CDI file %q: invalid CDI spec: %w", path, err)
+		return fmt.Errorf("invalid dynamic MIG CDI file %q: %w", path, err)
 	}
 	if saved.Kind != cdi.vendor+"/"+DynamicMIGClass || len(saved.Devices) != 1 ||
 		saved.Devices[0].Name != name || saved.Devices[0].Annotations[dynamicMIGUUIDAnnotation] != uuid {
@@ -260,6 +284,9 @@ func (cdi *cdiHandler) ReplaceDynamicMIGDevices(live []DynamicMIGDevice) error {
 		wanted[path] = struct{}{}
 	}
 	files, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

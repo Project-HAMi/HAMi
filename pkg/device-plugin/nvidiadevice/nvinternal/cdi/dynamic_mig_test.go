@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
 	nvcdspec "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/spec"
@@ -80,12 +81,17 @@ func TestDynamicMIGCDILifecycleWithoutGPU(t *testing.T) {
 	second, err := h.EnsureDynamicMIGDevice(dev)
 	require.NoError(t, err)
 	require.Equal(t, qualified, second)
+	dataAfterReuse, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, data, dataAfterReuse)
 	require.NoError(t, os.WriteFile(path, []byte("invalid CDI spec"), 0600))
 	third, err := h.EnsureDynamicMIGDevice(dev)
+	require.Error(t, err)
+	require.Empty(t, third)
+	dataAfterInvalidEnsure, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, qualified, third)
-	_, err = cdiapi.ReadSpec(path, 0)
-	require.NoError(t, err)
+	require.Equal(t, []byte("invalid CDI spec"), dataAfterInvalidEnsure)
+	require.NoError(t, os.WriteFile(path, data, 0600))
 	require.NoError(t, h.RemoveDynamicMIGDevice(dev.MIGUUID))
 	require.NoError(t, h.RemoveDynamicMIGDevice(dev.MIGUUID))
 	_, err = os.Stat(path)
@@ -130,6 +136,52 @@ func TestDynamicMIGCDIRegeneratesWhenCompleteSpecChanges(t *testing.T) {
 	var saved cdspec.Spec
 	require.NoError(t, json.Unmarshal(after, &saved))
 	require.Contains(t, saved.ContainerEdits.Env, "NVIDIA_VISIBLE_DEVICES=all")
+}
+
+func TestDynamicMIGCDIReuseDoesNotRewriteValidSpec(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-live", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	old := time.Unix(1, 0)
+	require.NoError(t, os.Chtimes(path, old, old))
+
+	_, err = h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, old, info.ModTime())
+}
+
+func TestDynamicMIGCDIEnsurePreservesUnownedFile(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	dev := DynamicMIGDevice{MIGUUID: "MIG-live", ParentGPUUUID: "GPU-parent", ParentMinor: 0, GPUInstanceID: 1, ComputeInstanceID: 2}
+	_, err := h.EnsureDynamicMIGDevice(dev)
+	require.NoError(t, err)
+	path, _, err := h.dynamicMIGPath(dev.MIGUUID)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var saved cdspec.Spec
+	require.NoError(t, json.Unmarshal(raw, &saved))
+	saved.Kind = "example.com/administrator-owned"
+	raw, err = json.Marshal(saved)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0600))
+
+	_, err = h.EnsureDynamicMIGDevice(dev)
+	require.Error(t, err)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, raw, after)
+}
+
+func TestDynamicMIGCDIStartupRecoveryAllowsMissingDirectoryWithoutLiveDevices(t *testing.T) {
+	h := testDynamicMIGHandler(t)
+	h.dynamicMIGRoot = filepath.Join(t.TempDir(), "missing")
+	require.NoError(t, h.ReplaceDynamicMIGDevices(nil))
 }
 
 func TestDynamicMIGCDIRemovalPreservesUnownedFile(t *testing.T) {
