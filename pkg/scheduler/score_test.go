@@ -32,6 +32,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -59,6 +60,70 @@ func TestMain(m *testing.M) {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 	m.Run()
+}
+
+func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
+	if err := config.InitDevicesWithConfig(&config.Config{AWSNeuronConfig: awsneuron.AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	quota := device.NewQuotaManager()
+	const namespace = "neuron-whole-device-quota"
+	t.Cleanup(func() { delete(quota.Quotas, namespace) })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuron": resource.MustParse("1"),
+			}},
+		}}},
+	}
+	requests := device.Resourcereqs(pod)
+	for _, tc := range []struct {
+		name  string
+		mask  int32
+		limit int64
+		used  int64
+		fit   bool
+	}{
+		{name: "two cores over quota", mask: 3, limit: 1},
+		{name: "two cores within quota", mask: 3, limit: 2, fit: true},
+		{name: "two cores exceed remaining quota", mask: 3, limit: 2, used: 1},
+		{name: "four cores over quota", mask: 15, limit: 1},
+		{name: "four cores within quota", mask: 15, limit: 4, fit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quota.Quotas[namespace] = &device.DeviceQuota{
+				"aws.amazon.com/neuroncore": &device.Quota{Used: tc.used, Limit: tc.limit, LimitSet: true},
+			}
+			if !fitResourceQuota(pod) {
+				t.Fatal("admission should defer whole-device core accounting until node placement")
+			}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "neuron-node"}}
+			usage := &NodeUsage{
+				Node:     node,
+				NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+				Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{{
+					Device: &device.DeviceUsage{ID: "neuron-0", Type: awsneuron.AWSNeuronDevice,
+						Health: true, Count: 1, Totalcore: tc.mask},
+				}}},
+			}
+			result := (&Scheduler{quotaManager: quota}).scoreNode(node.Name, usage, requests, pod,
+				util.NodeSchedulerPolicyBinpack.String(), util.DeviceScoringWeights{})
+			if (result.score != nil) != tc.fit {
+				t.Fatalf("placement fit = %t, want %t (reason: %s)", result.score != nil, tc.fit, result.reason)
+			}
+			if tc.fit {
+				got := neuronCorePeak(pod, result.score.Devices[awsneuron.AWSNeuronDevice])
+				if got != tc.limit {
+					t.Fatalf("allocated cores = %d, want %d", got, tc.limit)
+				}
+			}
+		})
+	}
 }
 
 // test case matrix
