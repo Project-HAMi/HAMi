@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -35,6 +37,10 @@ import (
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
+
+// serviceAccountPrefix starts the username the API server reports for a
+// service account, as opposed to a person or an external client.
+const serviceAccountPrefix = "system:serviceaccount:"
 
 type webhook struct {
 	decoder admission.Decoder
@@ -57,6 +63,9 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	if err != nil {
 		klog.Errorf("Failed to decode request: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
+	}
+	if req.Operation == admissionv1.Update {
+		return h.handleUpdate(req, pod)
 	}
 	if len(pod.Spec.Containers) == 0 {
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
@@ -147,12 +156,46 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
 }
 
-// schedulerOwnedAnnotation reports an annotation the scheduler writes after a
-// pod is admitted. The webhook runs on create only, so a pod that already
-// carries one did not get it from the scheduler: it was either written by hand
-// or copied from a scheduled pod's manifest, and in both cases the device
-// plugin would act on it as though the scheduler had decided it.
-func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
+// handleUpdate guards the same annotations on an existing pod. Denying them at
+// create closes only half the door: the keys can be patched in afterward by
+// anyone holding update on pods, and the device plugin hands out devices from
+// whatever they name, so the pod is served memory and cores the scheduler never
+// accounted for. An update that leaves those keys alone is not ours to judge
+// and passes through as-is, which also keeps the create path's mutation off an
+// existing pod, whose schedulerName the API server will not let us change.
+func (h *webhook) handleUpdate(req admission.Request, pod *corev1.Pod) admission.Response {
+	oldPod := &corev1.Pod{}
+	if err := h.decoder.DecodeRaw(req.OldObject, oldPod); err != nil {
+		klog.Errorf("Failed to decode old object: %v", err)
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)
+	if !changed {
+		return admission.Allowed("no scheduler-owned annotation changed")
+	}
+	// HAMi rewrites these itself once a pod is admitted: the scheduler patches
+	// them as it filters and binds, and a device plugin rewrites them as each
+	// container gets its devices. Those writers are service accounts and they
+	// only ever touch a pod this scheduler was asked to place, so a request
+	// failing either test is not one of them. A vendor's device plugin can run
+	// in its own namespace, which is why the account itself is not pinned here.
+	if !strings.HasPrefix(req.UserInfo.Username, serviceAccountPrefix) {
+		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
+	}
+	if len(config.SchedulerName) > 0 && pod.Spec.SchedulerName != config.SchedulerName {
+		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
+	}
+	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+func denySchedulerOwnedAnnotation(pod *corev1.Pod, username, annotation string) admission.Response {
+	klog.Warningf(template+" - Denying update as %s writes %s", pod.Namespace, pod.Name, pod.UID, username, annotation)
+	return admission.Denied(fmt.Sprintf("annotation %s is written by the scheduler and cannot be set by %s", annotation, username))
+}
+
+// schedulerOwnedAnnotationKeys lists the annotations the scheduler writes after
+// a pod is admitted, together with the per-device keys each backend fills in.
+func schedulerOwnedAnnotationKeys() []string {
 	keys := []string{
 		util.AssignedNodeAnnotations,
 		util.BindTimeAnnotations,
@@ -163,8 +206,28 @@ func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range keys {
+	return keys
+}
+
+// schedulerOwnedAnnotation reports an annotation the scheduler writes after a
+// pod is admitted. A pod that already carries one at create did not get it from
+// the scheduler: it was either written by hand or copied from a scheduled pod's
+// manifest, and in both cases the device plugin would act on it as though the
+// scheduler had decided it.
+func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
+	for _, key := range schedulerOwnedAnnotationKeys() {
 		if _, ok := pod.Annotations[key]; ok {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+// changedSchedulerOwnedAnnotation reports a scheduler-owned annotation the
+// update adds, rewrites or drops.
+func changedSchedulerOwnedAnnotation(oldPod, newPod *corev1.Pod) (string, bool) {
+	for _, key := range schedulerOwnedAnnotationKeys() {
+		if oldPod.Annotations[key] != newPod.Annotations[key] {
 			return key, true
 		}
 	}
