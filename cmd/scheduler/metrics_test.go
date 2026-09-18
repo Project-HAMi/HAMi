@@ -173,13 +173,15 @@ func TestMibToBytes(t *testing.T) {
 	}
 }
 
-func TestFindNodeDeviceUsage(t *testing.T) {
+func TestNewDeviceMetaIndex(t *testing.T) {
 	nodeUsage := map[string]*schedulerpkg.NodeUsage{
 		"node-1": {
 			Devices: policy.DeviceUsageList{
 				DeviceLists: []*policy.DeviceListsScore{
 					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 64, Type: "AMDGPU"}},
 					{Device: &device.DeviceUsage{ID: "NVIDIA-1", Totalcore: 100, Type: "NVIDIA"}},
+					// A nil device must be skipped rather than indexed.
+					{Device: nil},
 				},
 			},
 		},
@@ -191,6 +193,8 @@ func TestFindNodeDeviceUsage(t *testing.T) {
 			},
 		},
 	}
+
+	index := newDeviceMetaIndex(&nodeUsage)
 
 	tests := []struct {
 		name           string
@@ -206,12 +210,166 @@ func TestFindNodeDeviceUsage(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTotalcore, gotDeviceType, gotOk := findNodeDeviceUsage(&nodeUsage, tc.uuid)
-			if gotTotalcore != tc.wantTotalcore || gotDeviceType != tc.wantDeviceType || gotOk != tc.wantOk {
-				t.Errorf("findNodeDeviceUsage(%q) = (%d, %q, %v), want (%d, %q, %v)",
-					tc.uuid, gotTotalcore, gotDeviceType, gotOk, tc.wantTotalcore, tc.wantDeviceType, tc.wantOk)
+			meta, ok := index[tc.uuid]
+			if meta.totalcore != tc.wantTotalcore || meta.deviceType != tc.wantDeviceType || ok != tc.wantOk {
+				t.Errorf("index[%q] = (%d, %q, %v), want (%d, %q, %v)",
+					tc.uuid, meta.totalcore, meta.deviceType, ok, tc.wantTotalcore, tc.wantDeviceType, tc.wantOk)
 			}
 		})
+	}
+
+	if len(index) != 3 {
+		t.Errorf("len(index) = %d, want 3 (nil devices must not be indexed)", len(index))
+	}
+}
+
+func TestNewDeviceMetaIndexKeepsFirstEntryForDuplicateUUID(t *testing.T) {
+	// The scan this replaced returned on its first match, so a repeated UUID
+	// resolved to the first entry. Pin that within a single node's device list,
+	// where the order is deterministic.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 64, Type: "AMDGPU"}},
+					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 304, Type: "AMDGPU"}},
+				},
+			},
+		},
+	}
+
+	meta, ok := newDeviceMetaIndex(&nodeUsage)["AMD-1"]
+	if !ok || meta.totalcore != 64 {
+		t.Errorf("index[\"AMD-1\"] = (%d, %v), want (64, true)", meta.totalcore, ok)
+	}
+}
+
+func TestNewDeviceMetaIndexEmptySnapshot(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{}
+	if index := newDeviceMetaIndex(&nodeUsage); len(index) != 0 {
+		t.Errorf("len(index) = %d, want 0 for an empty snapshot", len(index))
+	}
+}
+
+func TestAMDCoreNormalizationResolvesDeviceOnAnotherNode(t *testing.T) {
+	// The lookup this index replaced was node-agnostic: it resolved a UUID on any
+	// node, not only the pod's NodeID. Pin that so an index keyed per node cannot
+	// silently regress AMD normalization to the raw CU count (32) instead of 50.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-2": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "AMD-1",
+							Index:     0,
+							Count:     1,
+							Totalmem:  192000,
+							Totalcore: 64,
+							Usedcores: 32,
+							Type:      "AMDGPU",
+							Mode:      "hami-core",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "amd-pod",
+			Namespace: "default",
+			UID:       k8stypes.UID("uid-amd-cross-node"),
+		},
+	}
+	podDevices := device.PodDevices{
+		"AMDGPU": device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					UUID:      "AMD-1",
+					Type:      "AMDGPU",
+					Usedmem:   96000,
+					Usedcores: 32,
+				},
+			},
+		},
+	}
+	// The pod is recorded on node-1 while the device is advertised by node-2.
+	pm.AddPod(pod, "node-1", podDevices)
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   pm,
+		},
+	}
+
+	want := `
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
+# TYPE hami_vgpu_core_allocated_ratio gauge
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_vgpu_core_allocated_ratio",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}
+
+func TestContainerMetricsFallBackToRawValuesForUnknownDevice(t *testing.T) {
+	// A pod may reference a device no node advertises (for example while a node
+	// is being removed). The collector must still emit the container metric with
+	// the raw, unnormalized core count rather than dropping or rewriting it.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{}
+
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orphan-pod",
+			Namespace: "default",
+			UID:       k8stypes.UID("uid-orphan"),
+		},
+	}
+	podDevices := device.PodDevices{
+		"AMDGPU": device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					UUID:      "AMD-unknown",
+					Type:      "AMDGPU",
+					Usedmem:   96000,
+					Usedcores: 32,
+				},
+			},
+		},
+	}
+	pm.AddPod(pod, "node-1", podDevices)
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   pm,
+		},
+	}
+
+	want := `
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
+# TYPE hami_vgpu_core_allocated_ratio gauge
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-unknown",namespace="default",node="node-1",pod="orphan-pod"} 32
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_vgpu_core_allocated_ratio",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
 

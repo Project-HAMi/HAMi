@@ -71,18 +71,44 @@ func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64
 	return normalizedCoreLimit, math.Ceil(float64(allocated) / float64(total) * normalizedCoreLimit)
 }
 
-// findNodeDeviceUsage looks up a device by UUID across every node's usage and
-// returns its total core capacity and type. ok is false when no node advertises
-// the device, in which case the caller falls back to emitting raw values.
-func findNodeDeviceUsage(nu *map[string]*schedulerpkg.NodeUsage, uuid string) (totalcore int32, deviceType string, ok bool) {
+// deviceMeta holds the per-device fields the container-level collector needs to
+// normalize core metrics. It is deliberately a value type: the collector only
+// reads these two scalars, so the index does not retain the snapshot's devices.
+type deviceMeta struct {
+	totalcore  int32
+	deviceType string
+}
+
+// newDeviceMetaIndex indexes every device in the snapshot by UUID so the
+// container-level collector can resolve a device in constant time. Without it,
+// each allocated container device triggers a fresh scan of every node's device
+// list, making a scrape cost O(allocated devices x nodes x devices per node).
+//
+// The index is node-agnostic, matching the lookup it replaces: a UUID resolves
+// regardless of which node advertises it. A UUID advertised by more than one
+// node keeps the first entry encountered, as the scan did by returning on its
+// first match.
+func newDeviceMetaIndex(nu *map[string]*schedulerpkg.NodeUsage) map[string]deviceMeta {
+	total := 0
+	for _, ni := range *nu {
+		total += len(ni.Devices.DeviceLists)
+	}
+	index := make(map[string]deviceMeta, total)
 	for _, ni := range *nu {
 		for _, dls := range ni.Devices.DeviceLists {
-			if dls.Device != nil && dls.Device.ID == uuid {
-				return dls.Device.Totalcore, dls.Device.Type, true
+			if dls.Device == nil {
+				continue
+			}
+			if _, ok := index[dls.Device.ID]; ok {
+				continue
+			}
+			index[dls.Device.ID] = deviceMeta{
+				totalcore:  dls.Device.Totalcore,
+				deviceType: dls.Device.Type,
 			}
 		}
 	}
-	return 0, "", false
+	return index
 }
 
 // mibToBytes converts a memory quantity expressed in mebibytes (MiB), the unit
@@ -104,9 +130,13 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	// A single snapshot is shared by the node- and container-level collectors so
 	// they observe a consistent cluster state within one scrape.
 	nu := cc.metricsProvider.InspectAllNodesUsage()
+	// Index the snapshot once so the container-level collector resolves each
+	// allocated device by UUID in constant time instead of rescanning the
+	// cluster per device.
+	deviceMetaByUUID := newDeviceMetaIndex(nu)
 	cc.collectNodeMetrics(ch, nu, legacy)
 	cc.collectQuotaMetrics(ch, legacy)
-	cc.collectContainerMetrics(ch, nu, legacy)
+	cc.collectContainerMetrics(ch, deviceMetaByUUID, legacy)
 	cc.collectRemoteGPUMetrics(ch)
 	cc.collectSchedulerStateMetrics(ch)
 }
@@ -349,7 +379,7 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 // collectContainerMetrics emits per-container vGPU metrics for all scheduled
 // pods. AMD core allocations are normalized to a percentage via
 // normalizeAMDCoreMetrics (issue #2518); legacy metrics keep raw values.
-func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, nu *map[string]*schedulerpkg.NodeUsage, legacy bool) {
+func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, deviceMetaByUUID map[string]deviceMeta, legacy bool) {
 	// PodManager only ever stores the pod's collapsed device usage, a single
 	// entry per device type, so there is no per-container breakdown to label
 	// with. See device.CollapseInitContainerUsage and SteadyStateDeviceUsage.
@@ -403,11 +433,11 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 					// Resolve the matching node device's total core capacity and type so
 					// AMD physical compute-unit (CU) counts in Usedcores can be normalized
 					// to the percentage unit used by hami_vgpu_core_allocated_ratio (#2518).
-					totalcore, deviceType, found := findNodeDeviceUsage(nu, ctrdevval.UUID)
+					meta, found := deviceMetaByUUID[ctrdevval.UUID]
 					klog.V(4).InfoS("Resolved device for container metric",
 						"deviceUUID", ctrdevval.UUID,
-						"totalCore", totalcore,
-						"deviceType", deviceType,
+						"totalCore", meta.totalcore,
+						"deviceType", meta.deviceType,
 						"found", found,
 						"nodeID", val.NodeID,
 					)
@@ -416,7 +446,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, usedMemBytes, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
 					}
-					_, ctrCoreAllocated := normalizeAMDCoreMetrics(deviceType, totalcore, ctrdevval.Usedcores)
+					_, ctrCoreAllocated := normalizeAMDCoreMetrics(meta.deviceType, meta.totalcore, ctrdevval.Usedcores)
 					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrCoreAllocated, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
 					}
