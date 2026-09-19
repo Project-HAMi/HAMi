@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -97,6 +98,7 @@ func newTestPlugin(t *testing.T) *NvidiaDevicePlugin {
 	memScale := 1.0
 	return &NvidiaDevicePlugin{
 		operatingMode: "vgpu",
+		prepareCache:  testCachePreparer(t),
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
 				Flags: v1.Flags{
@@ -115,6 +117,18 @@ func newTestPlugin(t *testing.T) *NvidiaDevicePlugin {
 				LogLevel:            &logLevel,
 			},
 		},
+	}
+}
+
+func testCachePreparer(t *testing.T) func(string, string) (string, error) {
+	t.Helper()
+	root := t.TempDir()
+	return func(podUID, containerName string) (string, error) {
+		path := filepath.Join(root, podUID+"_"+containerName)
+		if err := os.MkdirAll(path, 0o777); err != nil {
+			return "", err
+		}
+		return path, nil
 	}
 }
 
@@ -578,6 +592,39 @@ func TestAllocate_SingleContainer(t *testing.T) {
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 	require.True(t, hasLdSoPreloadMount(response.ContainerResponses[0].Mounts))
+}
+
+func TestAllocate_PropagatesVGPUCachePreparationError(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+	plugin.prepareCache = func(podUID, containerName string) (string, error) {
+		require.Equal(t, "pod-uid", podUID)
+		require.Equal(t, "c0", containerName)
+		return "", errors.New("cache fixture")
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{"GPU-aaa-0"},
+		}},
+	}
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, response)
+	require.ErrorContains(t, err, "prepare vGPU cache directory: cache fixture")
 }
 
 // ---------------------------------------------------------------------------

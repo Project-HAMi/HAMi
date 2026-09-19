@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
@@ -92,5 +93,20 @@ func WithConfig(config *nvidia.DeviceConfig) Option {
 func WithImexChannels(imexChannels imex.Channels) Option {
 	return func(m *options) {
 		m.imexChannels = imexChannels
+	}
+}
+
+// WithNodePodList injects the device-plugin process's node-scoped Pod cache.
+func WithNodePodList(list func() ([]*corev1.Pod, error)) Option {
+	return func(m *options) {
+		m.listNodePods = list
+	}
+}
+
+// WithVGPUCachePreparer injects Allocate-time preparation of a container's
+// libvgpu cache directory.
+func WithVGPUCachePreparer(prepare func(string, string) (string, error)) Option {
+	return func(m *options) {
+		m.prepareVGPUCache = prepare
 	}
 }

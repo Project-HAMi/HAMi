@@ -76,6 +76,7 @@ func start() error {
 	if err != nil {
 		return fmt.Errorf("failed to create container lister: %v", err)
 	}
+	defer containerLister.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

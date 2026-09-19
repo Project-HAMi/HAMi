@@ -12,12 +12,17 @@ package plugin
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
@@ -64,9 +69,169 @@ func TestActiveMigGPUUUIDs(t *testing.T) {
 		},
 	}
 
-	got := activeMigGPUUUIDs(pods)
+	podPointers := make([]*corev1.Pod, 0, len(pods))
+	for i := range pods {
+		podPointers = append(podPointers, &pods[i])
+	}
+	got, err := activeMigGPUUUIDs(podPointers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]struct{}{"GPU-live": {}, "GPU-pending": {}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("activeMigGPUUUIDs() = %v, want %v", got, want)
 	}
+}
+
+func TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation(t *testing.T) {
+	pods := []*corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid",
+			Namespace: "default",
+			Annotations: map[string]string{
+				nvidia.MigAllocationsAnnotation: "not-json",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}}
+	if _, err := activeMigGPUUUIDs(pods); err == nil {
+		t.Fatal("activeMigGPUUUIDs accepted an invalid active allocation annotation")
+	}
+}
+
+func mockMigRecoveryDevice(t *testing.T) (*MigInstanceManager, *nvmlmock.Device) {
+	t.Helper()
+	dev := &nvmlmock.Device{
+		GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+	}
+	manager := newMigInstanceManager(&nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetCountFunc:         func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+		DeviceGetHandleByUUIDFunc:  func(string) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	})
+	require.NoError(t, manager.Init())
+	t.Cleanup(manager.Shutdown)
+	return manager, dev
+}
+
+func TestMigRecoveryAllowsPendingReservations(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			nvidia.MigAllocationsAnnotation: `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	plugin := &NvidiaDevicePlugin{
+		migMgr: manager, migResetDeviceCount: 1,
+		listNodePods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
+	}
+	// No runtime identity exists yet. Recovery must allow Allocate to create it.
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.True(t, plugin.migPrimed)
+	// The reservation must also protect a newly created, locally tracked instance
+	// while the informer is still waiting for the runtime annotation update.
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	plugin.migMgr.byAllocation[key] = &migInstance{MigUUID: "MIG-new"}
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Contains(t, plugin.migMgr.byAllocation, key)
+}
+
+func TestMigRecoveryRejectsInvalidRuntimeIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		phase corev1.PodPhase
+		raw   string
+	}{
+		{"running without identity", corev1.PodRunning, `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"size":1}}]`},
+		{"pending partial identity", corev1.PodPending, `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"size":1},"migUUID":"MIG-test"}]`},
+		{"malformed annotation", corev1.PodPending, "not-json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager, _ := mockMigRecoveryDevice(t)
+			plugin := &NvidiaDevicePlugin{
+				migMgr: manager, migResetDeviceCount: 1,
+				listNodePods: func() ([]*corev1.Pod, error) {
+					return []*corev1.Pod{{
+						ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.MigAllocationsAnnotation: tc.raw}},
+						Status:     corev1.PodStatus{Phase: tc.phase},
+					}}, nil
+				},
+			}
+			// The mock has no destructive methods: any reset would panic.
+			require.Error(t, plugin.reconcileActiveMigAllocations())
+			require.False(t, plugin.migPrimed)
+		})
+	}
+}
+
+func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
+	manager, dev := mockMigRecoveryDevice(t)
+	resets := 0
+	destroyedGI, destroyedCI := 0, 0
+	ci := &nvmlmock.ComputeInstance{DestroyFunc: func() nvml.Return {
+		destroyedCI++
+		return nvml.SUCCESS
+	}}
+	gi := &nvmlmock.GpuInstance{
+		GetComputeInstanceProfileInfoFunc: func(profile, engine int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			if profile == 0 {
+				return nvml.ComputeInstanceProfileInfo{}, nvml.SUCCESS
+			}
+			return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+			return []nvml.ComputeInstance{ci}, nvml.SUCCESS
+		},
+		DestroyFunc: func() nvml.Return { destroyedGI++; return nvml.SUCCESS },
+	}
+	dev.GetGpuInstanceProfileInfoFunc = func(profile int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+		if profile == nvml.GPU_INSTANCE_PROFILE_1_SLICE {
+			return nvml.GpuInstanceProfileInfo{}, nvml.SUCCESS
+		}
+		return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+	}
+	dev.GetGpuInstancesFunc = func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+		return []nvml.GpuInstance{gi}, nvml.SUCCESS
+	}
+	// Reset enumerates profiles only after checking/enabling MIG mode.
+	dev.GetMigModeFunc = func() (int, int, nvml.Return) {
+		resets++
+		return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+	}
+	synced := false
+	plugin := &NvidiaDevicePlugin{
+		migMgr: manager, migResetDeviceCount: 1,
+		listNodePods: func() ([]*corev1.Pod, error) {
+			if !synced {
+				return nil, nodepodinformer.ErrNotSynced
+			}
+			return nil, nil
+		},
+	}
+	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
+	require.Zero(t, resets)
+	synced = true
+	// Concurrent callers must perform the initial scan/reset exactly once.
+	var wg sync.WaitGroup
+	results := make(chan error, 16)
+	for range 16 {
+		wg.Go(func() { results <- plugin.reconcileActiveMigAllocations() })
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.True(t, plugin.migPrimed)
+	// Once for busy detection, once for reset; subsequent reconciles do neither.
+	require.Equal(t, 2, resets)
+	require.Equal(t, 1, destroyedGI)
+	require.Equal(t, 1, destroyedCI)
 }

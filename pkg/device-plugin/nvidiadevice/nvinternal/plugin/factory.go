@@ -39,6 +39,7 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -61,6 +62,9 @@ type options struct {
 	deviceListStrategies spec.DeviceListStrategies
 
 	imexChannels imex.Channels
+
+	listNodePods     func() ([]*corev1.Pod, error)
+	prepareVGPUCache func(string, string) (string, error)
 }
 
 // New a new set of plugins with the supplied options.
