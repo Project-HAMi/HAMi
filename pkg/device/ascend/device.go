@@ -56,6 +56,8 @@ type Devices struct {
 	noUseUUIDAnno          string
 	handshakeAnno          string
 	hamiVnpuCore           bool
+	overwriteEnv           bool
+	runtimeClassName       string
 	allAscendResourceNames []corev1.ResourceName
 }
 
@@ -98,6 +100,8 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
 			hamiVnpuCore:           vnpus.HamiVnpuCore,
+			overwriteEnv:           vnpus.OverwriteEnv,
+			runtimeClassName:       vnpus.RuntimeClassName,
 			allAscendResourceNames: allAscendResourceNames,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
@@ -150,8 +154,24 @@ func lastEnvValueEquals(env []corev1.EnvVar, name, value string) bool {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
-		if dev.config.OverwriteEnv && !dev.containerRequestsAnyAscendResource(ctr) &&
-			!lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
+		if dev.containerRequestsAnyAscendResource(ctr) {
+			return false, nil
+		}
+		// The container-level JSON is decoded once and cached.
+		podMode, _ := util.ParsePodOverwriteEnv(p.Annotations[util.OverwriteEnvAnnotationKey])
+		if ctrMode, listed := cachedContainerOverwriteEnv(p.Annotations[util.OverwriteEnvContainersAnnotationKey], ctr.Name); listed {
+			podMode = ctrMode
+		}
+		inject := false
+		switch podMode {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.overwriteEnv
+		}
+		if inject && !lastEnvValueEquals(ctr.Env, "ASCEND_VISIBLE_DEVICES", "") {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
 				Name:  "ASCEND_VISIBLE_DEVICES",
 				Value: "",
@@ -233,8 +253,8 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	// Set runtime class name if it is not set by user and the runtime class name is configured
-	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
-		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+	if p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	return true, nil
 }
@@ -249,8 +269,21 @@ func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) 
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
 	}
+	normalizeHamiCore := dev.nodeSupportsHamiCore(&n)
 	for idx := range nodeDevices {
 		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
+		if !normalizeHamiCore {
+			continue
+		}
+		advertised := nodeDevices[idx].Devcore
+		budget := hamiCorePercentBudget(advertised)
+		if budget == advertised {
+			continue
+		}
+		klog.V(5).InfoS("hami-core Devcore normalized to percentage budget",
+			"node", n.Name, "device", nodeDevices[idx].ID,
+			"advertised", advertised, "budget", budget)
+		nodeDevices[idx].Devcore = budget
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
@@ -481,6 +514,174 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 	}
 }
 
+// hamiCorePercentBase is the fixed 0-100 percentage scale hami-core Coresreq
+// is expressed in.
+const hamiCorePercentBase = 100
+
+func (dev *Devices) nodeSupportsHamiCore(n *corev1.Node) bool {
+	supported := dev.hamiVnpuCore
+	if n != nil && n.Annotations != nil {
+		if val, ok := n.Annotations[VNPUNodeSelectorAnnotation]; ok {
+			supported = val == "true"
+		}
+	}
+	return supported
+}
+
+// hamiCorePercentBudget is the percentage capacity stored on hami-core nodes.
+//
+// Coresreq is a percentage, not physical AI cores, so a plugin that has not
+// enabled hami-core registers Devcore as the hardware AICore count
+// (8/20/24/30). GetNodeDevices rewrites any advertised value at or below the
+// base to 100 so Fit and the rest of the scheduler see one inventory unit.
+//
+// The coupled plugin change (Project-HAMi/ascend-device-plugin#132) advertises
+// Devcore = round(100 * deviceCoreScaling) for hami-core and never reports less
+// than the base, so any higher value is an intentional oversell budget.
+func hamiCorePercentBudget(advertisedTotalcore int32) int32 {
+	if advertisedTotalcore > hamiCorePercentBase {
+		return advertisedTotalcore
+	}
+	return hamiCorePercentBase
+}
+
+// hamiCoreExclusiveOccupant reports whether a single Pod already holds the
+// whole percentage base on dev.
+//
+// dev.Used cannot answer that. CollapseInitContainerUsage takes the peak core
+// usage and the peak slot count independently, so a Pod whose init container
+// reserves the whole card and whose app containers then run alongside is
+// recorded as Usedcores at the base with two slots. Reading dev.Used == 1 would
+// miss the reservation and let an oversold budget admit a second tenant onto a
+// card that is still exclusively held.
+//
+// Per-Pod entries are collapsed, so a Pod spreading the base across several of
+// its own containers counts as an occupant too. Such a card is full at the base
+// budget without oversell anyway, so this only declines to oversell it. Two
+// Pods holding half the card each stay below the base individually and keep
+// sharing an oversold card.
+func hamiCoreExclusiveOccupant(dev *device.DeviceUsage) bool {
+	for _, podInfo := range dev.PodInfos {
+		if podInfo == nil {
+			continue
+		}
+		for _, podSingle := range podInfo.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, ctrDev := range ctrDevs {
+					if ctrDev.UUID == dev.ID && ctrDev.Usedcores >= hamiCorePercentBase {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// incomingHamiCoreOnDevice is the cores this pod concurrently holds on dev
+// while the container being fitted is placed.
+//
+// allocated holds one row per pod container, aligned with container order and
+// including empty rows for containers that request nothing, so the row index
+// identifies the container and therefore its lifecycle stage.
+//
+// Only concurrent usage may be counted, because Kubernetes runs ordinary init
+// containers one at a time: an ordinary init container that has been placed has
+// already exited when the next container is fitted, so its rows must not count.
+// A sidecar init container (restartPolicy Always) keeps running for the whole
+// pod lifetime and stays resident, as do regular containers.
+//
+// This value feeds the `self` argument of hamiCoreIncomingExclusive, which adds
+// the request under judgement itself, so the container being fitted must NOT be
+// included here or its request would be counted twice.
+func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices, pod *corev1.Pod) int32 {
+	var sum int32
+	add := func(devs device.ContainerDevices) {
+		for _, d := range devs {
+			if d.UUID == devID {
+				sum += d.Usedcores
+			}
+		}
+	}
+
+	numInit := 0
+	if pod != nil {
+		numInit = len(pod.Spec.InitContainers)
+	}
+
+	if allocated != nil {
+		for _, podSingle := range *allocated {
+			for cidx, ctrDevs := range podSingle {
+				if !containerStillRunning(pod, cidx, numInit) {
+					continue
+				}
+				add(ctrDevs)
+			}
+		}
+	}
+
+	// Rows Fit already chose earlier in this same call, for the container being
+	// placed. They are that container's own occupancy, not the request under
+	// judgement, so they belong in `self`.
+	for _, ctrDevs := range tmpDevs {
+		add(ctrDevs)
+	}
+	return sum
+}
+
+// containerStillRunning reports whether the container at row index cidx still
+// occupies its devices while another container of the same pod is being fitted.
+//
+// Ordinary init containers run sequentially, so such a container has exited by
+// the time the next container is fitted. A sidecar init container keeps running
+// for the whole pod lifetime. Regular containers run together.
+func containerStillRunning(pod *corev1.Pod, cidx, numInit int) bool {
+	if cidx < 0 {
+		return false
+	}
+	if cidx < numInit {
+		// Only sidecars survive past the init phase.
+		return pod != nil && cidx < len(pod.Spec.InitContainers) &&
+			util.IsSidecarContainer(&pod.Spec.InitContainers[cidx])
+	}
+	return true
+}
+
+// hamiCoreOthersOnDevice sums cores already held on dev by pods other than
+// pod. In-flight usage from this scheduling pass (sidecar / prior containers
+// recorded by AddResourceUsage but not yet in PodInfos) is treated as self.
+func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int32 {
+	var others int32
+	for _, podInfo := range dev.PodInfos {
+		if podInfo == nil || podInfo.Pod == nil {
+			continue
+		}
+		if pod != nil && podInfo.UID != "" && pod.UID != "" && podInfo.UID == pod.UID {
+			continue
+		}
+		for _, podSingle := range podInfo.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, ctrDev := range ctrDevs {
+					if ctrDev.UUID == dev.ID {
+						others += ctrDev.Usedcores
+					}
+				}
+			}
+		}
+	}
+	return others
+}
+
+// hamiCoreIncomingExclusive reports whether this request would take the
+// incoming pod to the percentage base on a card that already has another
+// tenant.
+func hamiCoreIncomingExclusive(dev *device.DeviceUsage, pod *corev1.Pod, self, coresreq int32) bool {
+	if self+coresreq < hamiCorePercentBase {
+		return false
+	}
+	return hamiCoreOthersOnDevice(dev, pod) > 0
+}
+
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -505,13 +706,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 
 	// Verify whether the Node supports hami vnpu core.
 	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
-	nodeSupportHamiCore := npu.hamiVnpuCore
-
-	if nodeInfo != nil && nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok {
-			nodeSupportHamiCore = val == "true"
-		}
+	var node *corev1.Node
+	if nodeInfo != nil {
+		node = nodeInfo.Node
 	}
+	nodeSupportHamiCore := npu.nodeSupportsHamiCore(node)
 
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
@@ -587,27 +786,54 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// Set dev.Totalcore to 100 if vnpuMode is hami-core
-		effectiveTotalCore := dev.Totalcore
-		if isHAMiCore {
-			effectiveTotalCore = 100
-		}
-
-		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
+		// Inventory already holds the percentage budget on hami-core nodes
+		// (GetNodeDevices rewrites physical AICore to 100 and keeps advertised
+		// oversell above the base). Fit compares against that stored Totalcore.
+		if dev.Totalcore-dev.Usedcores < k.Coresreq {
 			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
-		// Coresreq=100 indicates it want this card exclusively
-		if effectiveTotalCore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+		// Coresreq at the percentage base stays exclusive for hami-core even when
+		// the plugin advertises an oversold budget. A pod that declares no mode
+		// used to keep physical Totalcore as its budget; after inventory
+		// normalization a hami-core node already stores 100/150, so gate on the
+		// node as well.
+		if k.Coresreq == hamiCorePercentBase && dev.Used > 0 &&
+			(isHAMiCore || nodeSupportHamiCore || dev.Totalcore == hamiCorePercentBase) {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if effectiveTotalCore != 0 && dev.Usedcores == effectiveTotalCore && k.Coresreq == 0 {
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
+			continue
+		}
+		// A card whose full-core occupancy belongs to one pod rejects every later
+		// request. Oversell lifts the budget above that occupant's share, so the
+		// check above no longer recognizes the card as full. Running after it keeps
+		// the non-oversold rejection reason as CardComputeUnitsExhausted. The
+		// requesting pod's own mode is irrelevant: only hami-core pods on
+		// non-hami-core nodes are filtered out, so a legacy vNPU pod still reaches
+		// an oversold card. dev.Used == 1 covers usage rebuilt without pod detail;
+		// hamiCoreExclusiveOccupant covers the multi-slot collapsed entry an
+		// init-container reservation produces.
+		if dev.Usedcores >= hamiCorePercentBase && (dev.Used == 1 || hamiCoreExclusiveOccupant(dev)) {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
+			continue
+		}
+		// Incoming pods use the same occupant rule. Fit is per container, so a
+		// pod that reaches the base across several of its own concurrent
+		// requests must not share an oversold card once another tenant is
+		// already there. Sequential ordinary init containers have already
+		// exited; a sidecar stays counted through the app phase.
+		if (isHAMiCore || nodeSupportHamiCore || dev.Totalcore >= hamiCorePercentBase) &&
+			hamiCoreIncomingExclusive(dev, pod, incomingHamiCoreOnDevice(dev.ID, allocated, tmpDevs, pod), k.Coresreq) {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		if k.Nums > 0 {

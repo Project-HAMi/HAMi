@@ -37,7 +37,6 @@ func Test_GenerateResourceRequests_WholeDeviceCapsCores(t *testing.T) {
 	dev := &AWSNeuronDevices{
 		resourceCountName: "aws.amazon.com/neuron",
 		resourceCoreName:  "aws.amazon.com/neuroncore",
-		coresPerAWSNeuron: 4,
 	}
 	ctr := &corev1.Container{
 		Name: "ctr",
@@ -79,16 +78,18 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 	dev := &AWSNeuronDevices{
 		resourceCountName: "aws.amazon.com/neuron",
 		resourceCoreName:  "aws.amazon.com/neuroncore",
-		coresPerAWSNeuron: 4,
 	}
 	du := &device.DeviceUsage{
-		ID:         "node-AWSNeuron-0",
-		Index:      0,
-		Count:      4,
-		Totalcore:  3,
-		Type:       AWSNeuronDevice,
-		Health:     true,
-		CustomInfo: map[string]any{AWSNodeType: "inf1.6xlarge"},
+		ID:        "node-AWSNeuron-0",
+		Index:     0,
+		Count:     4,
+		Totalcore: 3,
+		Type:      AWSNeuronDevice,
+		Health:    true,
+		CustomInfo: map[string]any{
+			AWSNodeType:             "inf1.6xlarge",
+			AWSCoresPerNeuronDevice: int32(4),
+		},
 	}
 	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "default", Annotations: map[string]string{}}}
 	wholeDevice, _ := dev.GenerateResourceRequests(&corev1.Container{

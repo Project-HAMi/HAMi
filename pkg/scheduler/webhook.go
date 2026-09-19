@@ -62,6 +62,15 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
 		return admission.Denied("pod has no containers")
 	}
+	// This must come before the different-scheduler case below: that path
+	// returns without validating anything, and a pod taking it keeps whatever
+	// allocation annotations it was created with. The device plugin hands out
+	// devices from exactly those annotations, so a pod naming its own GPU and
+	// memory would be served them, outside the scheduler's accounting.
+	if annotation, found := schedulerOwnedAnnotation(pod); found {
+		klog.Warningf(template+" - Denying admission as pod presets %s", pod.Namespace, pod.Name, pod.UID, annotation)
+		return admission.Denied(fmt.Sprintf("annotation %s is written by the scheduler and cannot be set when creating a pod", annotation))
+	}
 	if pod.Spec.SchedulerName != "" &&
 		(pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler) &&
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
@@ -136,6 +145,30 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+// schedulerOwnedAnnotation reports an annotation the scheduler writes after a
+// pod is admitted. The webhook runs on create only, so a pod that already
+// carries one did not get it from the scheduler: it was either written by hand
+// or copied from a scheduled pod's manifest, and in both cases the device
+// plugin would act on it as though the scheduler had decided it.
+func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
+	keys := []string{
+		util.AssignedNodeAnnotations,
+		util.BindTimeAnnotations,
+		util.DeviceBindPhase,
+	}
+	for _, perDevice := range []map[string]string{device.InRequestDevices, device.SupportDevices} {
+		for _, key := range perDevice {
+			keys = append(keys, key)
+		}
+	}
+	for _, key := range keys {
+		if _, ok := pod.Annotations[key]; ok {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func privilegedContainerName(pod *corev1.Pod) (string, bool) {

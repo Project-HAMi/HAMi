@@ -39,6 +39,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -50,6 +51,13 @@ var (
 	HTTPBind           string
 	SchedulerName      string
 	MetricsBindAddress string
+
+	// ExtenderBind is where /filter and /bind are served. They are the
+	// scheduler extender's own endpoints, called by the kube-scheduler
+	// container sharing this pod's network namespace, so they are kept off
+	// HTTPBind: that address also serves /webhook and /refit and must stay
+	// reachable from the rest of the cluster.
+	ExtenderBind string
 
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
@@ -71,6 +79,14 @@ var (
 	LeaderElect                  bool
 	LeaderElectResourceName      string
 	LeaderElectResourceNamespace string
+
+	// DevicePluginNamespace and DevicePluginServiceAccount identify the
+	// device-plugin's bound ServiceAccount. The /refit endpoint authenticates
+	// callers by TokenReview and only accepts a token whose username is
+	// exactly system:serviceaccount:<DevicePluginNamespace>:<DevicePluginServiceAccount>.
+	// See issue #2878.
+	DevicePluginNamespace      string
+	DevicePluginServiceAccount string
 )
 
 type Config struct {
@@ -86,6 +102,7 @@ type Config struct {
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	BirenConfig     biren.BirenConfig         `yaml:"biren"`
+	RemoteGPUConfig remotegpu.RemoteGPUConfig `yaml:"remotegpu"`
 	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
 
@@ -227,6 +244,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return biren.InitBirenDevice(birenConfig), nil
 		}, config.BirenConfig},
+		{remotegpu.RemoteGPUDevice, remotegpu.RemoteGPUCommonWord, func(cfg any) (device.Devices, error) {
+			remoteGPUConfig, ok := cfg.(remotegpu.RemoteGPUConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", remotegpu.RemoteGPUCommonWord)
+			}
+			return remotegpu.InitRemoteGPUDevice(remoteGPUConfig), nil
+		}, config.RemoteGPUConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -272,6 +296,7 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
+		!reflect.DeepEqual(config.RemoteGPUConfig, remotegpu.RemoteGPUConfig{}) ||
 		len(config.VNPUs.Configs) > 0 {
 		return nil
 	}

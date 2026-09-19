@@ -2439,6 +2439,7 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	}
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
+	seedPods(t, s, pod)
 	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
@@ -3497,6 +3498,8 @@ func TestFilterInvalidDeviceRequestFailsClosed(t *testing.T) {
 	}))
 	s := NewScheduler()
 	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{UID: "uid-ic", Name: "invalid-cores", Namespace: "ns-invalid"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
@@ -3507,6 +3510,8 @@ func TestFilterInvalidDeviceRequestFailsClosed(t *testing.T) {
 			}},
 		}}},
 	}
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
 	nodeNames := []string{"node1"}
 	res, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
 	require.Error(t, err)
@@ -3582,4 +3587,18 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	s.lock.RLock()
 	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
 	s.lock.RUnlock()
+}
+
+// seedPods makes pods resolvable to Filter, which verifies the request against
+// the live object before it touches any reservation.
+func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
+	t.Helper()
+	if s.kubeClient == nil {
+		s.kubeClient = fake.NewClientset()
+	}
+	for _, p := range pods {
+		if _, err := s.kubeClient.CoreV1().Pods(p.Namespace).Create(context.Background(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to seed pod %s/%s: %v", p.Namespace, p.Name, err)
+		}
+	}
 }

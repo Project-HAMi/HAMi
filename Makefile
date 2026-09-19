@@ -122,3 +122,7 @@ e2e-mig-test:
 .PHONY: e2e-mig-smoke-test
 e2e-mig-smoke-test:
 	./hack/e2e-mig-smoke-test.sh "${KUBE_CONF}"
+
+.PHONY: e2e-policy-test
+e2e-policy-test:
+	HAMI_E2E_REQUIRE_POLICY_TOPOLOGY=true bash ./hack/e2e-policy-test.sh "${KUBE_CONF}"

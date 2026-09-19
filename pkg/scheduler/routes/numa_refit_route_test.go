@@ -59,6 +59,30 @@ func TestNumaRefitRoute_DecodeError(t *testing.T) {
 	}
 }
 
+func TestBearerToken(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{name: "well formed", header: "Bearer abc.def.ghi", want: "abc.def.ghi"},
+		{name: "missing", header: "", want: ""},
+		{name: "wrong scheme", header: "Basic dXNlcjpwYXNz", want: ""},
+		{name: "no token after prefix", header: "Bearer ", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/refit", nil)
+			if test.header != "" {
+				req.Header.Set("Authorization", test.header)
+			}
+			if got := bearerToken(req); got != test.want {
+				t.Errorf("bearerToken() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestNumaRefitRoute_CacheNotSynced(t *testing.T) {
 	body, err := json.Marshal(device.NumaRefitRequest{PodUID: "uid"})
 	if err != nil {

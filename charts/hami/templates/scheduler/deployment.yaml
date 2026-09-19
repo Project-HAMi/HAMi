@@ -1,3 +1,9 @@
+{{- /* The extender and the cluster-facing endpoints are two listeners in one
+       pod, so sharing a port means the second bind fails and the scheduler
+       never starts. Catch it at template time rather than in a crash loop. */}}
+{{- if eq (int (.Values.scheduler.extenderPort | default 9444)) (int (.Values.scheduler.service.httpTargetPort | default 9443)) }}
+{{- fail "scheduler.extenderPort and scheduler.service.httpTargetPort must be different ports" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -114,8 +120,17 @@ spec:
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             {{- else }}
+            {{- /* No TLS: bind on the same port the Service routes to so the
+                   /refit endpoint is reachable. Authenticated refit still
+                   requires HTTPS; operators must supply cert/key when
+                   device-plugin token authentication is required. */}}
             - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}
             {{- end }}
+            {{- /* /filter and /bind are served here instead, on loopback, so
+                   they are reachable only from the kube-scheduler container in
+                   this pod. Unlike /refit they authenticate no caller, and the
+                   port above is published by the Service. */}}
+            - --extender-bind=127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
@@ -125,6 +140,8 @@ spec:
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-service-account={{ include "hami-vgpu.device-plugin" . }}
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}
@@ -150,6 +167,10 @@ spec:
             {{- end }}
             {{- if .Values.scheduler.kubeTimeout }}
             - --kube-timeout={{ .Values.scheduler.kubeTimeout }}
+            {{- end }}
+            {{- /* Compared as a string so an explicit 0, which disables retry, is passed through rather than treated as unset. */}}
+            {{- if ne (toString .Values.scheduler.nodeLockRetryTimeout) "" }}
+            - --node-lock-retry-timeout={{ .Values.scheduler.nodeLockRetryTimeout }}
             {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
