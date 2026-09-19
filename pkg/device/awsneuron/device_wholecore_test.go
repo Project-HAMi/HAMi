@@ -46,7 +46,7 @@ func Test_GenerateResourceRequests_WholeDeviceCapsCores(t *testing.T) {
 			},
 		},
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, _ := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, req.Coresreq, int32(maxCoresPerNeuronDevice))
 }
 
@@ -92,7 +92,7 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 		},
 	}
 	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "default", Annotations: map[string]string{}}}
-	wholeDevice := dev.GenerateResourceRequests(&corev1.Container{
+	wholeDevice, _ := dev.GenerateResourceRequests(&corev1.Container{
 		Name: "ctr",
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{"aws.amazon.com/neuron": resource.MustParse("1")},

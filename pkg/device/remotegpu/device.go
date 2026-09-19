@@ -185,22 +185,24 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, _ *corev1.Po
 	return true, nil
 }
 
-func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	count, ok := resourceValue(ctr, RemoteGPUResourceCount)
 	if !ok || count <= 0 {
-		return device.ContainerDeviceRequest{}
+		// No device requested (or an explicit zero) is device-less, not
+		// invalid. See the nvidia backend.
+		return device.ContainerDeviceRequest{}, nil
 	}
 	nums, err := safecast.Convert[int32](count)
 	if err != nil {
 		klog.ErrorS(err, "remotegpu: device count out of range", "value", count)
-		return device.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "remotegpu", Reason: fmt.Sprintf("device count %d is out of range", count)}
 	}
 	var memreq int32
 	if mem, ok := resourceValue(ctr, RemoteGPUResourceMemory); ok && mem > 0 {
 		memreq, err = safecast.Convert[int32](mem)
 		if err != nil {
 			klog.ErrorS(err, "remotegpu: memory request out of range", "value", mem)
-			return device.ContainerDeviceRequest{}
+			return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "remotegpu", Reason: fmt.Sprintf("memory request %d is out of range", mem)}
 		}
 	}
 	return device.ContainerDeviceRequest{
@@ -212,7 +214,7 @@ func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 		// the server's GPUs.
 		Memreq:   memreq,
 		Coresreq: 100,
-	}
+	}, nil
 }
 
 func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

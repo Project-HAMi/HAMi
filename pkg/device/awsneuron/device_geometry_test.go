@@ -117,16 +117,21 @@ func TestGenerateResourceRequestsDoesNotDependOnRegisteredNode(t *testing.T) {
 		},
 	}
 
-	want := dev.GenerateResourceRequests(container)
+	want, err := dev.GenerateResourceRequests(container)
+	assert.NilError(t, err)
 	assert.Equal(t, want.Coresreq, int32(maxCoresPerNeuronDevice))
 
-	_, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.xlarge", 1, 4))
+	_, err = dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.xlarge", 1, 4))
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dev.GenerateResourceRequests(container), want)
+	got, err := dev.GenerateResourceRequests(container)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, got, want)
 
 	_, err = dev.GetNodeDevices(newNeuronNode("inf2-node", "inf2.xlarge", 1, 2))
 	assert.NilError(t, err)
-	assert.DeepEqual(t, dev.GenerateResourceRequests(container), want)
+	got, err = dev.GenerateResourceRequests(container)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, got, want)
 }
 
 func TestMixedNodeGeometryAllocationWorkflow(t *testing.T) {
@@ -190,7 +195,8 @@ func TestMixedNodeGeometryAllocationWorkflow(t *testing.T) {
 				},
 			}
 
-			request := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+			request, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+			assert.NilError(t, err)
 			fit, allocations, reason := dev.Fit(
 				[]*device.DeviceUsage{usage},
 				request,

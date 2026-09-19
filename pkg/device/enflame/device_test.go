@@ -128,7 +128,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 	}
-	req := dev.GenerateResourceRequests(container)
+	req, _ := dev.GenerateResourceRequests(container)
 	assert.Equal(t, req.Nums, int32(1))
 	assert.Equal(t, req.Memreq, int32(3))
 	assert.Equal(t, req.MemPercentagereq, enflameRequestModeDirect)
@@ -149,7 +149,7 @@ func TestGenerateResourceRequests_ByMemoryCore(t *testing.T) {
 			},
 		},
 	}
-	req := dev.GenerateResourceRequests(container)
+	req, _ := dev.GenerateResourceRequests(container)
 	assert.Equal(t, req.Nums, int32(1))
 	assert.Equal(t, req.Type, EnflameVGCUDevice)
 	assert.Equal(t, req.Memreq, int32(20480))
@@ -571,7 +571,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
 				assert.Equal(t, req.Nums, int32(1))
 				assert.Equal(t, req.Coresreq, int32(tt.cores))

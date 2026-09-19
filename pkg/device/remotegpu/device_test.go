@@ -271,13 +271,16 @@ func TestGenerateResourceRequests(t *testing.T) {
 		},
 	}
 
-	req := dev.GenerateResourceRequests(ctr)
+	req, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
 	assert.Equal(t, req.Nums, int32(2))
 	assert.Equal(t, req.Memreq, int32(2000))
 	assert.Equal(t, req.Coresreq, int32(100))
 	assert.Equal(t, req.Type, RemoteGPUCommonWord)
 
-	assert.Equal(t, dev.GenerateResourceRequests(&corev1.Container{}).Nums, int32(0))
+	empty, err := dev.GenerateResourceRequests(&corev1.Container{})
+	assert.NilError(t, err)
+	assert.Equal(t, empty.Nums, int32(0))
 }
 
 func TestPatchAnnotations_WritesResolvedEndpoint(t *testing.T) {

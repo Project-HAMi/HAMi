@@ -1177,7 +1177,6 @@ func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-
 	// Simulation callers describe pods that need not exist, and the path they
 	// take reserves nothing, so only the scheduling path resolves the pod.
 	pod := args.Pod
@@ -1190,7 +1189,20 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		pod = live
 	}
 
-	resourceReqs := device.Resourcereqs(pod)
+	resourceReqs, reqErr := device.Resourcereqs(pod)
+	if reqErr != nil {
+		// A container declared HAMi resources but the request is invalid
+		// (for example a core limit out of the 0-100 range). Failing closed
+		// rejects the pod here; treating it as device-less would bind it
+		// with no device at all.
+		err := fmt.Errorf("invalid device request for pod %v: %w", pod.Name, reqErr)
+		klog.ErrorS(nil, "Rejecting pod with an invalid device request", "pod", klog.KObj(pod), "error", reqErr)
+		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
+		return &extenderv1.ExtenderFilterResult{
+			FailedNodes: map[string]string{},
+			Error:       err.Error(),
+		}, err
+	}
 
 	hasHAMiResource := false
 
