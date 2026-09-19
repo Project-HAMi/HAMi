@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -211,6 +212,14 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		nodes := []string{"node1"}
 		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
 		assert.NilError(t, err)
+		assert.NilError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_stale_reservations_total Stale HAMi device reservations encountered or removed.
+# TYPE hami_scheduler_stale_reservations_total counter
+hami_scheduler_stale_reservations_total{device_type="NVIDIA",failure_reason="unknown_device",phase="reconcile"} 1
+# HELP hami_scheduler_reconciliation_errors_total HAMi scheduler reconciliation errors.
+# TYPE hami_scheduler_reconciliation_errors_total counter
+hami_scheduler_reconciliation_errors_total{device_type="NVIDIA",failure_reason="unknown_device",phase="reconcile"} 1
+`), "hami_scheduler_stale_reservations_total", "hami_scheduler_reconciliation_errors_total"))
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
@@ -923,6 +932,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
+	successfulFilters := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()
@@ -938,6 +948,12 @@ func Test_Filter(t *testing.T) {
 			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
 				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
 			}
+			successfulFilters++
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(fmt.Sprintf(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter"} %d
+`, successfulFilters)), "hami_scheduler_allocations_total"))
 		})
 	}
 }
@@ -2440,7 +2456,14 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
 	seedPods(t, s, pod)
-	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	require.NoError(t, err)
+	require.Empty(t, result.NodeNames)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+`), "hami_scheduler_allocation_failures_total"))
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
@@ -2998,6 +3021,11 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="pod_lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3053,6 +3081,11 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="node_lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 type bindLockMockDevice struct {
@@ -3130,6 +3163,14 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "node lock contention")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+# HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
+# TYPE hami_scheduler_bind_rollbacks_total counter
+hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
