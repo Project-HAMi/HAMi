@@ -33,6 +33,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -54,9 +55,73 @@ import (
 )
 
 const (
-	defaultResync    = 1 * time.Hour
-	syncedPollPeriod = 100 * time.Millisecond
+	defaultResync                  = 1 * time.Hour
+	syncedPollPeriod               = 100 * time.Millisecond
+	unaccountedPodAllocationReason = "node has an unaccounted pod device allocation"
 )
+
+// podAllocationDecodeFailures tracks bound pods whose device allocations
+// cannot be reconstructed. Its zero value is ready for use so Scheduler
+// values constructed directly by tests remain valid.
+type podAllocationDecodeFailures struct {
+	mutex sync.RWMutex
+	pods  map[k8stypes.UID]string
+}
+
+func (f *podAllocationDecodeFailures) record(uid k8stypes.UID, nodeID string) {
+	if uid == "" || nodeID == "" {
+		return
+	}
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	if f.pods == nil {
+		f.pods = make(map[k8stypes.UID]string)
+	}
+	f.pods[uid] = nodeID
+}
+
+func (f *podAllocationDecodeFailures) clearPod(uid k8stypes.UID) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	delete(f.pods, uid)
+}
+
+func (f *podAllocationDecodeFailures) clearNode(nodeID string) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for uid, failedNodeID := range f.pods {
+		if failedNodeID == nodeID {
+			delete(f.pods, uid)
+		}
+	}
+}
+
+func (f *podAllocationDecodeFailures) nodes() map[string]struct{} {
+	f.mutex.RLock()
+	defer f.mutex.RUnlock()
+	if len(f.pods) == 0 {
+		return nil
+	}
+	nodes := make(map[string]struct{}, len(f.pods))
+	for _, nodeID := range f.pods {
+		nodes[nodeID] = struct{}{}
+	}
+	return nodes
+}
+
+func (f *podAllocationDecodeFailures) excludeCandidates(nodes *[]string, candidates map[string]*NodeUsage, failedNodes map[string]string) {
+	if nodes == nil {
+		return
+	}
+	blockedNodes := f.nodes()
+	for _, nodeID := range *nodes {
+		if _, blocked := blockedNodes[nodeID]; !blocked {
+			continue
+		}
+		delete(candidates, nodeID)
+		failedNodes[nodeID] = unaccountedPodAllocationReason
+	}
+}
 
 type Scheduler struct {
 	*nodeManager
@@ -92,6 +157,8 @@ type Scheduler struct {
 	// cycle, so in the common path this adds no contention; it exists so these
 	// paths cannot observe or produce half-applied accounting.
 	allocLock sync.Mutex
+
+	allocationDecodeFailures podAllocationDecodeFailures
 }
 
 func NewScheduler() *Scheduler {
@@ -145,6 +212,35 @@ func (s *Scheduler) doNodeNotify() {
 	}
 }
 
+func (s *Scheduler) recordAllocationDecodeFailure(pod *corev1.Pod, nodeID string) bool {
+	if pod.Spec.NodeName == "" || pod.Spec.NodeName != nodeID {
+		return false
+	}
+
+	// A Pod author can set spec.nodeName and HAMi annotations directly. A
+	// running Pod may still hold a device even when PodScheduled is absent, so
+	// treat its phase as evidence that the bound allocation must be accounted.
+	scheduled := pod.Status.Phase == corev1.PodRunning
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodScheduled &&
+			condition.Status == corev1.ConditionTrue {
+			scheduled = true
+			break
+		}
+	}
+	if !scheduled {
+		return false
+	}
+	for _, dev := range device.GetDevices() {
+		if device.PodRequiresDevice(dev, pod) {
+			s.allocationDecodeFailures.record(pod.UID, nodeID)
+			return pod.UID != ""
+		}
+	}
+
+	return false
+}
+
 func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
@@ -152,13 +248,17 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
-	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
 	if util.IsPodInTerminatedState(pod) {
+		s.allocationDecodeFailures.clearPod(pod.UID)
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
+		}
+		return
+	}
+	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
+		if _, cached := s.podManager.GetPod(pod); !cached {
+			s.recordAllocationDecodeFailure(pod, pod.Spec.NodeName)
 		}
 		return
 	}
@@ -176,7 +276,12 @@ func (s *Scheduler) onAddPod(obj any) {
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
+		_, cached := s.podManager.GetPod(pod)
+		blocked := false
+		if !cached {
+			blocked = s.recordAllocationDecodeFailure(pod, nodeID)
+		}
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "node", nodeID, "nodeBlocked", blocked)
 		return
 	}
 
@@ -185,6 +290,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	if s.podManager.AddPod(pod, nodeID, effectiveDevices) {
 		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
+	s.allocationDecodeFailures.clearPod(pod.UID)
 }
 
 func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
@@ -195,13 +301,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
-	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+	if util.IsPodInTerminatedState(newPod) {
+		s.allocationDecodeFailures.clearPod(newPod.UID)
+		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
+			s.quotaManager.RmUsage(newPod, pi.Devices)
+		}
 		return
 	}
 
-	if util.IsPodInTerminatedState(newPod) {
-		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
-			s.quotaManager.RmUsage(newPod, pi.Devices)
+	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+		if _, cached := s.podManager.GetPod(newPod); cached {
+			s.podManager.UpdatePod(newPod)
+		} else {
+			// The Pod remains bound, but its allocation is still unknown.
+			// Preserve any existing failure and quarantine a running Pod whose
+			// assignment disappeared before it could be accounted.
+			s.recordAllocationDecodeFailure(newPod, newPod.Spec.NodeName)
 		}
 		return
 	}
@@ -273,6 +388,8 @@ func (s *Scheduler) onDelPod(obj any) {
 		return
 	}
 
+	s.allocationDecodeFailures.clearPod(pod.UID)
+
 	// Delete notifications can contain incomplete Pod objects. The cached
 	// allocation, keyed by the immutable UID, is the cleanup source of truth.
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
@@ -306,6 +423,7 @@ func (s *Scheduler) onDelNode(obj any) {
 	}
 
 	nodelockutil.CleanupNodeLock(nodeName)
+	s.allocationDecodeFailures.clearNode(nodeName)
 	s.rmNode(nodeName)
 	s.cleanupNodeUsage(nodeName)
 	// Clear per-device health bookkeeping for the deleted node.
@@ -780,6 +898,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
+	defer s.allocationDecodeFailures.excludeCandidates(nodes, cachenodeMap, failedNodes)
 	allNodes, err := s.ListNodes()
 	if err != nil {
 		return &overallnodeMap, &overallnodeMap, failedNodes, err
