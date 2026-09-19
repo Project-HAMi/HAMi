@@ -9,9 +9,11 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,10 +21,13 @@ import (
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes/fake"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // Unix socket paths are limited to about 100 bytes, including the temporary
@@ -43,13 +48,18 @@ func lifecycleSocketDir(t *testing.T) string {
 
 func lifecyclePlugin(t *testing.T) (*NvidiaDevicePlugin, *nvmlmock.Interface) {
 	t.Helper()
+	return lifecyclePluginWithMode(t, nvidia.MigMode)
+}
+
+func lifecyclePluginWithMode(t *testing.T, mode string) (*NvidiaDevicePlugin, *nvmlmock.Interface) {
+	t.Helper()
 	lib := &nvmlmock.Interface{
 		InitFunc:           func() nvml.Return { return nvml.SUCCESS },
 		ShutdownFunc:       func() nvml.Return { return nvml.SUCCESS },
 		DeviceGetCountFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
 	}
 	p := &NvidiaDevicePlugin{
-		ctx: context.Background(), operatingMode: nvidia.MigMode,
+		ctx: context.Background(), operatingMode: mode,
 		migMgr: newMigInstanceManager(lib), socket: filepath.Join(lifecycleSocketDir(t), "gpu.sock"),
 		rm: &rm.ResourceManagerMock{
 			ResourceFunc: func() spec.ResourceName { return "nvidia.com/gpu" },
@@ -203,5 +213,227 @@ func TestMigReconcilerStopsWithCycle(t *testing.T) {
 	}
 	if p.ctx.Err() != nil {
 		t.Fatal("Stop canceled the parent context")
+	}
+}
+
+func TestHamiCorePluginStartStopRestart(t *testing.T) {
+	p, lib := lifecyclePluginWithMode(t, nvidia.HamiCoreMode)
+	for cycle := 1; cycle <= 2; cycle++ {
+		if err := p.Start(""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.getAPIDevices(); err != nil {
+			t.Fatal(err)
+		}
+		if len(lib.InitCalls()) != cycle || len(lib.ShutdownCalls()) != cycle-1 {
+			t.Fatal("hami-core registration changed session ownership")
+		}
+		if err := p.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		if len(lib.ShutdownCalls()) != cycle {
+			t.Fatal("Stop did not release NVML")
+		}
+	}
+}
+
+func TestApplyStartupMigModeDisableRequiresReset(t *testing.T) {
+	afterSet := false
+	dev := &nvmlmock.Device{
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100-SXM4-40GB", nvml.SUCCESS },
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			if afterSet {
+				return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_DISABLE, nvml.SUCCESS
+			}
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			afterSet = true
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetCountFunc:         func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	p := &NvidiaDevicePlugin{
+		ctx:           context.Background(),
+		operatingMode: nvidia.HamiCoreMode,
+		migMgr:        newMigInstanceManager(lib),
+		schedulerConfig: nvidia.NvidiaConfig{
+			MigProfileAllowlist: []device.AllowedMigProfiles{{
+				Models:   []string{"A100"},
+				Profiles: []string{"1g.5gb"},
+			}},
+		},
+	}
+	if err := p.migMgr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer p.migMgr.Shutdown()
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	defer func() { client.KubeClient = previous }()
+	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
+	if err == nil {
+		t.Fatal("expected pending-reset error")
+	}
+	if !errors.Is(err, errMigModeNeedsReset) {
+		t.Fatalf("applyStartupMigMode error = %v, want errors.Is(errMigModeNeedsReset)", err)
+	}
+	if !strings.Contains(err.Error(), "disable MIG for hami-core") {
+		t.Fatalf("wrapped error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "reboot the VM") || !strings.Contains(err.Error(), nvidiaMIGGettingStartedURL) {
+		t.Fatalf("operator guidance missing from error: %v", err)
+	}
+}
+
+func a100HamiCorePlugin(t *testing.T, dev nvml.Device) (*NvidiaDevicePlugin, *nvmlmock.Interface) {
+	t.Helper()
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetCountFunc:         func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	p := &NvidiaDevicePlugin{
+		ctx:           context.Background(),
+		operatingMode: nvidia.HamiCoreMode,
+		migMgr:        newMigInstanceManager(lib),
+		schedulerConfig: nvidia.NvidiaConfig{
+			MigProfileAllowlist: []device.AllowedMigProfiles{{
+				Models:   []string{"A100"},
+				Profiles: []string{"1g.5gb"},
+			}},
+		},
+		rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }},
+	}
+	if err := p.migMgr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { p.migMgr.Shutdown() })
+	return p, lib
+}
+
+func idleA100Device(setCalls *int, afterSetCurrent, afterSetPending int) *nvmlmock.Device {
+	afterSet := false
+	return &nvmlmock.Device{
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100-SXM4-40GB", nvml.SUCCESS },
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			if afterSet {
+				return afterSetCurrent, afterSetPending, nvml.SUCCESS
+			}
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			afterSet = true
+			if setCalls != nil {
+				*setCalls++
+			}
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetComputeRunningProcessesFunc: func() ([]nvml.ProcessInfo, nvml.Return) {
+			return nil, nvml.SUCCESS
+		},
+		GetGraphicsRunningProcessesFunc: func() ([]nvml.ProcessInfo, nvml.Return) {
+			return nil, nvml.SUCCESS
+		},
+	}
+}
+
+func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
+	setCalls := 0
+	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	defer func() { client.KubeClient = previous }()
+	if err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"}); err != nil {
+		t.Fatal(err)
+	}
+	if setCalls != 1 {
+		t.Fatalf("SetMigMode calls = %d, want 1", setCalls)
+	}
+}
+
+func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
+	setCalls := 0
+	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	defer func() { client.KubeClient = previous }()
+	if err := p.applyStartupMigMode(1, []string{"NVIDIA H100 80GB HBM3"}); err != nil {
+		t.Fatal(err)
+	}
+	if setCalls != 1 {
+		t.Fatalf("SetMigMode calls = %d, want 1 for MIG-capable GPU outside MigProfileAllowlist", setCalls)
+	}
+}
+
+func TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails(t *testing.T) {
+	setCalls := 0
+	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
+	previous := client.KubeClient
+	client.KubeClient = nil
+	defer func() { client.KubeClient = previous }()
+	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
+	if err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("applyStartupMigMode error = %v, want in-use fail-closed", err)
+	}
+	if errors.Is(err, errMigModeNeedsReset) {
+		t.Fatalf("allocation lookup failure must not look like a GPU reset: %v", err)
+	}
+	if setCalls != 0 {
+		t.Fatalf("SetMigMode calls = %d, want 0", setCalls)
+	}
+}
+
+func TestRegistrationRequiresRunningMigManagerSession(t *testing.T) {
+	p, _ := lifecyclePluginWithMode(t, nvidia.HamiCoreMode)
+	nvmlInitCalls := 0
+	originalInit := nvmlInit
+	nvmlInit = func() nvml.Return {
+		nvmlInitCalls++
+		return nvml.SUCCESS
+	}
+	scoreCalls := 0
+	originalScore := calculateGPUScore
+	calculateGPUScore = func([]string) (nvidia.ListDeviceScore, bool, error) {
+		scoreCalls++
+		return nil, false, nil
+	}
+	defer func() {
+		nvmlInit = originalInit
+		calculateGPUScore = originalScore
+	}()
+
+	if _, err := p.getAPIDevices(); err == nil {
+		t.Fatal("getAPIDevices succeeded without an NVML session")
+	}
+	if _, _, err := p.topologyScore(nil); err == nil {
+		t.Fatal("topologyScore succeeded without an NVML session")
+	}
+	if err := p.migMgr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	p.migMgr.Shutdown()
+	if _, err := p.getAPIDevices(); err == nil {
+		t.Fatal("getAPIDevices succeeded after Shutdown")
+	}
+	if _, _, err := p.topologyScore(nil); err == nil {
+		t.Fatal("topologyScore succeeded after Shutdown")
+	}
+	if nvmlInitCalls != 0 || scoreCalls != 0 {
+		t.Fatalf("fell back to package NVML (init=%d score=%d)", nvmlInitCalls, scoreCalls)
 	}
 }

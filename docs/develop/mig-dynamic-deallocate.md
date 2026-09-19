@@ -41,7 +41,10 @@ A stable reservation key supports idempotent realization. Reconciliation aligns 
 Each Dynamic MIG plugin start cycle owns one NVML session through its
 `MigInstanceManager`. Construction does not initialize NVML. `Start` initializes
 it before the startup scan; MIG discovery, registration, topology scoring,
-allocation, adoption, and release borrow the configured instance.
+allocation, adoption, release, and switching idle GPUs out of MIG (when the
+node is configured for hami-core) borrow the configured instance. If disabling
+MIG fails—including when a GPU reset is required—the start cycle fails instead
+of advertising hami-core while hardware remains partitioned.
 
 `Stop` cancels the cycle's registration and reconciliation loops, stops gRPC and
 waits for handlers (including allocation cleanup), and drains background workers
@@ -51,10 +54,13 @@ path; failed initialization is never paired with shutdown. Repeated shutdown is
 safe. A new start acquires a new session and rebuilds the in-memory allocation
 index from Pod annotations; shutdown itself does not destroy running instances.
 
-Initial resource discovery, health checking, non-MIG operation, and the separate
-monitor retain their independent session ownership. The one-init/one-shutdown
-invariant applies to the Dynamic MIG manager's session, not every NVML caller in
-the process. Forced process termination cannot run graceful cleanup.
+Health checking, initial factory discovery, and the separate monitor retain
+their independent session ownership. Non-MIG plugin start cycles still acquire
+the manager session so idle GPUs can be switched out of MIG before
+registration; registration then borrows that session and fails if it is not
+running. The one-init/one-shutdown invariant applies to the Dynamic MIG
+manager's session, not every NVML caller in the process. Forced process
+termination cannot run graceful cleanup.
 
 ## Architecture
 
