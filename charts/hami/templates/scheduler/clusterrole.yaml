@@ -24,6 +24,12 @@ rules:
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
     verbs: ["create"]
+  # The webhook reviews who is writing the hami.io/ allocation annotations on
+  # an update, so that only callers already holding node write access, this
+  # scheduler and the device plugins, can change them.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
 ---
 {{- if .Values.mockDevicePlugin.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
