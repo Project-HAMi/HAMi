@@ -383,3 +383,23 @@ func TestHostGPUMetricsError(t *testing.T) {
 		t.Fatalf("expected no metrics emitted for errored hardware")
 	}
 }
+
+// A modern driver already reports the vendor prefix in nvmlDeviceGetName, so
+// the identity must not add a second one: the device_type label has to match
+// the model the device plugin writes into the node register annotation.
+func TestResolveGPUDeviceIdentityDoesNotDoublePrefixModel(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	cc := ClusterManagerCollector{}
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100-SXM4-40GB", nvml.SUCCESS },
+	}
+
+	identity, err := cc.resolveGPUDeviceIdentity(mockDev)
+	if err != nil {
+		t.Fatalf("resolveGPUDeviceIdentity failed: %v", err)
+	}
+	if identity.deviceName != "NVIDIA A100-SXM4-40GB" {
+		t.Errorf("deviceName = %q, want %q", identity.deviceName, "NVIDIA A100-SXM4-40GB")
+	}
+}
