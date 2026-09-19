@@ -65,6 +65,7 @@ func init() {
 	rootCmd.Flags().StringVar(&metricsBindAddress, "metrics-bind-address", ":9394", "The TCP address that the vGPUmonitor should bind to for serving prometheus metrics(e.g. 127.0.0.1:9394, :9394)")
 	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
 	rootCmd.AddCommand(version.VersionCmd)
+	rootCmd.AddCommand(newDryRunCommand())
 }
 
 func start() error {
