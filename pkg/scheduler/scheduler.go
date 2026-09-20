@@ -702,7 +702,6 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 			nodeUsage.Devices.DeviceLists = append(nodeUsage.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &device.DeviceUsage{
-<<<<<<< HEAD
 					ID:           d.ID,
 					Index:        d.Index,
 					Used:         0,
@@ -717,27 +716,10 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 					DeviceVendor: d.DeviceVendor,
 					Numa:         d.Numa,
 					Health:       d.Health,
-					PodInfos:     make([]*device.PodInfo, 0),
-					CustomInfo:   maps.Clone(d.CustomInfo),
-=======
-					ID:          d.ID,
-					Index:       d.Index,
-					Used:        0,
-					Count:       d.Count,
-					Usedmem:     0,
-					Totalmem:    d.Devmem,
-					Totalcore:   d.Devcore,
-					Usedcores:   0,
-					MigProfiles: d.MIGProfiles,
-					Mode:        d.Mode,
-					Type:        d.Type,
-					Numa:        d.Numa,
-					Health:      d.Health,
 					// PodInfos is left nil: every consumer ranges over it or
 					// appends to it, and this runs once per device per node on
 					// every Filter call.
 					CustomInfo: maps.Clone(d.CustomInfo),
->>>>>>> 8670cf0 (perf(scheduler): build the usage snapshot only for candidate nodes)
 				},
 			})
 		}

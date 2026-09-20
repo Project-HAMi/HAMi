@@ -3553,7 +3553,6 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	s.lock.RUnlock()
 }
 
-<<<<<<< HEAD
 // seedPods makes pods resolvable to Filter, which verifies the request against
 // the live object before it touches any reservation.
 func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
@@ -3567,7 +3566,7 @@ func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
 		}
 	}
 }
-=======
+
 // benchNodeInfo builds a registered node carrying gpus idle NVIDIA devices.
 func testNodeInfo(name string, gpus int) *device.NodeInfo {
 	infos := make([]device.DeviceInfo, 0, gpus)
@@ -3640,4 +3639,3 @@ func Test_buildNodeUsage_LeavesPodInfosNil(t *testing.T) {
 	assert.Equal(t, len(usage.Devices.DeviceLists), 1)
 	assert.Assert(t, usage.Devices.DeviceLists[0].Device.PodInfos == nil)
 }
->>>>>>> 8670cf0 (perf(scheduler): build the usage snapshot only for candidate nodes)
