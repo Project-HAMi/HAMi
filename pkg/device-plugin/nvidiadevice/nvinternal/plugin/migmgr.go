@@ -46,12 +46,23 @@ var profileNameToCIProfileID = map[string]int{
 const nvidiaMIGGettingStartedURL = "https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/getting-started-with-mig.html"
 
 // errMigModeNeedsReset is returned when NVML reports a MIG enable/disable
-// that has not taken effect. Match with errors.Is.
+// that has not taken effect, including SetMigMode activationStatus
+// ERROR_RESET_REQUIRED. Match with errors.Is.
 var errMigModeNeedsReset = errors.New("MIG mode change requires a GPU reset or VM reboot")
 
 func errMigModePending(gpuIndex int, action string, current, pending int) error {
 	return fmt.Errorf("gpu %d MIG %s is pending (current=%d pending=%d): %w. Manual operator action may be needed: try nvidia-smi --gpu-reset, or reboot the VM if the hypervisor does not allow GPU reset. See %s",
 		gpuIndex, action, current, pending, errMigModeNeedsReset, nvidiaMIGGettingStartedURL)
+}
+
+// errMigModeActivation wraps SetMigMode's activationStatus. ERROR_RESET_REQUIRED
+// means the mode change was accepted but needs a GPU reset or VM reboot.
+func errMigModeActivation(gpuIndex int, action string, activation nvml.Return) error {
+	if activation == nvml.ERROR_RESET_REQUIRED {
+		return fmt.Errorf("gpu %d %s mig mode: %s: %w. Manual operator action may be needed: try nvidia-smi --gpu-reset, or reboot the VM if the hypervisor does not allow GPU reset. See %s",
+			gpuIndex, action, nvml.ErrorString(activation), errMigModeNeedsReset, nvidiaMIGGettingStartedURL)
+	}
+	return fmt.Errorf("gpu %d %s mig mode: %s", gpuIndex, action, nvml.ErrorString(activation))
 }
 
 type migAllocationKey struct {
@@ -322,7 +333,7 @@ func (m *MigInstanceManager) ensureMigModeEnabled(gpuIndex int) error {
 		return fmt.Errorf("gpu %d set mig mode: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if activation != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d activate mig mode: %s", gpuIndex, nvml.ErrorString(activation))
+		return errMigModeActivation(gpuIndex, "activate", activation)
 	}
 
 	dev, err = m.deviceHandleByIndex(gpuIndex)
@@ -393,7 +404,7 @@ func (m *MigInstanceManager) ensureMigModeDisabled(gpuIndex int) error {
 		return fmt.Errorf("gpu %d set mig mode: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if activation != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d deactivate mig mode: %s", gpuIndex, nvml.ErrorString(activation))
+		return errMigModeActivation(gpuIndex, "deactivate", activation)
 	}
 
 	dev, err = m.deviceHandleByIndex(gpuIndex)
