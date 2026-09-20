@@ -569,7 +569,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 
 	rawNodes, err := s.nodeLister.List(labelSelector)
 	if err != nil {
-		s.GetAllocationMetrics().ObserveReconciliationError("reconcile", "unknown", metrics.FailureReasonInternal)
 		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
 		return
 	}
@@ -584,7 +583,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 
 			nodedevices, err := devInstance.GetNodeDevices(*val)
 			if err != nil {
-				s.GetAllocationMetrics().ObserveReconciliationError("reconcile", devhandsk, metrics.FailureReasonInternal)
 				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk, "error", err)
 			}
 
@@ -611,7 +609,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 				klog.ErrorS(nil, "Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
-					s.GetAllocationMetrics().ObserveReconciliationError("reconcile", devhandsk, metrics.FailureReasonInternal)
 					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
 				}
 
@@ -628,7 +625,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 			if len(nodedevices) == 0 {
 				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
 					if _, ok := existingNode.Devices[devhandsk]; ok {
-						s.GetAllocationMetrics().ObserveStaleReservation("reconcile", devhandsk, metrics.FailureReasonStale)
 						klog.InfoS("Vendor reports zero devices, removing stale cache entry", "nodeName", val.Name, "deviceVendor", devhandsk)
 						s.rmNodeDevices(val.Name, devhandsk)
 					}
@@ -661,7 +657,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	}
 	_, overallnodeMap, _, err := s.getNodesUsage(&nodeNames, nil)
 	if err != nil {
-		s.GetAllocationMetrics().ObserveReconciliationError("reconcile", "unknown", metrics.FailureReasonInternal)
 		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
 		return
 	}
@@ -869,7 +864,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	failedNodes := make(map[string]string)
 	allNodes, err := s.ListNodes()
 	if err != nil {
-		s.GetAllocationMetrics().ObserveReconciliationError("reconcile", "unknown", metrics.FailureReasonInternal)
 		return &overallnodeMap, &overallnodeMap, failedNodes, err
 	}
 
@@ -885,16 +879,12 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				for _, allocation := range allocations {
 					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
 				}
-			} else {
-				s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 			}
 		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			klog.V(5).InfoS("pod allocated unknown node resources",
 				"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
-			s.GetAllocationMetrics().ObserveStaleReservation("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
-			s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 			continue
 		}
 		for _, podsingleds := range p.Devices {
@@ -926,14 +916,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							if d.Device.Mode == nvidia.MigMode {
 								klog.ErrorS(nil, "MIG Pod lacks a matching profile/placement reservation", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", udevice.UUID)
 								d.Device.Health = false
-								s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 							}
 						}
 					}
 					if !matched {
 						klog.ErrorS(nil, "pod allocated unknown or stale device resources", "pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID, "gpuUUID", udevice.UUID)
-						s.GetAllocationMetrics().ObserveStaleReservation("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
-						s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 					}
 				}
 			}
@@ -951,8 +938,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				if d.Device.Mode != nvidia.MigMode {
 					klog.ErrorS(nil, "unconsumed MIG reservations reference a non-MIG device", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
 					d.Device.Health = false
-					s.GetAllocationMetrics().ObserveStaleReservation("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
-					s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 					break
 				}
 				for _, allocation := range allocations {
@@ -968,8 +953,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 						d.Device.Health = false
 					}
 				}
-				s.GetAllocationMetrics().ObserveStaleReservation("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
-				s.GetAllocationMetrics().ObserveReconciliationError("reconcile", deviceTypeForPodDevices(p.Devices), metrics.FailureReasonStale)
 			}
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
@@ -1061,7 +1044,6 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
 		s.quotaManager.RmUsage(pod, pi.Devices)
-		s.GetAllocationMetrics().ObserveStaleReservation("bind", deviceTypeForPodDevices(pi.Devices), metrics.FailureReasonStale)
 	}
 }
 

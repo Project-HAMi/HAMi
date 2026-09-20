@@ -28,8 +28,6 @@ func TestSchedulerOutcomeMetrics(t *testing.T) {
 	m.ObserveAllocation("filter", "NVIDIA")
 	m.ObserveAllocationFailure("filter", "NVIDIA", FailureReasonNoFit)
 	m.ObserveBindRollback("bind", "NVIDIA", FailureReasonBind)
-	m.ObserveStaleReservation("reconcile", "NVIDIA", FailureReasonStale)
-	m.ObserveReconciliationError("reconcile", "NVIDIA", FailureReasonStale)
 
 	want := strings.NewReader(`
 # HELP hami_scheduler_allocations_total Successful HAMi device allocations.
@@ -41,19 +39,11 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no
 # HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
 # TYPE hami_scheduler_bind_rollbacks_total counter
 hami_scheduler_bind_rollbacks_total{device_type="NVIDIA",failure_reason="bind",phase="bind"} 1
-# HELP hami_scheduler_stale_reservations_total Stale HAMi device reservations encountered or removed.
-# TYPE hami_scheduler_stale_reservations_total counter
-hami_scheduler_stale_reservations_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
-# HELP hami_scheduler_reconciliation_errors_total HAMi scheduler reconciliation errors.
-# TYPE hami_scheduler_reconciliation_errors_total counter
-hami_scheduler_reconciliation_errors_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
 `)
 	if err := promtestutil.CollectAndCompare(m, want,
 		"hami_scheduler_allocations_total",
 		"hami_scheduler_allocation_failures_total",
 		"hami_scheduler_bind_rollbacks_total",
-		"hami_scheduler_stale_reservations_total",
-		"hami_scheduler_reconciliation_errors_total",
 	); err != nil {
 		t.Fatalf("unexpected scheduler outcome metrics:\n%s", err)
 	}
@@ -69,7 +59,6 @@ func TestSchedulerFailureReasons(t *testing.T) {
 		FailureReasonAnnotationPatch,
 		FailureReasonBind,
 		FailureReasonInternal,
-		FailureReasonStale,
 	} {
 		m.ObserveAllocationFailure("filter", "NVIDIA", reason)
 	}
@@ -84,7 +73,6 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="in
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lock",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lookup",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
-hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="stale",phase="filter"} 1
 `)
 	if err := promtestutil.CollectAndCompare(m, want, "hami_scheduler_allocation_failures_total"); err != nil {
 		t.Fatalf("unexpected failure reasons:\n%s", err)

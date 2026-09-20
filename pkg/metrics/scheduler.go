@@ -21,11 +21,9 @@ import "github.com/prometheus/client_golang/prometheus"
 // SchedulerOutcomeMetrics records scheduler allocation and recovery outcomes.
 // All label values are controlled by the scheduler and must remain bounded.
 type SchedulerOutcomeMetrics struct {
-	allocations          *prometheus.CounterVec
-	allocationFailures   *prometheus.CounterVec
-	bindRollbacks        *prometheus.CounterVec
-	staleReservations    *prometheus.CounterVec
-	reconciliationErrors *prometheus.CounterVec
+	allocations        *prometheus.CounterVec
+	allocationFailures *prometheus.CounterVec
+	bindRollbacks      *prometheus.CounterVec
 }
 
 var schedulerOutcomeLabels = []string{"phase", "device_type", "failure_reason"}
@@ -42,7 +40,6 @@ const (
 	FailureReasonAnnotationPatch SchedulerFailureReason = "annotation_patch"
 	FailureReasonBind            SchedulerFailureReason = "bind"
 	FailureReasonInternal        SchedulerFailureReason = "internal"
-	FailureReasonStale           SchedulerFailureReason = "stale"
 )
 
 // newSchedulerCounter creates an outcome counter with the shared label contract.
@@ -53,11 +50,9 @@ func newSchedulerCounter(name, help string) *prometheus.CounterVec {
 // NewSchedulerOutcomeMetrics creates the counters used by the scheduler.
 func NewSchedulerOutcomeMetrics() *SchedulerOutcomeMetrics {
 	return &SchedulerOutcomeMetrics{
-		allocations:          newSchedulerCounter("hami_scheduler_allocations_total", "Successful HAMi device allocations."),
-		allocationFailures:   newSchedulerCounter("hami_scheduler_allocation_failures_total", "HAMi device allocation failures."),
-		bindRollbacks:        newSchedulerCounter("hami_scheduler_bind_rollbacks_total", "HAMi bind operations that released a reservation after failure."),
-		staleReservations:    newSchedulerCounter("hami_scheduler_stale_reservations_total", "Stale HAMi device reservations encountered or removed."),
-		reconciliationErrors: newSchedulerCounter("hami_scheduler_reconciliation_errors_total", "HAMi scheduler reconciliation errors."),
+		allocations:        newSchedulerCounter("hami_scheduler_allocations_total", "Successful HAMi device allocations."),
+		allocationFailures: newSchedulerCounter("hami_scheduler_allocation_failures_total", "HAMi device allocation failures."),
+		bindRollbacks:      newSchedulerCounter("hami_scheduler_bind_rollbacks_total", "HAMi bind operations that released a reservation after failure."),
 	}
 }
 
@@ -81,23 +76,11 @@ func (m *SchedulerOutcomeMetrics) ObserveBindRollback(phase, deviceType string, 
 	m.bindRollbacks.With(m.labels(phase, deviceType, reason)).Inc()
 }
 
-// ObserveStaleReservation records a stale reservation encountered or removed.
-func (m *SchedulerOutcomeMetrics) ObserveStaleReservation(phase, deviceType string, reason SchedulerFailureReason) {
-	m.staleReservations.With(m.labels(phase, deviceType, reason)).Inc()
-}
-
-// ObserveReconciliationError records an error while rebuilding scheduler state.
-func (m *SchedulerOutcomeMetrics) ObserveReconciliationError(phase, deviceType string, reason SchedulerFailureReason) {
-	m.reconciliationErrors.With(m.labels(phase, deviceType, reason)).Inc()
-}
-
 // Collect implements prometheus.Collector.
 func (m *SchedulerOutcomeMetrics) Collect(ch chan<- prometheus.Metric) {
 	m.allocations.Collect(ch)
 	m.allocationFailures.Collect(ch)
 	m.bindRollbacks.Collect(ch)
-	m.staleReservations.Collect(ch)
-	m.reconciliationErrors.Collect(ch)
 }
 
 // Describe implements prometheus.Collector.
@@ -105,6 +88,4 @@ func (m *SchedulerOutcomeMetrics) Describe(ch chan<- *prometheus.Desc) {
 	m.allocations.Describe(ch)
 	m.allocationFailures.Describe(ch)
 	m.bindRollbacks.Describe(ch)
-	m.staleReservations.Describe(ch)
-	m.reconciliationErrors.Describe(ch)
 }

@@ -212,14 +212,6 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		nodes := []string{"node1"}
 		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
 		assert.NilError(t, err)
-		assert.NilError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
-# HELP hami_scheduler_stale_reservations_total Stale HAMi device reservations encountered or removed.
-# TYPE hami_scheduler_stale_reservations_total counter
-hami_scheduler_stale_reservations_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
-# HELP hami_scheduler_reconciliation_errors_total HAMi scheduler reconciliation errors.
-# TYPE hami_scheduler_reconciliation_errors_total counter
-hami_scheduler_reconciliation_errors_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
-`), "hami_scheduler_stale_reservations_total", "hami_scheduler_reconciliation_errors_total"))
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
