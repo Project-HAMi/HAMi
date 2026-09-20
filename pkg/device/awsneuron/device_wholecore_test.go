@@ -183,6 +183,51 @@ func Test_Fit_SharedCoresAreDistinctAndReplayable(t *testing.T) {
 	assert.Equal(t, fit, false)
 }
 
+func Test_Fit_NeuronCoreRequestRequiresContiguousRange(t *testing.T) {
+	dev := newNeuronBackend()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("2"),
+			}},
+		}}},
+	}
+	request := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+
+	for _, test := range []struct {
+		name     string
+		used     int32
+		fit      bool
+		wantMask int32
+		wantIDs  string
+	}{
+		// Core 1 is occupied. Cores 0 and 2 are free but cannot be combined;
+		// Fit must choose the later contiguous range, 2-3.
+		{name: "uses later contiguous range", used: 2, fit: true, wantMask: 12, wantIDs: "2,3"},
+		{name: "rejects fragmented free cores", used: 10},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			usage := &device.DeviceUsage{
+				ID: "neuron-0", Index: 0, Count: 4, Totalcore: 15,
+				Usedcores: test.used, Type: AWSNeuronDevice, Health: true,
+				CustomInfo: map[string]any{AWSCoresPerNeuronDevice: int32(4)},
+			}
+			fit, allocations, reason := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, test.fit, reason)
+			if !test.fit {
+				return
+			}
+			assert.Equal(t, allocations[AWSNeuronDevice][0].Usedcores, test.wantMask)
+			annotations := map[string]string{util.AssignedNodeAnnotations: "inf1"}
+			dev.PatchAnnotations(pod, &annotations, device.PodDevices{
+				AWSNeuronDevice: device.PodSingleDevice{allocations[AWSNeuronDevice]},
+			})
+			assert.Equal(t, annotations[AWSNeuronAssignedIndex], test.wantIDs)
+		})
+	}
+}
+
 func Test_Fit_MultiDeviceCoreRequestUsesNodeGeometry(t *testing.T) {
 	tests := []struct {
 		name      string

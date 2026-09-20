@@ -351,16 +351,20 @@ func countMaskAvailable(mask int32) int32 {
 	return ret
 }
 
-func allocateCoreMask(used, available int32, required int32) int32 {
-	var selected int32
-	for core := int32(0); core < int32(maxCoresPerNeuronDevice) && required > 0; core++ {
-		bit := int32(1) << core
-		if available&bit != 0 && used&bit == 0 {
-			selected |= bit
-			required--
+// allocateCoreMask returns one contiguous run of free NeuronCores. The Neuron
+// runtime requires a contiguous core range, so separate free bits cannot be
+// combined into one allocation.
+func allocateCoreMask(used, available int32, required int32) (int32, bool) {
+	if required <= 0 || required > int32(maxCoresPerNeuronDevice) {
+		return 0, false
+	}
+	for start := int32(0); start+required <= int32(maxCoresPerNeuronDevice); start++ {
+		mask := ((int32(1) << required) - 1) << start
+		if available&mask == mask && used&mask == 0 {
+			return mask, true
 		}
 	}
-	return selected
+	return 0, false
 }
 
 func coreAllocationInfo(info map[string]any, selected int32) map[string]any {
@@ -472,7 +476,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			} else if requiredCores == 0 {
 				requiredCores = countMaskAvailable(copy.Totalcore)
 			}
-			if countMaskAvailable(copy.Totalcore)-countMaskAvailable(copy.Usedcores) < requiredCores {
+			if _, found := allocateCoreMask(copy.Usedcores, copy.Totalcore, requiredCores); !found {
 				copy.Health = false
 			}
 			candidates[i] = copy
@@ -493,7 +497,11 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 					} else if requiredCores == 0 {
 						requiredCores = countMaskAvailable(val.Totalcore)
 					}
-					selected := allocateCoreMask(val.Usedcores, val.Totalcore, requiredCores)
+					selected, found := allocateCoreMask(val.Usedcores, val.Totalcore, requiredCores)
+					if !found {
+						reason[common.CardInsufficientCore]++
+						return false, tmpDevs, common.GenReason(reason, len(devices))
+					}
 					tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 						Idx:        int(val.Index),
 						UUID:       val.ID,
@@ -558,7 +566,11 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		}
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-		selected := allocateCoreMask(dev.Usedcores, dev.Totalcore, requiredCores)
+		selected, found := allocateCoreMask(dev.Usedcores, dev.Totalcore, requiredCores)
+		if !found {
+			reason[common.CardInsufficientCore]++
+			continue
+		}
 		tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
