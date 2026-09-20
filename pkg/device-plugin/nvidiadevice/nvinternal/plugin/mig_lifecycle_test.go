@@ -53,6 +53,7 @@ func lifecyclePlugin(t *testing.T) (*NvidiaDevicePlugin, *nvmlmock.Interface) {
 
 func lifecyclePluginWithMode(t *testing.T, mode string) (*NvidiaDevicePlugin, *nvmlmock.Interface) {
 	t.Helper()
+	setupFakeClient(t)
 	lib := &nvmlmock.Interface{
 		InitFunc:           func() nvml.Return { return nvml.SUCCESS },
 		ShutdownFunc:       func() nvml.Return { return nvml.SUCCESS },
