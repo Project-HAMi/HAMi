@@ -756,17 +756,8 @@ func cardPlugin(mode string, uuid string, totalMemoryMB uint64, scaling float64)
 	}
 }
 
-// The allocation reaching the device plugin is only as trustworthy as the
-// annotation it was read from, and that annotation is reachable by the pod's
-// owner (issue #3041). What the container asked for is not: Kubernetes fixes
-// the limits at create, and a percentage of a card resolves against the memory
-// this plugin itself registered.
-//
-// Reproduce on a cluster: schedule a pod requesting nvidia.com/gpumem: 3000,
-// then rewrite hami.io/vgpu-devices-to-allocate on it to name 20000 MB before
-// the kubelet allocates. Before this check the container came up with
-// CUDA_DEVICE_MEMORY_LIMIT=20000m, far past what HAMi had accounted for on
-// that card.
+// A forged hami.io/vgpu-devices-to-allocate annotation must not raise a
+// container's memory limit past what it requested (issue #3041).
 func TestValidateContainerAllocation(t *testing.T) {
 	restore := device.DevicesMap
 	defer func() { device.DevicesMap = restore }()

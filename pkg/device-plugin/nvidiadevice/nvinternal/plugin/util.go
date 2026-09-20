@@ -128,20 +128,7 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 }
 
 // validateContainerAllocation rejects an allocation handing the container more
-// than its own resource limits ask for.
-//
-// The numbers come from the annotation the scheduler writes, and nothing on
-// this side proves the scheduler wrote it: a pod arriving with values of its
-// own is served them as-is, and the memory and core limits below are what the
-// container then runs with (issue #3041). Limits cannot be raised once the pod
-// exists, so they are the one figure here its owner cannot inflate.
-//
-// A request for a percentage of a card is resolved the way the scheduler
-// resolved it, against the memory this plugin registered for that card. A
-// container leaving memory and cores to the defaults names no number to check
-// against, and neither does a card this plugin does not recognise. MIG is
-// skipped as well: a slice is charged its profile's capacity, which is rounded
-// up from the request by design.
+// than its own resource limits ask for (issue #3041).
 func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
 	if plugin.operatingMode == "mig" {
 		return nil
