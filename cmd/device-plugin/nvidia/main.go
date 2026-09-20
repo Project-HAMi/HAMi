@@ -53,8 +53,11 @@ type options struct {
 }
 
 const (
-	autoNvidiaDriverRoot = "auto"
-	hostNvidiaDriverRoot = "/"
+	autoNvidiaDriverRoot        = "auto"
+	hostNvidiaDriverRoot        = "/"
+	gpuOperatorNvidiaDriverRoot = "/run/nvidia/driver"
+	hostDriverContainerRoot     = "/host-driver-root"
+	gpuOperatorRunContainerRoot = "/gpu-operator-run-nvidia"
 )
 
 var gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
@@ -476,13 +479,31 @@ func resolveNvidiaDriverRoot(config *spec.Config) error {
 			"devRoot", devRoot)
 	}
 
+	containerDriverRoot, err := autoContainerDriverRoot(driverRoot)
+	if err != nil {
+		return err
+	}
+
 	// Assign distinct pointers because the NVIDIA configuration loader makes
 	// NvidiaDevRoot point to NvidiaDriverRoot when no dev root is specified.
 	config.Flags.NvidiaDriverRoot = &driverRoot
+	config.Flags.Plugin.ContainerDriverRoot = &containerDriverRoot
 	if config.Flags.NvidiaDevRoot != nil && *config.Flags.NvidiaDevRoot == autoNvidiaDriverRoot {
 		config.Flags.NvidiaDevRoot = &devRoot
 	}
+	klog.InfoS("Selected container NVIDIA driver root", "containerDriverRoot", containerDriverRoot)
 	return nil
+}
+
+func autoContainerDriverRoot(driverRoot string) (string, error) {
+	switch filepath.Clean(driverRoot) {
+	case hostNvidiaDriverRoot:
+		return hostDriverContainerRoot, nil
+	case gpuOperatorNvidiaDriverRoot:
+		return filepath.Join(gpuOperatorRunContainerRoot, "driver"), nil
+	default:
+		return "", fmt.Errorf("unsupported auto-detected NVIDIA driver root %q", driverRoot)
+	}
 }
 
 func readGPUOperatorDriverRoots(path string) (string, string, error) {

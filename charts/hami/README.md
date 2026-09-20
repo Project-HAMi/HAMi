@@ -201,7 +201,10 @@ When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
 `/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
 host-installed driver and uses `/` for both the driver and device roots. When
 HAMi starts before GPU Operator validation completes, wait for GPU Operator to
-become ready and restart the HAMi device plugin DaemonSet.
+become ready and restart the HAMi device plugin DaemonSet. The chart mounts the
+host root at `/host-driver-root` and `/run/nvidia` at
+`/gpu-operator-run-nvidia`; the device plugin selects the matching container
+path for host-installed drivers or GPU Operator's `/run/nvidia/driver` root.
 
 ### Device Plugin Service Configuration
 
