@@ -160,6 +160,11 @@ For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make 
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
 and verifies that the chart and application versions match.
 
+For changes to a package that has benchmarks, also run `make bench`. CI runs the benchmarks to
+confirm they still execute; it does not compare timings, because shared runners are too noisy for
+that. When a change is about performance and you want numbers to quote, raise the benchmark time
+with `BENCHTIME=1s make bench`.
+
 ## Issue and PR Lifecycle
 
 To keep the project manageable, we apply the following policy to all open issues and pull requests:
