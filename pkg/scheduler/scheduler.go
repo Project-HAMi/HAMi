@@ -1084,10 +1084,22 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 		return fmt.Errorf("pod %s/%s is already assigned to node %s",
 			args.PodNamespace, args.PodName, current.Spec.NodeName)
 	}
+	// Pods requesting HAMi resources must have completed filtering before they
+	// can be bound. Otherwise a caller could bypass device reservation and bind
+	// the pod directly to an arbitrary node. Pods without HAMi resources take
+	// the normal binding path and are not added to the pod manager.
+	pi, ok := s.podManager.GetPod(current)
+	for _, reqMap := range device.Resourcereqs(current) {
+		if len(reqMap) > 0 && (!ok || pi.NodeID == "") {
+			return fmt.Errorf("pod %s/%s has no scheduler reservation",
+				args.PodNamespace, args.PodName)
+		}
+	}
+
 	// The node the filter phase picked is the only node this pod may be bound
 	// to. Binding it elsewhere would leave the reservation on the scheduled
 	// node while the pod consumes devices on another.
-	if pi, ok := s.podManager.GetPod(current); ok && pi.NodeID != "" && pi.NodeID != args.Node {
+	if ok && pi.NodeID != "" && pi.NodeID != args.Node {
 		return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
 			args.PodNamespace, args.PodName, pi.NodeID, args.Node)
 	}
