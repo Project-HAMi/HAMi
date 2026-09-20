@@ -186,17 +186,7 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
 }
 
-// canWriteNodes asks the API server whether the caller may patch nodes, the
-// permission HAMi's own writers already need for their node locks and node
-// annotations. Reviewing the permission rather than matching an account keeps a
-// vendor's device plugin working wherever it is deployed, and turns away a
-// workload service account that only holds update on pods.
-//
-// A review that cannot be run refuses the change rather than waving it
-// through: a guard that turns itself off on an error is the bypass it exists to
-// close. The chart grants the create permission this needs, and a scheduler
-// missing it fails loudly at its own bind patch instead of silently trusting
-// every caller.
+// canWriteNodes asks the API server whether the caller may patch nodes.
 func canWriteNodes(ctx context.Context, user authenticationv1.UserInfo) bool {
 	kubeClient := client.GetClient()
 	if kubeClient == nil {
