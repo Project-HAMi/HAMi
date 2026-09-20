@@ -12,10 +12,22 @@ The allocation outcome metrics use only bounded label values:
 | `hami_scheduler_reconciliation_errors_total` | Errors while rebuilding scheduler state. |
 
 The labels are `phase`, `device_type`, and `failure_reason`. They never contain
-pod, namespace, node, UUID, or request identifiers. Failure reasons are fixed
-categories such as `no_fit`, `annotation_patch`, `unknown_device`, and
-`invalid_mig_reservation`. A successful filter reservation uses
-`failure_reason="none"`; bind failures are reported by the failure and
-rollback counters. Reconciliation counters describe observations, so a
-condition encountered during multiple reconciliation cycles may increment more
-than once.
+pod, namespace, node, UUID, or request identifiers. `failure_reason` uses this
+complete, fixed set:
+
+| Value | Meaning |
+| --- | --- |
+| `none` | The operation succeeded. |
+| `no_fit` | No candidate node could satisfy the device request. |
+| `lookup` | A required pod or node could not be read from the scheduler cache. |
+| `identity` | The bind request did not match the current pod identity or target. |
+| `lock` | Device reservation locking failed. |
+| `annotation_patch` | A required pod annotation update failed. |
+| `bind` | Another bind operation failed. |
+| `internal` | Internal usage, scoring, discovery, or cleanup failed. |
+| `stale` | Cached allocation state was missing, inconsistent, or obsolete. |
+
+A successful filter reservation uses `failure_reason="none"`; bind failures
+are reported by the failure and rollback counters. Reconciliation counters
+describe observations, so a condition encountered during multiple
+reconciliation cycles may increment more than once.

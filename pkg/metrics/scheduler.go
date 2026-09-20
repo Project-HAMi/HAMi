@@ -30,6 +30,22 @@ type SchedulerOutcomeMetrics struct {
 
 var schedulerOutcomeLabels = []string{"phase", "device_type", "failure_reason"}
 
+// SchedulerFailureReason is the bounded set of failure_reason label values.
+type SchedulerFailureReason string
+
+const (
+	FailureReasonNone            SchedulerFailureReason = "none"
+	FailureReasonNoFit           SchedulerFailureReason = "no_fit"
+	FailureReasonLookup          SchedulerFailureReason = "lookup"
+	FailureReasonIdentity        SchedulerFailureReason = "identity"
+	FailureReasonLock            SchedulerFailureReason = "lock"
+	FailureReasonAnnotationPatch SchedulerFailureReason = "annotation_patch"
+	FailureReasonBind            SchedulerFailureReason = "bind"
+	FailureReasonInternal        SchedulerFailureReason = "internal"
+	FailureReasonStale           SchedulerFailureReason = "stale"
+)
+
+// newSchedulerCounter creates an outcome counter with the shared label contract.
 func newSchedulerCounter(name, help string) *prometheus.CounterVec {
 	return prometheus.NewCounterVec(prometheus.CounterOpts{Name: name, Help: help}, schedulerOutcomeLabels)
 }
@@ -45,32 +61,33 @@ func NewSchedulerOutcomeMetrics() *SchedulerOutcomeMetrics {
 	}
 }
 
-func (m *SchedulerOutcomeMetrics) labels(phase, deviceType, reason string) prometheus.Labels {
-	return prometheus.Labels{"phase": phase, "device_type": deviceType, "failure_reason": reason}
+// labels builds the bounded labels shared by every scheduler outcome counter.
+func (m *SchedulerOutcomeMetrics) labels(phase, deviceType string, reason SchedulerFailureReason) prometheus.Labels {
+	return prometheus.Labels{"phase": phase, "device_type": deviceType, "failure_reason": string(reason)}
 }
 
 // ObserveAllocation records a successful allocation.
 func (m *SchedulerOutcomeMetrics) ObserveAllocation(phase, deviceType string) {
-	m.allocations.With(m.labels(phase, deviceType, "none")).Inc()
+	m.allocations.With(m.labels(phase, deviceType, FailureReasonNone)).Inc()
 }
 
 // ObserveAllocationFailure records a failed allocation using a bounded reason.
-func (m *SchedulerOutcomeMetrics) ObserveAllocationFailure(phase, deviceType, reason string) {
+func (m *SchedulerOutcomeMetrics) ObserveAllocationFailure(phase, deviceType string, reason SchedulerFailureReason) {
 	m.allocationFailures.With(m.labels(phase, deviceType, reason)).Inc()
 }
 
 // ObserveBindRollback records a bind failure that released its reservation.
-func (m *SchedulerOutcomeMetrics) ObserveBindRollback(phase, deviceType, reason string) {
+func (m *SchedulerOutcomeMetrics) ObserveBindRollback(phase, deviceType string, reason SchedulerFailureReason) {
 	m.bindRollbacks.With(m.labels(phase, deviceType, reason)).Inc()
 }
 
 // ObserveStaleReservation records a stale reservation encountered or removed.
-func (m *SchedulerOutcomeMetrics) ObserveStaleReservation(phase, deviceType, reason string) {
+func (m *SchedulerOutcomeMetrics) ObserveStaleReservation(phase, deviceType string, reason SchedulerFailureReason) {
 	m.staleReservations.With(m.labels(phase, deviceType, reason)).Inc()
 }
 
 // ObserveReconciliationError records an error while rebuilding scheduler state.
-func (m *SchedulerOutcomeMetrics) ObserveReconciliationError(phase, deviceType, reason string) {
+func (m *SchedulerOutcomeMetrics) ObserveReconciliationError(phase, deviceType string, reason SchedulerFailureReason) {
 	m.reconciliationErrors.With(m.labels(phase, deviceType, reason)).Inc()
 }
 

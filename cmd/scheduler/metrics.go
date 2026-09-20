@@ -48,6 +48,7 @@ type schedulerMetricsProvider interface {
 	// can emit hami_scheduler_is_leader without importing the scheduler package
 	// directly in metrics.go.
 	GetLeaderManager() leaderelection.LeaderManager
+	// GetAllocationMetrics returns the scheduler outcome counters.
 	GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics
 	// IsSynced reports whether the scheduler's internal cache has completed at
 	// least one successful sync and is ready to serve scheduling requests.

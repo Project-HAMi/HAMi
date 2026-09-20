@@ -133,7 +133,8 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 		},
 	}
 
-	if err := reg.Register(cc); err != nil {
+	registerer := prometheus.WrapRegistererWith(prometheus.Labels{"zone": c.Zone}, reg)
+	if err := registerer.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
 

@@ -215,10 +215,10 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		assert.NilError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
 # HELP hami_scheduler_stale_reservations_total Stale HAMi device reservations encountered or removed.
 # TYPE hami_scheduler_stale_reservations_total counter
-hami_scheduler_stale_reservations_total{device_type="NVIDIA",failure_reason="unknown_device",phase="reconcile"} 1
+hami_scheduler_stale_reservations_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
 # HELP hami_scheduler_reconciliation_errors_total HAMi scheduler reconciliation errors.
 # TYPE hami_scheduler_reconciliation_errors_total counter
-hami_scheduler_reconciliation_errors_total{device_type="NVIDIA",failure_reason="unknown_device",phase="reconcile"} 1
+hami_scheduler_reconciliation_errors_total{device_type="NVIDIA",failure_reason="stale",phase="reconcile"} 1
 `), "hami_scheduler_stale_reservations_total", "hami_scheduler_reconciliation_errors_total"))
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
@@ -3024,7 +3024,7 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
 # HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
 # TYPE hami_scheduler_allocation_failures_total counter
-hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="pod_lookup",phase="bind"} 1
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
 `), "hami_scheduler_allocation_failures_total"))
 }
 
@@ -3084,7 +3084,7 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
 # HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
 # TYPE hami_scheduler_allocation_failures_total counter
-hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="node_lookup",phase="bind"} 1
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
 `), "hami_scheduler_allocation_failures_total"))
 }
 
