@@ -407,7 +407,7 @@ func Test_onAddPod_DecodeFailureRequiresScheduledHAMiPod(t *testing.T) {
 	}
 }
 
-func Test_onUpdatePod_RemovedAssignmentKeepsUnaccountedNodeBlocked(t *testing.T) {
+func Test_onUpdatePod_RemovedAssignmentClearsDecodeFailure(t *testing.T) {
 	initReplayDevices(t)
 	s := NewScheduler()
 	addReplayNode(s, "node1")
@@ -421,20 +421,12 @@ func Test_onUpdatePod_RemovedAssignmentKeepsUnaccountedNodeBlocked(t *testing.T)
 	nodes := []string{"node1"}
 	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
 	assert.NilError(t, err)
-	assert.Equal(t, len(*candidates), 0)
-	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
-
-	terminated := updated.DeepCopy()
-	terminated.Status.Phase = corev1.PodSucceeded
-	s.onUpdatePod(updated, terminated)
-	candidates, _, failedNodes, err = s.getNodesUsage(&nodes, nil)
-	assert.NilError(t, err)
 	assert.Equal(t, len(failedNodes), 0)
 	_, ok := (*candidates)["node1"]
 	assert.Equal(t, ok, true)
 }
 
-func Test_onUpdatePod_RemovedAssignmentQuarantinesUncachedRunningPod(t *testing.T) {
+func Test_onUpdatePod_RemovedAssignmentDoesNotQuarantineUncachedRunningPod(t *testing.T) {
 	initReplayDevices(t)
 	s := NewScheduler()
 	addReplayNode(s, "node1")
@@ -446,8 +438,9 @@ func Test_onUpdatePod_RemovedAssignmentQuarantinesUncachedRunningPod(t *testing.
 	nodes := []string{"node1"}
 	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
 	assert.NilError(t, err)
-	assert.Equal(t, len(*candidates), 0)
-	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
+	assert.Equal(t, len(failedNodes), 0)
+	_, ok := (*candidates)["node1"]
+	assert.Equal(t, ok, true)
 }
 
 func Test_onUpdatePod_TerminatedWithoutAssignmentRemovesCachedUsage(t *testing.T) {
@@ -490,7 +483,7 @@ func Test_onAddPod_RunningWithoutScheduledConditionBlocksUnaccountedNode(t *test
 	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
 }
 
-func Test_onAddPod_RunningWithoutAssignmentBlocksUntilDeletion(t *testing.T) {
+func Test_onAddPod_RunningWithoutAssignmentDoesNotBlockNode(t *testing.T) {
 	initReplayDevices(t)
 	s := NewScheduler()
 	addReplayNode(s, "node1")
@@ -500,12 +493,6 @@ func Test_onAddPod_RunningWithoutAssignmentBlocksUntilDeletion(t *testing.T) {
 
 	nodes := []string{"node1"}
 	candidates, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
-	assert.NilError(t, err)
-	assert.Equal(t, len(*candidates), 0)
-	assert.Equal(t, failedNodes["node1"], unaccountedPodAllocationReason)
-
-	s.onDelPod(pod)
-	candidates, _, failedNodes, err = s.getNodesUsage(&nodes, nil)
 	assert.NilError(t, err)
 	assert.Equal(t, len(failedNodes), 0)
 	_, ok := (*candidates)["node1"]

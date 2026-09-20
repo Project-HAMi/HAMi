@@ -250,9 +250,9 @@ func (s *Scheduler) onAddPod(obj any) {
 	}
 	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
 	if !ok {
-		if _, cached := s.podManager.GetPod(pod); !cached {
-			s.recordAllocationDecodeFailure(pod, pod.Spec.NodeName)
-		}
+		// Allocation decode failures are tied to HAMi's assignment annotation.
+		// Without it, there is no scheduler-owned allocation to quarantine.
+		s.allocationDecodeFailures.clearPod(pod.UID)
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -303,14 +303,10 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
-		if _, cached := s.podManager.GetPod(newPod); cached {
-			s.podManager.UpdatePod(newPod)
-		} else {
-			// The Pod remains bound, but its allocation is still unknown.
-			// Preserve any existing failure and quarantine a running Pod whose
-			// assignment disappeared before it could be accounted.
-			s.recordAllocationDecodeFailure(newPod, newPod.Spec.NodeName)
-		}
+		// The assignment annotation is required before an undecodable Pod can
+		// represent an unaccounted HAMi allocation. Clear a prior failure when
+		// it disappears so an unrelated running Pod cannot block the node.
+		s.allocationDecodeFailures.clearPod(newPod.UID)
 		return
 	}
 
