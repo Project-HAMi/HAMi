@@ -22,11 +22,16 @@ import (
 
 	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -729,5 +734,203 @@ func TestCheckCDISpec(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func gpuContainer(limits corev1.ResourceList) *corev1.Container {
+	return &corev1.Container{
+		Name:      "main",
+		Resources: corev1.ResourceRequirements{Limits: limits},
+	}
+}
+
+// cardPlugin builds a plugin that knows one card of the given size, the way the
+// registered node annotation tells the scheduler about it.
+func cardPlugin(mode string, uuid string, totalMemoryMB uint64, scaling float64) *NvidiaDevicePlugin {
+	return &NvidiaDevicePlugin{
+		operatingMode:   mode,
+		schedulerConfig: nvidia.NvidiaConfig{DeviceMemoryScaling: &scaling},
+		rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
+			return rm.Devices{uuid: &rm.Device{TotalMemory: totalMemoryMB * 1024 * 1024}}
+		}},
+	}
+}
+
+// A forged hami.io/vgpu-devices-to-allocate annotation must not raise a
+// container's memory limit past what it requested (issue #3041).
+func TestValidateContainerAllocation(t *testing.T) {
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	const uuid = "GPU-1"
+	tests := []struct {
+		name      string
+		plugin    *NvidiaDevicePlugin
+		limits    corev1.ResourceList
+		allocated device.ContainerDevices
+		wantErr   bool
+	}{
+		{
+			name:      "within the requested memory",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 3000}},
+		},
+		{
+			name:      "more memory than requested",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+			wantErr:   true,
+		},
+		{
+			name:      "more cores than requested",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpucores": resource.MustParse("10")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedcores: 100}},
+			wantErr:   true,
+		},
+		{
+			name:      "within the requested percentage",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 12000}},
+		},
+		{
+			name:      "more than the requested percentage",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+			wantErr:   true,
+		},
+		{
+			name:      "percentage of an oversubscribed card",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 2),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 24000}},
+		},
+		{
+			name:      "percentage on a card this plugin does not know",
+			plugin:    cardPlugin("hami-core", "GPU-other", 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+		},
+		{
+			name:      "memory left to the default",
+			plugin:    cardPlugin("hami-core", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 24000}},
+		},
+		{
+			name:      "mig slice charged its profile",
+			plugin:    cardPlugin("mig", uuid, 24000, 1),
+			limits:    corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")},
+			allocated: device.ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.plugin.validateContainerAllocation(gpuContainer(tt.limits), tt.allocated)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("the allocation was accepted")
+				}
+				if !strings.Contains(err.Error(), "main") {
+					t.Errorf("error %q does not name the container", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("the allocation was rejected: %v", err)
+			}
+		})
+	}
+}
+
+// A device plugin built without the nvidia backend registered has no request to
+// compare against, and must not reject the allocation on that account.
+func TestValidateContainerAllocationWithoutDevices(t *testing.T) {
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+	device.DevicesMap = nil
+
+	limits := corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse("3000")}
+	plugin := cardPlugin("hami-core", "GPU-1", 24000, 1)
+	if err := plugin.validateContainerAllocation(gpuContainer(limits), device.ContainerDevices{{UUID: "GPU-1", Usedmem: 20000}}); err != nil {
+		t.Fatalf("the allocation was rejected: %v", err)
+	}
+}
+
+// Alignment can move an annotated entry onto the card the kubelet picked, so
+// the share has to be measured against that card rather than the one the
+// annotation named. Half of an 80 GB card is 40 GB, and carrying that onto a
+// 24 GB card would hand the container a limit past the whole device.
+func TestAllocate_PercentageCheckedAgainstAlignedDevice(t *testing.T) {
+	setupInRequestDevices(t)
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	annotated := &rm.Device{TotalMemory: 80000 * 1024 * 1024}
+	annotated.ID = "GPU-aaa"
+	selected := &rm.Device{TotalMemory: 24000 * 1024 * 1024}
+	selected.ID = "GPU-bbb"
+	plugin := newTestPluginWithRM(t, map[string]*rm.Device{"GPU-aaa": annotated, "GPU-bbb": selected})
+
+	previous := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	t.Cleanup(func() { enableGetPreferredAllocation = previous })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "aligned-pod", Namespace: "default", UID: "aligned-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,40000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c0",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			}},
+		}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	_, err := plugin.Allocate(context.Background(), &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-bbb"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("the allocation was accepted on the smaller card")
+	}
+	if !strings.Contains(err.Error(), "GPU-bbb") {
+		t.Errorf("error %q does not name the card the container got", err)
 	}
 }
