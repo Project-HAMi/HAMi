@@ -26,12 +26,12 @@ data:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
     {{- if .Values.scheduler.admissionWebhook.enabled }}
-    - urlPrefix: "https://127.0.0.1:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}"
+    - urlPrefix: "https://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}"
       enableHTTPS: true
       tlsConfig:
         insecure: true
     {{- else }}
-    - urlPrefix: "http://127.0.0.1:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}"
+    - urlPrefix: "http://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}"
       enableHTTPS: false
     {{- end }}
       filterVerb: filter
@@ -50,13 +50,13 @@ data:
         "extenders": [
             {
                 {{- if .Values.scheduler.admissionWebhook.enabled }}
-                "urlPrefix": "https://127.0.0.1:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}",
+                "urlPrefix": "https://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}",
                 "enableHttps": true,
                 "tlsConfig": {
                     "insecure": true
                 },
                 {{- else }}
-                "urlPrefix": "http://127.0.0.1:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}",
+                "urlPrefix": "http://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}",
                 "enableHttps": false,
                 {{- end }}
                 "filterVerb": "filter",

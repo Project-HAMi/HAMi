@@ -147,6 +147,40 @@ func Test_InitDevices(t *testing.T) {
 			},
 			want: []*Devices{},
 		},
+		{
+			// Multi-chip config: allAscendResourceNames must be collected from every
+			// chip and shared across all returned Devices instances, so a container
+			// requesting one chip's resource is recognized as an Ascend container by
+			// every other chip's MutateAdmission.
+			name:         "multi-chip shares allAscendResourceNames",
+			enableAscend: true,
+			args: []VNPUConfig{
+				{
+					ChipName:           "910A",
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					AICore:             int32(30),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				},
+				{
+					ChipName:           "910B4",
+					CommonWord:         "Ascend910B4",
+					ResourceName:       "huawei.com/Ascend910B4",
+					ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					AICore:             int32(20),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				},
+			},
+			want: []*Devices{
+				{config: VNPUConfig{ChipName: "910A", CommonWord: "Ascend910A", ResourceName: "huawei.com/Ascend910A", ResourceMemoryName: "huawei.com/Ascend910A-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(30), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
+				{config: VNPUConfig{ChipName: "910B4", CommonWord: "Ascend910B4", ResourceName: "huawei.com/Ascend910B4", ResourceMemoryName: "huawei.com/Ascend910B4-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(20), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -157,9 +191,20 @@ func Test_InitDevices(t *testing.T) {
 				for k, v := range devices {
 					assert.Equal(t, v, devices[k], "load ascend vnpu config %s: %v", devices[k].config.CommonWord, devices[k].config)
 				}
+				// Multi-chip: every Devices instance must share the full resource-name
+				// list collected from all chips, so containerRequestsAnyAscendResource
+				// works across sibling chips in the webhook loop.
+				if len(test.args) > 1 {
+					wantNames := []corev1.ResourceName{"huawei.com/Ascend910A", "huawei.com/Ascend910B4"}
+					for _, d := range devices {
+						assert.DeepEqual(t, d.allAscendResourceNames, wantNames)
+					}
+				}
 				assert.Equal(t, "hami.io/Ascend910A-devices-to-allocate", device.InRequestDevices[test.args[0].CommonWord])
 				assert.Equal(t, "hami.io/Ascend910A-devices-allocated", device.SupportDevices[test.args[0].CommonWord])
-				assert.Equal(t, test.want[0].handshakeAnno, util.HandshakeAnnos[test.args[0].CommonWord])
+				if len(test.args) == 1 && len(test.want) > 0 {
+					assert.Equal(t, test.want[0].handshakeAnno, util.HandshakeAnnos[test.args[0].CommonWord])
+				}
 			}
 		})
 	}
@@ -169,6 +214,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	dev := Devices{}
 	tests := []struct {
 		name string
+		dev  Devices
 		args corev1.Node
 		want []*device.DeviceInfo
 		err  error
@@ -188,6 +234,81 @@ func Test_GetNodeDevices(t *testing.T) {
 					ID:      "GPU-0",
 					Count:   int32(4),
 					Devcore: int32(8),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "hami-core node rewrites physical Devcore to 100",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-hami-core",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":20,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "true",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(100),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "hami-core node keeps advertised oversell Devcore",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-oversell",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":150,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "true",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(150),
+					Devmem:  int32(8738),
+					Type:    "huawei.com/Ascend910",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "node annotation false keeps physical Devcore",
+			dev:  Devices{hamiVnpuCore: true},
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-template",
+					Annotations: map[string]string{
+						dev.nodeRegisterAnno:       "[{\"ID\":\"GPU-0\",\"Count\":4,\"Devmem\":8738,\"Devcore\":20,\"Type\":\"huawei.com/Ascend910\",\"Numa\":0,\"Health\":true}]",
+						VNPUNodeSelectorAnnotation: "false",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:      "GPU-0",
+					Count:   int32(4),
+					Devcore: int32(20),
 					Devmem:  int32(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
@@ -235,7 +356,8 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := dev.GetNodeDevices(test.args)
+			d := test.dev
+			result, err := d.GetNodeDevices(test.args)
 			if (err != nil) != (test.err != nil) {
 				klog.ErrorS(err, "failed to unmarshal node devices", "node", test.args.Name)
 			}
@@ -867,11 +989,11 @@ func Test_MutateAdmission_OverwriteEnvDoesNotOverrideAscendContainer(t *testing.
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates: []Template{
 				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
 			},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -907,9 +1029,9 @@ func Test_MutateAdmission_OverwriteEnvInjectsEmptyForNonAscendContainer(t *testi
 				ResourceMemoryName: resourceName + "-memory",
 				MemoryAllocatable:  int64(32768),
 				MemoryCapacity:     int64(32768),
-				OverwriteEnv:       true,
 				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 			},
+			overwriteEnv:           true,
 			allAscendResourceNames: allResNames,
 		}
 	}
@@ -948,9 +1070,9 @@ func Test_MutateAdmission_OverwriteEnvLastWinsInjectsAfterRealValue(t *testing.T
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -983,9 +1105,9 @@ func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			OverwriteEnv:       true,
 			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
 		},
+		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
 	}
 	ctr := corev1.Container{
@@ -1011,6 +1133,117 @@ func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
 		}
 	}
 	assert.Assert(t, foundEmpty, "expected an empty literal ASCEND_VISIBLE_DEVICES to be injected despite the ValueFrom entry")
+}
+
+// hasInjectedEmptyAVD reports whether ctr.Env contains a literal empty
+// ASCEND_VISIBLE_DEVICES entry (the clearing injection).
+func hasInjectedEmptyAVD(env []corev1.EnvVar) bool {
+	for _, e := range env {
+		if e.Name == "ASCEND_VISIBLE_DEVICES" && e.ValueFrom == nil && e.Value == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Test_MutateAdmission_OverwriteEnvOptOut covers the universal opt-out annotation
+// (hami.io/overwrite-env pod-level + hami.io/overwrite-env-containers JSON container-level)
+// resolved via util.OverwriteEnvDecision, with the backend's dev.overwriteEnv
+// as the Unset fallback. The three-state decision: On forces injection, Off skips,
+// Unset falls back to config. Container-level overrides pod-level (both directions).
+func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
+	allResNames := []corev1.ResourceName{
+		"huawei.com/Ascend910A",
+		"huawei.com/Ascend910B4",
+	}
+	mkDev := func(overwriteEnv bool) *Devices {
+		return &Devices{
+			config: VNPUConfig{
+				ResourceName:       "huawei.com/Ascend910A",
+				ResourceMemoryName: "huawei.com/Ascend910A-memory",
+				MemoryAllocatable:  int64(32768),
+				MemoryCapacity:     int64(32768),
+				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+			},
+			overwriteEnv:           overwriteEnv,
+			allAscendResourceNames: allResNames,
+		}
+	}
+	mkPod := func(ann map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: ann}}
+	}
+	// nonAscendCtr requests no Ascend resource → eligible for the clearing injection.
+	nonAscendCtr := func() corev1.Container {
+		return corev1.Container{
+			Name:      "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		}
+	}
+
+	type tc struct {
+		name        string
+		configOn    bool // dev.overwriteEnv
+		annotations map[string]string
+		wantInject  bool
+	}
+	cases := []tc{
+		// Unset (no annotations) → fall back to config.
+		{name: "unset config true injects", configOn: true, wantInject: true},
+		{name: "unset config false skips", configOn: false, wantInject: false},
+		// Pod-level annotation forces the decision regardless of config.
+		{name: "pod false skips despite config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false"}, wantInject: false},
+		{name: "pod true injects despite config false", configOn: false, annotations: map[string]string{"hami.io/overwrite-env": "true"}, wantInject: true},
+		// Container-level overrides pod-level (both directions).
+		{name: "container false overrides pod true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "true", "hami.io/overwrite-env-containers": `{"main":"false"}`}, wantInject: false},
+		{name: "container true reverse-overrides pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"true"}`}, wantInject: true},
+		// Invalid annotation value is treated as absent → falls back to lower layer.
+		{name: "invalid pod value falls back to config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "yes"}, wantInject: true},
+		{name: "invalid container value falls back to pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"maybe"}`}, wantInject: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dev := mkDev(c.configOn)
+			ctr := nonAscendCtr()
+			_, err := dev.MutateAdmission(&ctr, mkPod(c.annotations))
+			assert.NilError(t, err)
+			assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), c.wantInject)
+		})
+	}
+
+	// Ascend container opt-out is a no-op: a container requesting an Ascend resource
+	// never enters the injection branch, so opt-out annotations have no effect.
+	t.Run("ascend container opt-out is no-op regardless of annotation", func(t *testing.T) {
+		dev := mkDev(true)
+		ctr := corev1.Container{
+			Name: "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"huawei.com/Ascend910B4": resource.MustParse("1"),
+			}},
+		}
+		// 910A device sees !ok for a 910B4 container; opt-out true would force inject
+		// for a non-ascend container, but an ascend container must be left untouched.
+		_, err := dev.MutateAdmission(&ctr, mkPod(map[string]string{"hami.io/overwrite-env": "true"}))
+		assert.NilError(t, err)
+		assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), false, "ascend container must not be injected even with opt-out true")
+	})
+
+	// Requests-only (no Limits) Ascend container is still recognized as an Ascend
+	// container and must not be injected (containerRequestsAnyAscendResource checks
+	// both Limits and Requests).
+	t.Run("requests-only ascend container is not injected", func(t *testing.T) {
+		dev := mkDev(true)
+		ctr := corev1.Container{
+			Name: "main",
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910B4": resource.MustParse("1"),
+				},
+			},
+		}
+		_, err := dev.MutateAdmission(&ctr, mkPod(nil))
+		assert.NilError(t, err)
+		assert.Equal(t, hasInjectedEmptyAVD(ctr.Env), false, "requests-only ascend container must not be injected")
+	})
 }
 
 func Test_MutateAdmission910C(t *testing.T) {
@@ -2903,6 +3136,298 @@ func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
 	}
 }
 
+func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	base := device.DeviceUsage{
+		ID: "dev-0", Index: 0, Type: "Ascend910B3",
+		Used: 3, Count: 4,
+		Usedmem: 3072, Totalmem: 65536,
+		Usedcores: 90, Health: true,
+	}
+	req := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 1024, MemPercentagereq: 0, Coresreq: 20,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+
+	t.Run("normalized 100-point budget admits Coresreq 30", func(t *testing.T) {
+		c := base
+		c.Used = 0
+		c.Usedmem = 0
+		c.Usedcores = 0
+		c.Totalcore = 100
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		req30 := req
+		req30.Coresreq = 30
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, req30, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit against 100-point budget, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("GetNodeDevices remaps physical 20 then Fit admits 30", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		n := corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Annotations: map[string]string{
+				dev.nodeRegisterAnno:       `[{"ID":"dev-0","Count":4,"Devmem":65536,"Devcore":20,"Type":"Ascend910B3","Numa":0,"Health":true}]`,
+				VNPUNodeSelectorAnnotation: "true",
+			},
+		}}
+		infos, err := dev.GetNodeDevices(n)
+		if err != nil || len(infos) != 1 || infos[0].Devcore != 100 {
+			t.Fatalf("expected remapped Devcore=100, err=%v infos=%#v", err, infos)
+		}
+		c := base
+		c.Used = 0
+		c.Usedmem = 0
+		c.Usedcores = 0
+		c.Totalcore = infos[0].Devcore
+		req30 := req
+		req30.Coresreq = 30
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req30, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit after inventory remap 20->100, got reason=%s", reason)
+		}
+	})
+	t.Run("normalized 100-point budget rejects 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 100
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 100 rejects 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 100
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 150 admits 90+20", func(t *testing.T) {
+		c := base
+		c.Totalcore = 150
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, req, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit at 110<=150, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("default budget 100 keeps CardComputeUnitsExhausted for a full card", func(t *testing.T) {
+		full := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 100,
+			Health: true,
+		}}
+		zeroCore := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 1024, MemPercentagereq: 0, Coresreq: 0,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(full, zeroCore, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected a full card to reject the request")
+		}
+		if reason != "1/1 CardComputeUnitsExhausted" {
+			t.Fatalf("expected CardComputeUnitsExhausted without oversell, got %s", reason)
+		}
+	})
+	t.Run("advertised 150 admits a second tenant below the exclusive threshold", func(t *testing.T) {
+		partial := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 60, Totalcore: 150,
+			Health: true,
+		}}
+		share := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(partial, share, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 60+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+	t.Run("advertised 150 exclusive occupant rejects a legacy vnpu pod", func(t *testing.T) {
+		exclusive := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 150,
+			Health: true,
+		}}
+		// No vnpu-mode annotation: Fit only filters hami-core pods off
+		// non-hami-core nodes, so this pod still reaches the oversold card.
+		legacyPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+		zeroCore := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 1024, MemPercentagereq: 0, Coresreq: 0,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(exclusive, zeroCore, legacyPod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected exclusive occupant to reject a legacy vNPU pod, got reason=%s", reason)
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+	t.Run("advertised 150 exclusive occupant rejects later share", func(t *testing.T) {
+		exclusive := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 150,
+			Health: true,
+		}}
+		share := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(exclusive, share, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected exclusive occupant to reject 50-core share, got reason=%s", reason)
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+}
+
+func TestDevices_Fit_HamiCoreMemoryOversell(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 32768, MemPercentagereq: 0, Coresreq: 20,
+	}
+
+	t.Run("physical 65536 rejects a 32768 share after a full-card occupant", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 65536,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, share, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 65536+32768>65536, got reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientMemory" {
+			t.Fatalf("expected CardInsufficientMemory, got %s", reason)
+		}
+	})
+	t.Run("plugin advertises 98304 admits 65536+32768", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 98304,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, result, reason := dev.Fit([]*device.DeviceUsage{&c}, share, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit at 65536+32768<=98304, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+	t.Run("plugin advertises 98304 rejects 65536+40000", func(t *testing.T) {
+		c := device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 65536, Totalmem: 98304,
+			Usedcores: 50, Totalcore: 100,
+			Health: true,
+		}
+		over := share
+		over.Memreq = 40000
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{&c}, over, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 65536+40000>98304, got reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientMemory" {
+			t.Fatalf("expected CardInsufficientMemory, got %s", reason)
+		}
+	})
+}
+
+func TestHamiCorePercentBudget(t *testing.T) {
+	cases := []struct {
+		in   int32
+		want int32
+	}{
+		{0, 100},
+		{20, 100},
+		{32, 100},
+		{100, 100},
+		{150, 150},
+		{200, 200},
+	}
+	for _, tc := range cases {
+		if got := hamiCorePercentBudget(tc.in); got != tc.want {
+			t.Fatalf("hamiCorePercentBudget(%d)=%d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestDevices_Fit_910C(t *testing.T) {
 	configStr := `- chipName: Ascend910
   commonWord: Ascend910C
@@ -3302,4 +3827,585 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, ok, false)
 		assert.Equal(t, reason, "core limit out of range")
 	})
+}
+
+// TestDevices_Fit_HamiCoreOversellInitContainerExclusivity keeps a full-core
+// init-container reservation exclusive once the plugin advertises an oversold
+// budget. CollapseInitContainerUsage tracks the peak core usage and the peak
+// slot count independently, so a Pod whose init container reserves the whole
+// card and whose app containers then run alongside is stored as Usedcores=100
+// with Slots=2, which the scheduler reconstructs as dev.Used=2.
+func TestDevices_Fit_HamiCoreOversellInitContainerExclusivity(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+	}
+
+	// applyUsage rebuilds node usage from a collapsed allocation the way the
+	// scheduler does: slots feed Used, and the Pod is recorded on the device.
+	applyUsage := func(dev *device.DeviceUsage, pi *device.PodInfo) {
+		for _, podSingle := range pi.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, cd := range ctrDevs {
+					if cd.UUID != dev.ID {
+						continue
+					}
+					dev.Used += max(cd.Slots, 1)
+					dev.Usedmem += cd.Usedmem
+					dev.Usedcores += cd.Usedcores
+					dev.PodInfos = append(dev.PodInfos, pi)
+				}
+			}
+		}
+	}
+
+	t.Run("init container holding the full card stays exclusive", func(t *testing.T) {
+		holder := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init"}},
+				Containers:     []corev1.Container{{Name: "app-0"}, {Name: "app-1"}},
+			},
+		}
+		collapsed := device.CollapseInitContainerUsage(holder, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 100}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 30}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 30}},
+			},
+		})
+		entry := collapsed["Ascend910B3"][0][0]
+		if entry.Usedcores != hamiCorePercentBase || entry.Slots != 2 {
+			t.Fatalf("collapsed usage changed: Usedcores=%d Slots=%d, want %d and 2",
+				entry.Usedcores, entry.Slots, hamiCorePercentBase)
+		}
+
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: holder, NodeID: "node1", Devices: collapsed})
+		if held.Used != 2 || held.Usedcores != hamiCorePercentBase {
+			t.Fatalf("reconstructed usage changed: Used=%d Usedcores=%d, want 2 and %d",
+				held.Used, held.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected the exclusive init reservation to reject a 50-core share")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("two half-card tenants keep sharing the oversold card", func(t *testing.T) {
+		shared := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		for _, name := range []string{"tenant-a", "tenant-b"} {
+			tenant := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			}
+			collapsed := device.CollapseInitContainerUsage(tenant, device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+				},
+			})
+			applyUsage(shared, &device.PodInfo{Pod: tenant, NodeID: "node1", Devices: collapsed})
+		}
+		if shared.Used != 2 || shared.Usedcores != hamiCorePercentBase {
+			t.Fatalf("reconstructed usage changed: Used=%d Usedcores=%d, want 2 and %d",
+				shared.Used, shared.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{shared}, share, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+}
+
+// TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity applies the
+// same occupant rule to an incoming pod: a pod-total of 100 on one card
+// cannot share oversell with another tenant, regardless of arrival order.
+func TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	share50 := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 4096, MemPercentagereq: 0, Coresreq: 50,
+	}
+	applyUsage := func(dev *device.DeviceUsage, pi *device.PodInfo) {
+		for _, podSingle := range pi.Devices {
+			for _, ctrDevs := range podSingle {
+				for _, cd := range ctrDevs {
+					if cd.UUID != dev.ID {
+						continue
+					}
+					dev.Used += max(cd.Slots, 1)
+					dev.Usedmem += cd.Usedmem
+					dev.Usedcores += cd.Usedcores
+					dev.PodInfos = append(dev.PodInfos, pi)
+				}
+			}
+		}
+	}
+	collapsedOn := func(pod *corev1.Pod, cores int32) device.PodDevices {
+		return device.CollapseInitContainerUsage(pod, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: cores}},
+			},
+		})
+	}
+
+	t.Run("A then B rejects B after A occupies 100 across two containers", func(t *testing.T) {
+		holder := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
+		}
+		collapsed := device.CollapseInitContainerUsage(holder, device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		})
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: holder, NodeID: "node1", Devices: collapsed})
+		if held.Usedcores != hamiCorePercentBase {
+			t.Fatalf("collapsed A usage: Usedcores=%d, want %d", held.Usedcores, hamiCorePercentBase)
+		}
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected B to be rejected after A already holds 100")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("B then A admits A's first 50 and rejects A's second 50", func(t *testing.T) {
+		tenantB := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyUsage(held, &device.PodInfo{Pod: tenantB, NodeID: "node1", Devices: collapsedOn(tenantB, 50)})
+
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected A's first 50 to fit beside B, got reason=%s", reason)
+		}
+
+		// score.AddResourceUsage records the first container before Fit sees
+		// the second. allocated carries that prior request so the incoming
+		// occupant rule can see the pod-total of 100.
+		held.Used++
+		held.Usedcores += 50
+		held.Usedmem += 4096
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		fit, _, reason = dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if fit {
+			t.Fatalf("expected A's second 50 to be exclusive against B")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("same pod can place a second 50 on an empty oversold card", func(t *testing.T) {
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+			Used: 1, Usedmem: 4096, Usedcores: 50,
+		}
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if !fit {
+			t.Fatalf("expected the same pod's second 50 to fit, got reason=%s", reason)
+		}
+	})
+
+	t.Run("in-flight same-pod usage without PodInfos is not another tenant", func(t *testing.T) {
+		// Sidecar / prior containers stay on Usedcores via AddResourceUsage
+		// but are not in the app-phase allocated map. They must not look like
+		// another tenant or the same pod's later 50 is rejected.
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+			Used: 2, Usedmem: 8192, Usedcores: 100,
+		}
+		allocated := &device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share50, hamiCorePod, nodeInfo, allocated)
+		if !fit {
+			t.Fatalf("expected same-pod in-flight 50+50 to fit, got reason=%s", reason)
+		}
+	})
+
+	t.Run("two 50-core tenants still admit a third 50", func(t *testing.T) {
+		shared := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		for _, name := range []string{"tenant-a", "tenant-b"} {
+			tenant := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			}
+			applyUsage(shared, &device.PodInfo{Pod: tenant, NodeID: "node1", Devices: collapsedOn(tenant, 50)})
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{shared}, share50, hamiCorePod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+}
+
+// TestDevices_Fit_HamiCoreOversellLegacyFullCore keeps a full-core request
+// exclusive on a hami-core node even when the requesting Pod carries no
+// vnpu-mode annotation. Without the annotation isHAMiCore is false, so the
+// budget stays at the advertised Totalcore and the base-equality arm of the
+// exclusivity guard no longer holds once the plugin oversells.
+
+// TestDevices_Fit_HamiCoreOversellSequentialInitConcurrency covers the two
+// lifecycle mistakes of summing every allocated row:
+//
+// Ordinary init containers run one at a time, so an init container that has
+// been placed has already exited when the next container is fitted. Counting its
+// rows as live usage makes sequential init containers look like concurrent
+// tenants and wrongly rejects a pod from an oversold card it can use.
+// alwaysRestartPolicy marks a container as a sidecar (restartPolicy Always).
+var alwaysRestartPolicy = corev1.ContainerRestartPolicyAlways
+
+func TestDevices_Fit_HamiCoreOversellSequentialInitConcurrency(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	hamiCorePod := func(pod *corev1.Pod) *corev1.Pod {
+		if pod.Annotations == nil {
+			pod.Annotations = map[string]string{}
+		}
+		pod.Annotations[VNPUModeAnnotation] = VNPUModeHamiCore
+		return pod
+	}
+	share := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
+	}
+	applyTenant := func(dev *device.DeviceUsage, cores int32) {
+		tenant := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "default", UID: "tenant-uid"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		dev.Used++
+		dev.Usedcores += cores
+		dev.Usedmem += 4096
+		dev.PodInfos = append(dev.PodInfos, &device.PodInfo{
+			Pod:    tenant,
+			NodeID: "node1",
+			Devices: device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: cores}},
+				},
+			},
+		})
+	}
+
+	t.Run("sequential init containers are not concurrent tenants", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}}, share, pod, nodeInfo, &allocated)
+		if !fit {
+			t.Fatalf("exited init containers must not block the app container, got reason=%s", reason)
+		}
+	})
+
+	t.Run("a resident sidecar is counted while its app container is fitted", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "sidecar-app", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "sc", RestartPolicy: &alwaysRestartPolicy}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 60 {
+			t.Fatalf("a resident sidecar must be counted, got %d want 60", got)
+		}
+	})
+
+	t.Run("exited ordinary init containers are not counted", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 0 {
+			t.Fatalf("exited ordinary init containers must not be summed, got %d want 0", got)
+		}
+	})
+
+	t.Run("regular containers are concurrent with each other", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "two-apps", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app-a"}, {Name: "app-b"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 40}},
+			},
+		}
+		if got := incomingHamiCoreOnDevice("dev-0", &allocated, nil, pod); got != 40 {
+			t.Fatalf("app containers run together, got %d want 40", got)
+		}
+	})
+
+	t.Run("a sidecar plus app reaching the base refuses another tenant", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "sidecar-app", Namespace: "default", UID: "incoming-uid"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "sc", RestartPolicy: &alwaysRestartPolicy}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 50}},
+			},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyTenant(held, 50)
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, pod, nodeInfo, &allocated)
+		if fit {
+			t.Fatalf("sidecar 50 + app 50 must not share with another tenant")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("sequential inits with another tenant still admit the app", func(t *testing.T) {
+		pod := hamiCorePod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "seq-init", Namespace: "default", UID: "incoming-uid"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}, {Name: "init-b"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		})
+		allocated := device.PodDevices{
+			"Ascend910B3": device.PodSingleDevice{
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 8192, Usedcores: 60}},
+			},
+		}
+		held := &device.DeviceUsage{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Count: 8, Totalmem: 65536, Totalcore: 150, Health: true,
+		}
+		applyTenant(held, 50)
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit([]*device.DeviceUsage{held}, share, pod, nodeInfo, &allocated)
+		if !fit {
+			t.Fatalf("exited sequential inits must not make the pod exclusive, got reason=%s", reason)
+		}
+	})
+}
+
+func TestDevices_Fit_HamiCoreOversellLegacyFullCore(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+	// No vnpu-mode annotation: Fit only filters hami-core pods off
+	// non-hami-core nodes, so this pod still reaches a hami-core card.
+	legacyPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+	fullCore := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 8192, MemPercentagereq: 0, Coresreq: 100,
+	}
+
+	partial := func(totalcore int32) []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 8,
+			Usedmem: 8192, Totalmem: 65536,
+			Usedcores: 50, Totalcore: totalcore,
+			Health: true,
+		}}
+	}
+
+	// Without oversell the capacity check already stops this request, which is
+	// why the exclusivity guard was never exercised on the base budget.
+	t.Run("advertised 100 rejects a legacy full-core request on capacity", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(partial(100), fullCore, legacyPod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected a partially used card to reject a full-core request")
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+
+	t.Run("advertised 150 still rejects a legacy full-core request", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(partial(150), fullCore, legacyPod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected oversell to keep a full-core request exclusive")
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
+
+	t.Run("advertised 150 still admits a legacy partial request", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, Configs: cfg})[0]
+		share := fullCore
+		share.Coresreq = 50
+		fit, _, reason := dev.Fit(partial(150), share, legacyPod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected 50+50 to fit a 150 budget, got reason=%s", reason)
+		}
+	})
+}
+
+// Test_InitDevices_GlobalOverwriteEnvPropagation verifies the global vnpus
+// overwriteEnv and runtimeClassName settings reach every Devices instance.
+func Test_InitDevices_GlobalOverwriteEnvPropagation(t *testing.T) {
+	chip := VNPUConfig{
+		ChipName:           "910A",
+		CommonWord:         "Ascend910A",
+		ResourceName:       "huawei.com/Ascend910A",
+		ResourceMemoryName: "huawei.com/Ascend910A-memory",
+	}
+	enable := true
+	defer func() { enableAscend = enable }()
+	enableAscend = true
+
+	devs := InitDevices(VNPUs{
+		OverwriteEnv:     true,
+		RuntimeClassName: "ascend-rc",
+		Configs:          []VNPUConfig{chip},
+	})
+	assert.Assert(t, len(devs) == 1, "expected one device")
+	assert.Equal(t, devs[0].overwriteEnv, true)
+	assert.Equal(t, devs[0].runtimeClassName, "ascend-rc")
 }

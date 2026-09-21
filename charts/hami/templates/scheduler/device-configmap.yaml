@@ -36,19 +36,19 @@ data:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
       - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
-        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "7g.40gb" ]
+        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb" ]
       - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
-        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.79gb" ]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.79gb" ]
       - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
-        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.80gb" ]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.80gb" ]
       - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
-        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "7g.94gb" ]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "4g.47gb", "7g.94gb" ]
       - models: [ "H20", "H100 on GH200"]
-        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "7g.96gb" ]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "4g.48gb", "7g.96gb" ]
       - models: [ "H200 NVL", "H200-SXM5"]
-        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "7g.141gb" ]
+        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "4g.71gb", "7g.141gb" ]
       - models: [ "B200" ]
-        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "7g.180gb" ]
+        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "4g.90gb", "7g.180gb" ]
       - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
         profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
     cambricon:
@@ -75,6 +75,12 @@ data:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
+      memoryPerCard:
+{{- if kindIs "slice" .Values.devices.mthreads.memoryPerCard }}
+{{ toYaml (.Values.devices.mthreads.memoryPerCard | default (list 96)) | indent 8 }}
+{{- else }}
+        - {{ .Values.devices.mthreads.memoryPerCard | default 96 }}
+{{- end }}
     iluvatars:
     - chipName: MR-V100
       commonWord: MR-V100
@@ -96,6 +102,12 @@ data:
       resourceCountName: iluvatar.ai/BI-V100-vgpu
       resourceMemoryName: iluvatar.ai/BI-V100.vMem
       resourceCoreName: iluvatar.ai/BI-V100.vCore
+    {{- if .Values.devices.remotegpu.enabled }}
+    remotegpu:
+      resourceCountName: {{ .Values.devices.remotegpu.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.remotegpu.resourceMemoryName }}
+      defaultPort: {{ .Values.devices.remotegpu.defaultPort }}
+    {{- end }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
       resourceVCountName: {{ .Values.kunlunResourceVCountName }}
@@ -113,6 +125,8 @@ data:
       resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
       - chipName: 910A
         commonWord: Ascend910A
@@ -123,8 +137,6 @@ data:
         memoryCapacity: 32768
         memoryFactor: 1
         aiCore: 30
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir02
             memory: 2184
@@ -148,8 +160,6 @@ data:
         memoryFactor: 1
         aiCore: 24
         aiCPU: 6
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir03_1c_8g
             memory: 8192
@@ -173,8 +183,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_16g
             memory: 16384
@@ -194,8 +202,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_16g
             memory: 16384
@@ -215,8 +221,6 @@ data:
         memoryFactor: 1
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir05_1c_8g
             memory: 8192
@@ -236,8 +240,6 @@ data:
         memoryFactor: 1
         aiCore: 8
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
           - name: vir01
             memory: 3072
@@ -260,8 +262,6 @@ data:
         memoryCapacity: 65536
         aiCore: 20
         aiCPU: 7
-        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
-        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         superPod: true
         templates:
           - name: vir05_1c_16g
@@ -273,3 +273,4 @@ data:
             aiCore: 10
             aiCPU: 3
   {{ end }}
+  

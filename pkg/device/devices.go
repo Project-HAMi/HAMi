@@ -119,6 +119,7 @@ type DeviceUsage struct {
 	MigUsage            MigInUse   // Deprecated: unused by dynamic NVIDIA MIG.
 	Numa                int
 	Type                string
+	DeviceVendor        string
 	Health              bool
 	PodInfos            []*PodInfo
 	CustomInfo          map[string]any
@@ -256,23 +257,26 @@ func init() {
 	SupportDevices = make(map[string]string)
 }
 
+// DeepCopy returns a copy of DeviceUsage. It clones the PodInfos slice but
+// shares its read-only PodInfo entries, which callers must not mutate.
 func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	if d == nil {
 		return nil
 	}
 	dup := &DeviceUsage{
-		ID:        d.ID,
-		Index:     d.Index,
-		Used:      d.Used,
-		Count:     d.Count,
-		Usedmem:   d.Usedmem,
-		Totalmem:  d.Totalmem,
-		Totalcore: d.Totalcore,
-		Usedcores: d.Usedcores,
-		Mode:      d.Mode,
-		Numa:      d.Numa,
-		Type:      d.Type,
-		Health:    d.Health,
+		ID:           d.ID,
+		Index:        d.Index,
+		Used:         d.Used,
+		Count:        d.Count,
+		Usedmem:      d.Usedmem,
+		Totalmem:     d.Totalmem,
+		Totalcore:    d.Totalcore,
+		Usedcores:    d.Usedcores,
+		Mode:         d.Mode,
+		Numa:         d.Numa,
+		Type:         d.Type,
+		DeviceVendor: d.DeviceVendor,
+		Health:       d.Health,
 	}
 
 	if d.MigProfiles != nil {
@@ -291,12 +295,8 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	}
 	dup.MigUsage = d.MigUsage.DeepCopy()
 
-	if d.PodInfos != nil {
-		dup.PodInfos = make([]*PodInfo, len(d.PodInfos))
-		for i, pi := range d.PodInfos {
-			dup.PodInfos[i] = pi.DeepCopy()
-		}
-	}
+	// Copy the slice while sharing its read-only PodInfo snapshots.
+	dup.PodInfos = slices.Clone(d.PodInfos)
 
 	if d.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(d.CustomInfo))
