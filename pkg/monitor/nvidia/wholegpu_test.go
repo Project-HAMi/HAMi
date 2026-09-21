@@ -246,9 +246,10 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 	})
 
 	t.Run("DeviceSmUtil on a MIG device goes through DCGM, not NVML", func(t *testing.T) {
-		fake := &fakeLatestValuesQuerier{vals: []dcgm.FieldValue_v1{{FieldID: dcgm.DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO, FieldType: dcgm.DCGM_FT_DOUBLE, Status: 0, Value: dcgmDoubleBytes(66)}}}
+		fake := &fakeLatestValuesQuerier{vals: []dcgm.FieldValue_v1{{FieldID: dcgm.DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO, FieldType: dcgm.DCGM_FT_DOUBLE, Status: 0, Value: dcgmDoubleBytes(0.66)}}}
 		col := newDCGMWholeGPUCollector(fake)
-		col.initOnce.Do(func() {}) // mark initialized, skip the real embedded engine
+		// MIG handle reports NVML giID 3, mapped to DCGM entity ID 99.
+		seedMigHierarchy(col, "GPU-parent-uuid", 3, 99)
 		u := &wholeGPUUsage{
 			uuids: []string{"MIG-GPU-parent-uuid/1/0"},
 			nvmllib: &mock.Interface{
@@ -256,6 +257,11 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 					return &mock.Device{
 						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
 						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+						GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+							return &mock.Device{
+								GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent-uuid", nvml.SUCCESS },
+							}, nvml.SUCCESS
+						},
 						// If the code still calls NVML for a MIG device, the test catches it.
 						GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { panic("must not call NVML for MIG") },
 					}, nvml.SUCCESS
@@ -265,7 +271,7 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 		}
 		assert.Equal(t, u.DeviceSmUtil(0), uint64(66))
 		assert.Equal(t, fake.lastEntityGroup, dcgm.FE_GPU_I)
-		assert.Equal(t, fake.lastID, uint(3))
+		assert.Equal(t, fake.lastID, uint(99))
 		assert.DeepEqual(t, fake.lastFields, migProfUtilFields)
 	})
 
@@ -277,6 +283,11 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 					return &mock.Device{
 						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
 						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+						GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+							return &mock.Device{
+								GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent-uuid", nvml.SUCCESS },
+							}, nvml.SUCCESS
+						},
 					}, nvml.SUCCESS
 				},
 			},
@@ -293,12 +304,41 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 					return &mock.Device{
 						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
 						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 0, nvml.ERROR_NOT_SUPPORTED },
+						GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+							return &mock.Device{
+								GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent-uuid", nvml.SUCCESS },
+							}, nvml.SUCCESS
+						},
 					}, nvml.SUCCESS
 				},
 			},
 			dcgm: newDCGMWholeGPUCollector(&fakeLatestValuesQuerier{}),
 		}
 		assert.Equal(t, u.DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("MIG device whose parent lookup fails returns 0 without hitting DCGM", func(t *testing.T) {
+		fake := &fakeLatestValuesQuerier{}
+		col := newDCGMWholeGPUCollector(fake)
+		seedMigHierarchy(col, "GPU-parent-uuid", 3, 99)
+		u := &wholeGPUUsage{
+			uuids: []string{"MIG-GPU-parent-uuid/1/0"},
+			nvmllib: &mock.Interface{
+				DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+					return &mock.Device{
+						IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+						GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+						GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+							return nil, nvml.ERROR_NOT_SUPPORTED
+						},
+					}, nvml.SUCCESS
+				},
+			},
+			dcgm: col,
+		}
+		assert.Equal(t, u.DeviceSmUtil(0), uint64(0))
+		assert.Equal(t, fake.lastEntityGroup, dcgm.FE_NONE)
+		assert.Equal(t, fake.lastID, uint(0))
 	})
 }
 

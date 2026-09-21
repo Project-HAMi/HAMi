@@ -1265,17 +1265,11 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 }
 
 // isWholeGPUAllocation reports whether every device allocated to the container
-// is a whole GPU (full memory and full cores).
-//
-// Returns false conservatively when the allocation cannot be confirmed as
-// whole-GPU: an empty devreq, a nil ResourceManager (e.g. partially
-// initialized plugin in tests), or any device missing from the resource
-// registry. The caller treats "false" as "fall through to the default
-// ld.so.preload path", so a false negative never blocks an allocation —
-// it only forgoes the whole-card optimization.
-//
-//   - devreq: devices allocated to the container (rm.ContainerDevices)
-//   - rm: ResourceManager used to look up device details; may be nil
+// is a whole GPU (full memory and full cores). Usedmem is in MiB while
+// TotalMemory is in bytes, so convert before comparing. Returns false when the
+// allocation cannot be confirmed whole-GPU (empty devreq, nil ResourceManager,
+// or an unknown device); the caller then falls back to the default
+// ld.so.preload path.
 func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager) bool {
 	if len(devreq) == 0 {
 		return false
@@ -1289,7 +1283,8 @@ func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager)
 		if deviceInfo == nil {
 			return false
 		}
-		if uint64(dev.Usedmem) != deviceInfo.TotalMemory || dev.Usedcores != 100 {
+		totalMiB := deviceInfo.TotalMemory / (1024 * 1024)
+		if uint64(dev.Usedmem) != totalMiB || dev.Usedcores != nvidia.WholeGPUUsedCores {
 			return false
 		}
 	}

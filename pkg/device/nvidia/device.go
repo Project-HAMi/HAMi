@@ -67,6 +67,11 @@ const (
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
+
+	// WholeGPUUsedCores is the cores percentage recorded in the
+	// vgpu-devices-allocated annotation when a container holds the entire GPU.
+	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
+	WholeGPUUsedCores int32 = 100
 )
 
 var (

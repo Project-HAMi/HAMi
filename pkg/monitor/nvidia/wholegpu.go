@@ -152,13 +152,27 @@ func (u *wholeGPUUsage) DeviceSmUtil(idx int) uint64 {
 	// query them from DCGM at GPU-instance granularity instead.
 	isMig, ret := handle.IsMigDeviceHandle()
 	if errors.Is(ret, nvml.SUCCESS) && isMig {
-		giID, ret := handle.GetGpuInstanceId()
-		if !errors.Is(ret, nvml.SUCCESS) || u.dcgm == nil {
-			klog.V(4).Infof("wholegpu: MIG device %s cannot map to a GPU instance id (nvml ret=%v, dcgm=%v)",
-				u.uuids[idx], ret, u.dcgm != nil)
+		if u.dcgm == nil {
 			return 0
 		}
-		return u.dcgm.GpuInstanceSmUtil(uint(giID), u.uuids[idx])
+		giID, ret := handle.GetGpuInstanceId()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG device %s GetGpuInstanceId failed: %v", u.uuids[idx], ret)
+			return 0
+		}
+		// DCGM uses global entity IDs, so pass the parent GPU UUID along
+		// with the per-parent giID to disambiguate MIG instances.
+		parentHandle, ret := handle.GetDeviceHandleFromMigDeviceHandle()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG device %s GetDeviceHandleFromMigDeviceHandle failed: %v", u.uuids[idx], ret)
+			return 0
+		}
+		parentUUID, ret := parentHandle.GetUUID()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG parent device GetUUID failed: %v", ret)
+			return 0
+		}
+		return u.dcgm.GpuInstanceSmUtil(parentUUID, uint(giID), u.uuids[idx])
 	}
 
 	rates, ret := handle.GetUtilizationRates()
@@ -366,13 +380,11 @@ func (l *ContainerLister) fetchNodeDevices() (map[string]*device.DeviceInfo, err
 }
 
 // evaluateContainerWholeGPU decides whether every device a container was
-// allocated is a whole physical GPU or a whole MIG instance. MIG instances
-// have hardware-level isolation at the instance boundary, so any container
-// holding a MIG device owns that entire instance — treat it as whole.
-// For non-MIG devices, the container must have allocated the full device
-// memory quota. Core count is intentionally not checked — a container can
-// request fractional cores against a whole memory allocation, and
-// NVML-reported utilization would not honor that core limit's semantics.
+// allocated is a whole physical GPU or a whole MIG instance. MIG instances are
+// hardware-isolated, so any container holding one owns the whole instance.
+// Non-MIG allocations must hold full memory AND full cores, matching the
+// device plugin's isWholeGPUAllocation — relaxing either would attribute
+// another tenant's utilization to the wrong container.
 func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo) wholeGPUVerdict {
 	if len(ctrDevs) == 0 {
 		return notWholeGPU
@@ -393,7 +405,7 @@ func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[str
 		// full cores, matching the device-plugin classifier. Otherwise the
 		// container is a shared allocation and its metrics must not be
 		// replaced with whole-device NVML usage.
-		if cd.Usedmem < nodeDev.Devmem || cd.Usedcores < 100 {
+		if cd.Usedmem < nodeDev.Devmem || cd.Usedcores < nv.WholeGPUUsedCores {
 			return notWholeGPU
 		}
 	}
