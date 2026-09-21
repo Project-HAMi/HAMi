@@ -64,6 +64,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -170,7 +171,36 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
-	return sConfig, mode, nil
+	node, err := util.GetNode(util.NodeName)
+	if err != nil {
+		// Without the node there is no way to tell a lupine server from an
+		// ordinary GPU node, and guessing the local mode would advertise to
+		// kubelet the very cards lupine is serving over the network.
+		return nil, "", fmt.Errorf("read node %q while resolving the operating mode: %w", util.NodeName, err)
+	}
+	return sConfig, resolveOperatingMode(mode, node), nil
+}
+
+// resolveOperatingMode lets the node's lupine label decide whether this plugin
+// serves its GPUs over the network rather than to pods of its own.
+//
+// The label is the operator's single declaration that a node belongs to the
+// lupine fleet: the scheduler's pool discovers servers by it and reads the
+// port from its value. Taking the mode from a second place as well, the
+// per-node config file, would let the two drift and leave a node half in the
+// fleet, serving lupine while still advertising the same cards to kubelet.
+func resolveOperatingMode(configured string, node *corev1.Node) string {
+	if node != nil {
+		if _, ok := node.Labels[remotegpu.LupineServerLabel]; ok {
+			return nvidia.RemoteMode
+		}
+	}
+	if configured == nvidia.RemoteMode {
+		klog.InfoS("ignoring the configured remote operating mode, this node carries no lupine server label",
+			"label", remotegpu.LupineServerLabel, "using", nvidia.HamiCoreMode)
+		return nvidia.HamiCoreMode
+	}
+	return configured
 }
 
 // getPluginSocketPath returns the socket to use for the specified resource.
@@ -280,6 +310,23 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 			resultErr = errors.Join(resultErr, plugin.stopLocked())
 		}
 	}()
+	if plugin.operatingMode == nvidia.RemoteMode {
+		// lupine serves these cards over the network and the scheduler hands
+		// them out cluster wide from the annotation WatchAndRegister publishes.
+		// Registering with kubelet as well would advertise the same cards
+		// locally, so a pod landing here could take one lupine is already
+		// serving. Publish, and stay out of kubelet's device list.
+		//
+		// Ahead of the MIG and inventory work below, none of which a node
+		// serving its cards over the network has anything to do with.
+		klog.InfoS("remote mode: publishing GPUs for lupine, not advertising them to kubelet",
+			"node", util.NodeName)
+		go func() {
+			plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
+		}()
+		return nil
+	}
+
 	if plugin.migMgr == nil {
 		return fmt.Errorf("MIG manager is not configured")
 	}
