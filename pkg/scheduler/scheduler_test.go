@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -923,6 +924,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
+	successfulFilters := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()
@@ -938,6 +940,12 @@ func Test_Filter(t *testing.T) {
 			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
 				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
 			}
+			successfulFilters++
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(fmt.Sprintf(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter"} %d
+`, successfulFilters)), "hami_scheduler_allocations_total"))
 		})
 	}
 }
@@ -2439,7 +2447,15 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	}
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
-	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	seedPods(t, s, pod)
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	require.NoError(t, err)
+	require.Empty(t, result.NodeNames)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+`), "hami_scheduler_allocation_failures_total"))
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
@@ -2997,6 +3013,11 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3052,6 +3073,11 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 type bindLockMockDevice struct {
@@ -3129,6 +3155,14 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "node lock contention")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+# HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
+# TYPE hami_scheduler_bind_rollbacks_total counter
+hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
@@ -3550,4 +3584,18 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	s.lock.RLock()
 	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
 	s.lock.RUnlock()
+}
+
+// seedPods makes pods resolvable to Filter, which verifies the request against
+// the live object before it touches any reservation.
+func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
+	t.Helper()
+	if s.kubeClient == nil {
+		s.kubeClient = fake.NewClientset()
+	}
+	for _, p := range pods {
+		if _, err := s.kubeClient.CoreV1().Pods(p.Namespace).Create(context.Background(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to seed pod %s/%s: %v", p.Namespace, p.Name, err)
+		}
+	}
 }

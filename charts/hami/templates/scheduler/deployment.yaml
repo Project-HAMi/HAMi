@@ -1,3 +1,9 @@
+{{- /* The extender and the cluster-facing endpoints are two listeners in one
+       pod, so sharing a port means the second bind fails and the scheduler
+       never starts. Catch it at template time rather than in a crash loop. */}}
+{{- if eq (int (.Values.scheduler.extenderPort | default 9444)) (int (.Values.scheduler.service.httpTargetPort | default 9443)) }}
+{{- fail "scheduler.extenderPort and scheduler.service.httpTargetPort must be different ports" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -120,6 +126,11 @@ spec:
                    device-plugin token authentication is required. */}}
             - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort | default 9443 }}
             {{- end }}
+            {{- /* /filter and /bind are served here instead, on loopback, so
+                   they are reachable only from the kube-scheduler container in
+                   this pod. Unlike /refit they authenticate no caller, and the
+                   port above is published by the Service. */}}
+            - --extender-bind=127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}

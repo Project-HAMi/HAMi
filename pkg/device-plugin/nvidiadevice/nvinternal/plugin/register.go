@@ -97,16 +97,15 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	getHandle := nvml.DeviceGetHandleByUUID
-	if plugin.operatingMode == nvidia.MigMode {
-		if plugin.migMgr == nil {
-			return nil, fmt.Errorf("MIG manager is not configured")
-		}
+	if plugin.migMgr != nil {
 		done, err := plugin.migMgr.beginOperation()
 		if err != nil {
 			return nil, err
 		}
 		defer done()
 		getHandle = plugin.migMgr.nvmllib.DeviceGetHandleByUUID
+	} else if plugin.operatingMode == nvidia.MigMode {
+		return nil, fmt.Errorf("MIG manager is not configured")
 	} else {
 		if ret := nvmlInit(); ret != nvml.SUCCESS {
 			return nil, fmt.Errorf("nvml init failed: %v", ret)
@@ -182,11 +181,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		if !ok {
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
 		}
-		if !strings.HasPrefix(Model, "NVIDIA") {
-			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
-			// This is to handle cases where the model name might not be in the expected format.
-			Model = fmt.Sprintf("NVIDIA-%s", Model)
-		}
+		Model = nvidia.NormalizeDeviceModel(Model)
 		devcore := int32(100)
 		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
@@ -386,18 +381,18 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 }
 
 func (plugin *NvidiaDevicePlugin) topologyScore(available []string) (nvidia.ListDeviceScore, bool, error) {
-	if plugin.operatingMode != nvidia.MigMode {
-		return calculateGPUScore(available)
+	if plugin.migMgr != nil {
+		done, err := plugin.migMgr.beginOperation()
+		if err != nil {
+			return nil, false, err
+		}
+		defer done()
+		return nvidia.CalculateGPUScoreWithNVML(plugin.migMgr.nvmllib, available)
 	}
-	if plugin.migMgr == nil {
+	if plugin.operatingMode == nvidia.MigMode {
 		return nil, false, fmt.Errorf("MIG manager is not configured")
 	}
-	done, err := plugin.migMgr.beginOperation()
-	if err != nil {
-		return nil, false, err
-	}
-	defer done()
-	return nvidia.CalculateGPUScoreWithNVML(plugin.migMgr.nvmllib, available)
+	return calculateGPUScore(available)
 }
 
 func waitForRegistration(ctx context.Context, interval time.Duration) bool {
