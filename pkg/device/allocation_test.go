@@ -85,6 +85,22 @@ func TestValidateContainerAllocation(t *testing.T) {
 			cardMemory: knownCard,
 		},
 		{
+			// Both were asked for, and every backend sizes the slice from
+			// Memreq while it is set. Measuring against the percentage instead
+			// would reject what the scheduler allocated.
+			name:       "both memory requests set, the absolute one is larger",
+			req:        ContainerDeviceRequest{Nums: 1, Memreq: 20000, MemPercentagereq: 10},
+			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+			cardMemory: knownCard,
+		},
+		{
+			name:       "both memory requests set, over the absolute one",
+			req:        ContainerDeviceRequest{Nums: 1, Memreq: 20000, MemPercentagereq: 10},
+			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 21000}},
+			cardMemory: knownCard,
+			wantErr:    true,
+		},
+		{
 			name:      "percentage with no card memory to size it against",
 			req:       ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50},
 			allocated: ContainerDevices{{UUID: uuid, Usedmem: 20000}},
