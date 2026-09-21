@@ -327,26 +327,14 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 		return nil
 	}
 
-	if plugin.operatingMode == nvidia.MigMode {
-		if plugin.migMgr == nil {
-			return fmt.Errorf("MIG manager is not configured")
-		}
-		if err := plugin.migMgr.Init(); err != nil {
-			return fmt.Errorf("init MIG instance manager: %w", err)
-		}
+	if plugin.migMgr == nil {
+		return fmt.Errorf("MIG manager is not configured")
+	}
+	if err := plugin.migMgr.Init(); err != nil {
+		return fmt.Errorf("init MIG instance manager: %w", err)
 	}
 
-	var deviceNumbers int
-	var deviceNames []string
-	var err error
-	if plugin.operatingMode == nvidia.MigMode {
-		deviceNumbers, deviceNames, err = plugin.migMgr.deviceInventory()
-	} else {
-		deviceNumbers, err = GetDeviceNums()
-		if err == nil {
-			deviceNames, err = GetDeviceNames()
-		}
-	}
+	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()
 	if err != nil {
 		return err
 	}
