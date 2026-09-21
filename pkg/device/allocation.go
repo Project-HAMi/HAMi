@@ -51,8 +51,12 @@ func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, all
 // requestedMemoryMB returns the memory the request entitles the container to on
 // the named card, and whether the request bounds it at all.
 func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int32, bool) {
-	// A percentage leaves Memreq at 0 unless both were asked for, in which case
-	// the scheduler sized the slice from the percentage as well.
+	// A container can carry both. Every backend sizes the slice from the
+	// percentage only while Memreq is zero, so the absolute request has to win
+	// here too, or an allocation the scheduler sized from it is rejected.
+	if req.Memreq > 0 {
+		return req.Memreq, true
+	}
 	if req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100 {
 		if cardMemory == nil {
 			return 0, false
@@ -62,9 +66,6 @@ func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardM
 			return 0, false
 		}
 		return total * req.MemPercentagereq / 100, true
-	}
-	if req.Memreq > 0 {
-		return req.Memreq, true
 	}
 	return 0, false
 }
