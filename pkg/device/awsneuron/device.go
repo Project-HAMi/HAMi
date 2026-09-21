@@ -17,7 +17,9 @@ limitations under the License.
 package awsneuron
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -36,8 +38,6 @@ import (
 type AWSNeuronDevices struct {
 	resourceCountName string
 	resourceCoreName  string
-	coresPerAWSNeuron uint
-	coremask          uint
 }
 
 const (
@@ -53,6 +53,7 @@ const (
 	AWSNeuronAllocated       = "NEURON_ALLOCATED"
 	AWSUsageInfo             = "awsusageinfo"
 	AWSNodeType              = "AWSNodeType"
+	AWSCoresPerNeuronDevice  = "AWSCoresPerNeuronDevice"
 	maxAWSNeuronDeviceCount  = int64(math.MaxInt32)
 	// maxCoresPerNeuronDevice caps per-device cores: addCoreUsage builds a
 	// two-bit mask and PatchAnnotations only emits the first two core indexes.
@@ -73,8 +74,6 @@ func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
 	return &AWSNeuronDevices{
 		resourceCountName: config.ResourceCountName,
 		resourceCoreName:  config.ResourceCoreName,
-		coresPerAWSNeuron: 0,
-		coremask:          0,
 	}
 }
 
@@ -126,20 +125,10 @@ func validateResourceRequest(quantity resource.Quantity, resourceName string, ma
 	return value, nil
 }
 
-// coresPerDevice reports NeuronCores per device. It is zero until a node is
-// registered, so callers without one fall back to the cap.
-func (dev *AWSNeuronDevices) coresPerDevice() int64 {
-	observed := int64(dev.coresPerAWSNeuron)
-	if observed <= 0 {
-		return maxCoresPerNeuronDevice
-	}
-	return min(observed, maxCoresPerNeuronDevice)
-}
-
 // splitCoreRequest maps a NeuronCore count onto devices. One core count applies
 // to every device, so counts that neither fit nor fill devices are rejected.
 func (dev *AWSNeuronDevices) splitCoreRequest(cores int64) (int32, int32, error) {
-	coresPerDevice := dev.coresPerDevice()
+	coresPerDevice := maxCoresPerNeuronDevice
 	if cores <= coresPerDevice {
 		return 1, int32(cores), nil
 	}
@@ -157,32 +146,41 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	counts, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
-	if !ok || counts == 0 {
+	if !ok || counts <= 0 || counts > maxAWSNeuronDeviceCount {
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
-	coresTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCoreName), resource.DecimalSI).AsInt64()
-	if dev.coresPerAWSNeuron == 0 {
-		dev.coresPerAWSNeuron = uint(coresTotal) / uint(counts)
+	coresTotal, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCoreName), resource.DecimalSI).AsInt64()
+	if !ok || coresTotal <= 0 {
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCoreName)
+	}
+	if coresTotal%counts != 0 {
+		return []*device.DeviceInfo{}, fmt.Errorf("%s capacity %d is not divisible by %s capacity %d", dev.resourceCoreName, coresTotal, dev.resourceCountName, counts)
+	}
+	coresPerDevice := coresTotal / counts
+	if coresPerDevice > math.MaxInt32 {
+		return []*device.DeviceInfo{}, fmt.Errorf("cores per AWS Neuron device %d exceeds the maximum of %d", coresPerDevice, int64(math.MaxInt32))
 	}
 	// The mask must stay within the addressable cores addCoreUsage can track,
 	// even when the hardware exposes more cores per device (inf1 has four).
-	dev.coremask = 0
-	for i < int(dev.coresPerDevice()) {
-		dev.coremask *= 2
-		dev.coremask++
+	coremask := int32(0)
+	for i < int(min(coresPerDevice, maxCoresPerNeuronDevice)) {
+		coremask *= 2
+		coremask++
 		i++
 	}
 	i = 0
-	customInfo := map[string]any{}
-	customInfo[AWSNodeType] = n.Labels["node.kubernetes.io/instance-type"]
+	customInfo := map[string]any{
+		AWSNodeType:             n.Labels["node.kubernetes.io/instance-type"],
+		AWSCoresPerNeuronDevice: int32(coresPerDevice),
+	}
 
 	for int64(i) < counts {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
-			Count:        int32(dev.coresPerAWSNeuron),
+			Count:        int32(coresPerDevice),
 			Devmem:       0,
-			Devcore:      int32(dev.coremask),
+			Devcore:      coremask,
 			Type:         AWSNeuronDevice,
 			Numa:         0,
 			Health:       true,
@@ -197,6 +195,13 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 		i++
 	}
 	return nodedevices, nil
+}
+
+func coresPerNeuronDevice(customInfo map[string]any) int32 {
+	if value, ok := customInfo[AWSCoresPerNeuronDevice].(int32); ok && value > 0 {
+		return value
+	}
+	return int32(maxCoresPerNeuronDevice)
 }
 
 func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
@@ -218,12 +223,14 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 							value = value + fmt.Sprint(val.Idx) + ","
 						}
 					} else {
+						coresPerDevice := coresPerNeuronDevice(val.CustomInfo)
+						coreOffset := int64(val.Idx) * int64(coresPerDevice)
 						if (val.Usedcores & 1) != 0 {
-							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)) + ","
+							value = value + fmt.Sprint(coreOffset) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
 						if (val.Usedcores & 2) != 0 {
-							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+1) + ","
+							value = value + fmt.Sprint(coreOffset+1) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
 					}
@@ -305,7 +312,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			Type:             AWSNeuronDevice,
 			Memreq:           0,
 			MemPercentagereq: 0,
-			Coresreq:         int32(dev.coresPerDevice()),
+			Coresreq:         int32(maxCoresPerNeuronDevice),
 		}
 	} else {
 		core, ok := resourceQuantity(ctr, awsResourceCores)
@@ -367,7 +374,10 @@ func countMaskAvailable(mask int32) int32 {
 }
 
 func addCoreUsage(prev map[string]any, require int) map[string]any {
-	res := map[string]any{}
+	res := maps.Clone(prev)
+	if res == nil {
+		res = map[string]any{}
+	}
 	count, ok := prev[AWSUsageInfo]
 	if !ok {
 		count = 0
@@ -389,6 +399,10 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 	}
 	return res
 }
+
+// continuousDeviceAvailable reports the device indexes of a free run of count
+// devices starting at slice position start. It returns indexes rather than
+// positions because Fit matches its result against DeviceUsage.Index.
 func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
 		return []int{}
@@ -399,14 +413,29 @@ func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count i
 		if devices[iterator].Used > 0 || !devices[iterator].Health {
 			return []int{}
 		}
-		res = append(res, iterator)
+		res = append(res, int(devices[iterator].Index))
 		iterator++
 	}
 	return res
 }
 
 func graphSelect(devices []*device.DeviceUsage, count int) []int {
-	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
+	if len(devices) == 0 {
+		return []int{}
+	}
+	// The ring and power of two groupings below read adjacency from slice
+	// positions, but the scheduler sorts devices by score before calling Fit.
+	// Restore index order on a copy so position math matches the physical
+	// layout, the same way kunlun's topology selector does. Ordering first
+	// also puts the device carrying the node type back at position zero.
+	sorted := make([]*device.DeviceUsage, len(devices))
+	copy(sorted, devices)
+	slices.SortFunc(sorted, func(a, b *device.DeviceUsage) int {
+		return cmp.Compare(a.Index, b.Index)
+	})
+	devices = sorted
+
+	if devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
 		return []int{}
 	}
 	AWSNodetype := ""

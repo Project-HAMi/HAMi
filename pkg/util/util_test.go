@@ -18,7 +18,9 @@ package util
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -236,6 +238,57 @@ func TestGetPendingPod(t *testing.T) {
 				assert.Equal(t, got.Name, tt.want.Name)
 			}
 		})
+	}
+}
+
+// TestGetPendingPodTrustsAnnotationsRegardlessOfOrigin documents a known gap
+// rather than guarding a fix (see issue #3041). GetPendingPod, and the device
+// plugin's Allocate downstream of it, select a pod purely from
+// hami.io/bind-time, hami.io/bind-phase and hami.io/vgpu-node. Nothing here
+// checks that the scheduler wrote them: PR #3042 blocks a pod from carrying
+// them at creation, but a pod can still gain them afterward, either through
+// an UPDATE (the admission webhook's rules watch CREATE only, see
+// charts/hami/templates/scheduler/webhook.yaml) or by being labelled
+// hami.io/webhook: ignore, which the API server excludes from admission
+// before HAMi's code ever runs. Neither is reproducible as a Go unit test:
+// both depend on API-server-side dispatch this package does not perform. If
+// this test starts failing, GetPendingPod has grown some form of provenance
+// check and this comment (and the two gaps above) should be revisited.
+func TestGetPendingPodTrustsAnnotationsRegardlessOfOrigin(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	// Nothing about this pod says the scheduler produced it: no NodeName set
+	// by a Binding, no bind-phase transition through PatchPodAnnotations. It
+	// is exactly what a hand-written manifest, or a post-create PATCH, would
+	// produce.
+	handWritten := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "hand-written",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     "2024-01-01T00:00:00Z",
+				DeviceBindPhase:         DeviceBindAllocating,
+				AssignedNodeAnnotations: "gpu-node-1",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "gpu-node-1"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), handWritten, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the pod: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-1"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	got, err := GetPendingPod(context.TODO(), "gpu-node-1")
+	if err != nil {
+		t.Fatalf("GetPendingPod() error = %v", err)
+	}
+	if got.Name != handWritten.Name {
+		t.Fatalf("GetPendingPod() returned %s, want %s", got.Name, handWritten.Name)
 	}
 }
 
@@ -1170,4 +1223,97 @@ func TestGetNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A merge patch is addressed by name alone, so a patch computed for one pod
+// can land on a different pod that later took the same name. Carrying the UID
+// makes the write conditional: Kubernetes refuses an update that changes it.
+func TestPatchPodAnnotationsPinsPodUID(t *testing.T) {
+	fakeClient := fake.NewClientset()
+	var patchBody []byte
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patch, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		patchBody = patch.GetPatch()
+		return true, &corev1.Pod{}, nil
+	})
+	oldClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod", Namespace: "team-a", UID: "gpu-pod-uid"},
+	}
+	assert.NilError(t, PatchPodAnnotations(pod, map[string]string{AssignedNodeAnnotations: "node-1"}))
+
+	var patch struct {
+		Metadata struct {
+			UID types.UID `json:"uid"`
+		} `json:"metadata"`
+	}
+	assert.NilError(t, json.Unmarshal(patchBody, &patch))
+	assert.Equal(t, types.UID("gpu-pod-uid"), patch.Metadata.UID, "the patch does not pin the pod's UID")
+}
+
+// TestPatchPodAnnotationsRejectsStaleUID covers delete-and-recreate: same
+// name and namespace, new UID, and a caller still holding a patch built for
+// the old one. The fake clientset does not enforce UID immutability like a
+// real API server does, so the reactor below stands in for that check.
+func TestPatchPodAnnotationsRejectsStaleUID(t *testing.T) {
+	const (
+		staleUID = types.UID("old-pod-uid")
+		liveUID  = types.UID("new-pod-uid")
+	)
+
+	fakeClient := fake.NewClientset()
+	live := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "gpu-pod",
+			Namespace:   "team-a",
+			UID:         liveUID,
+			Annotations: map[string]string{"pre-existing": "untouched"},
+		},
+	}
+	_, err := fakeClient.CoreV1().Pods(live.Namespace).Create(context.TODO(), live, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		var patch struct {
+			Metadata struct {
+				UID types.UID `json:"uid"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(patchAction.GetPatch(), &patch); err != nil {
+			return false, nil, err
+		}
+		if patch.Metadata.UID != "" && patch.Metadata.UID != liveUID {
+			return true, nil, apierrors.NewConflict(
+				corev1.Resource("pods"), patchAction.GetName(),
+				fmt.Errorf("Precondition failed: UID in precondition: %q, UID in object meta: %q", patch.Metadata.UID, liveUID),
+			)
+		}
+		return false, nil, nil
+	})
+	oldClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
+	stalePodRef := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod", Namespace: "team-a", UID: staleUID},
+	}
+	patchErr := PatchPodAnnotations(stalePodRef, map[string]string{AssignedNodeAnnotations: "node-1"})
+	assert.Assert(t, apierrors.IsConflict(patchErr), "a patch carrying a stale UID must return a conflict, got: %v", patchErr)
+
+	current, err := fakeClient.CoreV1().Pods("team-a").Get(context.TODO(), "gpu-pod", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, liveUID, current.UID, "the recreated pod's identity changed")
+	_, forged := current.Annotations[AssignedNodeAnnotations]
+	assert.Equal(t, false, forged, "the stale patch landed on the pod that replaced the original")
+	assert.Equal(t, "untouched", current.Annotations["pre-existing"])
 }

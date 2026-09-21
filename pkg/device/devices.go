@@ -119,6 +119,7 @@ type DeviceUsage struct {
 	MigUsage            MigInUse   // Deprecated: unused by dynamic NVIDIA MIG.
 	Numa                int
 	Type                string
+	DeviceVendor        string
 	Health              bool
 	PodInfos            []*PodInfo
 	CustomInfo          map[string]any
@@ -263,18 +264,19 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 		return nil
 	}
 	dup := &DeviceUsage{
-		ID:        d.ID,
-		Index:     d.Index,
-		Used:      d.Used,
-		Count:     d.Count,
-		Usedmem:   d.Usedmem,
-		Totalmem:  d.Totalmem,
-		Totalcore: d.Totalcore,
-		Usedcores: d.Usedcores,
-		Mode:      d.Mode,
-		Numa:      d.Numa,
-		Type:      d.Type,
-		Health:    d.Health,
+		ID:           d.ID,
+		Index:        d.Index,
+		Used:         d.Used,
+		Count:        d.Count,
+		Usedmem:      d.Usedmem,
+		Totalmem:     d.Totalmem,
+		Totalcore:    d.Totalcore,
+		Usedcores:    d.Usedcores,
+		Mode:         d.Mode,
+		Numa:         d.Numa,
+		Type:         d.Type,
+		DeviceVendor: d.DeviceVendor,
+		Health:       d.Health,
 	}
 
 	if d.MigProfiles != nil {

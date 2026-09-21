@@ -1928,9 +1928,10 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 						{Name: "1g.5gb", Core: 1, Memory: 5, InUse: false},
 					},
 				},
-				Numa:   0,
-				Type:   "NVIDIA",
-				Health: true,
+				Numa:         0,
+				Type:         "NVIDIA A100-SXM4-40GB",
+				DeviceVendor: "NVIDIA",
+				Health:       true,
 				PodInfos: []*PodInfo{
 					{
 						Pod: &corev1.Pod{
