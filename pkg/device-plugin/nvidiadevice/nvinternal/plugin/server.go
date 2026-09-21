@@ -64,6 +64,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -117,10 +118,10 @@ type NvidiaDevicePlugin struct {
 	operatingMode string
 	deviceCache   string
 
-	// migMgr tracks live MIG GI+CI instances so we can destroy and recreate
-	// them per-task rather than resharding the whole card. Only set when
-	// operatingMode == "mig". Construction does not initialize NVML; Start/Stop
-	// pair Init and Shutdown for that session.
+	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
+	// mutation (enable, allocate, disable). Construction does not initialize
+	// NVML; Start/Stop pair Init and Shutdown. The annotation reconciler runs
+	// only when operatingMode == "mig".
 	migMgr *MigInstanceManager
 
 	imexChannels imex.Channels
@@ -170,7 +171,36 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
-	return sConfig, mode, nil
+	node, err := util.GetNode(util.NodeName)
+	if err != nil {
+		// Without the node there is no way to tell a lupine server from an
+		// ordinary GPU node, and guessing the local mode would advertise to
+		// kubelet the very cards lupine is serving over the network.
+		return nil, "", fmt.Errorf("read node %q while resolving the operating mode: %w", util.NodeName, err)
+	}
+	return sConfig, resolveOperatingMode(mode, node), nil
+}
+
+// resolveOperatingMode lets the node's lupine label decide whether this plugin
+// serves its GPUs over the network rather than to pods of its own.
+//
+// The label is the operator's single declaration that a node belongs to the
+// lupine fleet: the scheduler's pool discovers servers by it and reads the
+// port from its value. Taking the mode from a second place as well, the
+// per-node config file, would let the two drift and leave a node half in the
+// fleet, serving lupine while still advertising the same cards to kubelet.
+func resolveOperatingMode(configured string, node *corev1.Node) string {
+	if node != nil {
+		if _, ok := node.Labels[remotegpu.LupineServerLabel]; ok {
+			return nvidia.RemoteMode
+		}
+	}
+	if configured == nvidia.RemoteMode {
+		klog.InfoS("ignoring the configured remote operating mode, this node carries no lupine server label",
+			"label", remotegpu.LupineServerLabel, "using", nvidia.HamiCoreMode)
+		return nvidia.HamiCoreMode
+	}
+	return configured
 }
 
 // getPluginSocketPath returns the socket to use for the specified resource.
@@ -193,11 +223,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
 		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
 	}
-	var migMgr *MigInstanceManager
-	if mode == "mig" {
-		migMgr = newMigInstanceManager(o.nvmllib)
-	}
-	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
+	return o.newNvidiaDevicePlugin(ctx, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, newMigInstanceManager(o.nvmllib)), nil
 }
 
 // newNvidiaDevicePlugin assembles an NvidiaDevicePlugin from the options and the
@@ -284,26 +310,31 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 			resultErr = errors.Join(resultErr, plugin.stopLocked())
 		}
 	}()
-	if plugin.operatingMode == nvidia.MigMode {
-		if plugin.migMgr == nil {
-			return fmt.Errorf("MIG manager is not configured")
-		}
-		if err := plugin.migMgr.Init(); err != nil {
-			return fmt.Errorf("init MIG instance manager: %w", err)
-		}
+	if plugin.operatingMode == nvidia.RemoteMode {
+		// lupine serves these cards over the network and the scheduler hands
+		// them out cluster wide from the annotation WatchAndRegister publishes.
+		// Registering with kubelet as well would advertise the same cards
+		// locally, so a pod landing here could take one lupine is already
+		// serving. Publish, and stay out of kubelet's device list.
+		//
+		// Ahead of the MIG and inventory work below, none of which a node
+		// serving its cards over the network has anything to do with.
+		klog.InfoS("remote mode: publishing GPUs for lupine, not advertising them to kubelet",
+			"node", util.NodeName)
+		go func() {
+			plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
+		}()
+		return nil
 	}
 
-	var deviceNumbers int
-	var deviceNames []string
-	var err error
-	if plugin.operatingMode == nvidia.MigMode {
-		deviceNumbers, deviceNames, err = plugin.migMgr.deviceInventory()
-	} else {
-		deviceNumbers, err = GetDeviceNums()
-		if err == nil {
-			deviceNames, err = GetDeviceNames()
-		}
+	if plugin.migMgr == nil {
+		return fmt.Errorf("MIG manager is not configured")
 	}
+	if err := plugin.migMgr.Init(); err != nil {
+		return fmt.Errorf("init MIG instance manager: %w", err)
+	}
+
+	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()
 	if err != nil {
 		return err
 	}
@@ -508,40 +539,20 @@ func (plugin *NvidiaDevicePlugin) runMigAnnotationReconciler(interval time.Durat
 	}
 }
 
-func (plugin *NvidiaDevicePlugin) devicesSupportMig(deviceNames []string) bool {
-	if len(deviceNames) == 0 {
-		return false
-	}
-	for _, name := range deviceNames {
-		supported := false
-		for _, allowlist := range plugin.schedulerConfig.MigProfileAllowlist {
-			if containsModel(name, allowlist.Models) {
-				supported = true
-				break
-			}
-		}
-		if !supported {
-			return false
-		}
-	}
-	return true
-}
-
-// applyStartupMigMode prepares idle MIG-capable GPUs when operatingMode is mig.
+// applyStartupMigMode converges hardware MIG state with operatingMode using
+// the start-cycle NVML session. Hardware capability comes from NVML
+// (GetMigMode NOT_SUPPORTED is a no-op); MigProfileAllowlist is not used here
+// because it only controls exposed scheduling profiles. Enabling remains
+// best-effort so a busy card can keep running instances; disabling fails the
+// start cycle so hami-core is never advertised while GPUs remain in MIG.
 func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceNames []string) error {
-	if !plugin.devicesSupportMig(deviceNames) {
-		return nil
-	}
-	if plugin.operatingMode != nvidia.MigMode {
-		return nil
-	}
 	if plugin.migMgr == nil {
 		return fmt.Errorf("MIG manager is not configured")
 	}
 	inUse, detectErr := plugin.migMgr.collectInUseGPUs(plugin.operationContext(), os.Getenv(util.NodeNameEnvName))
 	if detectErr != nil {
-		// Startup reset is destructive. If Kubernetes allocation state
-		// cannot be read reliably, preserve every GPU rather than risk
+		// Startup reset/disable is destructive. If Kubernetes allocation
+		// state cannot be read reliably, preserve every GPU rather than
 		// removing an allocation that is still active.
 		klog.InfoS("mig init: allocation detection failed; preserving all GPUs", "err", detectErr)
 		if inUse == nil {
@@ -551,16 +562,31 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 			inUse[i] = struct{}{}
 		}
 	}
-	reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
+	if plugin.operatingMode == nvidia.MigMode {
+		reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
+		if err != nil {
+			klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
+		}
+		klog.InfoS("mig init: resolved startup layout",
+			"inUseGPUs", sortedIntSetKeys(inUse),
+			"resetGPUs", reset)
+		if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
+			klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
+		}
+		return nil
+	}
+	disabled, err := plugin.migMgr.DisableIdleGPUs(deviceNumbers, inUse)
 	if err != nil {
-		klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
+		if errors.Is(err, errMigModeNeedsReset) {
+			klog.ErrorS(err, "MIG disable needs manual operator action",
+				"mode", plugin.operatingMode)
+		}
+		return fmt.Errorf("disable MIG for %s: %w", plugin.operatingMode, err)
 	}
-	klog.InfoS("mig init: resolved startup layout",
+	klog.InfoS("mig init: disabled idle GPUs for non-MIG mode",
+		"mode", plugin.operatingMode,
 		"inUseGPUs", sortedIntSetKeys(inUse),
-		"resetGPUs", reset)
-	if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
-		klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
-	}
+		"disabledGPUs", disabled)
 	return nil
 }
 
@@ -1008,7 +1034,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
-
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
 				if err != nil {
@@ -1016,6 +1041,14 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 				}
 				devreq = alignedDevreq
+			}
+			// After alignment, so a share is measured against the card the
+			// container actually gets: alignment can move an unmatched entry onto
+			// the device the kubelet picked while carrying its memory across, and
+			// that memory is what the limits below are built from.
+			if err := plugin.validateContainerAllocation(&currentCtr, devreq); err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			requestIDs, err := plugin.GetContainerDeviceStrArray(devreq, current, currentCtr.Name)
 			if err != nil {

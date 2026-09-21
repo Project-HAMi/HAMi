@@ -607,6 +607,35 @@ devices:
     defaultPort: 14833
     resourceCountName: "nvidia.com/remote-gpu"
     resourceMemoryName: "nvidia.com/remote-gpu-memory"
+    # Image carrying HAMi-core, which an init container copies into the client
+    # pod so the memory request is enforced and not merely a placement filter.
+    # A client node runs no device plugin, so nothing else would deliver it.
+    # Leave it unset for the device plugin image. Set it to "" to schedule
+    # remote GPUs without enforcement.
+    libImage:
+    # Image for the session stub the scheduler keeps on each lupine server, so
+    # a user port-forwards to the stub instead of the server. Needs socat on
+    # the path. Empty runs no stubs, and no port-forward sessions with them.
+    sessionImage: ""
+    server:
+      # Run a lupine server on every lupine node that leaves its label value
+      # empty. The chart-managed server listens on defaultPort, because a
+      # DaemonSet cannot vary a port per node, so a node whose label names its
+      # own port is left to a server managed outside the chart.
+      enabled: true
+      image:
+        registry: "ghcr.io"
+        repository: "lupinemachines/lupine-server"
+        tag: "cuda-13.3.1-ubuntu24.04"
+        pullPolicy: IfNotPresent
+      # The server reaches the GPUs through NVIDIA_VISIBLE_DEVICES, which only
+      # works under the NVIDIA container runtime. Name the RuntimeClass that
+      # selects it when the cluster does not make it the default, commonly
+      # "nvidia". It has its own setting rather than borrowing the device
+      # plugin's, because in remote mode that plugin may not run at all.
+      runtimeClassName: ""
+      tolerations: []
+      resources: {}
   ascend:
     enabled: false
     image: ""

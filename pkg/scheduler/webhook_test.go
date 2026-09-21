@@ -18,16 +18,21 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"strings"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -38,6 +43,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestHandle(t *testing.T) {
@@ -1479,6 +1485,242 @@ func TestForgedAllocationAnnotationsDenied(t *testing.T) {
 				t.Errorf("denial message %q does not name %s", resp.Result.Message, key)
 			}
 		})
+	}
+}
+
+// updatePod replays an update of oldPod into newPod by username and returns the
+// response.
+func updatePod(t *testing.T, oldPod, newPod *corev1.Pod, username string) admission.Response {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to build the scheme: %v", err)
+	}
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	oldBytes, err := runtime.Encode(codec, oldPod)
+	if err != nil {
+		t.Fatalf("failed to encode the old pod: %v", err)
+	}
+	newBytes, err := runtime.Encode(codec, newPod)
+	if err != nil {
+		t.Fatalf("failed to encode the new pod: %v", err)
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("failed to create the webhook: %v", err)
+	}
+	return wh.Handle(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "test-uid",
+			Namespace: newPod.Namespace,
+			Name:      newPod.Name,
+			Operation: admissionv1.Update,
+			UserInfo:  authenticationv1.UserInfo{Username: username},
+			Object:    runtime.RawExtension{Raw: newBytes},
+			OldObject: runtime.RawExtension{Raw: oldBytes},
+		},
+	})
+}
+
+func initHAMiScheduler(t *testing.T) {
+	t.Helper()
+
+	config.SchedulerName = "hami-scheduler"
+	initNvidiaDevices(t)
+}
+
+// allowNodeWriters answers the webhook's access review the way RBAC answers it
+// for HAMi's own writers: allowed for the given usernames, refused for the rest.
+func allowNodeWriters(t *testing.T, usernames ...string) {
+	t.Helper()
+
+	allowed := make(map[string]bool, len(usernames))
+	for _, username := range usernames {
+		allowed[username] = true
+	}
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "subjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		review, ok := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SubjectAccessReview)
+		if !ok {
+			return false, nil, nil
+		}
+		review.Status.Allowed = allowed[review.Spec.User]
+		return true, review, nil
+	})
+	previous := client.KubeClient
+	client.KubeClient = kubeClient
+	t.Cleanup(func() { client.KubeClient = previous })
+}
+
+func scheduledGPUPod(schedulerName string, annotations map[string]string) *corev1.Pod {
+	pod := gpuPodWithAnnotations(annotations)
+	pod.Spec.SchedulerName = schedulerName
+	return pod
+}
+
+// Denying these annotations at create leaves the pod reachable through a plain
+// patch, which is the same forgery a step later: the pod is admitted clean,
+// then given the annotations the device plugin allocates from.
+//
+// Reproduce on a cluster (issue #3041): create the pod from
+// TestForgedAllocationAnnotationsDenied without the annotations, so it is
+// admitted, then kubectl annotate it with, for example,
+// hami.io/vgpu-devices-to-allocate: "GPU-<uuid>,NVIDIA,20000,100:;". Before
+// this fix nothing looked at the pod again and the device plugin served the
+// named GPU.
+func TestPatchedAllocationAnnotationsDenied(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t)
+
+	for _, key := range []string{
+		util.AssignedNodeAnnotations,
+		util.BindTimeAnnotations,
+		util.DeviceBindPhase,
+		device.InRequestDevices[nvidia.NvidiaGPUDevice],
+		device.SupportDevices[nvidia.NvidiaGPUDevice],
+	} {
+		t.Run(key, func(t *testing.T) {
+			oldPod := scheduledGPUPod("hami-scheduler", nil)
+			newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "forged"})
+			resp := updatePod(t, oldPod, newPod, "kubernetes-admin")
+			if resp.Allowed {
+				t.Fatalf("patching %s in was allowed", key)
+			}
+			if !strings.Contains(resp.Result.Message, key) {
+				t.Errorf("denial message %q does not name %s", resp.Result.Message, key)
+			}
+		})
+	}
+}
+
+// A workload service account holding update on pods is the caller the create
+// path already turns away, and holds none of the node access HAMi's writers do.
+func TestWorkloadServiceAccountUpdateDenied(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "forged"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-b:builder")
+	if resp.Allowed {
+		t.Fatal("a workload service account wrote an allocation")
+	}
+}
+
+// Rewriting or dropping a value the scheduler already wrote is the same
+// forgery: it points the device plugin at another GPU, or hides the pod's
+// usage from it.
+func TestSchedulerOwnedAnnotationRewriteDenied(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t)
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	t.Run("rewrite", func(t *testing.T) {
+		oldPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+		newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-other,NVIDIA,20000,100:;"})
+		if resp := updatePod(t, oldPod, newPod, "kubernetes-admin"); resp.Allowed {
+			t.Fatal("rewriting the allocation was allowed")
+		}
+	})
+
+	t.Run("drop", func(t *testing.T) {
+		oldPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+		newPod := scheduledGPUPod("hami-scheduler", nil)
+		if resp := updatePod(t, oldPod, newPod, "kubernetes-admin"); resp.Allowed {
+			t.Fatal("dropping the allocation was allowed")
+		}
+	})
+}
+
+// HAMi rewrites these itself after admission, so its own components must keep
+// working: the scheduler patches them as it binds, and a device plugin rewrites
+// them as each container gets its devices.
+func TestSchedulerComponentUpdateAllowed(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:hami-system:hami-scheduler")
+	if !resp.Allowed {
+		t.Fatalf("the scheduler's own patch was denied: %v", resp.Result)
+	}
+}
+
+// A vendor's device plugin can run in its own namespace, and is recognised by
+// the node access it holds rather than by its account. It still only writes to
+// a pod this scheduler placed, so the same account writing to a pod routed
+// elsewhere is forging one.
+func TestNodeWriterUpdateOnForeignPodDenied(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:kube-system:ascend-device-plugin")
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("different-scheduler", nil)
+	newPod := scheduledGPUPod("different-scheduler", map[string]string{key: "forged"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:kube-system:ascend-device-plugin")
+	if resp.Allowed {
+		t.Fatal("a pod on another scheduler was given an allocation")
+	}
+}
+
+// A review that cannot be run is not a reason to trust the caller: the guard
+// would otherwise turn itself off exactly when the API server is not answering.
+func TestUpdateDeniedWhenReviewUnavailable(t *testing.T) {
+	initHAMiScheduler(t)
+	previous := client.KubeClient
+	client.KubeClient = nil
+	t.Cleanup(func() { client.KubeClient = previous })
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:hami-system:hami-scheduler")
+	if resp.Allowed {
+		t.Fatal("the update was allowed with no review to run")
+	}
+}
+
+// A review the API server refuses to answer is treated the same way.
+func TestUpdateDeniedWhenReviewFails(t *testing.T) {
+	initHAMiScheduler(t)
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("the api server is not answering")
+	})
+	previous := client.KubeClient
+	client.KubeClient = kubeClient
+	t.Cleanup(func() { client.KubeClient = previous })
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := scheduledGPUPod("hami-scheduler", nil)
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	resp := updatePod(t, oldPod, newPod, "system:serviceaccount:hami-system:hami-scheduler")
+	if resp.Allowed {
+		t.Fatal("the update was allowed with the review failing")
+	}
+}
+
+// Everything else about a pod stays the owner's to change.
+func TestUnrelatedUpdateAllowed(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t)
+
+	oldPod := scheduledGPUPod("hami-scheduler", map[string]string{"team.example.com/owner": "team-b"})
+	newPod := scheduledGPUPod("hami-scheduler", map[string]string{
+		"team.example.com/owner":             "team-c",
+		util.GPUSchedulerPolicyAnnotationKey: "spread",
+	})
+	resp := updatePod(t, oldPod, newPod, "kubernetes-admin")
+	if !resp.Allowed {
+		t.Fatalf("an unrelated annotation change was denied: %v", resp.Result)
+	}
+	if len(resp.Patches) > 0 {
+		t.Errorf("the update was patched: %v", resp.Patches)
 	}
 }
 

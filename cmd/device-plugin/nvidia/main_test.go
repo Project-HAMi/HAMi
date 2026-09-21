@@ -51,6 +51,9 @@ func TestResolveNvidiaDriverRootFromGPUOperatorContract(t *testing.T) {
 	if config.Flags.NvidiaDriverRoot == config.Flags.NvidiaDevRoot {
 		t.Fatal("driver and device roots still share a pointer")
 	}
+	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/host/run/nvidia/driver" {
+		t.Fatalf("ContainerDriverRoot = %q, want /host/run/nvidia/driver", got)
+	}
 }
 
 func TestResolveNvidiaDriverRootDefaultsToHostWithoutContract(t *testing.T) {
@@ -64,6 +67,9 @@ func TestResolveNvidiaDriverRootDefaultsToHostWithoutContract(t *testing.T) {
 	if *config.Flags.NvidiaDriverRoot != "/" || *config.Flags.NvidiaDevRoot != "/" {
 		t.Fatalf("roots = %q, %q; want /, /", *config.Flags.NvidiaDriverRoot, *config.Flags.NvidiaDevRoot)
 	}
+	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/host" {
+		t.Fatalf("ContainerDriverRoot = %q, want /host", got)
+	}
 }
 
 func TestResolveNvidiaDriverRootPreservesExplicitPaths(t *testing.T) {
@@ -76,6 +82,23 @@ func TestResolveNvidiaDriverRootPreservesExplicitPaths(t *testing.T) {
 	}
 	if driverRoot != "/custom/driver" || devRoot != "/custom/devices" {
 		t.Fatalf("explicit paths changed: driverRoot=%q devRoot=%q", driverRoot, devRoot)
+	}
+	if got := *config.Flags.Plugin.ContainerDriverRoot; got != spec.DefaultContainerDriverRoot {
+		t.Fatalf("ContainerDriverRoot = %q, want %q", got, spec.DefaultContainerDriverRoot)
+	}
+}
+
+func TestResolveNvidiaDriverRootRejectsUnsupportedAutoRoot(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "driver-ready")
+	if err := os.WriteFile(contractPath, []byte("NVIDIA_DRIVER_ROOT=/custom/driver\nNVIDIA_DEV_ROOT=/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setDriverReadyFileForTest(t, contractPath)
+	driverRoot := autoNvidiaDriverRoot
+	config := newDriverRootConfig(&driverRoot, &driverRoot)
+
+	if err := resolveNvidiaDriverRoot(config); err == nil {
+		t.Fatal("resolveNvidiaDriverRoot() returned nil, want unsupported root error")
 	}
 }
 
@@ -94,9 +117,13 @@ func TestResolveNvidiaDriverRootRejectsInvalidContract(t *testing.T) {
 }
 
 func newDriverRootConfig(driverRoot, devRoot *string) *spec.Config {
+	containerDriverRoot := spec.DefaultContainerDriverRoot
 	return &spec.Config{Flags: spec.Flags{CommandLineFlags: spec.CommandLineFlags{
 		NvidiaDriverRoot: driverRoot,
 		NvidiaDevRoot:    devRoot,
+		Plugin: &spec.PluginCommandLineFlags{
+			ContainerDriverRoot: &containerDriverRoot,
+		},
 	}}}
 }
 

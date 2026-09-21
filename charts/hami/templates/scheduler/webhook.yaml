@@ -72,15 +72,14 @@ webhooks:
           - ""
         apiVersions:
           - v1
-        {{- /* Known gap, tracked in issue #3041: CREATE only. The
-               hami.io/ allocation annotations PR #3042 denies at create
-               time can still be added afterward with a plain PATCH by
-               anyone holding update/patch on pods, since nothing revisits
-               them past this point. Adding UPDATE here needs webhook.go to
-               tell an unrelated field patch from one touching these
-               annotations, so it stays a separate change. */}}
+        {{- /* UPDATE carries the same hami.io/ allocation annotations that
+               CREATE denies: without it they can be patched in after the pod
+               exists, and the device plugin hands out whatever devices they
+               name. webhook.go compares the update against the old object and
+               only judges one that changes those keys. */}}
         operations:
           - CREATE
+          - UPDATE
         resources:
           - pods
         scope: '*'

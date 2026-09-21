@@ -107,6 +107,14 @@ data:
       resourceCountName: {{ .Values.devices.remotegpu.resourceCountName }}
       resourceMemoryName: {{ .Values.devices.remotegpu.resourceMemoryName }}
       defaultPort: {{ .Values.devices.remotegpu.defaultPort }}
+      {{- /* Unset means the device plugin image; "" is the documented opt-out,
+             which `default` would have swallowed along with it. */}}
+      {{- if kindIs "invalid" .Values.devices.remotegpu.libImage }}
+      libImage: {{ include "hami.devicePlugin.image" . | quote }}
+      {{- else }}
+      libImage: {{ .Values.devices.remotegpu.libImage | quote }}
+      {{- end }}
+      sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
     {{- end }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
