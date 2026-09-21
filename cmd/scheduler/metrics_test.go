@@ -28,6 +28,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -39,6 +40,7 @@ type fakeMetricsProvider struct {
 	podManager   *device.PodManager
 	isLeader     bool
 	isSynced     bool
+	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
@@ -59,6 +61,10 @@ func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
 
 func (f *fakeMetricsProvider) IsSynced() bool {
 	return f.isSynced
+}
+
+func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
+	return f.outcome
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
@@ -94,6 +100,8 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 
 	qm := device.NewQuotaManager()
 	pm := device.NewPodManager()
+	outcome := versionmetrics.NewSchedulerOutcomeMetrics()
+	outcome.ObserveAllocation("filter", "NVIDIA")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -121,15 +129,24 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 			nodeUsage:    nodeUsage,
 			quotaManager: qm,
 			podManager:   pm,
+			outcome:      outcome,
 		},
 	}
 
-	if err := reg.Register(cc); err != nil {
+	registerer := prometheus.WrapRegistererWith(prometheus.Labels{"zone": c.Zone}, reg)
+	if err := registerer.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
 
 	if _, err := reg.Gather(); err != nil {
 		t.Errorf("Gather failed (non-legacy): %v", err)
+	}
+	if err := promtestutil.GatherAndCompare(reg, strings.NewReader(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter",zone="test-zone"} 1
+`), "hami_scheduler_allocations_total"); err != nil {
+		t.Errorf("unexpected scheduler outcome metrics: %v", err)
 	}
 
 	regLegacy := prometheus.NewPedanticRegistry()
