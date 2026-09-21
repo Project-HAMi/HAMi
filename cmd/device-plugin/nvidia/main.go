@@ -56,8 +56,7 @@ const (
 	autoNvidiaDriverRoot        = "auto"
 	hostNvidiaDriverRoot        = "/"
 	gpuOperatorNvidiaDriverRoot = "/run/nvidia/driver"
-	hostDriverContainerRoot     = "/host-driver-root"
-	gpuOperatorRunContainerRoot = "/gpu-operator-run-nvidia"
+	hostContainerRoot           = "/host"
 )
 
 var gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
@@ -496,11 +495,14 @@ func resolveNvidiaDriverRoot(config *spec.Config) error {
 }
 
 func autoContainerDriverRoot(driverRoot string) (string, error) {
-	switch filepath.Clean(driverRoot) {
+	cleaned := filepath.Clean(driverRoot)
+	switch cleaned {
 	case hostNvidiaDriverRoot:
-		return hostDriverContainerRoot, nil
+		return hostContainerRoot, nil
 	case gpuOperatorNvidiaDriverRoot:
-		return filepath.Join(gpuOperatorRunContainerRoot, "driver"), nil
+		// GPU Operator's driver root is under the host root, so reuse the
+		// single host-root mount and append the host path as a suffix.
+		return filepath.Join(hostContainerRoot, strings.TrimPrefix(cleaned, "/")), nil
 	default:
 		return "", fmt.Errorf("unsupported auto-detected NVIDIA driver root %q", driverRoot)
 	}

@@ -51,8 +51,8 @@ func TestResolveNvidiaDriverRootFromGPUOperatorContract(t *testing.T) {
 	if config.Flags.NvidiaDriverRoot == config.Flags.NvidiaDevRoot {
 		t.Fatal("driver and device roots still share a pointer")
 	}
-	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/gpu-operator-run-nvidia/driver" {
-		t.Fatalf("ContainerDriverRoot = %q, want /gpu-operator-run-nvidia/driver", got)
+	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/host/run/nvidia/driver" {
+		t.Fatalf("ContainerDriverRoot = %q, want /host/run/nvidia/driver", got)
 	}
 }
 
@@ -67,8 +67,8 @@ func TestResolveNvidiaDriverRootDefaultsToHostWithoutContract(t *testing.T) {
 	if *config.Flags.NvidiaDriverRoot != "/" || *config.Flags.NvidiaDevRoot != "/" {
 		t.Fatalf("roots = %q, %q; want /, /", *config.Flags.NvidiaDriverRoot, *config.Flags.NvidiaDevRoot)
 	}
-	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/host-driver-root" {
-		t.Fatalf("ContainerDriverRoot = %q, want /host-driver-root", got)
+	if got := *config.Flags.Plugin.ContainerDriverRoot; got != "/host" {
+		t.Fatalf("ContainerDriverRoot = %q, want /host", got)
 	}
 }
 
