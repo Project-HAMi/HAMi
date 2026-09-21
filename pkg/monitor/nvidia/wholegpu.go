@@ -405,7 +405,7 @@ func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[str
 		// full cores, matching the device-plugin classifier. Otherwise the
 		// container is a shared allocation and its metrics must not be
 		// replaced with whole-device NVML usage.
-		if cd.Usedmem < nodeDev.Devmem || cd.Usedcores < nv.WholeGPUUsedCores {
+		if cd.Usedmem != nodeDev.Devmem || cd.Usedcores != nv.WholeGPUUsedCores {
 			return notWholeGPU
 		}
 	}
