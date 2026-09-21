@@ -163,7 +163,7 @@ func (c *dcgmWholeGPUCollector) refreshMigHierarchy() {
 		return
 	}
 	m := make(map[migHierarchyKey]uint, h.Count)
-	for i := uint(0); i < h.Count; i++ {
+	for i := range int(h.Count) {
 		entry := h.EntityList[i]
 		if entry.Entity.EntityGroupId != dcgm.FE_GPU_I {
 			continue
