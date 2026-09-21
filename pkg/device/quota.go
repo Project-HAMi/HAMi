@@ -38,8 +38,9 @@ type Quota struct {
 type DeviceQuota map[string]*Quota
 
 type QuotaManager struct {
-	Quotas map[string]*DeviceQuota
-	mutex  sync.RWMutex
+	Quotas       map[string]*DeviceQuota
+	objectLimits map[string]map[string]map[string]int64 // namespace -> quotaName -> resourceName -> limit
+	mutex        sync.RWMutex
 }
 
 var localCache QuotaManager
@@ -53,7 +54,8 @@ var once sync.Once
 func NewQuotaManager() *QuotaManager {
 	once.Do(func() {
 		localCache = QuotaManager{
-			Quotas: make(map[string]*DeviceQuota),
+			Quotas:       make(map[string]*DeviceQuota),
+			objectLimits: make(map[string]map[string]map[string]int64),
 		}
 	})
 	return &localCache
@@ -238,8 +240,73 @@ func (q *QuotaManager) UpdateQuota(oldQuota, newQuota *corev1.ResourceQuota) {
 	q.logQuotasLocked()
 }
 
+// recalcLimitLocked recalculates the effective limit for a namespace and resource
+// by taking the minimum limit across all ResourceQuota objects in that namespace.
+// It requires q.mutex to be held.
+func (q *QuotaManager) recalcLimitLocked(namespace, resourceName string) {
+	var minLimit int64
+	var found bool
+
+	if nsObjs, ok := q.objectLimits[namespace]; ok {
+		for _, objLimits := range nsObjs {
+			if limit, ok := objLimits[resourceName]; ok {
+				if !found || limit < minLimit {
+					minLimit = limit
+					found = true
+				}
+			}
+		}
+	}
+
+	if q.Quotas[namespace] == nil {
+		if !found {
+			return
+		}
+		q.Quotas[namespace] = &DeviceQuota{}
+	}
+	dp := q.Quotas[namespace]
+	quotaInfo, ok := (*dp)[resourceName]
+	if !ok {
+		if !found {
+			return
+		}
+		quotaInfo = &Quota{}
+		(*dp)[resourceName] = quotaInfo
+	}
+
+	if found {
+		quotaInfo.Limit = minLimit
+		quotaInfo.LimitSet = true
+	} else {
+		quotaInfo.Limit = 0
+		quotaInfo.LimitSet = false
+	}
+}
+
+func hasManagedKeys(quota *corev1.ResourceQuota) bool {
+	if quota == nil {
+		return false
+	}
+	for idx := range quota.Spec.Hard {
+		if _, ok := managedQuotaName(idx); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // addQuotaLocked requires q.mutex to be held.
 func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
+	if quota == nil {
+		return
+	}
+	if q.objectLimits == nil {
+		q.objectLimits = make(map[string]map[string]map[string]int64)
+	}
+
+	affectedResources := make(map[string]struct{})
+	newObjLimits := make(map[string]int64)
+
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
 		if ok {
@@ -247,41 +314,74 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 			if !ok {
 				continue
 			}
-			if q.Quotas[quota.Namespace] == nil {
-				q.Quotas[quota.Namespace] = &DeviceQuota{}
-			}
-			dp := q.Quotas[quota.Namespace]
-			_, ok = (*dp)[dn]
-			if !ok {
-				(*dp)[dn] = &Quota{
-					Used:  0,
-					Limit: value,
-				}
-			}
-			(*dp)[dn].Limit = value
-			(*dp)[dn].LimitSet = true
-			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
+			newObjLimits[dn] = value
+			affectedResources[dn] = struct{}{}
+			klog.V(4).InfoS("quota set:", "quotaName", quota.Name, "idx=", idx, "val", value)
 		}
+	}
+
+	// If this quota object previously existed in state, track any resources it no longer specifies
+	if nsObjs, ok := q.objectLimits[quota.Namespace]; ok {
+		if oldLimits, ok := nsObjs[quota.Name]; ok {
+			for res := range oldLimits {
+				affectedResources[res] = struct{}{}
+			}
+		}
+	}
+
+	if len(newObjLimits) > 0 {
+		if q.objectLimits[quota.Namespace] == nil {
+			q.objectLimits[quota.Namespace] = make(map[string]map[string]int64)
+		}
+		q.objectLimits[quota.Namespace][quota.Name] = newObjLimits
+	} else {
+		if nsObjs, ok := q.objectLimits[quota.Namespace]; ok {
+			delete(nsObjs, quota.Name)
+			if len(nsObjs) == 0 {
+				delete(q.objectLimits, quota.Namespace)
+			}
+		}
+	}
+
+	for res := range affectedResources {
+		q.recalcLimitLocked(quota.Namespace, res)
 	}
 }
 
 // delQuotaLocked requires q.mutex to be held.
 func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
-	for idx, val := range quota.Spec.Hard {
-		value, ok := val.AsInt64()
-		if ok {
-			dn, ok := managedQuotaName(idx)
-			if !ok {
-				continue
+	if quota == nil || q.objectLimits == nil {
+		return
+	}
+
+	// For anonymous quotas (Name == ""), only proceed if the quota carries managed keys.
+	if quota.Name == "" && !hasManagedKeys(quota) {
+		return
+	}
+
+	affectedResources := make(map[string]struct{})
+
+	if nsObjs, ok := q.objectLimits[quota.Namespace]; ok {
+		if objLimits, ok := nsObjs[quota.Name]; ok {
+			for res := range objLimits {
+				affectedResources[res] = struct{}{}
 			}
-			klog.V(4).InfoS("quota remove:", "idx=", idx, "val", value)
-			if dq, ok := q.Quotas[quota.Namespace]; ok {
-				if quotaInfo, ok := (*dq)[dn]; ok {
-					quotaInfo.Limit = 0
-					quotaInfo.LimitSet = false
-				}
+			delete(nsObjs, quota.Name)
+			if len(nsObjs) == 0 {
+				delete(q.objectLimits, quota.Namespace)
 			}
 		}
+	}
+
+	for idx := range quota.Spec.Hard {
+		if dn, ok := managedQuotaName(idx); ok {
+			affectedResources[dn] = struct{}{}
+		}
+	}
+
+	for res := range affectedResources {
+		q.recalcLimitLocked(quota.Namespace, res)
+		klog.V(4).InfoS("quota remove:", "quotaName", quota.Name, "res", res)
 	}
 }
 

@@ -479,3 +479,116 @@ func TestGetResourceQuota(t *testing.T) {
 		t.Errorf("GetResourceQuota: mutating copied quota affected internal state: %+v", originalMem)
 	}
 }
+
+func TestMultipleResourceQuotasEnforceMinLimit(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "team-multi-quota"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	strict := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "strict", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):  *resource.NewQuantity(1000, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName): *resource.NewQuantity(50, resource.DecimalSI),
+			},
+		},
+	}
+
+	loose := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "loose", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):  *resource.NewQuantity(5000, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName): *resource.NewQuantity(200, resource.DecimalSI),
+			},
+		},
+	}
+
+	// Add loose first, then strict
+	qm.AddQuota(loose)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 5000 {
+		t.Fatalf("expected memory limit 5000, got %d", got)
+	}
+
+	qm.AddQuota(strict)
+	// Strictest limit (minimum) must be enforced
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 1000 {
+		t.Errorf("expected memory limit 1000 (min of 1000, 5000), got %d", got)
+	}
+	if got := (*qm.Quotas[ns])[coreName].Limit; got != 50 {
+		t.Errorf("expected core limit 50 (min of 50, 200), got %d", got)
+	}
+
+	// Deleting strict quota should raise limit back to loose quota
+	qm.DelQuota(strict)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 5000 {
+		t.Errorf("expected memory limit 5000 after deleting strict, got %d", got)
+	}
+	if got := (*qm.Quotas[ns])[coreName].Limit; got != 200 {
+		t.Errorf("expected core limit 200 after deleting strict, got %d", got)
+	}
+
+	// Deleting loose quota should clear limit
+	qm.DelQuota(loose)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 0 {
+		t.Errorf("expected memory limit 0 after deleting all quotas, got %d", got)
+	}
+	if (*qm.Quotas[ns])[memName].LimitSet {
+		t.Errorf("expected LimitSet false after deleting all quotas")
+	}
+}
+
+func TestDelQuotaWithStaleSpec(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "team-stale-del"
+	memName := "nvidia.com/gpumem"
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "quota-stale", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(2000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(rq)
+
+	// Delete event carries an empty Spec.Hard
+	staleDel := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "quota-stale", Namespace: ns},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{}},
+	}
+	qm.DelQuota(staleDel)
+
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 0 {
+		t.Errorf("expected limit 0 after deleting quota with empty spec, got %d", got)
+	}
+	if (*qm.Quotas[ns])[memName].LimitSet {
+		t.Errorf("expected LimitSet false after delete")
+	}
+}
+
+func TestUnrelatedQuotaLeavesNoEntry(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "team-unrelated"
+
+	unrelated := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "cpu-only", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("requests.cpu"):    *resource.NewQuantity(4, resource.DecimalSI),
+				corev1.ResourceName("requests.memory"): *resource.NewQuantity(1024, resource.BinarySI),
+			},
+		},
+	}
+
+	qm.AddQuota(unrelated)
+	if qm.objectLimits[ns] != nil {
+		t.Errorf("expected no objectLimits map for quota without managed keys, got: %+v", qm.objectLimits[ns])
+	}
+}
