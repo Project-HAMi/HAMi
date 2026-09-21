@@ -304,13 +304,17 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		// learn which pod it is serving; handing the lock to another pod while
 		// the holder waits makes the holder read that other pod's allocation
 		// (issue #3096). Leave the lock alone until the holder is past the
-		// point of being allocated.
-		waiting, err := podAwaitingAllocation(ctx, ns, previousPodName)
-		if err != nil {
-			return err
-		}
-		if waiting {
-			return fmt.Errorf("node %s lock expired while %s/%s still waits to be allocated: %w", nodeName, ns, previousPodName, ErrNodeLockContention)
+		// point of being allocated. Only another pod's allocation can be
+		// crossed with this one, so a pod reclaiming its own expired lock
+		// still re-stamps it below and keeps its place.
+		if ns != pods.Namespace || previousPodName != pods.Name {
+			waiting, err := podAwaitingAllocation(ctx, ns, previousPodName)
+			if err != nil {
+				return err
+			}
+			if waiting {
+				return fmt.Errorf("node %s lock expired while %s/%s still waits to be allocated: %w", nodeName, ns, previousPodName, ErrNodeLockContention)
+			}
 		}
 		skipOwnerCheck = true
 	} else if ns == pods.Namespace && previousPodName == pods.Name {

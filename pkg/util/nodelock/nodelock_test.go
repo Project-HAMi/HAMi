@@ -1447,3 +1447,53 @@ func TestLockNodeExpiredTakenWhenHolderIsDone(t *testing.T) {
 		})
 	}
 }
+
+// TestLockNodeExpiredReclaimedByOwnHolder covers the reentrant case the #3096
+// guard must not catch. A pod whose own lock has expired while it is still
+// pending has to be able to take it back, or it can never be allocated: the
+// guard below only exists to stop another pod's allocation being crossed with
+// this one.
+func TestLockNodeExpiredReclaimedByOwnHolder(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-3"
+	expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	staleLock := expired + NodeLockSep + "default" + NodeLockSep + "holder"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: staleLock},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	holder := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), holder, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	if err := LockNode(nodeName, "", holder); err != nil {
+		t.Fatalf("the holder could not reclaim its own expired lock: %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if node.Annotations[NodeLockKey] == staleLock {
+		t.Fatal("the lock was left at its expired timestamp instead of being re-stamped")
+	}
+	if !strings.Contains(node.Annotations[NodeLockKey], "holder") {
+		t.Fatalf("the lock is %q, want it still held by the holder", node.Annotations[NodeLockKey])
+	}
+}
