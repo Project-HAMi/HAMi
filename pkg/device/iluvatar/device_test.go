@@ -996,3 +996,85 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, reason, "core limit out of range")
 	})
 }
+
+func iluvatarTestDevice() IluvatarDevices {
+	return IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ChipName:           "MR-V100",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		},
+	}
+}
+
+func iluvatarContainer(count int64, cores *int64) *corev1.Container {
+	limits := corev1.ResourceList{
+		"iluvatar.ai/MR-V100-vgpu": *resource.NewQuantity(count, resource.DecimalSI),
+	}
+	if cores != nil {
+		limits["iluvatar.ai/MR-V100.vCore"] = *resource.NewQuantity(*cores, resource.DecimalSI)
+	}
+	return &corev1.Container{Name: "demo", Resources: corev1.ResourceRequirements{Limits: limits}}
+}
+
+// Test_GenerateResourceRequests_MutatedMultiCard walks the admission path.
+// MutateAdmission rewrites the core limit to count*100 for a multi card
+// request, and GenerateResourceRequests has to read that total back as a per
+// card percentage. It previously compared the total against the 0-100 range,
+// so every multi card request returned an empty request and the pod was
+// scheduled with no device.
+func Test_GenerateResourceRequests_MutatedMultiCard(t *testing.T) {
+	dev := iluvatarTestDevice()
+	for _, count := range []int64{1, 2, 4, 8} {
+		ctr := iluvatarContainer(count, nil)
+		if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
+			t.Fatalf("MutateAdmission(count=%d): %v", count, err)
+		}
+		got := dev.GenerateResourceRequests(ctr)
+		if got.Nums != int32(count) {
+			t.Errorf("count=%d: Nums = %d, want %d", count, got.Nums, count)
+		}
+		if count > 1 && got.Coresreq != 100 {
+			t.Errorf("count=%d: Coresreq = %d, want 100 per card", count, got.Coresreq)
+		}
+	}
+}
+
+// Test_GenerateResourceRequests_CoreLimitScales pins which values are treated
+// as a total and which as a per card percentage. The admission webhook is
+// optional: it can be disabled, it defaults to failurePolicy Ignore, and a
+// namespace or pod can carry hami.io/webhook: ignore. On those paths the limit
+// was never scaled, so a per card value must reach the scheduler untouched.
+func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
+	dev := iluvatarTestDevice()
+	tests := []struct {
+		name     string
+		count    int64
+		cores    int64
+		wantCore int32
+		wantNums int32
+	}{
+		{name: "scaled by the webhook", count: 2, cores: 200, wantCore: 100, wantNums: 2},
+		{name: "scaled by the webhook, eight cards", count: 8, cores: 800, wantCore: 100, wantNums: 8},
+		{name: "unscaled per card value is left alone", count: 2, cores: 60, wantCore: 60, wantNums: 2},
+		{name: "unscaled small value does not truncate to zero", count: 4, cores: 3, wantCore: 3, wantNums: 4},
+		{name: "unscaled full share", count: 8, cores: 100, wantCore: 100, wantNums: 8},
+		{name: "single card is unchanged", count: 1, cores: 50, wantCore: 50, wantNums: 1},
+		{name: "a total that does not divide evenly is rejected", count: 4, cores: 150, wantCore: 0, wantNums: 0},
+		{name: "a per card value above 100 is still rejected", count: 1, cores: 200, wantCore: 0, wantNums: 0},
+		{name: "negative is rejected", count: 2, cores: -1, wantCore: 0, wantNums: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := dev.GenerateResourceRequests(iluvatarContainer(test.count, &test.cores))
+			if got.Nums != test.wantNums {
+				t.Errorf("Nums = %d, want %d", got.Nums, test.wantNums)
+			}
+			if got.Coresreq != test.wantCore {
+				t.Errorf("Coresreq = %d, want %d", got.Coresreq, test.wantCore)
+			}
+		})
+	}
+}

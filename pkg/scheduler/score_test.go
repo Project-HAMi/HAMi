@@ -4940,3 +4940,63 @@ func Test_calcScore_AllocationRowsStayInLockstep(t *testing.T) {
 		}
 	}
 }
+
+// mixedCapacityNode holds two NVIDIA cards of different memory capacity,
+// registered the way the device plugin registers them: the device type is the
+// card's model name, and the vendor is the "NVIDIA" common word the request
+// carries. It goes through buildNodeUsage so the vendor is carried into
+// DeviceUsage the same way the scheduler does it.
+func mixedCapacityNode(task *corev1.Pod) *NodeUsage {
+	nodeInfo := &device.NodeInfo{
+		ID:   "mixed-node",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "mixed-node"}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "gpu-40g", Index: 0, Count: 10, Devmem: 40960, Devcore: 100, Numa: 0,
+				Type: "NVIDIA A100-SXM4-40GB", DeviceVendor: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "gpu-80g", Index: 1, Count: 10, Devmem: 81920, Devcore: 100, Numa: 0,
+				Type: "NVIDIA A100-SXM4-80GB", DeviceVendor: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	}
+	node := buildNodeUsage(nodeInfo, task)
+	for _, deviceList := range node.Devices.DeviceLists {
+		if deviceList.Device.ID == "gpu-80g" {
+			deviceList.Device.Used = 1
+			deviceList.Device.Usedcores = 5
+			deviceList.Device.Usedmem = 4096
+		}
+	}
+	return node
+}
+
+// Binpack must rank cards by their utilisation *after* the pending request is
+// placed. On a node whose cards differ in capacity, scoring on current usage
+// alone sends the pod to the 80GB card (0.20 used today vs 0.00) even though
+// the 40GB card is the tighter fit for a 20GB request (0.90 vs 0.85 after
+// placement) and keeping the large card free is the point of binpack.
+func TestBinpackPacksSmallerCardOnMixedCapacityNode(t *testing.T) {
+	task := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:        "trainer",
+		Namespace:   "default",
+		Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyBinpack.String()},
+	}}
+	node := mixedCapacityNode(task)
+	requests := device.ContainerDeviceRequests{
+		nvidia.NvidiaGPUDevice: {
+			Nums:             1,
+			Type:             nvidia.NvidiaGPUDevice,
+			Memreq:           20480,
+			MemPercentagereq: 101,
+			Coresreq:         30,
+		},
+	}
+
+	devinput := &device.PodDevices{}
+	fit, reason := fitInDevices(node, requests, task, nil, devinput, util.DefaultDeviceScoringWeights())
+	assert.Assert(t, fit, "expected the pod to fit; reason=%s", reason)
+
+	containers := (*devinput)[nvidia.NvidiaGPUDevice]
+	assert.Equal(t, len(containers), 1)
+	assert.Equal(t, len(containers[0]), 1)
+	assert.Equal(t, containers[0][0].UUID, "gpu-40g",
+		"binpack placed the pod by current usage instead of usage after placement")
+}

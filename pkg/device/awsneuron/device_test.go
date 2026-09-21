@@ -265,15 +265,18 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					Index:        uint(0),
-					ID:           "test-AWSNeuron-0",
-					Count:        int32(2),
-					Devmem:       int32(0),
-					Devcore:      int32(3),
-					Type:         AWSNeuronDevice,
-					Numa:         0,
-					Health:       true,
-					CustomInfo:   map[string]any{"AWSNodeType": string("inf2")},
+					Index:   uint(0),
+					ID:      "test-AWSNeuron-0",
+					Count:   int32(2),
+					Devmem:  int32(0),
+					Devcore: int32(3),
+					Type:    AWSNeuronDevice,
+					Numa:    0,
+					Health:  true,
+					CustomInfo: map[string]any{
+						AWSNodeType:             string("inf2"),
+						AWSCoresPerNeuronDevice: int32(2),
+					},
 					DeviceVendor: AWSNeuronCommonWord,
 				},
 			},
@@ -457,7 +460,6 @@ func Test_PatchAnnotations(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			dev.coresPerAWSNeuron = 2
 			result := dev.PatchAnnotations(&test.args.pod, test.args.annoinput, test.args.pd)
 			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
 			assert.Equal(t, result[AWSNeuronAssignedIndex], test.want[AWSNeuronAssignedIndex])
@@ -648,7 +650,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			dev.coresPerAWSNeuron = 2
 			result := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
@@ -658,60 +659,45 @@ func Test_GenerateResourceRequests(t *testing.T) {
 // Test_splitCoreRequest covers the one place the core request shape is decided.
 func Test_splitCoreRequest(t *testing.T) {
 	tests := []struct {
-		name              string
-		coresPerAWSNeuron uint
-		cores             int64
-		wantNums          int32
-		wantCoresreq      int32
-		wantErr           string
+		name         string
+		cores        int64
+		wantNums     int32
+		wantCoresreq int32
+		wantErr      string
 	}{
 		{
-			name:              "single core takes one device",
-			coresPerAWSNeuron: 2,
-			cores:             1,
-			wantNums:          1,
-			wantCoresreq:      1,
+			name:         "single core takes one device",
+			cores:        1,
+			wantNums:     1,
+			wantCoresreq: 1,
 		},
 		{
-			name:              "a full device is one device",
-			coresPerAWSNeuron: 2,
-			cores:             2,
-			wantNums:          1,
-			wantCoresreq:      2,
+			name:         "a full addressable device is one device",
+			cores:        2,
+			wantNums:     1,
+			wantCoresreq: 2,
 		},
 		{
-			name:              "whole devices divide evenly",
-			coresPerAWSNeuron: 2,
-			cores:             6,
-			wantNums:          3,
-			wantCoresreq:      2,
+			name:         "whole devices divide evenly",
+			cores:        6,
+			wantNums:     3,
+			wantCoresreq: 2,
 		},
 		{
-			name:              "odd count above one has no representable shape",
-			coresPerAWSNeuron: 2,
-			cores:             3,
-			wantErr:           "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
+			name:    "odd count above one has no representable shape",
+			cores:   3,
+			wantErr: "aws.amazon.com/neuroncore must be 1 or a multiple of 2, got 3",
 		},
 		{
-			// An Inferentia chip has four cores, but only two are addressable.
-			name:              "per-device cores above the addressable limit are bounded",
-			coresPerAWSNeuron: 4,
-			cores:             4,
-			wantNums:          2,
-			wantCoresreq:      2,
-		},
-		{
-			name:         "unknown per-device cores falls back to the addressable limit",
+			name:         "four cores use two addressable devices",
 			cores:        4,
 			wantNums:     2,
 			wantCoresreq: 2,
 		},
 		{
-			// One core per device divides evenly, leaving only the count bound.
-			name:              "device count stays within int32",
-			coresPerAWSNeuron: 1,
-			cores:             int64(math.MaxInt32) + 1,
-			wantErr:           "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
+			name:    "device count stays within int32",
+			cores:   int64(math.MaxInt32)*2 + 2,
+			wantErr: "aws.amazon.com/neuroncore needs 2147483648 devices, which exceeds the maximum of 2147483647",
 		},
 	}
 	for _, test := range tests {
@@ -720,8 +706,6 @@ func Test_splitCoreRequest(t *testing.T) {
 				ResourceCountName: "aws.amazon.com/neuron",
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			})
-			dev.coresPerAWSNeuron = test.coresPerAWSNeuron
-
 			nums, coresreq, err := dev.splitCoreRequest(test.cores)
 			if test.wantErr != "" {
 				assert.Error(t, err, test.wantErr)
@@ -1101,4 +1085,116 @@ func TestDevices_Fit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_graphSelect_ScoreSortedInput covers the order the scheduler actually
+// hands to Fit. DeviceUsageList sorts by score, so a busy device can sit at
+// position zero while its Index is elsewhere. graphSelect must reason about
+// physical adjacency and report indexes, because Fit matches its result
+// against DeviceUsage.Index. Every device carries the node type here, as
+// GetNodeDevices sets CustomInfo on all of them.
+func Test_graphSelect_ScoreSortedInput(t *testing.T) {
+	devices := makeDeviceUsages("trn", map[int]int32{5: 1}, true)
+	for _, d := range devices {
+		d.CustomInfo = map[string]any{AWSNodeType: "trn"}
+	}
+
+	// Move the busy device to the front, as a score sort would.
+	scoreOrdered := []*device.DeviceUsage{devices[5]}
+	for i, d := range devices {
+		if i != 5 {
+			scoreOrdered = append(scoreOrdered, d)
+		}
+	}
+
+	got := graphSelect(scoreOrdered, 4)
+	assert.DeepEqual(t, got, []int{0, 1, 2, 3})
+
+	// Every returned value has to name a free device.
+	byIndex := map[uint]*device.DeviceUsage{}
+	for _, d := range devices {
+		byIndex[d.Index] = d
+	}
+	for _, idx := range got {
+		d, ok := byIndex[uint(idx)]
+		assert.Assert(t, ok, "graphSelect returned %d, which is not a device index", idx)
+		assert.Assert(t, d.Used == 0, "graphSelect returned busy device index %d", idx)
+	}
+}
+
+// makeOffsetDeviceUsages builds devices whose Index deliberately does not equal
+// its slice position, so a result made of positions is distinguishable from one
+// made of indexes.
+func makeOffsetDeviceUsages(nodeType string, base uint, n int, used map[uint]int32) []*device.DeviceUsage {
+	devices := make([]*device.DeviceUsage, n)
+	for i := range n {
+		idx := base + uint(i)
+		du := &device.DeviceUsage{
+			Index:      idx,
+			Health:     true,
+			CustomInfo: map[string]any{AWSNodeType: nodeType},
+		}
+		if u, ok := used[idx]; ok {
+			du.Used = u
+		}
+		devices[i] = du
+	}
+	return devices
+}
+
+// Test_graphSelect_ReturnsIndexesNotPositions pins the contract Fit relies on.
+// Fit matches the returned values against DeviceUsage.Index, so graphSelect has
+// to report indexes. With an index set that does not start at zero, a result
+// built from slice positions names devices that do not exist, and Fit's lookup
+// loop then appends nothing while still reporting a successful fit.
+func Test_graphSelect_ReturnsIndexesNotPositions(t *testing.T) {
+	devices := makeOffsetDeviceUsages("trn", 100, 16, nil)
+
+	got := graphSelect(devices, 4)
+	assert.DeepEqual(t, got, []int{100, 101, 102, 103})
+
+	known := map[int]bool{}
+	for _, d := range devices {
+		known[int(d.Index)] = true
+	}
+	for _, idx := range got {
+		assert.Assert(t, known[idx], "graphSelect returned %d, which is not a device index", idx)
+	}
+}
+
+// Test_graphSelect_BusyDeviceWithOffsetIndexes checks the same contract when a
+// device is taken, which is the case that used to hand out an in-use device.
+func Test_graphSelect_BusyDeviceWithOffsetIndexes(t *testing.T) {
+	devices := makeOffsetDeviceUsages("trn", 100, 16, map[uint]int32{101: 1})
+
+	got := graphSelect(devices, 4)
+	assert.DeepEqual(t, got, []int{104, 105, 106, 107})
+
+	byIndex := map[uint]*device.DeviceUsage{}
+	for _, d := range devices {
+		byIndex[d.Index] = d
+	}
+	for _, idx := range got {
+		d, ok := byIndex[uint(idx)]
+		assert.Assert(t, ok, "graphSelect returned %d, which is not a device index", idx)
+		assert.Assert(t, d.Used == 0, "graphSelect returned busy device index %d", idx)
+	}
+}
+
+// Test_graphSelect_NodeTypeReadFromLowestIndex covers the node type lookup.
+// GetNodeDevices hands the same CustomInfo map to every device, but the check
+// only inspects the first element, so it has to run after the slice is ordered
+// by index rather than by score.
+func Test_graphSelect_NodeTypeReadFromLowestIndex(t *testing.T) {
+	devices := makeDeviceUsages("trn", nil, true)
+	// Only the lowest-index device carries the node type, and the score sort
+	// has moved a different device to the front.
+	scoreOrdered := []*device.DeviceUsage{devices[7]}
+	for i, d := range devices {
+		if i != 7 {
+			scoreOrdered = append(scoreOrdered, d)
+		}
+	}
+
+	assert.DeepEqual(t, graphSelect(scoreOrdered, 4), []int{0, 1, 2, 3})
 }
