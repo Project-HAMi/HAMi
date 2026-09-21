@@ -128,7 +128,9 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 }
 
 // validateContainerAllocation rejects an allocation handing the container more
-// than its own resource limits ask for (issue #3041).
+// than its own resource limits ask for (issue #3041). A MIG slice is charged
+// its profile's capacity rather than the raw request, so there is nothing to
+// compare it against here.
 func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
 	if plugin.operatingMode == "mig" {
 		return nil
@@ -137,37 +139,7 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 	if !ok {
 		return nil
 	}
-	req := dev.GenerateResourceRequests(ctr)
-	for _, each := range allocated {
-		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
-		if bounded && each.Usedmem > limit {
-			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
-				ctr.Name, each.Usedmem, each.UUID, limit)
-		}
-		if req.Coresreq > 0 && each.Usedcores > req.Coresreq {
-			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
-				ctr.Name, each.Usedcores, each.UUID, req.Coresreq)
-		}
-	}
-	return nil
-}
-
-// memoryLimitMB returns the memory the request entitles the container to on the
-// named card, and whether the request bounds it at all.
-func (plugin *NvidiaDevicePlugin) memoryLimitMB(req device.ContainerDeviceRequest, uuid string) (int32, bool) {
-	// A percentage leaves Memreq at 0 unless both were asked for, in which case
-	// the scheduler sized the slice from the percentage as well.
-	if req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100 {
-		total, ok := plugin.registeredMemoryMB(uuid)
-		if !ok {
-			return 0, false
-		}
-		return total * req.MemPercentagereq / 100, true
-	}
-	if req.Memreq > 0 {
-		return req.Memreq, true
-	}
-	return 0, false
+	return device.ValidateContainerAllocation(ctr.Name, dev.GenerateResourceRequests(ctr), allocated, plugin.registeredMemoryMB)
 }
 
 // registeredMemoryMB returns the memory this plugin published for a card, which
