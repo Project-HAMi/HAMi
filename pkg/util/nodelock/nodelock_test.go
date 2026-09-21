@@ -1347,3 +1347,103 @@ func TestSetNodeLockNilPod(t *testing.T) {
 		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
 	}
 }
+
+// TestLockNodeExpiredKeepsLockWhileHolderWaits guards issue #3096. The kubelet
+// gives a device plugin no pod identity, so the plugin reads the node lock to
+// learn which pod its Allocate is for. Handing an expired lock to the next pod
+// while the holder is still pending made the holder's Allocate read the new
+// pod's allocation, and the two pods were served each other's devices.
+func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-1"
+	expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	lockValue := expired + NodeLockSep + "default" + NodeLockSep + "holder"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: lockValue},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	// The holder is still pending: its Allocate has not run, so it will read
+	// this lock to find out which allocation is its own.
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	err := LockNode(nodeName, "", next)
+	if err == nil {
+		t.Fatal("the expired lock was handed over while its holder was still pending")
+	}
+	if !errors.Is(err, ErrNodeLockContention) {
+		t.Fatalf("want a contention error the scheduler can retry, got %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if node.Annotations[NodeLockKey] != lockValue {
+		t.Fatalf("the lock changed to %q, want it left at %q", node.Annotations[NodeLockKey], lockValue)
+	}
+}
+
+// TestLockNodeExpiredTakenWhenHolderIsDone is the other half of #3096: once the
+// holder can no longer be handed an allocation, the expired lock must still be
+// recoverable, or one stuck pod would keep the node locked for good.
+func TestLockNodeExpiredTakenWhenHolderIsDone(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded, corev1.PodRunning} {
+		t.Run(string(phase), func(t *testing.T) {
+			nodeLocks = newNodeLockManager()
+			client.KubeClient = fake.NewClientset()
+
+			originalTimeout := NodeLockTimeout
+			NodeLockTimeout = time.Minute * 2
+			t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+			const nodeName = "gpu-node-2"
+			expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+
+			if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{NodeLockKey: expired + NodeLockSep + "default" + NodeLockSep + "holder"},
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the node: %v", err)
+			}
+			if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: phase},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the holder: %v", err)
+			}
+
+			next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+			if err := LockNode(nodeName, "", next); err != nil {
+				t.Fatalf("the expired lock was not recoverable: %v", err)
+			}
+
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to read the node back: %v", err)
+			}
+			if !strings.Contains(node.Annotations[NodeLockKey], "next") {
+				t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+			}
+		})
+	}
+}
