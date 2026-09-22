@@ -37,6 +37,7 @@ func TestValidateContainerAllocation(t *testing.T) {
 		req        ContainerDeviceRequest
 		allocated  ContainerDevices
 		cardMemory CardMemoryMB
+		cores      CoresUnit
 		wantErr    bool
 	}{
 		{
@@ -44,12 +45,14 @@ func TestValidateContainerAllocation(t *testing.T) {
 			req:        ContainerDeviceRequest{Nums: 1, Memreq: 3000},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 3000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			name:       "more memory than requested",
 			req:        ContainerDeviceRequest{Nums: 1, Memreq: 3000},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 20000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 			wantErr:    true,
 		},
 		{
@@ -57,12 +60,14 @@ func TestValidateContainerAllocation(t *testing.T) {
 			req:        ContainerDeviceRequest{Nums: 1, Coresreq: 50},
 			allocated:  ContainerDevices{{UUID: uuid, Usedcores: 50}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			name:       "more cores than requested",
 			req:        ContainerDeviceRequest{Nums: 1, Coresreq: 10},
 			allocated:  ContainerDevices{{UUID: uuid, Usedcores: 100}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 			wantErr:    true,
 		},
 		{
@@ -70,12 +75,14 @@ func TestValidateContainerAllocation(t *testing.T) {
 			req:        ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 12000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			name:       "more than the requested percentage",
 			req:        ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 20000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 			wantErr:    true,
 		},
 		{
@@ -83,6 +90,7 @@ func TestValidateContainerAllocation(t *testing.T) {
 			req:        ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50},
 			allocated:  ContainerDevices{{UUID: "GPU-other", Usedmem: 20000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			// Both were asked for, and every backend sizes the slice from
@@ -92,24 +100,28 @@ func TestValidateContainerAllocation(t *testing.T) {
 			req:        ContainerDeviceRequest{Nums: 1, Memreq: 20000, MemPercentagereq: 10},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 20000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			name:       "both memory requests set, over the absolute one",
 			req:        ContainerDeviceRequest{Nums: 1, Memreq: 20000, MemPercentagereq: 10},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 21000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 			wantErr:    true,
 		},
 		{
 			name:      "percentage with no card memory to size it against",
 			req:       ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50},
 			allocated: ContainerDevices{{UUID: uuid, Usedmem: 20000}},
+			cores:     CoresInRequestUnits,
 		},
 		{
 			name:       "memory left to the default",
 			req:        ContainerDeviceRequest{Nums: 1},
 			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 24000}},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
 		},
 		{
 			name: "the second of two devices is over",
@@ -119,13 +131,33 @@ func TestValidateContainerAllocation(t *testing.T) {
 				{UUID: uuid, Usedmem: 9000},
 			},
 			cardMemory: knownCard,
+			cores:      CoresInRequestUnits,
+			wantErr:    true,
+		},
+		{
+			// AMD books Usedcores as the compute units the percentage resolved
+			// to, and AWS Neuron books a core bitmask. Neither is the request's
+			// unit, so reading them as one rejects allocations the scheduler
+			// made. Memory is still in MB and still checked.
+			name:       "vendor encoded cores are left alone",
+			req:        ContainerDeviceRequest{Nums: 1, Memreq: 3000, Coresreq: 50},
+			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 3000, Usedcores: 152}},
+			cardMemory: knownCard,
+			cores:      CoresVendorEncoded,
+		},
+		{
+			name:       "vendor encoded cores still do not excuse the memory",
+			req:        ContainerDeviceRequest{Nums: 1, Memreq: 3000, Coresreq: 50},
+			allocated:  ContainerDevices{{UUID: uuid, Usedmem: 9000, Usedcores: 152}},
+			cardMemory: knownCard,
+			cores:      CoresVendorEncoded,
 			wantErr:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateContainerAllocation("main", tt.req, tt.allocated, tt.cardMemory)
+			err := ValidateContainerAllocation("main", tt.req, tt.allocated, tt.cardMemory, tt.cores)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("the allocation was accepted")
