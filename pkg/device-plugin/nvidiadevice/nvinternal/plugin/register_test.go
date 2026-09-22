@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -343,6 +344,13 @@ func timeAfter(d time.Duration) <-chan struct{} {
 }
 
 func TestRegisterInAnnotationReportNodeCapacity(t *testing.T) {
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	t.Cleanup(func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	})
+
 	fakeClient := fake.NewClientset()
 	client.KubeClient = fakeClient
 
@@ -402,9 +410,9 @@ func TestRegisterInAnnotationReportNodeCapacity(t *testing.T) {
 			ResourceCoreName:   "nvidia.com/gpucores",
 			NodeDefaultConfig: nvidia.NodeDefaultConfig{
 				DeviceSplitCount:    &splitCount,
-				DeviceCoreScaling:  &coreScaling,
+				DeviceCoreScaling:   &coreScaling,
 				DeviceMemoryScaling: &memScaling,
-				ReportNodeCapacity: &reportCap,
+				ReportNodeCapacity:  &reportCap,
 			},
 		},
 	}
@@ -429,5 +437,117 @@ func TestRegisterInAnnotationReportNodeCapacity(t *testing.T) {
 	gpuCores := updatedNode.Status.Capacity["nvidia.com/gpucores"]
 	if gpuCores.Value() != 100 {
 		t.Errorf("nvidia.com/gpucores capacity = %v, want 100", gpuCores.Value())
+	}
+}
+
+func TestRegisterInAnnotationReportNodeCapacityAllUnhealthy(t *testing.T) {
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	t.Cleanup(func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	})
+
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+
+	nodeName := "node-test-capacity-unhealthy"
+	util.NodeName = nodeName
+
+	// Node starts with stale positive capacity/allocatable from a prior healthy scan.
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				"nvidia.com/gpumem":   *resource.NewQuantity(32768, resource.DecimalSI),
+				"nvidia.com/gpucores": *resource.NewQuantity(100, resource.DecimalSI),
+			},
+			Allocatable: corev1.ResourceList{
+				"nvidia.com/gpumem":   *resource.NewQuantity(32768, resource.DecimalSI),
+				"nvidia.com/gpucores": *resource.NewQuantity(100, resource.DecimalSI),
+			},
+		},
+	}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fake node: %v", err)
+	}
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				"GPU-1111": &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "GPU-1111", Health: "Unhealthy"}},
+			}
+		},
+	}
+
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	mockDev := &nvmlmock.Device{
+		GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{Total: 32768 * 1024 * 1024}, nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100", nvml.SUCCESS },
+		GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '0', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+		},
+	}
+
+	originalGetHandle := nvml.DeviceGetHandleByUUID
+	nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+		return mockDev, nvml.SUCCESS
+	}
+	defer func() { nvml.DeviceGetHandleByUUID = originalGetHandle }()
+
+	splitCount := uint(2)
+	coreScaling := 1.0
+	memScaling := 1.0
+	reportCap := true
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+		schedulerConfig: nvidia.NvidiaConfig{
+			ResourceMemoryName: "nvidia.com/gpumem",
+			ResourceCoreName:   "nvidia.com/gpucores",
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceSplitCount:    &splitCount,
+				DeviceCoreScaling:   &coreScaling,
+				DeviceMemoryScaling: &memScaling,
+				ReportNodeCapacity:  &reportCap,
+			},
+		},
+	}
+
+	if _, err := plugin.RegisterInAnnotation(); err != nil {
+		t.Fatalf("RegisterInAnnotation() error = %v", err)
+	}
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get updated node: %v", err)
+	}
+
+	gpuMem := updatedNode.Status.Capacity["nvidia.com/gpumem"]
+	if gpuMem.Value() != 0 {
+		t.Errorf("nvidia.com/gpumem capacity = %v, want 0 once all devices are unhealthy", gpuMem.Value())
+	}
+	gpuCores := updatedNode.Status.Capacity["nvidia.com/gpucores"]
+	if gpuCores.Value() != 0 {
+		t.Errorf("nvidia.com/gpucores capacity = %v, want 0 once all devices are unhealthy", gpuCores.Value())
+	}
+	allocMem := updatedNode.Status.Allocatable["nvidia.com/gpumem"]
+	if allocMem.Value() != 0 {
+		t.Errorf("nvidia.com/gpumem allocatable = %v, want 0 once all devices are unhealthy", allocMem.Value())
+	}
+	allocCores := updatedNode.Status.Allocatable["nvidia.com/gpucores"]
+	if allocCores.Value() != 0 {
+		t.Errorf("nvidia.com/gpucores allocatable = %v, want 0 once all devices are unhealthy", allocCores.Value())
 	}
 }

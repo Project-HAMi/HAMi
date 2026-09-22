@@ -204,7 +204,6 @@ func PatchNodeStatusCapacity(node *corev1.Node, resources corev1.ResourceList) e
 	return err
 }
 
-
 func AllNonSidecarInitContainersSucceeded(pod *corev1.Pod) bool {
 	if len(pod.Spec.InitContainers) == 0 {
 		return false

@@ -125,4 +125,3 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 	klog.Infoln("reading config=", config.NvidiaConfig.ResourceCountName, "devcfg", *devcfg.ResourceName, "configfile=", *plugin.ConfigFile)
 	return devcfg, nil
 }
-

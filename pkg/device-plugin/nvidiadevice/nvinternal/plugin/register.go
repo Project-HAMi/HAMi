@@ -290,18 +290,13 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		if coreName == "" {
 			coreName = "nvidia.com/gpucores"
 		}
-		resList := corev1.ResourceList{}
-		if totalMemory > 0 {
-			resList[corev1.ResourceName(memName)] = *resource.NewQuantity(totalMemory, resource.DecimalSI)
+		resList := corev1.ResourceList{
+			corev1.ResourceName(memName):  *resource.NewQuantity(totalMemory, resource.DecimalSI),
+			corev1.ResourceName(coreName): *resource.NewQuantity(totalCores, resource.DecimalSI),
 		}
-		if totalCores > 0 {
-			resList[corev1.ResourceName(coreName)] = *resource.NewQuantity(totalCores, resource.DecimalSI)
-		}
-		if len(resList) > 0 {
-			klog.Infof("Updating node status capacity with memory/core resources: %v", resList)
-			if patchErr := util.PatchNodeStatusCapacity(node, resList); patchErr != nil {
-				klog.Errorf("failed to patch node status capacity: %v", patchErr)
-			}
+		klog.Infof("Updating node status capacity with memory/core resources: %v", resList)
+		if patchErr := util.PatchNodeStatusCapacity(node, resList); patchErr != nil {
+			klog.Errorf("failed to patch node status capacity: %v", patchErr)
 		}
 	}
 
