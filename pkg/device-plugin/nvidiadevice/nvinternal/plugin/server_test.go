@@ -1106,3 +1106,145 @@ func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
 	require.Nil(t, response)
 	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
 }
+
+// TestIsWholeGPUAllocation covers the byte-vs-MiB unit handling that
+// previously made the function always return false.
+func TestIsWholeGPUAllocation(t *testing.T) {
+	// 8 GiB card: TotalMemory is in bytes, Usedmem in MiB.
+	const (
+		gibInMiB = int32(8 * 1024)
+		uuidA    = "GPU-aaaa"
+		uuidB    = "GPU-bbbb"
+	)
+	totalA := uint64(gibInMiB) * 1024 * 1024
+	totalB := uint64(gibInMiB) * 1024 * 1024
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				uuidA: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidA}, TotalMemory: totalA},
+				uuidB: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidB}, TotalMemory: totalB},
+			}
+		},
+		ResourceFunc: func() v1.ResourceName { return v1.ResourceName("nvidia.com/gpu") },
+	}
+
+	cases := []struct {
+		name   string
+		devreq device.ContainerDevices
+		rm     rm.ResourceManager
+		want   bool
+	}{
+		{
+			name:   "nil ResourceManager falls through to default preload",
+			devreq: device.ContainerDevices{{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores}},
+			rm:     nil,
+			want:   false,
+		},
+		{
+			name:   "empty devreq yields false",
+			devreq: device.ContainerDevices{},
+			rm:     mockRM,
+			want:   false,
+		},
+		{
+			name: "single whole-GPU allocation (MiB == bytes/1Mi)",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "two whole-GPU allocations",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "regression: pre-fix code rejected this because MiB vs bytes are not equal as raw integers",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "partial cores is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores - 1},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "memory exceeding full card is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB + 1, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "UUID missing from registry falls through",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "any non-whole device in a multi-device request fails the whole",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isWholeGPUAllocation(tc.devreq, tc.rm))
+		})
+	}
+}
+
+// TestWholeGPUSkipHookAllowed pins the env gate and the over-subscription
+// guards: scaled devices must keep the interception hook.
+func TestWholeGPUSkipHookAllowed(t *testing.T) {
+	original := wholeGPUSkipHookEnabled
+	t.Cleanup(func() { wholeGPUSkipHookEnabled = original })
+
+	one, two := float64(1), float64(2)
+	pluginWith := func(memScale, coreScale *float64) *NvidiaDevicePlugin {
+		return &NvidiaDevicePlugin{
+			schedulerConfig: nvidia.NvidiaConfig{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceMemoryScaling: memScale,
+					DeviceCoreScaling:   coreScale,
+				},
+			},
+		}
+	}
+
+	wholeGPUSkipHookEnabled = false
+	require.False(t, pluginWith(&one, &one).wholeGPUSkipHookAllowed())
+
+	wholeGPUSkipHookEnabled = true
+	require.True(t, pluginWith(&one, &one).wholeGPUSkipHookAllowed())
+	require.False(t, pluginWith(&two, &one).wholeGPUSkipHookAllowed())
+	require.False(t, pluginWith(&one, &two).wholeGPUSkipHookAllowed())
+}

@@ -183,6 +183,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            - name: HAMI_WHOLE_GPU_SKIP_HOOK
+              value: {{ .Values.devicePlugin.monitor.skipHookForWholeGPU | default false | quote }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
