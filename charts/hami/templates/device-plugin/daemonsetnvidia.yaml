@@ -257,6 +257,8 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            - name: HAMI_WHOLE_GPU_SKIP_HOOK
+              value: {{ .Values.devicePlugin.monitor.skipHookForWholeGPU | default false | quote }}
             {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             # fake-gpu-operator validation requires the monitor to receive the
             # same driver-root configuration as the device plugin.

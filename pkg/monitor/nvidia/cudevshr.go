@@ -78,6 +78,10 @@ type ContainerUsage struct {
 	ContainerName string
 	data          []byte
 	Info          UsageInfo
+	// synthesized marks entries created by reconcileWholeGPU from NVML data
+	// rather than loaded from a libvgpu shm cache file. data is always nil
+	// for these, so no Munmap is required when they're removed.
+	synthesized bool
 }
 
 type ContainerLister struct {
@@ -86,6 +90,10 @@ type ContainerLister struct {
 	mutex         sync.Mutex
 	clientset     *kubernetes.Clientset
 	nodeName      string
+
+	// wholeGPU holds the whole-GPU reconciliation state; nil unless
+	// HAMI_WHOLE_GPU_SKIP_HOOK is enabled.
+	wholeGPU *wholeGPUState
 
 	// Fields for the informer-based pod cache mechanism
 	informerFactory informers.SharedInformerFactory
@@ -193,6 +201,10 @@ func (l *ContainerLister) Update() error {
 	podUIDs := make(map[string]bool, len(pods))
 	for _, pod := range pods {
 		podUIDs[string(pod.UID)] = true
+	}
+
+	if wholeGPUSkipHookEnabled {
+		l.reconcileWholeGPU(pods)
 	}
 
 	for _, entry := range entries {
