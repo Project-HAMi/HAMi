@@ -23,24 +23,43 @@ import "fmt"
 // number, so a card the plugin does not know leaves such a request unbounded.
 type CardMemoryMB func(uuid string) (int32, bool)
 
+// CoresUnit says whether a backend records ContainerDevice.Usedcores in the
+// same unit the request carries, which decides whether the two can be compared
+// at all.
+type CoresUnit bool
+
+const (
+	// CoresInRequestUnits marks a backend that books Usedcores as the request
+	// itself, so an allocation above the request is a real overage. NVIDIA,
+	// Hygon, Cambricon, Iluvatar, Mthreads, Biren and VastAI all do this.
+	CoresInRequestUnits CoresUnit = true
+	// CoresVendorEncoded marks a backend that books something else: AMD stores
+	// the compute unit count the percentage resolved to, and AWS Neuron stores
+	// a core bitmask. Comparing either against the request is meaningless, so
+	// those allocations are checked for memory alone.
+	CoresVendorEncoded CoresUnit = false
+)
+
 // ValidateContainerAllocation rejects an allocation handing the container more
 // than its own resource limits ask for (issue #3041). Every device plugin reads
 // the allocation from the pod annotation the scheduler writes, and nothing on
 // the plugin side proves the scheduler wrote it, so the numbers are compared
 // against the container's limits, which cannot be raised once the pod exists.
 //
-// req is what the device backend derives from the container, and cardMemory
-// resolves the published memory of a card for a percentage request. A vendor
-// whose slices are charged a rounded-up capacity rather than the raw request,
-// as NVIDIA MIG is, has nothing to compare against and should not call this.
-func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, allocated ContainerDevices, cardMemory CardMemoryMB) error {
+// req is what the device backend derives from the container, cardMemory
+// resolves the published memory of a card for a percentage request, and cores
+// states how the backend books Usedcores. Memory is in MB everywhere, so it is
+// always compared. A vendor whose slices are charged a rounded-up capacity
+// rather than the raw request, as NVIDIA MIG is, has nothing to compare
+// against and should not call this.
+func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, allocated ContainerDevices, cardMemory CardMemoryMB, cores CoresUnit) error {
 	for _, each := range allocated {
 		limit, bounded := requestedMemoryMB(req, each.UUID, cardMemory)
 		if bounded && each.Usedmem > limit {
 			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
 				ctrName, each.Usedmem, each.UUID, limit)
 		}
-		if req.Coresreq > 0 && each.Usedcores > req.Coresreq {
+		if cores == CoresInRequestUnits && req.Coresreq > 0 && each.Usedcores > req.Coresreq {
 			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
 				ctrName, each.Usedcores, each.UUID, req.Coresreq)
 		}

@@ -139,7 +139,7 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 	if !ok {
 		return nil
 	}
-	return device.ValidateContainerAllocation(ctr.Name, dev.GenerateResourceRequests(ctr), allocated, plugin.registeredMemoryMB)
+	return device.ValidateContainerAllocation(ctr.Name, dev.GenerateResourceRequests(ctr), allocated, plugin.registeredMemoryMB, device.CoresInRequestUnits)
 }
 
 // registeredMemoryMB returns the memory this plugin published for a card, which
