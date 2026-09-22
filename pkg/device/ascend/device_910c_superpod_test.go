@@ -33,7 +33,7 @@ import (
 // node, because the pair combination selects whole cards and returns more
 // devices than requested.
 func TestAscend910C_FitSplitModeOddRequestSchedulable(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}, hamiVnpuCore: true}
 	devices := make([]*device.DeviceUsage, 0, 8)
 	for i := range 8 {
 		devices = append(devices, &device.DeviceUsage{
@@ -45,7 +45,9 @@ func TestAscend910C_FitSplitModeOddRequestSchedulable(t *testing.T) {
 			Health:    true,
 		})
 	}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", Annotations: map[string]string{}}}
+	// Fit is invoked after MutateAdmission, which infers hami-core mode from
+	// this core request. Model that admission result explicitly here.
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", Annotations: map[string]string{VNPUModeAnnotation: VNPUModeHamiCore}}}
 	request := device.ContainerDeviceRequest{Nums: 3, Type: Ascend910CType, Memreq: 16384, Coresreq: 20}
 
 	fit, tmpDevs, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
