@@ -3567,7 +3567,7 @@ func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
 	}
 }
 
-// benchNodeInfo builds a registered node carrying gpus idle NVIDIA devices.
+// testNodeInfo builds a registered node carrying gpus idle NVIDIA devices.
 func testNodeInfo(name string, gpus int) *device.NodeInfo {
 	infos := make([]device.DeviceInfo, 0, gpus)
 	for j := range gpus {
