@@ -1180,6 +1180,8 @@ func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
 	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
 }
 
+// TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead verifies that a valid
+// device config cannot select an operating mode without reading the node.
 // A node that cannot be read is not a node without the label. Falling back to
 // a local mode there would advertise to kubelet the cards lupine is already
 // serving over the network, putting two workloads on the same GPU.
@@ -1193,13 +1195,15 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	t.Cleanup(func() { util.NodeName = previousNodeName })
 
 	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
-	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	// Use the HAMi device-config schema; NVIDIA's "version" field is not valid
+	// here and strict decoding would exit before exercising the node lookup.
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
 	previousFile := ConfigFile
 	ConfigFile = &pluginConfig
 	t.Cleanup(func() { ConfigFile = previousFile })
 
 	_, mode, err := LoadNvidiaDevicePluginConfig()
-	require.Error(t, err)
+	require.ErrorContains(t, err, `read node "absent-node" while resolving the operating mode`)
 	require.Empty(t, mode, "no mode is chosen when the node is unknown")
 }
 
