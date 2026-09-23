@@ -18,6 +18,7 @@ package ascend
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -172,6 +173,77 @@ func TestENPUAdmissionSingleDieAndLegacySuperPod(t *testing.T) {
 	}
 }
 
+func TestENPUAdmissionRequestsOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, count, limitCount, memory, limitMemory, policy string
+		wantMemory                                                 int64
+		wantMutated, invalid                                       bool
+	}{
+		{name: "requests only", mode: VNPUModeENPU, count: "1", memory: "20480", wantMemory: 20480, wantMutated: true},
+		{name: "alias requests only", mode: "vcann-rt", count: "1", memory: "20480", wantMemory: 20480, wantMutated: true},
+		{name: "default memory", mode: VNPUModeENPU, count: "1", wantMemory: 65536, wantMutated: true},
+		{name: "memory limit takes precedence", mode: VNPUModeENPU, count: "1", memory: "16384", limitMemory: "20480", wantMemory: 20480, wantMutated: true},
+		{name: "multiple devices", mode: VNPUModeENPU, count: "2", invalid: true},
+		{name: "zero devices", mode: VNPUModeENPU, count: "0", invalid: true},
+		{name: "limit count takes precedence", mode: VNPUModeENPU, count: "1", limitCount: "2", invalid: true},
+		{name: "invalid policy", mode: VNPUModeENPU, count: "1", policy: "unknown", invalid: true},
+		{name: "no Ascend count", mode: VNPUModeENPU},
+		{name: "hami-core unchanged", mode: VNPUModeHamiCore, count: "1", memory: "20480"},
+		{name: "template unchanged", mode: VNPUModeTemplate, count: "1", memory: "20480"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := enpuTestDevice()
+			dev.config.SuperPod = true
+			dev.runtimeClassName = "ascend"
+			countName := corev1.ResourceName(dev.config.ResourceName)
+			memoryName := corev1.ResourceName(dev.config.ResourceMemoryName)
+			dev.allAscendResourceNames = []corev1.ResourceName{countName}
+			pod := enpuTestPod(tc.mode, tc.policy)
+			ctr := &pod.Spec.Containers[0]
+			ctr.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{}}
+			if tc.count != "" {
+				ctr.Resources.Requests[countName] = resource.MustParse(tc.count)
+			}
+			if tc.memory != "" {
+				ctr.Resources.Requests[memoryName] = resource.MustParse(tc.memory)
+			}
+			if tc.limitCount != "" || tc.limitMemory != "" {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
+			if tc.limitCount != "" {
+				ctr.Resources.Limits[countName] = resource.MustParse(tc.limitCount)
+			}
+			if tc.limitMemory != "" {
+				ctr.Resources.Limits[memoryName] = resource.MustParse(tc.limitMemory)
+			}
+			original := pod.DeepCopy()
+			mutated, err := dev.MutateAdmission(ctr, pod)
+			if (err != nil) != tc.invalid || mutated != tc.wantMutated {
+				t.Fatalf("MutateAdmission = %v, %v; want mutated=%v, invalid=%v", mutated, err, tc.wantMutated, tc.invalid)
+			}
+			if !tc.wantMutated {
+				if !reflect.DeepEqual(pod, original) {
+					t.Fatal("rejected or unrelated Pod was modified")
+				}
+				return
+			}
+			if pod.Annotations["huawei.com/enpu-policy"] != "elastic" || pod.Spec.RuntimeClassName == nil || *pod.Spec.RuntimeClassName != "ascend" {
+				t.Fatalf("policy or runtime class not persisted: %+v", pod)
+			}
+			for _, resources := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+				count, memory := resources[countName], resources[memoryName]
+				if count.Value() != 1 || memory.Value() != tc.wantMemory {
+					t.Fatalf("count/memory = %d/%d, want 1/%d", count.Value(), memory.Value(), tc.wantMemory)
+				}
+			}
+			request := dev.GenerateResourceRequests(ctr)
+			if request.Nums != 1 || int64(request.Memreq) != tc.wantMemory {
+				t.Fatalf("scheduler request does not match admitted resources: %+v", request)
+			}
+		})
+	}
+}
+
 func TestENPUFitBackendIsolation(t *testing.T) {
 	for _, tc := range []struct {
 		name, incomingMode, existingMode string
@@ -259,6 +331,13 @@ func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 		{name: "ENPU disabled by default", mode: VNPUModeENPU, node: &device.NodeInfo{}},
 		{name: "implicit core keeps zero reservation", node: enpuTestNode(true, false), wantFit: true},
 		{name: "unannotated rejected on ENPU only", node: enpuTestNode(false, true)},
+		{name: "unknown mode rejected on ENPU only", mode: "typo", node: enpuTestNode(false, true)},
+		{name: "core rejected on ENPU only", mode: VNPUModeHamiCore, node: enpuTestNode(false, true)},
+		{name: "ENPU alias accepted", mode: "vcann-rt", node: enpuTestNode(false, true), wantFit: true, wantCore: 100},
+		{name: "unknown mode on legacy template node unchanged", mode: "typo", node: enpuTestNode(false, false), wantFit: true},
+		{name: "unknown mode on legacy core node unchanged", mode: "typo", node: enpuTestNode(true, false), wantFit: true},
+		{name: "core accepted on dual backend node", mode: VNPUModeHamiCore, node: enpuTestNode(true, true), wantFit: true},
+		{name: "template rejected on dual backend node", mode: VNPUModeTemplate, node: enpuTestNode(true, true)},
 		{name: "template rejected on ENPU", mode: VNPUModeTemplate, node: enpuTestNode(false, true)},
 		{name: "template default unchanged", mode: VNPUModeTemplate, node: enpuTestNode(false, false), wantFit: true},
 	} {
