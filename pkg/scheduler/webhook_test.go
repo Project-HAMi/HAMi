@@ -38,6 +38,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -651,6 +652,41 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 				t.Errorf("fitResourceQuota() = %v, want %v", got, tc.fit)
 			}
 		})
+	}
+}
+
+func TestFitResourceQuotaAWSNeuronCoreRequest(t *testing.T) {
+	if err := config.InitDevicesWithConfig(&config.Config{AWSNeuronConfig: awsneuron.AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	quota := device.NewQuotaManager()
+	quota.Quotas["neuron-core-limit"] = &device.DeviceQuota{
+		"aws.amazon.com/neuroncore": &device.Quota{Limit: 5, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(quota.Quotas, "neuron-core-limit") })
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "neuron-core-limit"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("6"),
+			}},
+		}}},
+	}
+	if fitResourceQuota(pod) {
+		t.Fatal("six requested NeuronCores must exceed a five-core quota")
+	}
+	pod.Spec.Containers[0].Resources.Limits["aws.amazon.com/neuroncore"] = resource.MustParse("4")
+	if !fitResourceQuota(pod) {
+		t.Fatal("four requested NeuronCores should fit a five-core quota")
+	}
+	quota.AddUsage(pod, device.PodDevices{awsneuron.AWSNeuronDevice: {{
+		{Usedcores: 1}, {Usedcores: 2}, {Usedcores: 4}, {Usedcores: 8},
+	}}})
+	if used := (*quota.Quotas["neuron-core-limit"])["aws.amazon.com/neuroncore"].Used; used != 4 {
+		t.Fatalf("quota used = %d, want 4 allocated NeuronCores", used)
 	}
 }
 

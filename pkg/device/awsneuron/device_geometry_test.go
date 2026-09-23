@@ -99,10 +99,8 @@ func TestGetNodeDevicesKeepsGeometryPerNode(t *testing.T) {
 			secondDevices, err := dev.GetNodeDevices(test.second)
 			assert.NilError(t, err)
 
-			// Core allocation remains capped at two in this bug fix. Count and the
-			// stored stride must still describe each node's physical geometry.
-			assertNeuronGeometry(t, firstDevices, test.firstCores, 3, test.firstCores)
-			assertNeuronGeometry(t, secondDevices, test.secondCores, 3, test.secondCores)
+			assertNeuronGeometry(t, firstDevices, test.firstCores, (1<<test.firstCores)-1, test.firstCores)
+			assertNeuronGeometry(t, secondDevices, test.secondCores, (1<<test.secondCores)-1, test.secondCores)
 		})
 	}
 }
@@ -118,7 +116,7 @@ func TestGenerateResourceRequestsDoesNotDependOnRegisteredNode(t *testing.T) {
 	}
 
 	want := dev.GenerateResourceRequests(container)
-	assert.Equal(t, want.Coresreq, int32(maxCoresPerNeuronDevice))
+	assert.Equal(t, want.Coresreq, int32(0))
 
 	_, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.xlarge", 1, 4))
 	assert.NilError(t, err)
