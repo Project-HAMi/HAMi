@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -42,6 +43,7 @@ func Test_MutateAdmission(t *testing.T) {
 		ResourceCoreName:   "hygon.com/hcucores",
 	}
 	InitHCUDevice(config)
+	expectedErr := errors.New("hygon.com/hcucores must be an integer between 0 and 100")
 	tests := []struct {
 		name string
 		args struct {
@@ -69,13 +71,582 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 			err:  nil,
 		},
+		{
+			name: "hcuResourceCount in limits and hcucores 0 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("0"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in limits and hcucores 1 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in limits and hcucores 100 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("100"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in limits and hcucores 101 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("101"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and negative hcucores rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("-1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and overflow hcucores 2147483648 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("2147483648"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and overflow hcucores 4294967296 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("4294967296"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and overflow hcucores MaxInt64 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("9223372036854775807"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and overflow hcucores math.MaxInt32 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("2147483647"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and fractional hcucores 50m rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("50m"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and non-integer hcucores 99.1 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("99.1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests without hcucores",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum": resource.MustParse("1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in requests and hcucores 0 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("0"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in requests and hcucores 1 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in requests and hcucores 100 accepted",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("100"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in requests and hcucores 101 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("101"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and negative hcucores rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("-1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and overflow hcucores 2147483648 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("2147483648"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and overflow hcucores 4294967296 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("4294967296"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and overflow hcucores MaxInt64 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("9223372036854775807"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and overflow hcucores math.MaxInt32 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("2147483647"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and fractional hcucores 50m rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("50m"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests and non-integer hcucores 99.1 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("99.1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits and hcucores in requests",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum": resource.MustParse("1"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("50"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "hcuResourceCount in limits and invalid hcucores in requests rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum": resource.MustParse("1"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("2147483648"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits, limits hcucores 50 and requests hcucores 101 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("50"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("101"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits, limits hcucores 101 and requests hcucores 50 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("101"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("50"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in requests, requests hcucores 50 and limits hcucores 101 rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("50"),
+						},
+						Limits: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("101"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
+		{
+			name: "hcuResourceCount in limits, limits hcucores 50 and requests hcucores 50m rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/hcunum":   resource.MustParse("1"),
+							"hygon.com/hcucores": resource.MustParse("50"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/hcucores": resource.MustParse("50m"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  expectedErr,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := HCUDevices{}
 			result, err := dev.MutateAdmission(test.args.ctr, test.args.p)
-			if err != test.err {
-				klog.InfoS("set to resource limits failed")
+			if test.err != nil {
+				assert.Assert(t, err != nil, "expected error but got nil")
+				assert.Equal(t, err.Error(), test.err.Error())
+			} else {
+				assert.NilError(t, err)
 			}
 			assert.Equal(t, result, test.want)
 		})
@@ -681,6 +1252,78 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "fractional hcu memory 500m in limits rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("500m"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative hcu memory -1 in limits rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized hcu memory 3000000000 in limits exceeds int32 range rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("3000000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "fractional hcu memory 500m in requests rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("500m"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative hcu memory -1 in requests rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized hcu memory 3000000000 in requests exceeds int32 range rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("3000000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -689,6 +1332,61 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			ParseConfig(&fs)
 			result := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_ValidMemory(t *testing.T) {
+	dev := HCUDevices{}
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+
+	tests := []struct {
+		name string
+		ctr  *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "explicit integer memory in limits",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("1024"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             HygonHCUDevice,
+				Memreq:           1024,
+				MemPercentagereq: 0,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "unspecified memory defaults to 100 percentage",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             HygonHCUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dev.GenerateResourceRequests(tt.ctr)
+			assert.DeepEqual(t, result, tt.want)
 		})
 	}
 }
@@ -1475,6 +2173,11 @@ func TestFit_CoresValidation(t *testing.T) {
 			wantOk:   true,
 		},
 		{
+			name:     "cores 1 is accepted",
+			coresreq: 1,
+			wantOk:   true,
+		},
+		{
 			name:     "cores 50 is accepted",
 			coresreq: 50,
 			wantOk:   true,
@@ -1502,6 +2205,21 @@ func TestFit_CoresValidation(t *testing.T) {
 		{
 			name:     "negative cores -1 is rejected",
 			coresreq: -1,
+			wantOk:   false,
+		},
+		{
+			name:     "negative wrapped cores from int32 overflow -2147483648 rejected",
+			coresreq: -2147483648,
+			wantOk:   false,
+		},
+		{
+			name:     "math.MinInt32 rejected",
+			coresreq: math.MinInt32,
+			wantOk:   false,
+		},
+		{
+			name:     "math.MaxInt32 rejected",
+			coresreq: math.MaxInt32,
 			wantOk:   false,
 		},
 	}
@@ -1556,6 +2274,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		wantVal int32
 	}{
 		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
+		{name: "1 cores", cores: "1", wantOk: true, wantVal: 1},
 		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
 		{name: "100 cores", cores: "100", wantOk: true, wantVal: 100},
 		{name: "101 cores", cores: "101", wantOk: false},
@@ -1564,6 +2283,10 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		{name: "-1 cores", cores: "-1", wantOk: false},
 		{name: "fractional 50m", cores: "50m", wantOk: false},
 		{name: "fractional 99.1", cores: "99.1", wantOk: false},
+		{name: "math.MaxInt32", cores: "2147483647", wantOk: false},
+		{name: "overflow 2147483648", cores: "2147483648", wantOk: false},
+		{name: "overflow 4294967296", cores: "4294967296", wantOk: false},
+		{name: "overflow MaxInt64", cores: "9223372036854775807", wantOk: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctr := &corev1.Container{
@@ -1583,4 +2306,141 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_EndToEnd_CoresOverflow_ResourceAccounting(t *testing.T) {
+	dev := InitHCUDevice(HygonConfig{
+		ResourceCountName:  "hygon.com/hcunum",
+		ResourceMemoryName: "hygon.com/hcumem",
+		ResourceCoreName:   "hygon.com/hcucores",
+	})
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "hcu-node1-gpu-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  16000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      HygonHCUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "flow-pod",
+			Namespace: "default",
+		},
+	}
+
+	// 1. Valid request flow: 50 cores
+	validCtr := &corev1.Container{
+		Name: "valid-workload",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"hygon.com/hcunum":   resource.MustParse("1"),
+				"hygon.com/hcucores": resource.MustParse("50"),
+			},
+		},
+	}
+
+	// Admission stage
+	admitted, err := dev.MutateAdmission(validCtr, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, admitted, true)
+
+	// Resource request generation
+	req := dev.GenerateResourceRequests(validCtr)
+	assert.Equal(t, req.Nums, int32(1))
+	assert.Equal(t, req.Coresreq, int32(50))
+
+	// Fit scheduling stage
+	fit, allocated, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, reason, "")
+	assert.Equal(t, len(allocated[HygonHCUDevice]), 1)
+
+	// Accounting update stage
+	allocatedDevice := allocated[HygonHCUDevice][0]
+	assert.Equal(t, allocatedDevice.Usedcores, int32(50))
+	err = dev.AddResourceUsage(pod, devices[0], &allocatedDevice)
+	assert.NilError(t, err)
+	assert.Equal(t, devices[0].Usedcores, int32(50))
+	assert.Equal(t, devices[0].Used, int32(1))
+
+	// 2. Out-of-range and overflowing requests must be rejected before scheduling
+	invalidCoreTests := []struct {
+		name string
+		val  string
+	}{
+		{name: "boundary 101", val: "101"},
+		{name: "negative -1", val: "-1"},
+		{name: "math.MaxInt32 + 1 overflow (2147483648)", val: "2147483648"},
+		{name: "2^32 overflow (4294967296)", val: "4294967296"},
+		{name: "math.MaxInt64 overflow (9223372036854775807)", val: "9223372036854775807"},
+	}
+
+	for _, tt := range invalidCoreTests {
+		t.Run("rejection_"+tt.name, func(t *testing.T) {
+			invalidCtr := &corev1.Container{
+				Name: "invalid-workload",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum":   resource.MustParse("1"),
+						"hygon.com/hcucores": resource.MustParse(tt.val),
+					},
+				},
+			}
+
+			// A. MutateAdmission rejects invalid/overflowing cores
+			admitted, err := dev.MutateAdmission(invalidCtr, pod)
+			assert.Assert(t, err != nil, "expected admission error for %s", tt.val)
+			assert.Equal(t, admitted, false)
+
+			// B. GenerateResourceRequests returns empty request, preventing invalid Coresreq
+			genReq := dev.GenerateResourceRequests(invalidCtr)
+			assert.Equal(t, genReq.Nums, int32(0))
+			assert.Equal(t, genReq.Coresreq, int32(0))
+
+			// C. Accounting is untouched (AddResourceUsage is not reached)
+			assert.Equal(t, devices[0].Usedcores, int32(50))
+			assert.Equal(t, devices[0].Used, int32(1))
+		})
+	}
+
+	// 3. Defensive Fit() check: even if an invalid or negative Coresreq reaches Fit(),
+	// Fit() rejects it immediately, preventing device allocation or accounting corruption.
+	t.Run("Fit defensive check rejects invalid Coresreq", func(t *testing.T) {
+		defensiveCases := []struct {
+			name     string
+			coresreq int32
+		}{
+			{name: "negative -1", coresreq: -1},
+			{name: "int32 overflow wrap -2147483648", coresreq: -2147483648},
+			{name: "exceeds 100", coresreq: 101},
+			{name: "math.MinInt32", coresreq: math.MinInt32},
+			{name: "math.MaxInt32", coresreq: math.MaxInt32},
+		}
+
+		for _, tc := range defensiveCases {
+			t.Run(tc.name, func(t *testing.T) {
+				malformedReq := device.ContainerDeviceRequest{
+					Nums:     1,
+					Type:     HygonHCUDevice,
+					Memreq:   1000,
+					Coresreq: tc.coresreq,
+				}
+				fit, alloc, reason := dev.Fit(devices, malformedReq, pod, &device.NodeInfo{}, &device.PodDevices{})
+				assert.Equal(t, fit, false)
+				assert.Equal(t, reason, "core limit out of range")
+				assert.Equal(t, len(alloc[HygonHCUDevice]), 0)
+
+				// AddResourceUsage is never invoked, Usedcores remains uncorrupted at 50
+				assert.Equal(t, devices[0].Usedcores, int32(50))
+				assert.Equal(t, devices[0].Used, int32(1))
+			})
+		}
+	})
 }
