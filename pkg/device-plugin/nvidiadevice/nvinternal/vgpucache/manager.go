@@ -30,13 +30,26 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 )
+
+const maxDeleteAttempts = 5
+
+// deletionFailure belongs to one directory identity, not merely its pathname.
+// mutex protects these records, including resets when Prepare replaces a directory.
+type deletionFailure struct {
+	info     os.FileInfo
+	attempts int
+}
 
 // Config configures a Manager.
 type Config struct {
 	Root         string
 	ScanInterval time.Duration
 	GracePeriod  time.Duration
+	// OnAbandoned must enqueue notifications without waiting for network I/O.
+	OnAbandoned func(path string, attempts int, err error)
 }
 
 // Manager serializes cache mutations with Prepare, while live Pod confirmation
@@ -51,10 +64,11 @@ type Manager struct {
 	// generation is protected by mutex and advances before any Prepare mutation.
 	generation uint64
 	// scanMutex protects scan/retry state without blocking Prepare.
-	scanMutex        sync.Mutex
-	now              func() time.Time
-	retryDelay       time.Duration
-	nextConfirmation time.Time
+	scanMutex         sync.Mutex
+	now               func() time.Time
+	confirmationRetry nodepodinformer.ConfirmationBackoff
+	deletionFailures  map[string]deletionFailure
+	onAbandoned       func(string, int, error)
 }
 
 // New constructs a cache manager around the device-plugin process's shared Pod
@@ -77,12 +91,15 @@ func New(config Config, listNodePods, listLiveNodePods func() ([]*corev1.Pod, er
 		return nil, fmt.Errorf("vGPU cache grace period must not be negative: %v", config.GracePeriod)
 	}
 	return &Manager{
-		root:             root,
-		scanInterval:     config.ScanInterval,
-		gracePeriod:      config.GracePeriod,
-		listNodePods:     listNodePods,
-		listLiveNodePods: listLiveNodePods,
-		now:              time.Now,
+		root:              root,
+		scanInterval:      config.ScanInterval,
+		gracePeriod:       config.GracePeriod,
+		listNodePods:      listNodePods,
+		listLiveNodePods:  listLiveNodePods,
+		now:               time.Now,
+		confirmationRetry: nodepodinformer.ConfirmationBackoff{Initial: config.ScanInterval},
+		deletionFailures:  make(map[string]deletionFailure),
+		onAbandoned:       config.OnAbandoned,
 	}, nil
 }
 
@@ -107,6 +124,7 @@ func (m *Manager) Prepare(podUID, containerName string) (string, error) {
 	if err := os.RemoveAll(target); err != nil {
 		return "", fmt.Errorf("remove previous vGPU cache directory %s: %w", target, err)
 	}
+	delete(m.deletionFailures, target)
 	if err := os.Mkdir(target, 0o777); err != nil {
 		return "", fmt.Errorf("create vGPU cache directory %s: %w", target, err)
 	}
@@ -140,16 +158,13 @@ func (m *Manager) scanAndLog() {
 
 // scan collects expired candidates under mutex, confirms them without blocking
 // Prepare, then rechecks identities before deletion. A concurrent Prepare skips
-// the whole batch; the next scan retries from a new snapshot.
+// the whole batch. Incomplete rounds back off before taking a new snapshot.
 func (m *Manager) scan() error {
 	// Skip overlapping scans instead of queuing redundant API requests.
 	if !m.scanMutex.TryLock() {
 		return nil
 	}
 	defer m.scanMutex.Unlock()
-	if m.now().Before(m.nextConfirmation) {
-		return nil
-	}
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -167,6 +182,8 @@ func (m *Manager) scan() error {
 	rootInfo, err := os.Lstat(m.root)
 	if err != nil {
 		if os.IsNotExist(err) {
+			m.confirmationRetry.Reset()
+			clear(m.deletionFailures)
 			return nil
 		}
 		return fmt.Errorf("stat vGPU cache root %s: %w", m.root, err)
@@ -186,8 +203,10 @@ func (m *Manager) scan() error {
 		info   os.FileInfo
 	}
 	var candidates []candidate
+	present := make(map[string]struct{}, len(entries))
 	now := m.now()
 	for _, entry := range entries {
+		present[filepath.Join(m.root, entry.Name())] = struct{}{}
 		podUID, _, ok := parseCacheDirectoryName(entry.Name())
 		if !ok {
 			klog.InfoS("Skipping malformed vGPU cache entry", "entry", entry.Name())
@@ -212,32 +231,42 @@ func (m *Manager) scan() error {
 			klog.InfoS("Skipping non-directory vGPU cache entry", "entry", target)
 			continue
 		}
+		if failure, ok := m.deletionFailures[target]; ok {
+			if !os.SameFile(failure.info, before) {
+				delete(m.deletionFailures, target)
+			} else if failure.attempts >= maxDeleteAttempts {
+				continue
+			}
+		}
 		if before.ModTime().Add(m.gracePeriod).After(now) {
 			continue
 		}
 
 		candidates = append(candidates, candidate{podUID: podUID, path: target, info: before})
 	}
+	for path := range m.deletionFailures {
+		if _, exists := present[path]; !exists {
+			delete(m.deletionFailures, path)
+		}
+	}
 	if len(candidates) == 0 {
+		if scanErr == nil {
+			m.confirmationRetry.Reset()
+		}
 		return scanErr
 	}
+	if !m.confirmationRetry.Ready(m.now()) {
+		return scanErr
+	}
+	complete := false
+	defer func() { m.confirmationRetry.Finish(m.now(), complete) }()
 	generation := m.generation
 	m.mutex.Unlock()
 	livePods, confirmErr := m.listLiveNodePods()
 	m.mutex.Lock()
 	if confirmErr != nil {
-		// Back off only failed API confirmations. The normal scan interval is
-		// the initial delay, doubled on each failure and capped at one minute.
-		if m.retryDelay == 0 {
-			m.retryDelay = min(m.scanInterval, time.Minute)
-		} else {
-			m.retryDelay = min(2*m.retryDelay, time.Minute)
-		}
-		m.nextConfirmation = m.now().Add(m.retryDelay)
 		return errors.Join(scanErr, fmt.Errorf("confirm node Pods before cache GC: %w", confirmErr))
 	}
-	m.retryDelay = 0
-	m.nextConfirmation = time.Time{}
 	if generation != m.generation {
 		return scanErr
 	}
@@ -258,8 +287,10 @@ func (m *Manager) scan() error {
 			confirmedPodUIDs[string(pod.UID)] = struct{}{}
 		}
 	}
+	complete = scanErr == nil
 	for _, entry := range candidates {
 		if _, exists := confirmedPodUIDs[entry.podUID]; exists {
+			complete = false
 			continue
 		}
 		target, before := entry.path, entry.info
@@ -267,18 +298,34 @@ func (m *Manager) scan() error {
 		current, err := os.Lstat(target)
 		if err != nil {
 			if !os.IsNotExist(err) {
+				complete = false
 				scanErr = errors.Join(scanErr, fmt.Errorf("recheck vGPU cache entry %s: %w", target, err))
 			}
 			continue
 		}
 		if !os.SameFile(before, current) || !before.ModTime().Equal(current.ModTime()) {
+			complete = false
 			klog.InfoS("Skipping vGPU cache entry changed during GC", "directory", target)
 			continue
 		}
 		if err := os.RemoveAll(target); err != nil {
+			failure := m.deletionFailures[target]
+			failure.info = current
+			failure.attempts++
+			m.deletionFailures[target] = failure
 			scanErr = errors.Join(scanErr, fmt.Errorf("remove vGPU cache directory %s: %w", target, err))
+			if failure.attempts == maxDeleteAttempts {
+				klog.ErrorS(err, "Abandoning vGPU cache cleanup; remove the directory manually or restart the device plugin after fixing the cause",
+					"directory", target, "podUID", entry.podUID, "attempts", failure.attempts)
+				if m.onAbandoned != nil {
+					m.onAbandoned(target, failure.attempts, err)
+				}
+			} else {
+				complete = false
+			}
 			continue
 		}
+		delete(m.deletionFailures, target)
 		klog.InfoS("Removed stale vGPU cache directory", "directory", target, "podUID", entry.podUID)
 	}
 	return scanErr

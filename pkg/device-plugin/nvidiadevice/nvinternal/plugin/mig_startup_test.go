@@ -304,15 +304,19 @@ func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
 		listNodePods:     informer.List,
 		listLiveNodePods: func() ([]*corev1.Pod, error) { return informer.ListFresh(t.Context()) },
 	}
+	now := time.Now()
+	plugin.confirmationNow = func() time.Time { return now }
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.Contains(t, manager.byAllocation, key)
 	require.Zero(t, giDestroyed)
 	require.Zero(t, ciDestroyed)
+	now = now.Add(time.Minute)
 	apiErr = errors.New("API unavailable")
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), apiErr)
 	require.Contains(t, manager.byAllocation, key)
 	require.Zero(t, giDestroyed)
 	require.Zero(t, ciDestroyed)
+	now = now.Add(time.Minute)
 	apiErr, pod = nil, nil
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.Empty(t, manager.byAllocation)
@@ -371,6 +375,15 @@ func TestMIGCleanupDiscardsConfirmationAcrossAllocate(t *testing.T) {
 	case <-entered:
 	case <-time.After(time.Second):
 		t.Fatal("cleanup did not request confirmation")
+	}
+	// A concurrent reconciler must not queue or launch another live query.
+	overlapped := make(chan error, 1)
+	go func() { overlapped <- plugin.reconcileActiveMigAllocations() }()
+	select {
+	case err := <-overlapped:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("overlapping reconciliation blocked")
 	}
 	// Exercise the actual kubelet entry point while confirmation is blocked.
 	// Even an allocation that later fails invalidates the cleanup snapshot.
@@ -516,4 +529,108 @@ func TestHamiCoreStartupWithoutPodSync(t *testing.T) {
 			require.Equal(t, tc.liveCalls, liveCalls)
 		})
 	}
+}
+
+// TestMIGIncompleteConfirmationBackoff bounds queries even when the API succeeds
+// but reservations, hardware errors or allocation races prevent reclamation.
+func TestMIGIncompleteConfirmationBackoff(t *testing.T) {
+	for _, reason := range []string{"API failure", "live reservation", "destroy failure", "concurrent allocation", "invalid live annotation"} {
+		t.Run(reason, func(t *testing.T) {
+			manager, dev := mockMigRecoveryDevice(t)
+			key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+			manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 1, CIID: 2}
+			manager.byAllocationMigUUID["MIG-test"] = key
+			broken := true
+			destroyed := 0
+			ci := &nvmlmock.ComputeInstance{DestroyFunc: func() nvml.Return {
+				if broken && reason == "destroy failure" {
+					return nvml.ERROR_UNKNOWN
+				}
+				return nvml.SUCCESS
+			}}
+			gi := &nvmlmock.GpuInstance{
+				GetComputeInstanceByIdFunc: func(int) (nvml.ComputeInstance, nvml.Return) { return ci, nvml.SUCCESS },
+				DestroyFunc:                func() nvml.Return { destroyed++; return nvml.SUCCESS },
+			}
+			dev.GetGpuInstanceByIdFunc = func(int) (nvml.GpuInstance, nvml.Return) { return gi, nvml.SUCCESS }
+			now := time.Now()
+			p := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true,
+				confirmationNow: func() time.Time { return now },
+				listNodePods:    func() ([]*corev1.Pod, error) { return nil, nil },
+			}
+			calls := 0
+			p.listLiveNodePods = func() ([]*corev1.Pod, error) {
+				calls++
+				now = now.Add(2 * time.Second)
+				if !broken {
+					return nil, nil
+				}
+				switch reason {
+				case "API failure":
+					return nil, errors.New("unavailable")
+				case "concurrent allocation":
+					p.applyMutex.Lock()
+					p.migAllocationGeneration++
+					p.applyMutex.Unlock()
+				case "live reservation", "invalid live annotation":
+					raw := `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`
+					if reason == "invalid live annotation" {
+						raw = "not-json"
+					}
+					return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.MigAllocationsAnnotation: raw}}, Status: corev1.PodStatus{Phase: corev1.PodPending}}}, nil
+				}
+				return nil, nil
+			}
+			for index, delay := range []time.Duration{5, 10, 20, 40, 60, 60} {
+				err := p.reconcileActiveMigAllocations()
+				if reason == "API failure" || reason == "destroy failure" || reason == "invalid live annotation" {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+				require.Equal(t, index+1, calls)
+				require.Zero(t, destroyed)
+				now = now.Add(delay*time.Second - time.Nanosecond)
+				for range 3 {
+					require.NoError(t, p.reconcileActiveMigAllocations())
+				}
+				require.Equal(t, index+1, calls)
+				now = now.Add(time.Nanosecond)
+			}
+			broken = false
+			require.NoError(t, p.reconcileActiveMigAllocations())
+			require.Equal(t, 7, calls)
+			require.Equal(t, 1, destroyed)
+			require.Empty(t, manager.byAllocation)
+			require.NoError(t, p.reconcileActiveMigAllocations())
+			require.Equal(t, 7, calls, "no candidate requires no query")
+		})
+	}
+}
+
+// TestMIGCachedRecoveryClearsRetry allows fresh work after the informer catches
+// up without turning the previous live snapshot into deletion authorization.
+func TestMIGCachedRecoveryClearsRetry(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test"}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+	}}, Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	var cached []*corev1.Pod
+	calls := 0
+	p := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true,
+		listNodePods:     func() ([]*corev1.Pod, error) { return cached, nil },
+		listLiveNodePods: func() ([]*corev1.Pod, error) { calls++; return []*corev1.Pod{pod}, nil },
+	}
+	require.NoError(t, p.reconcileActiveMigAllocations())
+	require.NoError(t, p.reconcileActiveMigAllocations())
+	require.Equal(t, 1, calls)
+	cached = []*corev1.Pod{pod}
+	require.NoError(t, p.reconcileActiveMigAllocations())
+	require.Equal(t, 1, calls)
+	cached = nil
+	require.NoError(t, p.reconcileActiveMigAllocations())
+	require.Equal(t, 2, calls, "new candidate must be reconfirmed after cached recovery")
+	require.Contains(t, manager.byAllocation, key)
 }

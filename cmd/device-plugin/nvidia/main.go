@@ -35,7 +35,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
@@ -292,7 +294,9 @@ func start(c *cli.Context, o *options) (resultErr error) {
 		return fmt.Errorf("create device-plugin node Pod informer: %w", err)
 	}
 	listLiveNodePods := func() ([]*corev1.Pod, error) { return nodePods.ListFresh(processCtx) }
-	cacheManager, err := vgpucache.New(resolveVGPUCacheConfig(), nodePods.List, listLiveNodePods)
+	cacheConfig := resolveVGPUCacheConfig()
+	cacheConfig.OnAbandoned = startVGPUCacheEvents(processCtx, client.GetClient(), util.NodeName)
+	cacheManager, err := vgpucache.New(cacheConfig, nodePods.List, listLiveNodePods)
 	if err != nil {
 		return fmt.Errorf("create vGPU cache manager: %w", err)
 	}
@@ -680,5 +684,54 @@ func disableResourceRenamingInConfig(config *spec.Config) {
 	}
 	if setsDevices {
 		klog.Warning("Customizing the 'devices' field in sharing.timeSlicing.resources is not yet supported in the config. Ignoring...")
+	}
+}
+
+// startVGPUCacheEvents queues one warning per abandoned directory. A bounded
+// worker issues no LISTs, limits reports to one per five seconds, and does not
+// retry failed notifications: the cleanup decision and Error log remain valid.
+func startVGPUCacheEvents(ctx context.Context, kubeClient kubernetes.Interface, nodeName string) func(string, int, error) {
+	messages := make(chan string, 16)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case message := <-messages:
+				if ctx.Err() != nil {
+					return
+				}
+				reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				node, err := kubeClient.CoreV1().Nodes().Get(reportCtx, nodeName, metav1.GetOptions{})
+				if err == nil {
+					now := metav1.Now()
+					_, err = kubeClient.CoreV1().Events(corev1.NamespaceDefault).Create(reportCtx, &corev1.Event{
+						ObjectMeta:     metav1.ObjectMeta{GenerateName: "vgpu-cache-cleanup-", Namespace: corev1.NamespaceDefault},
+						InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: node.Name, UID: node.UID},
+						Type:           corev1.EventTypeWarning, Reason: "VGPUCacheCleanupAbandoned", Message: message,
+						Source:         corev1.EventSource{Component: "hami-device-plugin", Host: nodeName},
+						FirstTimestamp: now, LastTimestamp: now, Count: 1,
+					}, metav1.CreateOptions{})
+				}
+				cancel()
+				if err != nil {
+					klog.ErrorS(err, "Failed to report abandoned vGPU cache cleanup", "node", nodeName, "message", message)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}
+	}()
+	return func(path string, attempts int, err error) {
+		message := fmt.Sprintf("Stopped cleaning %s after %d deletion failures: %v. Remove it manually or restart the device plugin after fixing the cause.", path, attempts, err)
+		select {
+		case <-ctx.Done():
+		case messages <- message:
+		default:
+			klog.ErrorS(nil, "vGPU cache warning queue is full; notification dropped", "message", message)
+		}
 	}
 }

@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
@@ -1255,8 +1256,10 @@ func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
 	handler := &recordingDynamicMIGCDI{InterfaceMock: &cdi.InterfaceMock{
 		CreateSpecFileFunc: func() error { specCalls++; return specErr },
 	}, live: []cdi.DynamicMIGDevice{{MIGUUID: "MIG-existing"}}}
+	now := time.Now()
 	plugin := &NvidiaDevicePlugin{
-		operatingMode: nvidia.MigMode, migMgr: manager,
+		confirmationNow: func() time.Time { return now },
+		operatingMode:   nvidia.MigMode, migMgr: manager,
 		deviceListStrategies: strategies, cdiHandler: handler,
 		listNodePods: func() ([]*corev1.Pod, error) { return nil, nodepodinformer.ErrNotSynced },
 	}
@@ -1269,13 +1272,24 @@ func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
 	require.ErrorIs(t, plugin.applyStartupMigMode(0, nil), specErr)
 	require.False(t, plugin.migPrimed)
 	require.Equal(t, 1, specCalls)
+	for _, delay := range []time.Duration{5, 10, 20, 40, 60, 60} {
+		previousCalls := specCalls
+		now = now.Add(delay*time.Second - time.Nanosecond)
+		require.NoError(t, plugin.reconcileActiveMigAllocations())
+		require.Equal(t, previousCalls, specCalls)
+		require.False(t, plugin.migPrimed)
+		now = now.Add(time.Nanosecond)
+		require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), specErr)
+		require.Equal(t, previousCalls+1, specCalls)
+	}
 	specErr = nil
+	now = now.Add(time.Minute)
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.True(t, plugin.migPrimed)
 	require.Empty(t, handler.live)
-	require.Equal(t, 2, specCalls)
+	require.Equal(t, 8, specCalls)
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
-	require.Equal(t, 2, specCalls)
+	require.Equal(t, 8, specCalls)
 }
 
 // TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot checks that failed CDI removals
@@ -1299,7 +1313,10 @@ func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
 	require.Zero(t, calls)
 	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
-	plugin.listLiveNodePods = plugin.listNodePods
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		t.Fatal("CDI-only retries must not query Pods")
+		return nil, nil
+	}
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), removeErr)
 	require.Contains(t, plugin.pendingCDIRemovals, "MIG-destroyed")
 	removeErr = nil

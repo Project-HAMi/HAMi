@@ -358,6 +358,7 @@ func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
 	for _, failure := range []error{errors.New("API unavailable"), context.DeadlineExceeded, context.Canceled} {
 		manager.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, failure }
 		require.ErrorIs(t, manager.scan(), failure)
+		require.Empty(t, manager.deletionFailures, "API errors are not deletion attempts")
 		require.DirExists(t, first)
 		require.DirExists(t, second)
 		now = now.Add(time.Minute)
@@ -463,6 +464,7 @@ func TestScanAllowsPrepareDuringConfirmationAndEventuallyCleans(t *testing.T) {
 	require.DirExists(t, old, "concurrent Prepare invalidates the entire batch")
 	require.DirExists(t, replaced)
 	// On a subsequent stable round both orphaned directories are collectible.
+	manager.now = func() time.Time { return time.Now().Add(time.Minute) }
 	require.NoError(t, manager.scan())
 	require.NoDirExists(t, old)
 	require.NoDirExists(t, replaced)
@@ -580,4 +582,186 @@ func TestRunEventuallyCleansAfterConfirmationFailure(t *testing.T) {
 	require.DirExists(t, target)
 	recovered.Store(true)
 	require.Eventually(t, func() bool { _, err := os.Stat(target); return os.IsNotExist(err) }, time.Second, time.Millisecond)
+}
+
+// TestScanIncompleteRoundsBackOff covers successful LISTs that cannot complete
+// cleanup, including partial progress, and measures retry delay after slow work.
+func TestScanIncompleteRoundsBackOff(t *testing.T) {
+	for _, reason := range []string{"live Pod missing from cache", "concurrent Prepare", "changed directory"} {
+		t.Run(reason, func(t *testing.T) {
+			manager := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return nil, nil })
+			manager.gracePeriod = 0
+			now := time.Now().Add(time.Hour)
+			manager.now = func() time.Time { return now }
+			target, err := manager.Prepare("blocked", "gpu")
+			require.NoError(t, err)
+			_, err = manager.Prepare("collectible", "gpu")
+			require.NoError(t, err)
+			calls := 0
+			manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+				calls++
+				now = now.Add(2 * time.Second) // Slow confirmation must not consume retry delay.
+				switch reason {
+				case "live Pod missing from cache":
+					return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "blocked"}}}, nil
+				case "concurrent Prepare":
+					_, err := manager.Prepare("blocked", "gpu")
+					require.NoError(t, err)
+				case "changed directory":
+					require.NoError(t, os.Chtimes(target, now, now))
+				}
+				return nil, nil
+			}
+			for index, delay := range []time.Duration{1, 2, 4, 8, 16, 32, 60, 60} {
+				err := manager.scan()
+				require.NoError(t, err)
+				require.Equal(t, index+1, calls)
+				require.Empty(t, manager.deletionFailures, "discarded confirmations are not deletion attempts")
+				require.DirExists(t, target)
+				now = now.Add(delay*time.Second - time.Nanosecond)
+				for range 3 {
+					require.NoError(t, manager.scan())
+				}
+				require.Equal(t, index+1, calls)
+				now = now.Add(time.Nanosecond)
+			}
+			require.NoError(t, os.Chmod(target, 0o700))
+			manager.listLiveNodePods = func() ([]*corev1.Pod, error) { calls++; return nil, nil }
+			require.NoError(t, manager.scan())
+			require.Equal(t, 9, calls)
+			require.NoDirExists(t, target)
+		})
+	}
+}
+
+// TestScanCachedRecoveryClearsRetry confirms an informer update removes the
+// candidate without a new LIST, permitting unrelated new work immediately.
+func TestScanCachedRecoveryClearsRetry(t *testing.T) {
+	var cached []*corev1.Pod
+	manager := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return cached, nil })
+	manager.gracePeriod = 0
+	_, err := manager.Prepare("live", "gpu")
+	require.NoError(t, err)
+	calls := 0
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		calls++
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "live"}}}, nil
+	}
+	require.NoError(t, manager.scan())
+	cached = []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "live"}}}
+	require.NoError(t, manager.scan())
+	require.Equal(t, 1, calls)
+	orphan, err := manager.Prepare("orphan", "gpu")
+	require.NoError(t, err)
+	require.NoError(t, manager.scan())
+	require.Equal(t, 2, calls)
+	require.NoDirExists(t, orphan)
+}
+
+// TestScanAbandonsUndeletableDirectory limits actual removal attempts, reports
+// once and skips abandoned entries even when other directories require LISTs.
+func TestScanAbandonsUndeletableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires filesystem permission enforcement")
+	}
+	m := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return nil, nil })
+	m.gracePeriod = 0
+	now := time.Now().Add(time.Hour)
+	m.now = func() time.Time { return now }
+	target, err := m.Prepare("blocked", "gpu")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(target, "cache"), nil, 0o600))
+	require.NoError(t, os.Chmod(target, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(target, 0o700) })
+	calls, reports := 0, 0
+	m.listLiveNodePods = func() ([]*corev1.Pod, error) { calls++; return nil, nil }
+	m.onAbandoned = func(path string, attempts int, err error) {
+		reports++
+		require.Equal(t, target, path)
+		require.Equal(t, 5, attempts)
+		require.ErrorIs(t, err, os.ErrPermission)
+	}
+	for attempt, delay := range []time.Duration{1, 2, 4, 8, 16} {
+		require.ErrorIs(t, m.scan(), os.ErrPermission)
+		require.Equal(t, attempt+1, calls)
+		require.Equal(t, attempt+1, m.deletionFailures[target].attempts)
+		if attempt < 4 {
+			require.Zero(t, reports)
+		}
+		require.NoError(t, m.scan())
+		require.Equal(t, attempt+1, calls)
+		now = now.Add(delay * time.Second)
+	}
+	require.Equal(t, 1, reports)
+	// Fixing permission alone must not resume an abandoned cleanup.
+	require.NoError(t, os.Chmod(target, 0o700))
+	for range 10 {
+		now = now.Add(time.Minute)
+		require.NoError(t, m.scan())
+	}
+	require.Equal(t, 5, calls)
+	require.DirExists(t, target)
+	other, err := m.Prepare("other", "gpu")
+	require.NoError(t, err)
+	require.NoError(t, m.scan())
+	require.Equal(t, 6, calls)
+	require.NoDirExists(t, other)
+	require.DirExists(t, target)
+	require.Equal(t, 1, reports)
+	// Keep the old inode alive to ensure a replacement has a distinct identity.
+	old := filepath.Join(t.TempDir(), "old")
+	require.NoError(t, os.Rename(target, old))
+	require.NoError(t, os.Mkdir(target, 0o700))
+	require.NoError(t, m.scan())
+	require.Equal(t, 7, calls)
+	require.NoDirExists(t, target)
+	require.Empty(t, m.deletionFailures)
+}
+
+// TestScanDeleteFailureRecovery checks counters survive partial deletion but
+// clear on success or disappearance; a new Manager retries after restart.
+func TestScanDeleteFailureRecovery(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires filesystem permission enforcement")
+	}
+	for _, recovery := range []string{"before limit", "manual removal", "restart", "Prepare"} {
+		t.Run(recovery, func(t *testing.T) {
+			m := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return nil, nil })
+			m.gracePeriod = 0
+			now := time.Now().Add(time.Hour)
+			m.now = func() time.Time { return now }
+			target, err := m.Prepare("blocked", "gpu")
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(target, "cache"), nil, 0o600))
+			require.NoError(t, os.Chmod(target, 0o500))
+			t.Cleanup(func() { _ = os.Chmod(target, 0o700) })
+			other, err := m.Prepare("other", "gpu")
+			require.NoError(t, err)
+			attempts := 5
+			if recovery == "before limit" {
+				attempts = 2
+			}
+			for range attempts {
+				require.ErrorIs(t, m.scan(), os.ErrPermission)
+				now = now.Add(time.Minute)
+			}
+			require.NoDirExists(t, other, "one bad entry must not prevent other cleanup")
+			require.Equal(t, attempts, m.deletionFailures[target].attempts)
+			require.NoError(t, os.Chmod(target, 0o700))
+			switch recovery {
+			case "manual removal":
+				require.NoError(t, os.RemoveAll(target))
+			case "Prepare":
+				_, err := m.Prepare("blocked", "gpu")
+				require.NoError(t, err)
+				require.Empty(t, m.deletionFailures, "Prepare resets identity even if the filesystem reuses an inode")
+			case "restart":
+				m = newTestManager(t, m.root, func() ([]*corev1.Pod, error) { return nil, nil })
+				m.gracePeriod = 0
+			}
+			require.NoError(t, m.scan())
+			require.NoDirExists(t, target)
+			require.Empty(t, m.deletionFailures)
+		})
+	}
 }

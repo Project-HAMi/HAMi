@@ -17,12 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 // TestResolveVGPUCacheConfigReusesExistingEnvironment checks that explicit shared-cache settings
@@ -165,4 +174,93 @@ func setDriverReadyFileForTest(t *testing.T, path string) {
 	original := gpuOperatorDriverReadyFile
 	gpuOperatorDriverReadyFile = path
 	t.Cleanup(func() { gpuOperatorDriverReadyFile = original })
+}
+
+// TestVGPUCacheAbandonEvent reports the real Node identity without listing
+// events, and a failing event write does not retry or affect the caller.
+func TestVGPUCacheAbandonEvent(t *testing.T) {
+	for _, failWrite := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failWrite=%v", failWrite), func(t *testing.T) {
+			kubeClient := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-node", UID: "node-uid"}})
+			created := make(chan *corev1.Event, 1)
+			kubeClient.PrependReactor("create", "events", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				create, ok := action.(clienttesting.CreateAction)
+				if !ok {
+					return true, nil, errors.New("unexpected action")
+				}
+				event, ok := create.GetObject().(*corev1.Event)
+				if !ok {
+					return true, nil, errors.New("unexpected object")
+				}
+				created <- event.DeepCopy()
+				if failWrite {
+					return true, nil, errors.New("event API unavailable")
+				}
+				return true, event, nil
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			report := startVGPUCacheEvents(ctx, kubeClient, "gpu-node")
+			report("/cache/pod_gpu", 5, errors.New("permission denied"))
+			select {
+			case event := <-created:
+				require.Equal(t, "VGPUCacheCleanupAbandoned", event.Reason)
+				require.Equal(t, corev1.EventTypeWarning, event.Type)
+				require.Equal(t, "Node", event.InvolvedObject.Kind)
+				require.Equal(t, "node-uid", string(event.InvolvedObject.UID))
+				require.Equal(t, "gpu-node", event.InvolvedObject.Name)
+				require.Contains(t, event.Message, "/cache/pod_gpu")
+				require.Contains(t, event.Message, "5 deletion failures")
+				require.Contains(t, event.Message, "permission denied")
+			case <-time.After(time.Second):
+				t.Fatal("event was not reported")
+			}
+			// A second notification stays queued behind the rate limit.
+			report("/cache/another_gpu", 5, errors.New("permission denied"))
+			select {
+			case <-created:
+				t.Fatal("notification was not rate limited")
+			case <-time.After(30 * time.Millisecond):
+			}
+			cancel()
+			actions := kubeClient.Actions()
+			require.Len(t, actions, 2)
+			require.Equal(t, "get", actions[0].GetVerb())
+			require.Equal(t, "create", actions[1].GetVerb())
+		})
+	}
+}
+
+// TestVGPUCacheEventQueueDoesNotBlock keeps reporting bounded when the API is
+// stuck; once cancelled the worker drops pending notifications without retrying.
+func TestVGPUCacheEventQueueDoesNotBlock(t *testing.T) {
+	kubeClient := fake.NewSimpleClientset()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	kubeClient.PrependReactor("get", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		close(entered)
+		<-release
+		return true, nil, errors.New("Node API unavailable")
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	report := startVGPUCacheEvents(ctx, kubeClient, "gpu-node")
+	report("/cache/first_gpu", 5, os.ErrPermission)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start")
+	}
+	queued := make(chan struct{})
+	go func() {
+		for range 32 {
+			report("/cache/other_gpu", 5, os.ErrPermission)
+		}
+		close(queued)
+	}()
+	select {
+	case <-queued:
+	case <-time.After(time.Second):
+		t.Fatal("full notification queue blocked cleanup")
+	}
 }

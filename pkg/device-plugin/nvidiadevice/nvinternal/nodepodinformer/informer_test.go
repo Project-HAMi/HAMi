@@ -281,3 +281,39 @@ func TestWaitForSyncStopsWhenContextEnds(t *testing.T) {
 		})
 	}
 }
+
+// TestConfirmationBackoff checks capped retries, completion-time scheduling and
+// reset without real sleeps. Each consumer owns an independent state instance.
+func TestConfirmationBackoff(t *testing.T) {
+	for _, initial := range []time.Duration{0, time.Second, 2 * time.Minute} {
+		t.Run(initial.String(), func(t *testing.T) {
+			backoff := ConfirmationBackoff{Initial: initial}
+			independent := ConfirmationBackoff{}
+			now := time.Now()
+			require.True(t, backoff.Ready(now))
+			delay := initial
+			if delay <= 0 {
+				delay = 5 * time.Second
+			}
+			delay = min(delay, time.Minute)
+			firstDelay := delay
+			for range 10 {
+				now = now.Add(2 * time.Second) // Work completed after a slow query.
+				backoff.Finish(now, false)
+				require.False(t, backoff.Ready(now))
+				require.True(t, independent.Ready(now))
+				require.False(t, backoff.Ready(now.Add(delay-time.Nanosecond)))
+				now = now.Add(delay)
+				require.True(t, backoff.Ready(now))
+				delay = min(2*delay, time.Minute)
+			}
+			backoff.Finish(now, true)
+			require.True(t, backoff.Ready(now))
+			backoff.Finish(now, false)
+			require.False(t, backoff.Ready(now.Add(firstDelay-time.Nanosecond)))
+			require.True(t, backoff.Ready(now.Add(firstDelay)))
+			backoff.Reset() // An informer update eliminated all candidates.
+			require.True(t, backoff.Ready(now))
+		})
+	}
+}

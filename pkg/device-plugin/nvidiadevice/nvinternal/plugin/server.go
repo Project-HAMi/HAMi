@@ -132,6 +132,10 @@ type NvidiaDevicePlugin struct {
 	// migPrimed records completed authoritative startup recovery, reset and CDI
 	// publication. Cached adoption alone must not mark this work complete.
 	migPrimed bool
+	// Confirmation retry state is protected by applyMutex.
+	migConfirmationRetry    nodepodinformer.ConfirmationBackoff
+	migConfirmationInFlight bool
+	confirmationNow         func() time.Time
 	// migAllocationGeneration changes under applyMutex whenever Allocate starts.
 	// Cleanup must discard an API confirmation spanning an allocation attempt.
 	migAllocationGeneration uint64
@@ -500,6 +504,14 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
 // It releases the lock only for live confirmation, then revalidates allocation
 // generation before resetting hardware or deleting instances.
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
+	if plugin.migConfirmationInFlight {
+		return nil
+	}
+	now := plugin.confirmationNow
+	if now == nil {
+		now = time.Now
+	}
+
 	pods, err := plugin.listNodePodSnapshot()
 	if err != nil {
 		return err
@@ -511,15 +523,25 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	// Cached absence only identifies candidates. Idle reconciler ticks and
 	// pending CDI removals require no API request once startup is complete.
 	needsConfirmation := !plugin.migPrimed
+	var candidates []migAllocationKey
 	plugin.migMgr.mu.Lock()
 	for key := range plugin.migMgr.byAllocation {
 		if _, exists := active[key]; !exists {
 			needsConfirmation = true
-			break
+			candidates = append(candidates, key)
 		}
 	}
 	plugin.migMgr.mu.Unlock()
+	complete := false
 	if needsConfirmation {
+		if !plugin.migConfirmationRetry.Ready(now()) {
+			return nil
+		}
+		plugin.migConfirmationInFlight = true
+		defer func() {
+			plugin.migConfirmationInFlight = false
+			plugin.migConfirmationRetry.Finish(now(), complete)
+		}()
 		generation := plugin.migAllocationGeneration
 		// The caller owns applyMutex. Drop it around network I/O so kubelet
 		// allocation is not stalled by a slow cleanup confirmation.
@@ -528,7 +550,7 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		plugin.applyMutex.Lock()
 		if generation != plugin.migAllocationGeneration {
 			// A new allocation may not have been visible to the API request.
-			// Retry next tick with a new cache snapshot and confirmation.
+			// Retry after backoff with a new cache snapshot and confirmation.
 			return nil
 		}
 		if err != nil {
@@ -538,6 +560,9 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		if err != nil {
 			return err
 		}
+	}
+	if !needsConfirmation {
+		plugin.migConfirmationRetry.Reset()
 	}
 	if !plugin.migPrimed {
 		if err := plugin.primeMigManagerFromPods(pods); err != nil {
@@ -563,6 +588,16 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		plugin.migPrimed = true
 	}
 	destroyed, err := plugin.migMgr.ReconcileActiveAllocationsWithDestroyed(active)
+	// A live reservation omitted by the informer is still unresolved work,
+	// even when the API request and hardware reconciliation both succeeded.
+	complete = err == nil
+	plugin.migMgr.mu.Lock()
+	for _, key := range candidates {
+		if _, remains := plugin.migMgr.byAllocation[key]; remains {
+			complete = false
+		}
+	}
+	plugin.migMgr.mu.Unlock()
 	if !plugin.deviceListStrategies.AnyCDIEnabled() {
 		return err
 	}
