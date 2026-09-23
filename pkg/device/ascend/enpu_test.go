@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 func enpuTestDevice() *Devices {
@@ -272,6 +273,56 @@ func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 			}
 			if fit && (len(allocation[Ascend910CType]) != 1 || allocation[Ascend910CType][0].Usedcores != tc.wantCore) {
 				t.Fatalf("unexpected core accounting: %+v", allocation)
+			}
+		})
+	}
+}
+
+func TestENPUNilPodPolicyDefaults(t *testing.T) {
+	if got := enpuPolicyOverride(nil); got != "" {
+		t.Fatalf("nil Pod policy override = %q, want empty", got)
+	}
+	if got := enpuSchedulingPolicy(nil); got != "elastic" {
+		t.Fatalf("nil Pod scheduling policy = %q, want elastic", got)
+	}
+	dev := enpuTestDevice()
+	dev.enpuPolicy = "fixed-share"
+	if got := dev.enpuPolicyForPod(nil); got != "fixed-share" {
+		t.Fatalf("nil Pod configured policy = %q, want fixed-share", got)
+	}
+	dev.enpuPolicy = ""
+	if got := dev.enpuPolicyForPod(nil); got != "elastic" {
+		t.Fatalf("nil Pod unconfigured policy = %q, want elastic", got)
+	}
+}
+
+func TestENPUFitIgnoresMissingPodInfo(t *testing.T) {
+	for _, tc := range []struct {
+		name, incomingMode, existingMode, existingPolicy string
+		wantFit                                          bool
+	}{
+		{name: "same ENPU policy shares", incomingMode: VNPUModeENPU, existingMode: VNPUModeENPU, existingPolicy: "elastic", wantFit: true},
+		{name: "different ENPU policy rejected", incomingMode: VNPUModeENPU, existingMode: VNPUModeENPU, existingPolicy: "fixed-share"},
+		{name: "ENPU rejects core tenant", incomingMode: VNPUModeENPU, existingMode: VNPUModeHamiCore},
+		{name: "core tenants still share", incomingMode: VNPUModeHamiCore, existingMode: VNPUModeHamiCore, wantFit: true},
+		{name: "core rejects ENPU tenant", incomingMode: VNPUModeHamiCore, existingMode: VNPUModeENPU, existingPolicy: "elastic"},
+		{name: "implicit core rejects ENPU tenant", existingMode: VNPUModeENPU, existingPolicy: "elastic"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := enpuTestDevice()
+			incoming := enpuTestPod(tc.incomingMode, "elastic")
+			existing := enpuTestPod(tc.existingMode, tc.existingPolicy)
+			usage := enpuTestUsage("occupied", existing)
+			usage.PodInfos = []*device.PodInfo{nil, {}, {Pod: existing}, nil, {}}
+			fit, allocation, reason := dev.Fit([]*device.DeviceUsage{usage}, enpuTestRequest(tc.incomingMode), incoming, enpuTestNode(true, true), nil)
+			if fit != tc.wantFit {
+				t.Fatalf("Fit = %v, want %v; reason = %s", fit, tc.wantFit, reason)
+			}
+			if fit && (len(allocation[Ascend910CType]) != 1 || allocation[Ascend910CType][0].UUID != "occupied") {
+				t.Fatalf("unexpected allocation: %+v", allocation)
+			}
+			if !fit && (len(allocation[Ascend910CType]) != 0 || reason != common.GenReason(map[string]int{common.ModeNotFit: 1}, 1)) {
+				t.Fatalf("unexpected rejection: allocation = %+v, reason = %s", allocation, reason)
 			}
 		})
 	}
