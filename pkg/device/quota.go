@@ -283,21 +283,19 @@ func (q *QuotaManager) recalcLimitLocked(namespace, resourceName string) {
 	}
 }
 
-func hasManagedKeys(quota *corev1.ResourceQuota) bool {
+// isScopedQuota returns true if the ResourceQuota defines scopes or scope selectors.
+// HAMi tracks usage at namespace granularity and does not evaluate pod scopes in FitQuota,
+// so scoped quotas are skipped to avoid over-restricting pods outside their scope.
+func isScopedQuota(quota *corev1.ResourceQuota) bool {
 	if quota == nil {
 		return false
 	}
-	for idx := range quota.Spec.Hard {
-		if _, ok := managedQuotaName(idx); ok {
-			return true
-		}
-	}
-	return false
+	return len(quota.Spec.Scopes) > 0 || quota.Spec.ScopeSelector != nil
 }
 
 // addQuotaLocked requires q.mutex to be held.
 func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
-	if quota == nil {
+	if quota == nil || isScopedQuota(quota) {
 		return
 	}
 	if q.objectLimits == nil {
@@ -354,11 +352,6 @@ func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
 		return
 	}
 
-	// For anonymous quotas (Name == ""), only proceed if the quota carries managed keys.
-	if quota.Name == "" && !hasManagedKeys(quota) {
-		return
-	}
-
 	affectedResources := make(map[string]struct{})
 
 	if nsObjs, ok := q.objectLimits[quota.Namespace]; ok {
@@ -373,9 +366,11 @@ func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
 		}
 	}
 
-	for idx := range quota.Spec.Hard {
-		if dn, ok := managedQuotaName(idx); ok {
-			affectedResources[dn] = struct{}{}
+	if !isScopedQuota(quota) {
+		for idx := range quota.Spec.Hard {
+			if dn, ok := managedQuotaName(idx); ok {
+				affectedResources[dn] = struct{}{}
+			}
 		}
 	}
 

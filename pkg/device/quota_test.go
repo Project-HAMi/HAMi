@@ -281,20 +281,26 @@ func TestDelQuotaNonLimitsKey(t *testing.T) {
 	memName := "nvidia.com/gpumem"
 	coreName := "nvidia.com/gpucore"
 
-	rq := &corev1.ResourceQuota{}
-	rq.Namespace = ns
-	rq.Spec.Hard = corev1.ResourceList{
-		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
-		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(10, resource.DecimalSI),
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "quota-with-limits", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName): *resource.NewQuantity(10, resource.DecimalSI),
+			},
+		},
 	}
 	qm.AddQuota(rq)
 
 	// Quota with non-limits keys (including 7-character prefix key).
-	unrelatedQuota := &corev1.ResourceQuota{}
-	unrelatedQuota.Namespace = ns
-	unrelatedQuota.Spec.Hard = corev1.ResourceList{
-		corev1.ResourceName("requests." + memName): *resource.NewQuantity(50, resource.DecimalSI),
-		corev1.ResourceName("0123456" + memName):   *resource.NewQuantity(50, resource.DecimalSI),
+	unrelatedQuota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "quota-without-limits", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("requests." + memName): *resource.NewQuantity(50, resource.DecimalSI),
+				corev1.ResourceName("0123456" + memName):   *resource.NewQuantity(50, resource.DecimalSI),
+			},
+		},
 	}
 
 	// DelQuota on non-limits keys should NOT reset active quota limits.
@@ -592,3 +598,85 @@ func TestUnrelatedQuotaLeavesNoEntry(t *testing.T) {
 		t.Errorf("expected no objectLimits map for quota without managed keys, got: %+v", qm.objectLimits[ns])
 	}
 }
+
+func TestScopedQuotaIgnored(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "team-scoped-quota"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	unscoped := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "unscoped-baseline", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):  *resource.NewQuantity(2000, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName): *resource.NewQuantity(100, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(unscoped)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 2000 {
+		t.Fatalf("expected memory limit 2000, got %d", got)
+	}
+
+	// Scoped quota with BestEffort scope and explicit 0 limits should be ignored
+	// so it does not clamp non-best-effort pods in the namespace.
+	scopedBestEffort := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-besteffort", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Scopes: []corev1.ResourceQuotaScope{corev1.ResourceQuotaScopeBestEffort},
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):  *resource.NewQuantity(0, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName): *resource.NewQuantity(0, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(scopedBestEffort)
+
+	// Memory limit must remain at unscoped quota's value (2000), not clamped to 0
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 2000 {
+		t.Errorf("expected memory limit 2000 to remain, but scoped quota clamped it to %d", got)
+	}
+	if got := (*qm.Quotas[ns])[coreName].Limit; got != 100 {
+		t.Errorf("expected core limit 100 to remain, but scoped quota clamped it to %d", got)
+	}
+
+	// Scoped quota with ScopeSelector should also be ignored
+	scopedSelector := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-selector", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			ScopeSelector: &corev1.ScopeSelector{
+				MatchExpressions: []corev1.ScopedResourceSelectorRequirement{
+					{
+						ScopeName: corev1.ResourceQuotaScopePriorityClass,
+						Operator:  corev1.ScopeSelectorOpIn,
+						Values:    []string{"low-priority"},
+					},
+				},
+			},
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(500, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(scopedSelector)
+
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 2000 {
+		t.Errorf("expected memory limit 2000 to remain, but scoped selector quota clamped it to %d", got)
+	}
+
+	// Deleting scoped quotas should have no adverse effect
+	qm.DelQuota(scopedBestEffort)
+	qm.DelQuota(scopedSelector)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 2000 {
+		t.Errorf("expected memory limit 2000 after deleting scoped quotas, got %d", got)
+	}
+
+	// Deleting the unscoped quota restores state to 0
+	qm.DelQuota(unscoped)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 0 {
+		t.Errorf("expected memory limit 0 after deleting unscoped quota, got %d", got)
+	}
+}
+
