@@ -17,6 +17,7 @@ limitations under the License.
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -742,11 +743,13 @@ func TestRegisterInAnnotationReportNodeCapacityDefaultsAndPatchError(t *testing.
 		t.Fatalf("failed to create fake node: %v", err)
 	}
 
+	var statusPatchBody []byte
 	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		patchAction, ok := action.(k8stesting.PatchAction)
 		if !ok || patchAction.GetSubresource() != "status" {
 			return false, nil, nil
 		}
+		statusPatchBody = patchAction.GetPatch()
 		return true, nil, fmt.Errorf("simulated patch failure")
 	})
 
@@ -806,5 +809,14 @@ func TestRegisterInAnnotationReportNodeCapacityDefaultsAndPatchError(t *testing.
 	// must still succeed.
 	if _, err := plugin.RegisterInAnnotation(); err != nil {
 		t.Fatalf("RegisterInAnnotation() error = %v, want nil (patch errors are logged, not returned)", err)
+	}
+
+	if statusPatchBody == nil {
+		t.Fatal("status patch was never attempted")
+	}
+	for _, name := range []string{"nvidia.com/gpumem", "nvidia.com/gpucores"} {
+		if !bytes.Contains(statusPatchBody, []byte(name)) {
+			t.Errorf("status patch body = %s, want it to contain fallback resource name %q", statusPatchBody, name)
+		}
 	}
 }
