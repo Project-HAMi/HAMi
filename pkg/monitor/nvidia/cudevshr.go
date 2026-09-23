@@ -161,6 +161,13 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 	return l.clientset
 }
 
+// PodLister returns the lister backed by the node-scoped pod informer that
+// initInformerWithConfig starts and waits for. Callers that only need pods
+// assigned to this node should reuse it rather than starting a second informer.
+func (l *ContainerLister) PodLister() corelisters.PodLister {
+	return l.podLister
+}
+
 // SetContainersForTest replaces the internal container map; use only in tests.
 func (l *ContainerLister) SetContainersForTest(m map[string]*ContainerUsage) {
 	l.mutex.Lock()
@@ -180,7 +187,7 @@ func (l *ContainerLister) Update() error {
 
 	pods, err := l.podLister.List(labels.Everything())
 	if err != nil {
-		return fmt.Errorf("failed to list pods: %v", err)
+		return fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	podUIDs := make(map[string]bool, len(pods))

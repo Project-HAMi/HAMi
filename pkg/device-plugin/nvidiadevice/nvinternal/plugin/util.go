@@ -107,7 +107,7 @@ func decodePodSingleDevice(dtype string, p *corev1.Pod) (device.PodSingleDevice,
 // from podSingleDev in place, returning the corresponding pod container and the
 // popped devices. The container resolution uses the same init-then-regular
 // ordering convention as the annotation encoder. It does NOT touch the API
-// server — the caller is responsible for patching the annotation once after the
+// server, the caller is responsible for patching the annotation once after the
 // loop completes.
 func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevice) (corev1.Container, device.ContainerDevices, error) {
 	initContainerCount := len(pod.Spec.InitContainers)
@@ -127,6 +127,67 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 	return corev1.Container{}, nil, errors.New("no pending device allocation found")
 }
 
+// validateContainerAllocation rejects an allocation handing the container more
+// than its own resource limits ask for (issue #3041).
+func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
+	if plugin.operatingMode == "mig" {
+		return nil
+	}
+	dev, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		return nil
+	}
+	req := dev.GenerateResourceRequests(ctr)
+	for _, each := range allocated {
+		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
+		if bounded && each.Usedmem > limit {
+			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
+				ctr.Name, each.Usedmem, each.UUID, limit)
+		}
+		if req.Coresreq > 0 && each.Usedcores > req.Coresreq {
+			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
+				ctr.Name, each.Usedcores, each.UUID, req.Coresreq)
+		}
+	}
+	return nil
+}
+
+// memoryLimitMB returns the memory the request entitles the container to on the
+// named card, and whether the request bounds it at all.
+func (plugin *NvidiaDevicePlugin) memoryLimitMB(req device.ContainerDeviceRequest, uuid string) (int32, bool) {
+	// A percentage leaves Memreq at 0 unless both were asked for, in which case
+	// the scheduler sized the slice from the percentage as well.
+	if req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100 {
+		total, ok := plugin.registeredMemoryMB(uuid)
+		if !ok {
+			return 0, false
+		}
+		return total * req.MemPercentagereq / 100, true
+	}
+	if req.Memreq > 0 {
+		return req.Memreq, true
+	}
+	return 0, false
+}
+
+// registeredMemoryMB returns the memory this plugin published for a card, which
+// is what the scheduler sized a percentage request against, oversubscription
+// included.
+func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int32, bool) {
+	if plugin.rm == nil {
+		return 0, false
+	}
+	card, ok := plugin.rm.Devices()[uuid]
+	if !ok || card == nil {
+		return 0, false
+	}
+	total := int32(card.TotalMemory / 1024 / 1024)
+	if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+		total = int32(float64(total) * *plugin.schedulerConfig.DeviceMemoryScaling)
+	}
+	return total, true
+}
+
 // patchErasedAnnotation patches the pod's device annotation with the given
 // podSingleDev (which has had some containers popped). It also updates
 // pod.Annotations in place so that subsequent Allocate calls within the same
@@ -143,36 +204,12 @@ func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.Po
 	return nil
 }
 
-func GetIndexAndTypeFromUUID(uuid string) (string, int) {
-	defer nvml.Shutdown()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
-	}
-	originuuid := strings.Split(uuid, "[")[0]
-	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get handlebyuuid error ret=", ret)
-		panic(0)
-	}
-	Model, ret := ndev.GetName()
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get name error ret=", ret)
-		panic(0)
-	}
-	index, ret := ndev.GetIndex()
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get index error ret=", ret)
-		panic(0)
-	}
-	return Model, index
-}
-
 func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
@@ -193,11 +230,11 @@ func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 }
 
 func GetDeviceNums() (int, error) {
-	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
@@ -208,11 +245,11 @@ func GetDeviceNums() (int, error) {
 
 func GetDeviceNames() ([]string, error) {
 	names := []string{}
-	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return names, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
 	}
+	defer nvml.Shutdown()
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
@@ -351,7 +388,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if reservation.GPUUUID != c[i].UUID {
 			return nil, fmt.Errorf("MIG reservation GPU %s does not match allocated GPU %s", reservation.GPUUUID, c[i].UUID)
 		}
-		gpuIndex, ok := gpuUUIDToIndex(reservation.GPUUUID)
+		gpuIndex, ok := nv.migMgr.gpuUUIDToIndex(reservation.GPUUUID)
 		if !ok {
 			return nil, fmt.Errorf("resolve parent GPU %s", reservation.GPUUUID)
 		}

@@ -35,17 +35,21 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/stretchr/testify/require"
@@ -169,7 +173,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 
 	for i := range testCases {
-		tc := testCases[i]
+		tc := &testCases[i]
 		t.Run(tc.description, func(t *testing.T) {
 			deviceListStrategies, _ := v1.NewDeviceListStrategies(tc.deviceListStrategies)
 			plugin := NvidiaDevicePlugin{
@@ -203,6 +207,66 @@ func TestCDIAllocateResponse(t *testing.T) {
 			require.EqualValues(t, &tc.expectedResponse, &response)
 		})
 	}
+}
+
+// TestNewNvidiaDevicePluginPropagatesImexChannels guards the wiring from options
+// into the plugin: WithImexChannels stores the channels on options, and the
+// plugin the constructor builds must carry them, otherwise updateResponseForCDI,
+// updateResponseForImexChannelsEnvVar, updateResponseForDeviceMounts, and
+// apiDeviceSpecs all see an empty list and IMEX channels are never exposed to the
+// container.
+func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
+	channels := imex.Channels{{ID: "0"}, {ID: "1"}}
+	o := &options{
+		imexChannels: channels,
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							CDIAnnotationPrefix: ptr("cdi.k8s.io/"),
+						},
+					},
+				},
+			},
+		},
+	}
+	resourceManager := &rm.ResourceManagerMock{
+		ResourceFunc: func() v1.ResourceName { return "nvidia.com/gpu" },
+	}
+	deviceListStrategies, err := v1.NewDeviceListStrategies([]string{"envvar"})
+	require.NoError(t, err)
+
+	plugin := o.newNvidiaDevicePlugin(
+		context.Background(),
+		resourceManager,
+		deviceListStrategies,
+		nvidia.NvidiaConfig{},
+		"hami-core",
+		nil,
+	)
+
+	require.Equal(t, channels, plugin.imexChannels,
+		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+}
+
+// TestUpdateResponseForImexChannelsEnvVarExposesChannels covers the container-facing
+// half of the IMEX wiring: once the channels are on the plugin, the allocate response
+// must expose them to the container through the IMEX channel env var. With
+// TestNewNvidiaDevicePluginPropagatesImexChannels (options into the plugin) this pins
+// the full path the #2892 regression broke.
+func TestUpdateResponseForImexChannelsEnvVarExposesChannels(t *testing.T) {
+	plugin := NvidiaDevicePlugin{
+		imexChannels: imex.Channels{{ID: "0"}, {ID: "3"}},
+	}
+
+	response := kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+		Envs: map[string]string{},
+	}
+	plugin.updateResponseForImexChannelsEnvVar(&response)
+
+	require.Equal(t, "0,3", response.Envs[v1.ImexChannelEnvVar],
+		"updateResponseForImexChannelsEnvVar must expose the plugin's IMEX channels to the container")
 }
 
 func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
@@ -723,7 +787,23 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 	require.Contains(t, err.Error(), "device number not matched")
 }
 
-func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
+func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	prepareCalls := 0
+	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
+	prepareHostPIDLockParentForAllocation = func() error {
+		prepareCalls++
+		return nil
+	}
+	defer func() {
+		prepareHostPIDLockParentForAllocation =
+			previousPrepareHostPIDLockParent
+	}()
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() {
+		enableGetPreferredAllocation = previousEnableGetPreferredAllocation
+	}()
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
@@ -791,9 +871,62 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 
 	response, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
+	require.Equal(t, 1, prepareCalls)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
+	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.EnvironmentVariable])
+	brokerMountCount := 0
+	brokerMountIndex := -1
+	fallbackParentMountCount := 0
+	fallbackParentMountIndex := -1
+	for mountIndex, mount := range response.ContainerResponses[0].Mounts {
+		if mount.ContainerPath == hostpid.ContainerDirectory {
+			require.Equal(t, hostpid.ServerDirectory, mount.HostPath)
+			require.True(t, mount.ReadOnly)
+			brokerMountIndex = mountIndex
+			brokerMountCount++
+		}
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackParentMountIndex = mountIndex
+			fallbackParentMountCount++
+		}
+	}
+	require.Equal(t, 1, brokerMountCount)
+	require.Equal(t, 1, fallbackParentMountCount)
+	require.Less(t, fallbackParentMountIndex, brokerMountIndex)
+
+	t.Setenv(hostpid.EnvironmentVariable, "")
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
+	disabledResponse, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, 2, prepareCalls)
+	require.NotContains(t, disabledResponse.ContainerResponses[0].Envs,
+		hostpid.EnvironmentVariable)
+	fallbackMountCount := 0
+	for _, mount := range disabledResponse.ContainerResponses[0].Mounts {
+		require.NotEqual(t, hostpid.ContainerDirectory, mount.ContainerPath)
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackMountCount++
+		}
+	}
+	require.Equal(t, 1, fallbackMountCount)
+
+	prepareHostPIDLockParentForAllocation = func() error {
+		return errors.New("parent preparation fixture")
+	}
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
+	failedResponse, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, failedResponse)
+	require.ErrorContains(t, err, "failed to prepare host PID lock parent")
 }
 
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
@@ -916,4 +1049,116 @@ func TestListAndWatchSendError(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, server.sent, 2)
 	})
+}
+
+// TestAllocateRejectsEmptyDeviceIDs guards against a regression of the
+// index-out-of-range panic in Allocate when kubelet sends a container
+// request with an empty DevicesIds list (upstream k8s-device-plugin has
+// the same guard).
+func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: ptr(v1.DeviceIDStrategyUUID),
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: func() v1.DeviceListStrategies {
+			s, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+			return s
+		}(),
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{},
+		}},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, response)
+	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
+}
+
+// A node that cannot be read is not a node without the label. Falling back to
+// a local mode there would advertise to kubelet the cards lupine is already
+// serving over the network, putting two workloads on the same GPU.
+func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) {
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { client.KubeClient = previous })
+	t.Setenv(util.NodeNameEnvName, "absent-node")
+	previousNodeName := util.NodeName
+	util.NodeName = "absent-node"
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+
+	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+
+	_, mode, err := LoadNvidiaDevicePluginConfig()
+	require.Error(t, err)
+	require.Empty(t, mode, "no mode is chosen when the node is unknown")
+}
+
+// The lupine label is the operator's one declaration that a node serves its
+// GPUs over the network. Deriving the mode from it keeps the plugin and the
+// scheduler's pool from disagreeing about which fleet a node belongs to.
+func TestResolveOperatingMode(t *testing.T) {
+	labelled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "gpu-a",
+		Labels: map[string]string{remotegpu.LupineServerLabel: ""},
+	}}
+	plain := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-b"}}
+
+	for _, tc := range []struct {
+		name       string
+		configured string
+		node       *corev1.Node
+		want       string
+	}{
+		{"label wins over the configured mode", nvidia.HamiCoreMode, labelled, nvidia.RemoteMode},
+		{"label wins over mig too", nvidia.MigMode, labelled, nvidia.RemoteMode},
+		{"an unlabelled node keeps its configured mode", nvidia.MigMode, plain, nvidia.MigMode},
+		// Honouring remote here would hide the cards from both fleets: this
+		// backend would skip them and the pool would never discover the node.
+		{"remote without the label is refused", nvidia.RemoteMode, plain, nvidia.HamiCoreMode},
+		{"remote with no node readable is refused", nvidia.RemoteMode, nil, nvidia.HamiCoreMode},
+		{"no node readable keeps the configured mode", nvidia.HamiCoreMode, nil, nvidia.HamiCoreMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
+		})
+	}
 }

@@ -29,6 +29,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -47,6 +48,8 @@ type schedulerMetricsProvider interface {
 	// can emit hami_scheduler_is_leader without importing the scheduler package
 	// directly in metrics.go.
 	GetLeaderManager() leaderelection.LeaderManager
+	// GetAllocationMetrics returns the scheduler outcome counters.
+	GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics
 	// IsSynced reports whether the scheduler's internal cache has completed at
 	// least one successful sync and is ready to serve scheduling requests.
 	IsSynced() bool
@@ -70,18 +73,44 @@ func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64
 	return normalizedCoreLimit, math.Ceil(float64(allocated) / float64(total) * normalizedCoreLimit)
 }
 
-// findNodeDeviceUsage looks up a device by UUID across every node's usage and
-// returns its total core capacity and type. ok is false when no node advertises
-// the device, in which case the caller falls back to emitting raw values.
-func findNodeDeviceUsage(nu *map[string]*schedulerpkg.NodeUsage, uuid string) (totalcore int32, deviceType string, ok bool) {
+// deviceMeta holds the per-device fields the container-level collector needs to
+// normalize core metrics. It is deliberately a value type: the collector only
+// reads these two scalars, so the index does not retain the snapshot's devices.
+type deviceMeta struct {
+	totalcore  int32
+	deviceType string
+}
+
+// newDeviceMetaIndex indexes every device in the snapshot by UUID so the
+// container-level collector can resolve a device in constant time. Without it,
+// each allocated container device triggers a fresh scan of every node's device
+// list, making a scrape cost O(allocated devices x nodes x devices per node).
+//
+// The index is node-agnostic, matching the lookup it replaces: a UUID resolves
+// regardless of which node advertises it. A UUID advertised by more than one
+// node keeps the first entry encountered, as the scan did by returning on its
+// first match.
+func newDeviceMetaIndex(nu *map[string]*schedulerpkg.NodeUsage) map[string]deviceMeta {
+	total := 0
+	for _, ni := range *nu {
+		total += len(ni.Devices.DeviceLists)
+	}
+	index := make(map[string]deviceMeta, total)
 	for _, ni := range *nu {
 		for _, dls := range ni.Devices.DeviceLists {
-			if dls.Device != nil && dls.Device.ID == uuid {
-				return dls.Device.Totalcore, dls.Device.Type, true
+			if dls.Device == nil {
+				continue
+			}
+			if _, ok := index[dls.Device.ID]; ok {
+				continue
+			}
+			index[dls.Device.ID] = deviceMeta{
+				totalcore:  dls.Device.Totalcore,
+				deviceType: dls.Device.Type,
 			}
 		}
 	}
-	return 0, "", false
+	return index
 }
 
 // mibToBytes converts a memory quantity expressed in mebibytes (MiB), the unit
@@ -103,10 +132,26 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	// A single snapshot is shared by the node- and container-level collectors so
 	// they observe a consistent cluster state within one scrape.
 	nu := cc.metricsProvider.InspectAllNodesUsage()
+	// Index the snapshot once so the container-level collector resolves each
+	// allocated device by UUID in constant time instead of rescanning the
+	// cluster per device.
+	deviceMetaByUUID := newDeviceMetaIndex(nu)
 	cc.collectNodeMetrics(ch, nu, legacy)
 	cc.collectQuotaMetrics(ch, legacy)
-	cc.collectContainerMetrics(ch, nu, legacy)
+	cc.collectContainerMetrics(ch, deviceMetaByUUID, legacy)
+	cc.collectRemoteGPUMetrics(ch)
 	cc.collectSchedulerStateMetrics(ch)
+	cc.collectSchedulerOutcomeMetrics(ch)
+}
+
+// remoteGPUPool reads the lupine fleet when the remote-gpu backend is
+// configured and reports nothing otherwise. Swappable for tests.
+var remoteGPUPool = func() []remotegpu.PoolDevice {
+	dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices)
+	if !ok {
+		return nil
+	}
+	return dev.Inspect()
 }
 
 // collectNodeMetrics emits node-level GPU metrics (memory/core limits and
@@ -210,6 +255,13 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
+			if devs.Device.Type == remotegpu.RemoteGPUCommonWord {
+				// The lupine pool is handed to every client node, so reporting
+				// it here would list each card once per node, under a node
+				// that does not own it. collectRemoteGPUMetrics reports the
+				// pool once, by server.
+				continue
+			}
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
 			if devs.Device.Mode == "mig" {
 				for _, allocation := range devs.Device.MigAllocationsInUse {
@@ -330,30 +382,36 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 // collectContainerMetrics emits per-container vGPU metrics for all scheduled
 // pods. AMD core allocations are normalized to a percentage via
 // normalizeAMDCoreMetrics (issue #2518); legacy metrics keep raw values.
-func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, nu *map[string]*schedulerpkg.NodeUsage, legacy bool) {
+func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, deviceMetaByUUID map[string]deviceMeta, legacy bool) {
+	// PodManager only ever stores the pod's collapsed device usage, a single
+	// entry per device type, so there is no per-container breakdown to label
+	// with. See device.CollapseInitContainerUsage and SteadyStateDeviceUsage.
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"hami_vgpu_memory_allocated_bytes",
-		"vGPU memory allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		"vGPU memory allocated from a pod",
+		[]string{"namespace", "node", "pod", "device_uuid"}, nil,
 	)
 	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
 		"hami_vgpu_core_allocated_ratio",
-		"vGPU core allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		"vGPU core allocated from a pod",
+		[]string{"namespace", "node", "pod", "device_uuid"}, nil,
 	)
 	var (
 		legacyAllocatedMemory *prometheus.Desc
 		legacyAllocatedCore   *prometheus.Desc
 	)
 	if legacy {
+		// Legacy metrics exist to keep pre-existing dashboards working, so
+		// containeridx stays even though it is always "0". Only the new
+		// hami_vgpu_* pair drops it.
 		legacyAllocatedMemory = prometheus.NewDesc(
 			"vGPUMemoryAllocated",
-			"vGPU memory allocated from a container",
+			"vGPU memory allocated from a pod",
 			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 		)
 		legacyAllocatedCore = prometheus.NewDesc(
 			"vGPUCoreAllocated",
-			"vGPU core allocated from a container",
+			"vGPU core allocated from a pod",
 			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 		)
 	}
@@ -378,29 +436,69 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 					// Resolve the matching node device's total core capacity and type so
 					// AMD physical compute-unit (CU) counts in Usedcores can be normalized
 					// to the percentage unit used by hami_vgpu_core_allocated_ratio (#2518).
-					totalcore, deviceType, found := findNodeDeviceUsage(nu, ctrdevval.UUID)
+					meta, found := deviceMetaByUUID[ctrdevval.UUID]
 					klog.V(4).InfoS("Resolved device for container metric",
 						"deviceUUID", ctrdevval.UUID,
-						"totalCore", totalcore,
-						"deviceType", deviceType,
+						"totalCore", meta.totalcore,
+						"deviceType", meta.deviceType,
 						"found", found,
 						"nodeID", val.NodeID,
 					)
-					containerLabels := []string{val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID}
+					containerLabels := []string{val.Namespace, val.NodeID, val.Name, ctrdevval.UUID}
 					usedMemBytes := mibToBytes(ctrdevval.Usedmem)
 					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, usedMemBytes, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
 					}
-					_, ctrCoreAllocated := normalizeAMDCoreMetrics(deviceType, totalcore, ctrdevval.Usedcores)
+					_, ctrCoreAllocated := normalizeAMDCoreMetrics(meta.deviceType, meta.totalcore, ctrdevval.Usedcores)
 					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrCoreAllocated, containerLabels...); err != nil {
 						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
 					}
 					if legacy {
-						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, containerLabels...)
-						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), containerLabels...)
+						legacyLabels := []string{val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID}
+						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, usedMemBytes, legacyLabels...)
+						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), legacyLabels...)
 					}
 				}
 			}
+		}
+	}
+}
+
+// collectRemoteGPUMetrics exports the lupine fleet once, keyed by the server
+// that owns each card rather than the client nodes that can reach it. A card
+// is handed out whole, so allocation is a flag and allocated memory is either
+// the whole card or nothing.
+func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.Metric) {
+	labels := []string{"server", "endpoint", "device_uuid", "device_index", "device_type"}
+	memoryLimitDesc := prometheus.NewDesc(
+		"hami_remote_gpu_memory_limit_bytes",
+		"Device memory limit for a lupine-served GPU",
+		labels, nil,
+	)
+	allocatedDesc := prometheus.NewDesc(
+		"hami_remote_gpu_allocated",
+		"1 if a pod holds this lupine-served GPU, 0 if it is free",
+		labels, nil,
+	)
+	overviewDesc := prometheus.NewDesc(
+		"hami_remote_gpu_overview",
+		"Memory allocated on a lupine-served GPU, with its server and capacity",
+		[]string{"server", "endpoint", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
+	)
+	for _, pd := range remoteGPUPool() {
+		d := pd.Device
+		allocated, usedmem := 0.0, int32(0)
+		if pd.Reserved {
+			allocated, usedmem = 1, d.Devmem
+		}
+		if err := sendMetric(ch, memoryLimitDesc, prometheus.GaugeValue, mibToBytes(d.Devmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_memory_limit_bytes metric: %v", err)
+		}
+		if err := sendMetric(ch, allocatedDesc, prometheus.GaugeValue, allocated, pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_allocated metric: %v", err)
+		}
+		if err := sendMetric(ch, overviewDesc, prometheus.GaugeValue, mibToBytes(usedmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), fmt.Sprint(d.Devcore), fmt.Sprint(d.Devmem), d.Type); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_overview metric: %v", err)
 		}
 	}
 }
@@ -434,6 +532,15 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	}
 	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
+	}
+}
+
+// collectSchedulerOutcomeMetrics emits allocation and recovery counters owned
+// by the scheduler. The metrics object is optional so lightweight collector
+// tests and embedders can omit scheduler lifecycle metrics.
+func (cc ClusterManagerCollector) collectSchedulerOutcomeMetrics(ch chan<- prometheus.Metric) {
+	if outcome := cc.metricsProvider.GetAllocationMetrics(); outcome != nil {
+		outcome.Collect(ch)
 	}
 }
 

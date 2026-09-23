@@ -38,3 +38,10 @@ const (
 	ErrReasonFailedScheduling  = "FilteringFailed"
 	ErrMessageFailedScheduling = "0/1 nodes are available"
 )
+
+// MIG related.
+const (
+	MIGModeAnnotation       = "nvidia.com/vgpu-mode"
+	MIGModeValue            = "mig"
+	MIGAllocationAnnotation = "hami.io/vgpu-mig-allocations"
+)

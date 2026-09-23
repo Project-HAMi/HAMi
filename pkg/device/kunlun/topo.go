@@ -74,12 +74,8 @@ func countbubble(t []int) int {
 }
 
 func calcscore(p []int, c []int) float32 {
-	sort.Slice(p, func(i, j int) bool {
-		return i < j
-	})
-	sort.Slice(c, func(i, j int) bool {
-		return i < j
-	})
+	slices.Sort(p)
+	slices.Sort(c)
 	prev := countbubble(p)
 	cur := countbubble(c)
 	klog.V(5).Infoln("Score kunlun num prev=", prev, "cur=", cur)

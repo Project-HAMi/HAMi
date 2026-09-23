@@ -116,7 +116,7 @@ jobs:
         # Prevent running from the forked repository that doesn't need to upload coverage.
         # In addition, running on the forked repository would fail as missing the necessary secret.
         if: ${{ github.repository == 'Project-HAMi/HAMi' }}
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           # Even though token upload token is not required for public repos,
           # but adding a token might increase successful uploads as per:
@@ -127,11 +127,45 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+  bench:
+    name: Benchmark
+    # Runs alongside the unit tests rather than after them: the two share no
+    # artifacts, so serialising them would only add wall-clock time.
+    needs: [ lint, get_info ]
+    runs-on: ubuntu-22.04
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The libvgpu submodule holds no Go sources, so unlike the unit test job
+      # this one does not need it to build the benchmarks.
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Run benchmarks
+        # A low benchtime keeps this a smoke test: the job proves every
+        # benchmark still runs, and deliberately does not compare timings,
+        # which are not reproducible on shared runners.
+        run: BENCHTIME=10x make bench
+      - name: Upload benchmark results
+        # Uploaded even on failure so the partial output shows which benchmark
+        # broke.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: benchmark-results
+          path: _output/bench/results.txt
+          retention-days: 5
+          if-no-files-found: warn
+
   build:
     name: Compile
     needs: [ test, get_info ]
     runs-on: ubuntu-22.04
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     steps:
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
@@ -156,10 +190,10 @@ jobs:
           submodulePath: libvgpu
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
         with:
           driver-opts: image=moby/buildkit:v0.31.2@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec
 
@@ -170,7 +204,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
@@ -205,7 +239,7 @@ jobs:
   package_chart:
     runs-on: ubuntu-22.04
     needs: [ test, get_info ]
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     env:
       HELM_VERSION: v3.8.1
     steps:
@@ -266,7 +300,17 @@ jobs:
   e2e_test:
     uses: ./.github/workflows/call-e2e.yaml
     needs: [ package_chart, get_info, build ]
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || (github.repository == 'Project-HAMi/HAMi' && github.ref == 'refs/heads/master')
     with:
       ref: ${{ needs.get_info.outputs.version }}
       type: "pullrequest"
+
+  # execute MIG smoke test when hami code merge
+  e2e_mig_test:
+    uses: ./.github/workflows/call-e2e-mig.yaml
+    needs: [ package_chart, get_info, build, e2e_test ]
+    if: (needs.get_info.outputs.e2e_run == 'true' || (github.repository == 'Project-HAMi/HAMi' && github.ref == 'refs/heads/master')) && vars.ENABLE_MIG_E2E == 'true'
+    with:
+      ref: ${{ needs.get_info.outputs.version }}
+      type: "smoke"
+      deploy-type: "pullrequest"

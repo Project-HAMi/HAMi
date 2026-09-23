@@ -27,6 +27,8 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -38,6 +40,7 @@ type fakeMetricsProvider struct {
 	podManager   *device.PodManager
 	isLeader     bool
 	isSynced     bool
+	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
@@ -58,6 +61,10 @@ func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
 
 func (f *fakeMetricsProvider) IsSynced() bool {
 	return f.isSynced
+}
+
+func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
+	return f.outcome
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
@@ -93,6 +100,8 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 
 	qm := device.NewQuotaManager()
 	pm := device.NewPodManager()
+	outcome := versionmetrics.NewSchedulerOutcomeMetrics()
+	outcome.ObserveAllocation("filter", "NVIDIA")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -120,15 +129,24 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 			nodeUsage:    nodeUsage,
 			quotaManager: qm,
 			podManager:   pm,
+			outcome:      outcome,
 		},
 	}
 
-	if err := reg.Register(cc); err != nil {
+	registerer := prometheus.WrapRegistererWith(prometheus.Labels{"zone": c.Zone}, reg)
+	if err := registerer.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
 
 	if _, err := reg.Gather(); err != nil {
 		t.Errorf("Gather failed (non-legacy): %v", err)
+	}
+	if err := promtestutil.GatherAndCompare(reg, strings.NewReader(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter",zone="test-zone"} 1
+`), "hami_scheduler_allocations_total"); err != nil {
+		t.Errorf("unexpected scheduler outcome metrics: %v", err)
 	}
 
 	regLegacy := prometheus.NewPedanticRegistry()
@@ -172,13 +190,15 @@ func TestMibToBytes(t *testing.T) {
 	}
 }
 
-func TestFindNodeDeviceUsage(t *testing.T) {
+func TestNewDeviceMetaIndex(t *testing.T) {
 	nodeUsage := map[string]*schedulerpkg.NodeUsage{
 		"node-1": {
 			Devices: policy.DeviceUsageList{
 				DeviceLists: []*policy.DeviceListsScore{
 					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 64, Type: "AMDGPU"}},
 					{Device: &device.DeviceUsage{ID: "NVIDIA-1", Totalcore: 100, Type: "NVIDIA"}},
+					// A nil device must be skipped rather than indexed.
+					{Device: nil},
 				},
 			},
 		},
@@ -190,6 +210,8 @@ func TestFindNodeDeviceUsage(t *testing.T) {
 			},
 		},
 	}
+
+	index := newDeviceMetaIndex(&nodeUsage)
 
 	tests := []struct {
 		name           string
@@ -205,12 +227,166 @@ func TestFindNodeDeviceUsage(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTotalcore, gotDeviceType, gotOk := findNodeDeviceUsage(&nodeUsage, tc.uuid)
-			if gotTotalcore != tc.wantTotalcore || gotDeviceType != tc.wantDeviceType || gotOk != tc.wantOk {
-				t.Errorf("findNodeDeviceUsage(%q) = (%d, %q, %v), want (%d, %q, %v)",
-					tc.uuid, gotTotalcore, gotDeviceType, gotOk, tc.wantTotalcore, tc.wantDeviceType, tc.wantOk)
+			meta, ok := index[tc.uuid]
+			if meta.totalcore != tc.wantTotalcore || meta.deviceType != tc.wantDeviceType || ok != tc.wantOk {
+				t.Errorf("index[%q] = (%d, %q, %v), want (%d, %q, %v)",
+					tc.uuid, meta.totalcore, meta.deviceType, ok, tc.wantTotalcore, tc.wantDeviceType, tc.wantOk)
 			}
 		})
+	}
+
+	if len(index) != 3 {
+		t.Errorf("len(index) = %d, want 3 (nil devices must not be indexed)", len(index))
+	}
+}
+
+func TestNewDeviceMetaIndexKeepsFirstEntryForDuplicateUUID(t *testing.T) {
+	// The scan this replaced returned on its first match, so a repeated UUID
+	// resolved to the first entry. Pin that within a single node's device list,
+	// where the order is deterministic.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 64, Type: "AMDGPU"}},
+					{Device: &device.DeviceUsage{ID: "AMD-1", Totalcore: 304, Type: "AMDGPU"}},
+				},
+			},
+		},
+	}
+
+	meta, ok := newDeviceMetaIndex(&nodeUsage)["AMD-1"]
+	if !ok || meta.totalcore != 64 {
+		t.Errorf("index[\"AMD-1\"] = (%d, %v), want (64, true)", meta.totalcore, ok)
+	}
+}
+
+func TestNewDeviceMetaIndexEmptySnapshot(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{}
+	if index := newDeviceMetaIndex(&nodeUsage); len(index) != 0 {
+		t.Errorf("len(index) = %d, want 0 for an empty snapshot", len(index))
+	}
+}
+
+func TestAMDCoreNormalizationResolvesDeviceOnAnotherNode(t *testing.T) {
+	// The lookup this index replaced was node-agnostic: it resolved a UUID on any
+	// node, not only the pod's NodeID. Pin that so an index keyed per node cannot
+	// silently regress AMD normalization to the raw CU count (32) instead of 50.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-2": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "AMD-1",
+							Index:     0,
+							Count:     1,
+							Totalmem:  192000,
+							Totalcore: 64,
+							Usedcores: 32,
+							Type:      "AMDGPU",
+							Mode:      "hami-core",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "amd-pod",
+			Namespace: "default",
+			UID:       k8stypes.UID("uid-amd-cross-node"),
+		},
+	}
+	podDevices := device.PodDevices{
+		"AMDGPU": device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					UUID:      "AMD-1",
+					Type:      "AMDGPU",
+					Usedmem:   96000,
+					Usedcores: 32,
+				},
+			},
+		},
+	}
+	// The pod is recorded on node-1 while the device is advertised by node-2.
+	pm.AddPod(pod, "node-1", podDevices)
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   pm,
+		},
+	}
+
+	want := `
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
+# TYPE hami_vgpu_core_allocated_ratio gauge
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_vgpu_core_allocated_ratio",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}
+
+func TestContainerMetricsFallBackToRawValuesForUnknownDevice(t *testing.T) {
+	// A pod may reference a device no node advertises (for example while a node
+	// is being removed). The collector must still emit the container metric with
+	// the raw, unnormalized core count rather than dropping or rewriting it.
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{}
+
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orphan-pod",
+			Namespace: "default",
+			UID:       k8stypes.UID("uid-orphan"),
+		},
+	}
+	podDevices := device.PodDevices{
+		"AMDGPU": device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					UUID:      "AMD-unknown",
+					Type:      "AMDGPU",
+					Usedmem:   96000,
+					Usedcores: 32,
+				},
+			},
+		},
+	}
+	pm.AddPod(pod, "node-1", podDevices)
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   pm,
+		},
+	}
+
+	want := `
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
+# TYPE hami_vgpu_core_allocated_ratio gauge
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-unknown",namespace="default",node="node-1",pod="orphan-pod"} 32
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_vgpu_core_allocated_ratio",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
 
@@ -279,9 +455,9 @@ func TestAMDCoreAllocatedRatioNormalization(t *testing.T) {
 # HELP hami_gpu_core_allocated_ratio Device core allocated for a certain GPU
 # TYPE hami_gpu_core_allocated_ratio gauge
 hami_gpu_core_allocated_ratio{device_index="0",device_type="AMDGPU",device_uuid="AMD-1",node="node-1"} 50
-# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a container
+# HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a pod
 # TYPE hami_vgpu_core_allocated_ratio gauge
-hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+hami_vgpu_core_allocated_ratio{device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
 `
 	if err := promtestutil.CollectAndCompare(
 		newCollector,
@@ -302,7 +478,7 @@ hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace
 		},
 	}
 	legacyWant := `
-# HELP vGPUCoreAllocated vGPU core allocated from a container
+# HELP vGPUCoreAllocated vGPU core allocated from a pod
 # TYPE vGPUCoreAllocated gauge
 vGPUCoreAllocated{containeridx="0",deviceuuid="AMD-1",nodename="node-1",podname="amd-pod",podnamespace="default"} 32
 `
@@ -576,6 +752,75 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
 		})
+	}
+}
+
+// The lupine pool is handed to every client node, so the per-node metrics
+// would list each remote card once per node. Those entries are dropped and the
+// pool is exported once, by the server that owns each card.
+func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
+	remote := func() *device.DeviceUsage {
+		return &device.DeviceUsage{ID: "gpu-a/GPU-1", Totalmem: 1024, Totalcore: 100, Type: remotegpu.RemoteGPUCommonWord, Health: true}
+	}
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"cpu-1": {Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{
+			{Device: remote()},
+			{Device: &device.DeviceUsage{ID: "GPU-local", Totalmem: 2048, Totalcore: 100, Usedmem: 512, Type: "NVIDIA", Mode: "hami-core"}},
+		}}},
+		"cpu-2": {Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{{Device: remote()}}}},
+	}
+	prev := remoteGPUPool
+	remoteGPUPool = func() []remotegpu.PoolDevice {
+		return []remotegpu.PoolDevice{
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true,
+				Device: device.DeviceInfo{ID: "gpu-a/GPU-1", Index: 0, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833",
+				Device: device.DeviceInfo{ID: "gpu-a/GPU-2", Index: 1, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
+		}
+	}
+	t.Cleanup(func() { remoteGPUPool = prev })
+
+	cc := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{Zone: "test-zone"},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   device.NewPodManager(),
+		},
+	}
+	want := `
+# HELP hami_gpu_memory_limit_bytes Device memory limit for a certain GPU
+# TYPE hami_gpu_memory_limit_bytes gauge
+hami_gpu_memory_limit_bytes{device_index="0",device_type="NVIDIA",device_uuid="GPU-local",node="cpu-1"} 2.147483648e+09
+# HELP hami_node_gpu_overview GPU overview on a certain node
+# TYPE hami_node_gpu_overview gauge
+hami_node_gpu_overview{device_cores="100",device_index="0",device_memory_limit="2048",device_type="NVIDIA",device_uuid="GPU-local",node="cpu-1"} 5.36870912e+08
+# HELP hami_remote_gpu_allocated 1 if a pod holds this lupine-served GPU, 0 if it is free
+# TYPE hami_remote_gpu_allocated gauge
+hami_remote_gpu_allocated{device_index="0",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1
+hami_remote_gpu_allocated{device_index="1",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 0
+# HELP hami_remote_gpu_memory_limit_bytes Device memory limit for a lupine-served GPU
+# TYPE hami_remote_gpu_memory_limit_bytes gauge
+hami_remote_gpu_memory_limit_bytes{device_index="0",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+hami_remote_gpu_memory_limit_bytes{device_index="1",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+# HELP hami_remote_gpu_overview Memory allocated on a lupine-served GPU, with its server and capacity
+# TYPE hami_remote_gpu_overview gauge
+hami_remote_gpu_overview{device_cores="100",device_index="0",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
+hami_remote_gpu_overview{device_cores="100",device_index="1",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 0
+`
+	if err := promtestutil.CollectAndCompare(cc, strings.NewReader(want),
+		"hami_node_gpu_overview", "hami_gpu_memory_limit_bytes",
+		"hami_remote_gpu_allocated", "hami_remote_gpu_memory_limit_bytes", "hami_remote_gpu_overview",
+	); err != nil {
+		t.Errorf("unexpected metrics:\n%s", err)
+	}
+}
+
+// Without the remote-gpu backend configured the collector reports nothing for
+// the pool and does not fail the scrape.
+func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
+	if got := remoteGPUPool(); got != nil {
+		t.Errorf("expected no pool without the backend, got %v", got)
 	}
 }
 

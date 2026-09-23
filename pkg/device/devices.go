@@ -119,6 +119,7 @@ type DeviceUsage struct {
 	MigUsage            MigInUse   // Deprecated: unused by dynamic NVIDIA MIG.
 	Numa                int
 	Type                string
+	DeviceVendor        string
 	Health              bool
 	PodInfos            []*PodInfo
 	CustomInfo          map[string]any
@@ -256,23 +257,26 @@ func init() {
 	SupportDevices = make(map[string]string)
 }
 
+// DeepCopy returns a copy of DeviceUsage. It clones the PodInfos slice but
+// shares its read-only PodInfo entries, which callers must not mutate.
 func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	if d == nil {
 		return nil
 	}
 	dup := &DeviceUsage{
-		ID:        d.ID,
-		Index:     d.Index,
-		Used:      d.Used,
-		Count:     d.Count,
-		Usedmem:   d.Usedmem,
-		Totalmem:  d.Totalmem,
-		Totalcore: d.Totalcore,
-		Usedcores: d.Usedcores,
-		Mode:      d.Mode,
-		Numa:      d.Numa,
-		Type:      d.Type,
-		Health:    d.Health,
+		ID:           d.ID,
+		Index:        d.Index,
+		Used:         d.Used,
+		Count:        d.Count,
+		Usedmem:      d.Usedmem,
+		Totalmem:     d.Totalmem,
+		Totalcore:    d.Totalcore,
+		Usedcores:    d.Usedcores,
+		Mode:         d.Mode,
+		Numa:         d.Numa,
+		Type:         d.Type,
+		DeviceVendor: d.DeviceVendor,
+		Health:       d.Health,
 	}
 
 	if d.MigProfiles != nil {
@@ -291,12 +295,8 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	}
 	dup.MigUsage = d.MigUsage.DeepCopy()
 
-	if d.PodInfos != nil {
-		dup.PodInfos = make([]*PodInfo, len(d.PodInfos))
-		for i, pi := range d.PodInfos {
-			dup.PodInfos[i] = pi.DeepCopy()
-		}
-	}
+	// Copy the slice while sharing its read-only PodInfo snapshots.
+	dup.PodInfos = slices.Clone(d.PodInfos)
 
 	if d.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(d.CustomInfo))
@@ -451,6 +451,12 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 func EncodeContainerDevices(cd ContainerDevices) string {
 	var builder strings.Builder
 	for _, val := range cd {
+		// Slots is appended as an optional 5th field only when it exceeds 1, so
+		// single-slot allocations keep the historical 4-field encoding.
+		if val.Slots > 1 {
+			fmt.Fprintf(&builder, "%s,%s,%d,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, val.Slots, OneContainerMultiDeviceSplitSymbol)
+			continue
+		}
 		fmt.Fprintf(&builder, "%s,%s,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, OneContainerMultiDeviceSplitSymbol)
 	}
 	tmp := builder.String()
@@ -536,6 +542,15 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			Type:      tmpstr[1],
 			Usedmem:   int32(devmem),
 			Usedcores: int32(devcores),
+		}
+		// The 5th field is optional. An unusable value is ignored rather than
+		// rejected: dropping the whole annotation undercounts far more than one slot.
+		if len(tmpstr) >= 5 {
+			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
+				tmpdev.Slots = int32(devslots)
+			} else {
+				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
+			}
 		}
 		contdev = append(contdev, tmpdev)
 	}

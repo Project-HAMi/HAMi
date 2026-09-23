@@ -29,7 +29,7 @@ import (
 
 // TestAscend910C_FitPartialAllocationBug tests rejection when partial cards cannot fulfill the request.
 func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
@@ -65,7 +65,7 @@ func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
 
 // TestAscend910C_FitExactCountBypassBug tests pairing validation when candidate count matches originReq.
 func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
@@ -95,7 +95,7 @@ func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
 
 // TestAscend910C_FitFullPairSucceeds tests successful allocation for full module pairs.
 func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
@@ -122,7 +122,7 @@ func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
 
 // TestAscend910C_FitWithoutNetworkID_ValidatesPairing tests pairing validation when NetworkID is missing.
 func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
@@ -163,7 +163,7 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 
 // TestComputeBestCombination910C_NoFullPairsReturnsEmpty tests empty combination when no candidate NPUs form a full module.
 func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{

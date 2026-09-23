@@ -191,6 +191,24 @@ func TestCalcscore(t *testing.T) {
 	}
 }
 
+func TestCalcscoreSortsInputsInPlace(t *testing.T) {
+	// calcscore sorts its inputs in place (the contract TestCalcscore relies
+	// on when it passes copies). Feed unsorted slices and verify they come
+	// back sorted: a comparator returning "i < j" compares slice indices
+	// instead of elements and leaves the slices untouched.
+	prev := []int{6, 2, 4, 0}
+	cur := []int{5, 1, 3, 7}
+
+	calcscore(prev, cur)
+
+	if !sort.IntsAreSorted(prev) {
+		t.Errorf("calcscore left prev unsorted: %v", prev)
+	}
+	if !sort.IntsAreSorted(cur) {
+		t.Errorf("calcscore left cur unsorted: %v", cur)
+	}
+}
+
 func TestCanMeet(t *testing.T) {
 	tests := []struct {
 		name string

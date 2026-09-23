@@ -34,6 +34,7 @@ package plugin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -94,15 +95,25 @@ var nvmlInit = nvml.Init
 // calculateGPUScore is overridable in tests to simulate topology-score calculation failures.
 var calculateGPUScore = nvidia.CalculateGPUScore
 
-func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
+func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error) {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
-	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+	getHandle := nvml.DeviceGetHandleByUUID
+	if plugin.migMgr != nil {
+		done, err := plugin.migMgr.beginOperation()
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+		getHandle = plugin.migMgr.nvmllib.DeviceGetHandleByUUID
+	} else if plugin.operatingMode == nvidia.MigMode {
+		return nil, fmt.Errorf("MIG manager is not configured")
+	} else {
+		if ret := nvmlInit(); ret != nvml.SUCCESS {
+			return nil, fmt.Errorf("nvml init failed: %v", ret)
+		}
+		defer nvml.Shutdown()
 	}
-	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
-	defer nvml.Shutdown()
 	res := make([]*device.DeviceInfo, 0, len(devs))
 
 	// Log mode-related warnings once per scan instead of per device
@@ -112,15 +123,15 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	}
 
 	for UUID := range devs {
-		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
+		ndev, ret := getHandle(UUID)
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
-			panic(0)
+			klog.Errorf("skipping device uuid=%s: nvml DeviceGetHandleByUUID failed: %v", UUID, ret)
+			continue
 		}
 		idx, ret := ndev.GetIndex()
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml get index error ret=", ret)
-			panic(0)
+			klog.Errorf("skipping device uuid=%s: nvml GetIndex failed: %v", UUID, ret)
+			continue
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
@@ -141,13 +152,13 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 				continue
 			}
 		default:
-			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+			klog.Errorf("skipping device uuid=%s: nvml GetMemoryInfo failed: %v", UUID, ret)
+			continue
 		}
 		Model, ret := ndev.GetName()
 		if ret != nvml.SUCCESS {
-			klog.Error("nvml get name error ret=", ret)
-			panic(0)
+			klog.Errorf("skipping device uuid=%s: nvml GetName failed: %v", UUID, ret)
+			continue
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
@@ -172,11 +183,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		if !ok {
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
 		}
-		if !strings.HasPrefix(Model, "NVIDIA") {
-			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
-			// This is to handle cases where the model name might not be in the expected format.
-			Model = fmt.Sprintf("NVIDIA-%s", Model)
-		}
+		Model = nvidia.NormalizeDeviceModel(Model)
 		devcore := int32(100)
 		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
@@ -208,7 +215,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		res = append(res, info)
 		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
-	return &res
+	return &res, nil
 }
 
 func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model string) []device.MigProfile {
@@ -261,14 +268,18 @@ func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model str
 // RegisterInAnnotation scans devices and patches node annotations.
 // Returns (changed, error) where changed indicates whether the annotation was actually updated.
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
-	devices := plugin.getAPIDevices()
+	devices, err := plugin.getAPIDevices()
+	if err != nil {
+		klog.ErrorS(err, "failed to get API devices")
+		return false, err
+	}
 
 	// Log compact summary at V(3); full details at V(5)
 	klog.V(3).Infof("Discovered %d device(s) for registration", len(*devices))
 	klog.V(5).InfoS("Device details", "devices", devices)
 
 	annos := make(map[string]string)
-	node, err := util.GetNode(util.NodeName)
+	node, err := util.GetNodeWithContext(plugin.operationContext(), util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return false, err
@@ -308,7 +319,7 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
-		gpuScore, hasAsymmetry, err := calculateGPUScore(device.GetDevicesUUIDList(*devices))
+		gpuScore, hasAsymmetry, err := plugin.topologyScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
 			return false, err
@@ -332,10 +343,12 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	}
 	klog.Infof("Updating node annotations with %d device(s)", len(*devices))
 	klog.V(3).Infof("Annotation content: %v", annos)
-	err = util.PatchNodeAnnotations(node, annos)
-
+	err = util.PatchNodeAnnotationsWithContext(plugin.operationContext(), node, annos)
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
+		util.EmitNodeWarningEvent(node, "RegistrationFailed",
+			fmt.Sprintf("Failed to patch node annotation: %v", err),
+			10*time.Minute)
 		return true, err
 	}
 	plugin.deviceCache = encodeddevices
@@ -343,12 +356,15 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
+	ctx := plugin.operationContext()
 	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
 	successSleepInterval := time.Second * 30
 	var disableWatchAndRegister bool
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case disable := <-disableNVML:
 			if disable {
 				// when received disableNVML signal, stop the watch and register all the time
@@ -364,21 +380,57 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 		}
 		if disableWatchAndRegister {
 			klog.V(3).Info("WatchAndRegister is disabled, sleeping")
-			ackDisableWatchAndRegister <- true
-			time.Sleep(successSleepInterval)
+			select {
+			case ackDisableWatchAndRegister <- true:
+			case <-ctx.Done():
+				return
+			}
+			if !waitForRegistration(ctx, successSleepInterval) {
+				return
+			}
 			continue
 		}
 		changed, err := plugin.RegisterInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v. Retrying in %v...", err, errorSleepInterval)
-			time.Sleep(errorSleepInterval)
+			if !waitForRegistration(ctx, errorSleepInterval) {
+				return
+			}
 		} else {
 			if changed {
 				klog.Infof("Successfully updated node annotation. Next check in %v...", successSleepInterval)
 			} else {
 				klog.V(3).Infof("No device changes detected. Next check in %v...", successSleepInterval)
 			}
-			time.Sleep(successSleepInterval)
+			if !waitForRegistration(ctx, successSleepInterval) {
+				return
+			}
 		}
+	}
+}
+
+func (plugin *NvidiaDevicePlugin) topologyScore(available []string) (nvidia.ListDeviceScore, bool, error) {
+	if plugin.migMgr != nil {
+		done, err := plugin.migMgr.beginOperation()
+		if err != nil {
+			return nil, false, err
+		}
+		defer done()
+		return nvidia.CalculateGPUScoreWithNVML(plugin.migMgr.nvmllib, available)
+	}
+	if plugin.operatingMode == nvidia.MigMode {
+		return nil, false, fmt.Errorf("MIG manager is not configured")
+	}
+	return calculateGPUScore(available)
+}
+
+func waitForRegistration(ctx context.Context, interval time.Duration) bool {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }

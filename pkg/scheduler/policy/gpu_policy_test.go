@@ -512,11 +512,12 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "Zero capacity device returns score 0 without panic",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Count:     0,
-				Totalcore: 0,
-				Totalmem:  0,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Count:        0,
+				Totalcore:    0,
+				Totalmem:     0,
 			},
 			requests:      make(device.ContainerDeviceRequests),
 			expectedScore: 0,
@@ -524,11 +525,12 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "Partial zero capacity (Count=0) returns score 0 without panic",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Count:     0,
-				Totalcore: 8,
-				Totalmem:  4096,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Count:        0,
+				Totalcore:    8,
+				Totalmem:     4096,
 			},
 			requests:      make(device.ContainerDeviceRequests),
 			expectedScore: 0,
@@ -536,14 +538,15 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "ContainerDeviceRequests has no data",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Totalcore: 4,
-				Totalmem:  8192,
-				Count:     10,
-				Used:      2,
-				Usedcores: 1,
-				Usedmem:   2048,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Totalcore:    4,
+				Totalmem:     8192,
+				Count:        10,
+				Used:         2,
+				Usedcores:    1,
+				Usedmem:      2048,
 			},
 			requests:      make(device.ContainerDeviceRequests),
 			expectedScore: 7.0,
@@ -551,14 +554,15 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "Filter other device types and ignore Nums for slots",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Totalcore: 4,
-				Totalmem:  8192,
-				Count:     10,
-				Used:      2,
-				Usedcores: 1,
-				Usedmem:   2048,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Totalcore:    4,
+				Totalmem:     8192,
+				Count:        10,
+				Used:         2,
+				Usedcores:    1,
+				Usedmem:      2048,
 			},
 			requests: device.ContainerDeviceRequests{
 				"type1": {
@@ -581,14 +585,15 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "MemPercentagereq calculation evaluates correctly",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Totalcore: 10,
-				Totalmem:  10000,
-				Count:     10,
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Totalcore:    10,
+				Totalmem:     10000,
+				Count:        10,
+				Used:         0,
+				Usedcores:    0,
+				Usedmem:      0,
 			},
 			requests: device.ContainerDeviceRequests{
 				"type1": {
@@ -604,14 +609,15 @@ func TestComputeScore(t *testing.T) {
 		{
 			name: "Filter other device types and aggregate same device types",
 			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Type:      "type1",
-				Totalcore: 10,
-				Totalmem:  10000,
-				Count:     10,
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
+				ID:           "test-device",
+				Type:         "type1",
+				DeviceVendor: "type1",
+				Totalcore:    10,
+				Totalmem:     10000,
+				Count:        10,
+				Used:         0,
+				Usedcores:    0,
+				Usedmem:      0,
 			},
 			requests: device.ContainerDeviceRequests{
 				"container1": {
@@ -637,6 +643,164 @@ func TestComputeScore(t *testing.T) {
 				},
 			},
 			expectedScore: 8.0,
+		},
+		{
+			// The NVIDIA device plugin registers the card's model name as the
+			// device type, while the request carries the "NVIDIA" common word.
+			name: "Model named device type still counts the request",
+			device: &device.DeviceUsage{
+				ID:           "gpu-0",
+				Type:         "NVIDIA A100-SXM4-40GB",
+				DeviceVendor: "NVIDIA",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"NVIDIA": {
+					Nums:             1,
+					Type:             "NVIDIA",
+					Memreq:           20480,
+					MemPercentagereq: 101,
+					Coresreq:         30,
+				},
+			},
+			// slots 1/10 + cores 30/100 + memory 20480/40960
+			expectedScore: float32(util.Weight) * 0.9,
+		},
+		{
+			// Cambricon takes the device type off the node's Model label.
+			name: "Model named device type still counts the request for cambricon",
+			device: &device.DeviceUsage{
+				ID:           "mlu-0",
+				Type:         "MLU370-X8",
+				DeviceVendor: "MLU",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"MLU": {
+					Nums:             1,
+					Type:             "MLU",
+					Memreq:           20480,
+					MemPercentagereq: 101,
+					Coresreq:         30,
+				},
+			},
+			// slots 1/10 + cores 30/100 + memory 20480/40960
+			expectedScore: float32(util.Weight) * 0.9,
+		},
+		{
+			name: "Request of another vendor is not scored",
+			device: &device.DeviceUsage{
+				ID:           "gpu-0",
+				Type:         "NVIDIA A100-SXM4-40GB",
+				DeviceVendor: "NVIDIA",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"MLU": {
+					Nums:             1,
+					Type:             "MLU",
+					Memreq:           20480,
+					MemPercentagereq: 101,
+					Coresreq:         30,
+				},
+			},
+			expectedScore: 0,
+		},
+		{
+			// The chart ships both "Ascend910B4" and "Ascend910B4-1" as Ascend
+			// common words, so a device must only be scored against requests
+			// carrying its own vendor, never one whose name contains it.
+			name: "Vendors sharing a prefix are not mixed on the longer vendor",
+			device: &device.DeviceUsage{
+				ID:           "npu-0",
+				Type:         "Ascend910B4-1",
+				DeviceVendor: "Ascend910B4-1",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"Ascend910B4": {
+					Nums:             1,
+					Type:             "Ascend910B4",
+					Memreq:           8192,
+					MemPercentagereq: 101,
+					Coresreq:         10,
+				},
+				"Ascend910B4-1": {
+					Nums:             1,
+					Type:             "Ascend910B4-1",
+					Memreq:           4096,
+					MemPercentagereq: 101,
+					Coresreq:         20,
+				},
+			},
+			// slots 1/10 + cores 20/100 + memory 4096/40960
+			expectedScore: float32(util.Weight) * 0.4,
+		},
+		{
+			name: "Vendors sharing a prefix are not mixed on the shorter vendor",
+			device: &device.DeviceUsage{
+				ID:           "npu-1",
+				Type:         "Ascend910B4",
+				DeviceVendor: "Ascend910B4",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"Ascend910B4": {
+					Nums:             1,
+					Type:             "Ascend910B4",
+					Memreq:           8192,
+					MemPercentagereq: 101,
+					Coresreq:         10,
+				},
+				"Ascend910B4-1": {
+					Nums:             1,
+					Type:             "Ascend910B4-1",
+					Memreq:           4096,
+					MemPercentagereq: 101,
+					Coresreq:         20,
+				},
+			},
+			// slots 1/10 + cores 10/100 + memory 8192/40960
+			expectedScore: float32(util.Weight) * 0.4,
+		},
+		{
+			name: "Requests of one vendor accumulate on a model named device",
+			device: &device.DeviceUsage{
+				ID:           "gpu-0",
+				Type:         "NVIDIA A100-SXM4-40GB",
+				DeviceVendor: "NVIDIA",
+				Totalcore:    100,
+				Totalmem:     40960,
+				Count:        10,
+			},
+			requests: device.ContainerDeviceRequests{
+				"container1": {
+					Nums:             1,
+					Type:             "NVIDIA",
+					Memreq:           4096,
+					MemPercentagereq: 101,
+					Coresreq:         10,
+				},
+				"container2": {
+					Nums:             1,
+					Type:             "NVIDIA",
+					Memreq:           8192,
+					MemPercentagereq: 101,
+					Coresreq:         20,
+				},
+			},
+			// slots 2/10 + cores 30/100 + memory 12288/40960
+			expectedScore: float32(util.Weight) * 0.8,
 		},
 	}
 
@@ -666,7 +830,7 @@ func TestComputeScoreWithResourceWeights(t *testing.T) {
 	}
 	newDeviceScore := func(id string, used, usedCores, usedMemory int32) *DeviceListsScore {
 		return &DeviceListsScore{Device: &device.DeviceUsage{
-			ID: id, Type: "type1", Count: 10, Totalcore: 100, Totalmem: 100,
+			ID: id, Type: "type1", DeviceVendor: "type1", Count: 10, Totalcore: 100, Totalmem: 100,
 			Used: used, Usedcores: usedCores, Usedmem: usedMemory,
 		}}
 	}
@@ -739,4 +903,40 @@ func TestComputeScoreWithResourceWeights(t *testing.T) {
 		// when NUMA binding is requested, even though gpu-b has a higher score.
 		assert.Equal(t, devices.DeviceLists[len(devices.DeviceLists)-1].Device.ID, "gpu-a")
 	})
+}
+
+// TestLessTrimsThePolicy covers a padded policy value. IsValidGPUSchedulerPolicy
+// accepts one, and Policy is also assigned straight from --gpu-scheduler-policy,
+// so Less has to reach the same branch it would for the trimmed form. Comparing
+// the untrimmed string matched no branch and sorted as spread, inverting the
+// order a binpack annotation asked for.
+func TestLessTrimsThePolicy(t *testing.T) {
+	newList := func(policy string) DeviceUsageList {
+		return DeviceUsageList{
+			Policy: policy,
+			DeviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{ID: "low", Numa: 0}, Score: 1},
+				{Device: &device.DeviceUsage{ID: "high", Numa: 0}, Score: 9},
+			},
+		}
+	}
+
+	for _, policy := range []string{"binpack", " binpack ", "\tbinpack\n"} {
+		l := newList(policy)
+		// binpack ranks the lower score first; spread does the opposite.
+		assert.Equal(t, l.Less(0, 1), true, "policy %q", policy)
+	}
+
+	for _, policy := range []string{"spread", " spread "} {
+		l := newList(policy)
+		assert.Equal(t, l.Less(0, 1), false, "policy %q", policy)
+	}
+
+	// mutex is a whole-string branch too: it orders busy devices first.
+	for _, policy := range []string{"mutex", " mutex "} {
+		l := newList(policy)
+		l.DeviceLists[0].Device.Used = 0
+		l.DeviceLists[1].Device.Used = 3
+		assert.Equal(t, l.Less(0, 1), false, "policy %q", policy)
+	}
 }

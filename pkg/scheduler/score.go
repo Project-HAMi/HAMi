@@ -40,11 +40,16 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
+// deviceTypeMatches preserves HAMi's case-insensitive substring matching for
+// mapping a registered request type to the corresponding node devices.
+func deviceTypeMatches(availableType, requestedType string) bool {
+	return strings.Contains(strings.ToLower(availableType), strings.ToLower(requestedType))
+}
+
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
-	targetType := strings.ToLower(t)
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(strings.ToLower(val.Device.Type), targetType) {
+		if deviceTypeMatches(val.Device.Type, t) {
 			l = append(l, val.Device)
 		}
 	}
@@ -99,7 +104,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 		if int(k.Nums) > len(typeDevices) && !isMIGRequest(k, typeDevices, pod) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod),
 				"request devices nums", k.Nums, "node device nums (type)", len(typeDevices), "type", k.Type)
-			return false, common.NodeInsufficientDevice
+			// Report it in the same form every device backend uses. common.ParseReason
+			// reads only "<count>/<total> <Reason>", so the bare constant this used to
+			// return was dropped and the pod got no event naming why the node was rejected.
+			return false, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(typeDevices)}, int(k.Nums))
 		}
 
 		fit, tmpDevs, reason := devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
@@ -319,7 +327,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			return reason, false
 		}
 		for typ := range allocTypes {
-			if len(score.Devices[typ]) == appIndex {
+			if len(score.Devices[typ]) == numInitContainers+appIndex {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
 		}
@@ -364,23 +372,22 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	var initAllocs device.PodDevices
 	if numInitContainers > 0 {
 		allocs, fit, reason := allocateInitContainers(appNodeCopy, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
-		initAllocs = allocs
+		// Seed init/sidecar rows so app-phase Fit sees concurrent sidecar
+		// usage and so row indices match the pod spec. Ordinary init rows
+		// stay present for the annotation layout; Fit skips them when
+		// computing live occupancy.
+		for devType, initConList := range allocs {
+			score.Devices[devType] = append(device.PodSingleDevice{}, initConList...)
+		}
 	}
 
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
-	}
-
-	if numInitContainers > 0 && initAllocs != nil {
-		for devType, initConList := range initAllocs {
-			score.Devices[devType] = append(initConList, score.Devices[devType]...)
-		}
 	}
 
 	applyPeakUsage(node, appNodeCopy, peakUsage)

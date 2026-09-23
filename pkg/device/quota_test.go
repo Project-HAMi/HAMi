@@ -400,3 +400,82 @@ func TestUpdateQuota(t *testing.T) {
 		t.Errorf("memory limit = %d, want 3000", got)
 	}
 }
+
+func TestReplaceUsage(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "replacens"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+	oldDev := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			[]ContainerDevice{
+				{Idx: 0, UUID: "GPU0", Usedmem: 1000, Usedcores: 100},
+			},
+		},
+	}
+
+	newDev := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			[]ContainerDevice{
+				{Idx: 0, UUID: "GPU0", Usedmem: 2000, Usedcores: 200},
+			},
+		},
+	}
+
+	qm.Quotas[ns] = &DeviceQuota{}
+	qm.AddUsage(pod, oldDev)
+
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	if got := (*qm.Quotas[ns])[memName].Used; got != 1000 {
+		t.Fatalf("AddUsage: expected Used memory 1000, got %d", got)
+	}
+
+	qm.ReplaceUsage(pod, oldDev, newDev)
+
+	if got := (*qm.Quotas[ns])[memName].Used; got != 2000 {
+		t.Errorf("ReplaceUsage: expected Used memory 2000, got %d", got)
+	}
+	if got := (*qm.Quotas[ns])[coreName].Used; got != 200 {
+		t.Errorf("ReplaceUsage: expected Used core 200, got %d", got)
+	}
+
+	// Replacing empty devices should be a no-op
+	qm.ReplaceUsage(pod, PodDevices{}, PodDevices{})
+	if got := (*qm.Quotas[ns])[memName].Used; got != 2000 {
+		t.Errorf("ReplaceUsage with empty devices modified used memory: got %d", got)
+	}
+}
+
+func TestGetResourceQuota(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "copyns"
+
+	qm.Quotas[ns] = &DeviceQuota{
+		"nvidia.com/gpumem":  &Quota{Used: 500, Limit: 1000, LimitSet: true},
+		"nvidia.com/gpucore": &Quota{Used: 50, Limit: 100, LimitSet: true},
+	}
+
+	copyMap := qm.GetResourceQuota()
+
+	if _, ok := copyMap[ns]; !ok {
+		t.Fatalf("GetResourceQuota: namespace %s missing from copied map", ns)
+	}
+
+	memQuota, ok := (*copyMap[ns])["nvidia.com/gpumem"]
+	if !ok || memQuota.Used != 500 || memQuota.Limit != 1000 || !memQuota.LimitSet {
+		t.Errorf("GetResourceQuota: invalid memory quota copy: %+v", memQuota)
+	}
+
+	// Mutate the returned copy to verify deep-copy isolation
+	memQuota.Used = 9999
+	memQuota.Limit = 8888
+
+	originalMem := (*qm.Quotas[ns])["nvidia.com/gpumem"]
+	if originalMem.Used != 500 || originalMem.Limit != 1000 {
+		t.Errorf("GetResourceQuota: mutating copied quota affected internal state: %+v", originalMem)
+	}
+}

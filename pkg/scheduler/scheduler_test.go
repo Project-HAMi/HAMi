@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -923,6 +924,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
+	successfulFilters := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()
@@ -938,6 +940,12 @@ func Test_Filter(t *testing.T) {
 			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
 				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
 			}
+			successfulFilters++
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(fmt.Sprintf(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter"} %d
+`, successfulFilters)), "hami_scheduler_allocations_total"))
 		})
 	}
 }
@@ -1142,7 +1150,7 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 						Name: "node",
 						Annotations: map[string]string{
 							"hami.io/node-handshake":     "Requesting_2025-06-13 09:07:40",
-							"hami.io/node-handshake-dcu": "Requesting_2025-06-13 09:07:40",
+							"hami.io/node-handshake-hcu": "Requesting_2025-06-13 09:07:40",
 						},
 					},
 				}
@@ -1171,19 +1179,19 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 					t.Errorf("missing annotation: hami.io/node-handshake")
 					return false
 				}
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
-				if !okDcu {
-					t.Errorf("missing annotation: hami.io/node-handshake-dcu")
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
+				if !okHcu {
+					t.Errorf("missing annotation: hami.io/node-handshake-hcu")
 					return false
 				}
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 				return true
@@ -1280,24 +1288,24 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 
 				// If annotations exist, check for specific annotations
 				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
 
 				// Here you can define what should happen when annotations are present but not set
-				if !okHami || !okDcu {
+				if !okHami || !okHcu {
 					t.Logf("expected annotations are missing, checking if handled properly...")
 					return true // Adjust based on expected behavior
 				}
 
 				// Verify time format in annotations if they exist
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 
@@ -1457,7 +1465,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, mockDev.nodeCleanedUp, 0)
 
@@ -1542,7 +1550,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 1, mockDev.nodeCleanedUp, "NodeCleanUp should be invoked when device is unhealthy even on discovery error")
 
@@ -1625,7 +1633,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Healthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be invoked when device is healthy")
 
@@ -1752,7 +1760,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testi
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, devHealthy.nodeCleanedUp)
 	assert.Equal(t, 1, devUnhealthyErr.nodeCleanedUp)
@@ -1846,7 +1854,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	atomic.StoreUint32(&s.started, 1)
 
 	// Cycle 1: Transient discovery error occurs when fetching node devices.
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 1 semantics:
 	// - NodeCleanUp was NOT called because device is healthy.
@@ -1875,7 +1883,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.health = true
 	mockDev.needUpdate = true
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 2 recovery semantics:
 	// - Device state correctly recovers and updates in scheduler cache.
@@ -1890,7 +1898,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.getNodeErr = nil
 	mockDev.nodeDevices = []*device.DeviceInfo{}
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 3 zero-device semantics:
 	// - NodeCleanUp is NOT called because device is healthy.
@@ -2046,7 +2054,7 @@ func Test_register_StaleDeviceVendorRemoval(t *testing.T) {
 	// - For node-1: vendor-B (0 devices) is removed from cache (exercises ok == true branch);
 	//   vendor-D (0 devices) is not in cache (exercises ok == false branch).
 	// - For node-absent: node is absent from scheduler cache (exercises GetNode error branch).
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Expect vendor-B to be removed from node-1 cache, while vendor-A and vendor-C remain
 	nodeInfo, err = s.GetNode("node-1")
@@ -2439,7 +2447,15 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	}
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
-	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	seedPods(t, s, pod)
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	require.NoError(t, err)
+	require.Empty(t, result.NodeNames)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+`), "hami_scheduler_allocation_failures_total"))
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
@@ -2997,6 +3013,11 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3052,6 +3073,11 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 type bindLockMockDevice struct {
@@ -3129,6 +3155,14 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "node lock contention")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+# HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
+# TYPE hami_scheduler_bind_rollbacks_total counter
+hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
@@ -3483,4 +3517,85 @@ func TestSchedulerIsSynced(t *testing.T) {
 	s.synced.Store(true)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+// Test_register_PrintedLogPrunedOnNodeDelete covers the printedLog bookkeeping
+// across a node's full lifecycle. The map used to be a loop-local in
+// RegisterFromNodeAnnotations, so onDelNode could not reach it: entries
+// accumulated for every node name ever seen, and a node recreated under an old
+// name was logged at V(5) as "updated" instead of at info level as "added".
+func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": &registerMockDevice{
+			nodeDevices: []*device.DeviceInfo{{
+				ID:           "gpu-1",
+				DeviceVendor: "mock-vendor",
+				Health:       true,
+			}},
+			health:     true,
+			needUpdate: true,
+		},
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	// A second node stands in for the rest of the cluster: deleting node-1 must
+	// not disturb it.
+	s.lock.Lock()
+	s.printedLog["node-2"] = true
+	s.lock.Unlock()
+
+	// First registration logs the node as added and records it.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "first registration should record the node")
+	s.lock.RUnlock()
+
+	// Deleting the node must drop its entry, and only its entry.
+	s.onDelNode(node)
+	s.lock.RLock()
+	_, stillPresent := s.printedLog["node-1"]
+	assert.Equal(t, false, stillPresent, "deleting a node should prune its printedLog entry")
+	assert.Equal(t, true, s.printedLog["node-2"], "deleting a node must not disturb other nodes")
+	s.lock.RUnlock()
+
+	// A node returning under the same name is treated as newly added again.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
+	s.lock.RUnlock()
+}
+
+// seedPods makes pods resolvable to Filter, which verifies the request against
+// the live object before it touches any reservation.
+func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
+	t.Helper()
+	if s.kubeClient == nil {
+		s.kubeClient = fake.NewClientset()
+	}
+	for _, p := range pods {
+		if _, err := s.kubeClient.CoreV1().Pods(p.Namespace).Create(context.Background(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to seed pod %s/%s: %v", p.Namespace, p.Name, err)
+		}
+	}
 }

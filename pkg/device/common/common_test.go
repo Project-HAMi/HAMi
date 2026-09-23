@@ -38,6 +38,28 @@ func TestParseReason(t *testing.T) {
 				"CardNotHealth":          3,
 			},
 		},
+		{
+			name:   "node-level rejection reported before any device backend runs",
+			reason: GenReason(map[string]int{NodeInsufficientDevice: 1}, 4),
+
+			expectedReasonMap: map[string]int{
+				NodeInsufficientDevice: 1,
+			},
+		},
+		{
+			// fitInDevices reports internal failures as plain error text on the same
+			// field. Parsing it would turn the UUID it carries into an event reason.
+			name:   "free-form internal error is not a reason type",
+			reason: "AddResourceUsage failed for device GPU-0fc3eda5: device is full",
+
+			expectedReasonMap: map[string]int{},
+		},
+		{
+			name:   "empty reason",
+			reason: "",
+
+			expectedReasonMap: map[string]int{},
+		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
 			result := ParseReason(ts.reason)

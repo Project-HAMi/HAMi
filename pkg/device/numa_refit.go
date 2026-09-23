@@ -38,8 +38,9 @@ type NumaRefitRequest struct {
 	// scheduler can cross-check the index against the Pod spec and refuse a
 	// mismatched request.
 	ContainerName string `json:"containerName,omitempty"`
-	// DeviceType is the device vendor type the refit applies to, for
-	// example "NVIDIA".
+	// DeviceType is the device vendor type the refit applies to. The scheduler
+	// currently accepts "NVIDIA" only; other registered types are rejected
+	// until their allocation-specific accounting is supported.
 	DeviceType string `json:"deviceType"`
 	// AllowedDeviceUUIDs lists the physical device IDs kubelet can still
 	// satisfy the allocation from. The refit must select among these only.

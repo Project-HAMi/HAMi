@@ -497,7 +497,7 @@ func TestDevices_LockNode(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["HCU"]: "some-value"},
 				},
 			}
 

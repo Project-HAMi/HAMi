@@ -51,12 +51,16 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 
 		var err error
 		nodeName, err = utils.GetGPUNode(clientSet)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to find GPU node: E2E tests require at least one node with nvidia.com/gpu capacity")
 		fmt.Printf("Using GPU node: %s\n", nodeName)
 
 		ginkgo.By("Adding node labeling")
 		_, err = utils.AddNodeLabel(clientSet, nodeName, NodeLabelKey, NodeLabelValue)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		ginkgo.By("Waiting for device-plugin to register healthy GPU devices")
+		err = utils.WaitForDevicePluginReady(clientSet, nodeName, 5*time.Minute, 2*time.Second)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "device-plugin did not become ready on node %s", nodeName)
 	})
 
 	ginkgo.AfterEach(func() {

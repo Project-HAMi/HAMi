@@ -1,0 +1,104 @@
+name: Call e2e MIG test
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Reference id to run tests'
+        required: true
+        type: string
+      type:
+        description: 'E2E MIG test type: smoke or full'
+        required: true
+        type: string
+        default: smoke
+      deploy-type:
+        description: 'Deploy type for helm-deploy: pullrequest, release, or local'
+        required: true
+        type: string
+        default: release
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-mig-test:
+    strategy:
+      matrix:
+        include:
+          - device: nvidia
+            type: mig
+    runs-on: [ "${{ matrix.device }}", "${{ matrix.type }}" ]
+    environment: ${{ matrix.device }}
+    env:
+      E2E_TYPE: ${{ inputs.deploy-type }}
+      HAMI_VERSION: ${{ inputs.ref }}
+      TARGET_NODE: ${{ vars.MIG_TARGET_NODE }}
+      MIG_TEST_TYPE: ${{ inputs.type }}
+    steps:
+      - name: checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Acquire shared e2e runner lock
+        run: bash hack/e2e-runner-lock.sh acquire
+
+      - name: install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: setup e2e env
+        run: |
+          make e2e-env-setup
+
+      - name: download hami helm
+        if: inputs.deploy-type == 'pullrequest'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: chart_package_artifact
+          path: charts/
+
+      - name: download hami image
+        if: inputs.deploy-type == 'pullrequest'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: hami-image
+          path: ./image
+
+      - name: load e2e image
+        if: inputs.deploy-type == 'pullrequest'
+        run: |
+          echo "Loading Docker image from image.tar..."
+          sudo ctr -n k8s.io images import ./image/image.tar
+          sudo ctr -n k8s.io images ls | grep hami
+
+      - name: deploy hami helm
+        run: |
+          make helm-deploy
+
+      - name: e2e mig test
+        run: |
+          if [ "${MIG_TEST_TYPE}" == "smoke" ]; then
+            make e2e-mig-smoke-test
+          else
+            make e2e-mig-test
+          fi
+
+      - name: cleanup e2e env
+        if: always()
+        run: |
+          echo "Cleaning up HAMi deployment..."
+          helm uninstall hami -n hami-system --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          kubectl wait --for=delete pod --all -n hami-system \
+            --timeout=120s --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          kubectl annotate node --all \
+            hami.io/mutex.lock- hami.io/node-handshake- \
+            hami.io/node-nvidia-register- hami.io/nvidia-license- \
+            --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          echo "Cleanup done."
+
+      - name: Release shared e2e runner lock
+        if: always()
+        run: bash hack/e2e-runner-lock.sh release

@@ -40,7 +40,7 @@ Open questions for maintainers:
 | how-to-profiling-scheduler.md | Developer | Fresh | Keep |
 | how-to-use-volcano-ascend.md | Operator | Fresh | Keep |
 | how-to-use-volcano-vgpu.md | Operator | Fresh | Keep |
-| hygon-dcu-support.md | Operator/User | Fresh | Keep |
+| hygon-hcu-support.md | Operator/User | Fresh | Keep |
 | iluvatar-gpu-support.md | Operator/User | Fresh | Keep |
 | kunlun-vxpu-support.md | Operator/User | Fresh | Keep |
 | metax-support.md | Operator/User | Fresh | Keep |

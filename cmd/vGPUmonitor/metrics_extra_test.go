@@ -173,12 +173,13 @@ func TestHostGPUMetrics_SendMetricError(t *testing.T) {
 
 	cc := ClusterManagerCollector{}
 	ch := make(chan prometheus.Metric, 10)
+	identity := testGPUIdentity(nodeName, "GPU-123", "NVIDIA-Tesla")
 
-	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Errorf("expected no error from collectGPUMemoryMetrics even if descriptor is bad")
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Errorf("expected no error from collectGPUUtilizationMetrics even if descriptor is bad")
 	}
 }

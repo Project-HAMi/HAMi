@@ -43,6 +43,11 @@ func init() {
 }
 
 func GetNode(nodename string) (*corev1.Node, error) {
+	return GetNodeWithContext(context.Background(), nodename)
+}
+
+// GetNodeWithContext allows callers to cancel a node lookup during shutdown.
+func GetNodeWithContext(ctx context.Context, nodename string) (*corev1.Node, error) {
 	if nodename == "" {
 		klog.ErrorS(nil, "Node name is empty")
 		return nil, fmt.Errorf("nodename is empty")
@@ -54,18 +59,18 @@ func GetNode(nodename string) (*corev1.Node, error) {
 	}
 
 	klog.V(5).InfoS("Fetching node", "nodeName", nodename)
-	n, err := c.CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	n, err := c.CoreV1().Nodes().Get(ctx, nodename, metav1.GetOptions{})
 	if err != nil {
 		switch {
 		case apierrors.IsNotFound(err):
 			klog.ErrorS(err, "Node not found", "nodeName", nodename)
-			return nil, fmt.Errorf("node %s not found", nodename)
+			return nil, fmt.Errorf("node %s not found: %w", nodename, err)
 		case apierrors.IsUnauthorized(err):
 			klog.ErrorS(err, "Unauthorized to access node", "nodeName", nodename)
-			return nil, fmt.Errorf("unauthorized to access node %s", nodename)
+			return nil, fmt.Errorf("unauthorized to access node %s: %w", nodename, err)
 		default:
 			klog.ErrorS(err, "Failed to get node", "nodeName", nodename)
-			return nil, fmt.Errorf("failed to get node %s: %v", nodename, err)
+			return nil, fmt.Errorf("failed to get node %s: %w", nodename, err)
 		}
 	}
 
@@ -137,6 +142,11 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+	return PatchNodeAnnotationsWithContext(context.Background(), node, annotations)
+}
+
+// PatchNodeAnnotationsWithContext allows callers to cancel registration on shutdown.
+func PatchNodeAnnotationsWithContext(ctx context.Context, node *corev1.Node, annotations map[string]string) error {
 	if node == nil {
 		return fmt.Errorf("node is nil")
 	}
@@ -159,7 +169,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 		return err
 	}
 	_, err = c.CoreV1().Nodes().
-		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+		Patch(ctx, node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch node %v failed, %v", node.Name, err)
@@ -230,6 +240,12 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 		return fmt.Errorf("pod is nil")
 	}
 	type patchMetadata struct {
+		// UID makes the patch conditional on the object's identity. A merge
+		// patch is addressed by name, so without it a patch computed for one
+		// pod can land on a different pod that later took the same name.
+		// Kubernetes rejects an update that changes the UID, so a mismatch
+		// fails the request instead of writing to the wrong object.
+		UID         k8stypes.UID      `json:"uid,omitempty"`
 		Annotations map[string]string `json:"annotations,omitempty"`
 		Labels      map[string]string `json:"labels,omitempty"`
 	}
@@ -238,6 +254,7 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	}
 
 	p := patchPod{}
+	p.Metadata.UID = pod.UID
 	p.Metadata.Annotations = annotations
 	label := make(map[string]string)
 	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
@@ -351,6 +368,16 @@ func IsValidGPUSchedulerPolicy(policy string) bool {
 	return true
 }
 
+// normalizeSchedulerPolicy trims every comma-separated token so consumers
+// that compare whole strings or split without trimming see canonical values.
+func normalizeSchedulerPolicy(policy string) string {
+	parts := strings.Split(policy, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, ",")
+}
+
 // IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
 // policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
 // single name is meaningful here. The value is trimmed before it is compared,
@@ -370,14 +397,21 @@ func IsValidNodeSchedulerPolicy(policy string) bool {
 // defaultPolicy. An annotation that does not name a known policy is ignored
 // with a warning, so defaultPolicy stands.
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
-	userGPUPolicy := defaultPolicy
+	// --gpu-scheduler-policy is a free-form string that nothing validates, so
+	// a padded cluster default reaches DeviceUsageList.Less the same way a
+	// padded annotation would.
+	userGPUPolicy := normalizeSchedulerPolicy(defaultPolicy)
 	if task != nil && task.Annotations != nil {
 		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
 			if IsValidGPUSchedulerPolicy(value) {
-				userGPUPolicy = value
+				// The validator trims each token, but DeviceUsageList.Less
+				// compares the whole string and its chain dispatch splits on
+				// commas, so store the canonical form. An accepted padded
+				// value would otherwise silently sort as the spread default.
+				userGPUPolicy = normalizeSchedulerPolicy(value)
 			} else {
 				klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
-					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, defaultPolicy)
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, userGPUPolicy)
 			}
 		}
 	}

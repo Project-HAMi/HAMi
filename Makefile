@@ -66,6 +66,12 @@ test:
 	mkdir -p ./_output/coverage/
 	bash hack/unit-test.sh
 
+# Runs every Go benchmark to completion. Set BENCHTIME for a longer, more
+# meaningful local measurement, e.g. BENCHTIME=1s make bench.
+.PHONY: bench
+bench:
+	bash hack/bench.sh
+
 lint:
 	bash hack/verify-staticcheck.sh
 
@@ -114,3 +120,15 @@ local-deploy: docker
 .PHONY: e2e-test
 e2e-test:
 	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
+
+.PHONY: e2e-mig-test
+e2e-mig-test:
+	./hack/e2e-mig-test.sh "${KUBE_CONF}"
+
+.PHONY: e2e-mig-smoke-test
+e2e-mig-smoke-test:
+	./hack/e2e-mig-smoke-test.sh "${KUBE_CONF}"
+
+.PHONY: e2e-policy-test
+e2e-policy-test:
+	HAMI_E2E_REQUIRE_POLICY_TOPOLOGY=true bash ./hack/e2e-policy-test.sh "${KUBE_CONF}"

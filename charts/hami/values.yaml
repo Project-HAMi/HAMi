@@ -21,6 +21,23 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
+    create: true
+
+    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
+    name: "hami-device-plugin"
+
+# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
+selinux:
+  enabled: false
+  type: container_file_t
+  level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -33,10 +50,10 @@ mluResourceName: "cambricon.com/vmlu"
 mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
 mluResourceCores: "cambricon.com/mlu.smlu.vcore"
 
-#Hygon DCU Parameters
-dcuResourceName: "hygon.com/dcunum"
-dcuResourceMem: "hygon.com/dcumem"
-dcuResourceCores: "hygon.com/dcucores"
+#Hygon HCU Parameters
+hcuResourceName: "hygon.com/hcunum"
+hcuResourceMem: "hygon.com/hcumem"
+hcuResourceCores: "hygon.com/hcucores"
 
 #Metax sGPU Parameters
 metaxResourceName: "metax-tech.com/sgpu"
@@ -77,6 +94,33 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
+  # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
+  # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
+  # writes can be throttled by the default limits.
+  kubeQPS: ""
+  kubeBurst: ""
+  # kubeTimeout is in seconds; 0 means no timeout.
+  kubeTimeout: ""
+  # How long Bind retries LockNode when another PodGroup member holds the node
+  # lock. Empty keeps the binary default (28s); 0 disables retry entirely.
+  nodeLockRetryTimeout: ""
+  # httpTimeout the generated scheduler configuration gives the HAMi extender, in
+  # seconds. It is applied to the KubeSchedulerConfiguration used on Kubernetes
+  # 1.22+ and to the legacy Policy format used below it, which is why it is
+  # expressed in seconds rather than as a duration: the two formats want
+  # different units. Keep it above nodeLockRetryTimeout, otherwise kube-scheduler
+  # cuts the bind call off while the extender is still retrying the node lock.
+  extenderHTTPTimeout: 30
+  # Port the extender serves /filter and /bind on, bound to 127.0.0.1 so only
+  # the kube-scheduler container sharing this pod's network namespace can call
+  # them. It is deliberately not the port the Service publishes: that one also
+  # carries /webhook and /refit, which must stay reachable from the cluster,
+  # and /filter and /bind have no caller authentication of their own. Change
+  # this only if 9444 is already taken inside the pod; if you run kube-scheduler
+  # outside this pod, override the bind address through
+  # scheduler.extender.extraArgs instead.
+  extenderPort: 9444
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
@@ -267,16 +311,38 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
+    # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
     runAsUser: 2000
   service:
-    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
+    type: ClusterIP  # Default type is ClusterIP, can be changed to NodePort
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
-    monitorTargetPort: 9395
-    httpTargetPort: 443
+    monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
+    httpTargetPort: 9443
     labels: {}
     annotations: {}
+  networkPolicy:
+    # Restrict ingress on the scheduler's HTTP port (refit and webhook share
+    # this one port -- NetworkPolicy can't separate them by path; filter and
+    # bind are not on it, they are served on scheduler.extenderPort, bound to
+    # loopback) to the device-plugin's pods and to the kube-system namespace, where
+    # kube-scheduler and kube-apiserver normally run. See issue #2878.
+    #
+    # Off by default: /refit's own caller authentication (TokenReview) does
+    # not depend on this and is unaffected either way -- this is only an
+    # extra layer on top. Enable it only after confirming your CNI actually
+    # matches kube-apiserver traffic against namespaceSelector/podSelector.
+    # When kube-apiserver runs as a hostNetwork pod (the kubeadm/most on-prem
+    # default), Kubernetes documents NetworkPolicy behavior for hostNetwork
+    # pods as undefined, and it is known not to match on at least Calico
+    # (projectcalico/calico#1987) and Cilium (which requires its separate
+    # Host Firewall feature for host-network traffic). If this policy blocks
+    # kube-apiserver's calls to /webhook, admissionWebhook.failurePolicy:
+    # Ignore lets pod admission continue with HAMi's mutation silently
+    # skipped -- pods can then be scheduled by the default scheduler with no
+    # GPU device allocated and no error surfaced.
+    enabled: false
 
 devicePlugin:
   enabled: true
@@ -416,10 +482,13 @@ devicePlugin:
   createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
-  passDeviceSpecsEnabled: false
+  passDeviceSpecsEnabled: true
   deviceListStrategy: "envvar"
   nvidiaHookPath: null
-  nvidiaDriverRoot: null
+  # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
+  # and device roots from GPU Operator's driver-ready contract. If the
+  # contract is absent, both roots default to / for a host-installed driver.
+  nvidiaDriverRoot: "auto"
   gdrcopyEnabled: null
   gdsEnabled: null
   mofedEnabled: null
@@ -438,6 +507,10 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
+  # Let HAMi core ask the device plugin for its host PID.
+  # This requires hostPID to be true.
+  hostPIDBroker:
+    enabled: false
   hostNetwork: false
   securityContext:
     privileged: true
@@ -447,7 +520,11 @@ devicePlugin:
       add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
-  tolerations: []
+  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -508,6 +585,12 @@ devices:
     enabled: true
     customresources:
       - mthreads.com/vgpu
+    # Memory units (512MiB each) provided by one MThreads card model, one entry per
+    # model present in the cluster. 96 = MTT S4000 (48GiB, upstream default);
+    # 160 = MTT S5000 (80GiB). Mixed fleets list every model, e.g. [96, 160].
+    # Pods that omit mthreads.com/sgpu-memory are sized from the node's real card.
+    memoryPerCard:
+      - 96
   vastai:
     enabled: true
     customresources:
@@ -519,6 +602,43 @@ devices:
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
+  remotegpu:
+    # Schedule pods onto GPUs served over the network by a lupine server.
+    # Label each lupine node with hami.io/lupine-server, optionally setting the
+    # label value to the port lupine listens on.
+    enabled: false
+    defaultPort: 14833
+    resourceCountName: "nvidia.com/remote-gpu"
+    resourceMemoryName: "nvidia.com/remote-gpu-memory"
+    # Image carrying HAMi-core, which an init container copies into the client
+    # pod so the memory request is enforced and not merely a placement filter.
+    # A client node runs no device plugin, so nothing else would deliver it.
+    # Leave it unset for the device plugin image. Set it to "" to schedule
+    # remote GPUs without enforcement.
+    libImage:
+    # Image for the session stub the scheduler keeps on each lupine server, so
+    # a user port-forwards to the stub instead of the server. Needs socat on
+    # the path. Empty runs no stubs, and no port-forward sessions with them.
+    sessionImage: ""
+    server:
+      # Run a lupine server on every lupine node that leaves its label value
+      # empty. The chart-managed server listens on defaultPort, because a
+      # DaemonSet cannot vary a port per node, so a node whose label names its
+      # own port is left to a server managed outside the chart.
+      enabled: true
+      image:
+        registry: "ghcr.io"
+        repository: "lupinemachines/lupine-server"
+        tag: "cuda-13.3.1-ubuntu24.04"
+        pullPolicy: IfNotPresent
+      # The server reaches the GPUs through NVIDIA_VISIBLE_DEVICES, which only
+      # works under the NVIDIA container runtime. Name the RuntimeClass that
+      # selects it when the cluster does not make it the default, commonly
+      # "nvidia". It has its own setting rather than borrowing the device
+      # plugin's, because in remote mode that plugin may not run at all.
+      runtimeClassName: ""
+      tolerations: []
+      resources: {}
   ascend:
     enabled: false
     image: ""

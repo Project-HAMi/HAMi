@@ -1,0 +1,24 @@
+{{- if and .Values.platform.openshift (or .Values.devicePlugin.enabled .Values.mockDevicePlugin.enabled) .Values.openshift.securityContextConstraints.name }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-openshift-scc
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:{{ .Values.openshift.securityContextConstraints.name }}
+subjects:
+  {{- if .Values.devicePlugin.enabled }}
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.device-plugin" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
+  {{- end }}
+  {{- if .Values.mockDevicePlugin.enabled }}
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.mock-device-plugin" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
+  {{- end }}
+{{- end }}

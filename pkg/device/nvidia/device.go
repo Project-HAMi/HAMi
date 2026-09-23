@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +62,10 @@ const (
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
+	// RemoteMode marks a GPU this node serves over the network through lupine
+	// rather than to pods of its own. The remote-gpu backend hands such a card
+	// out cluster wide, so this backend must leave it alone.
+	RemoteMode = "remote"
 )
 
 var (
@@ -187,6 +192,19 @@ func (dev *NvidiaGPUDevices) CommonWord() string {
 	return NvidiaGPUDevice
 }
 
+// NormalizeDeviceModel returns the card model string HAMi uses for a GPU, both
+// in the node register annotation and in the device_type metric label. NVML
+// reports names with and without the vendor prefix depending on driver
+// generation ("NVIDIA A100-SXM4-40GB" but "Tesla V100-SXM2-16GB"), so only an
+// unprefixed name gets one. Callers must share this so the plugin and the
+// vGPU monitor label the same physical GPU identically.
+func NormalizeDeviceModel(model string) string {
+	if strings.HasPrefix(model, NvidiaGPUDevice) {
+		return model
+	}
+	return NvidiaGPUDevice + "-" + model
+}
+
 func ParseConfig(fs *flag.FlagSet) {
 }
 
@@ -303,6 +321,29 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
 	}
+	// The device plugin publishes one registration annotation whatever mode it
+	// runs in, and the remote-gpu backend reads the same annotation. Claiming a
+	// card that lupine is already serving would let this node hand the same
+	// physical GPU to a second pod.
+	local := make([]*device.DeviceInfo, 0, len(nodedevices))
+	for _, nodedevice := range nodedevices {
+		if nodedevice == nil || nodedevice.Mode == RemoteMode {
+			continue
+		}
+		local = append(local, nodedevice)
+	}
+	if skipped := len(nodedevices) - len(local); skipped > 0 {
+		klog.InfoS("skipping GPUs this node serves remotely through lupine",
+			"node", n.Name, "skipped", skipped, "kept", len(local))
+	}
+	if len(local) == 0 {
+		// Zero devices rather than an error: Scheduler.register prunes a stale
+		// cache entry only on a successful empty result, and skips the pruning
+		// on error. An error would leave a node that has just switched to
+		// serving lupine still advertising its cards here.
+		return nil, nil
+	}
+	nodedevices = local
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}
@@ -342,20 +383,29 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if err := dev.validateCores(ctr); err != nil {
 		return false, err
 	}
+	if err := dev.validateMigProfilePreference(p); err != nil {
+		return false, err
+	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  util.TaskPriority,
-			Value: fmt.Sprint(priority.Value()),
-		})
+		value := fmt.Sprint(priority.Value())
+		if !hasEnvVarWithValue(ctr.Env, util.TaskPriority, value) {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  util.TaskPriority,
+				Value: value,
+			})
+		}
 	}
 
 	if dev.config.GPUCorePolicy != "" &&
 		dev.config.GPUCorePolicy != DefaultCorePolicy {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  util.CoreLimitSwitch,
-			Value: string(dev.config.GPUCorePolicy),
-		})
+		value := string(dev.config.GPUCorePolicy)
+		if !hasEnvVarWithValue(ctr.Env, util.CoreLimitSwitch, value) {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  util.CoreLimitSwitch,
+				Value: value,
+			})
+		}
 	}
 
 	hasResource := dev.mutateContainerResource(ctr)
@@ -370,13 +420,38 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		}
 	}
 
-	if !hasResource && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
+	if !hasResource {
+		// Unset falls back to dev.config.OverwriteEnv.
+		inject := false
+		switch util.OverwriteEnvDecision(p, ctr) {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.config.OverwriteEnv
+		}
+		// Idempotent on webhook reinvocation (reinvocationPolicy: IfNeeded).
+		if inject && !hasEnvVarWithValue(ctr.Env, "NVIDIA_VISIBLE_DEVICES", "none") {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "NVIDIA_VISIBLE_DEVICES",
+				Value: "none",
+			})
+		}
 	}
 	return hasResource, nil
+}
+
+// hasEnvVarWithValue matches the last entry with the given name, because
+// kubelet lets the last same-name env entry win.
+func hasEnvVarWithValue(env []corev1.EnvVar, name, value string) bool {
+	for _, e := range slices.Backward(env) {
+		if e.Name != name {
+			continue
+		}
+		return e.ValueFrom == nil && e.Value == value
+	}
+	return false
 }
 
 func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
@@ -616,26 +691,43 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	return device.ContainerDeviceRequest{}
 }
 
-func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage) bool {
+func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage, preferred []string) bool {
 	if devusage.Mode == MigMode {
 		occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
-		for _, existing := range toAllocate {
-			if existing.UUID != devusage.ID {
-				continue
-			}
-			_, placement, ok := selectMigCandidate(devusage.MigProfiles, occupied, existing.Usedmem)
-			if !ok {
-				return false
-			}
-			occupied = append(occupied, placement)
-		}
-		_, _, ok := selectMigCandidate(devusage.MigProfiles, occupied, request.Memreq)
+		// Plan every slice of this container on this card together; reject only when no layout exists.
+		memories := queuedMigMemories(toAllocate, devusage.ID)
+		memories = append(memories, request.Memreq)
+		_, _, ok := planMigContainer(devusage.MigProfiles, occupied, memories, preferred)
 		return ok
 	}
 	return true
 }
 
-func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32) (device.MigProfile, device.MigPlacement, bool) {
+// queuedMigMemories returns the memory requests already queued for this container on the given card.
+func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int32 {
+	memories := make([]int32, 0, len(toAllocate)+1)
+	for _, existing := range toAllocate {
+		if existing.UUID == uuid {
+			memories = append(memories, existing.Usedmem)
+		}
+	}
+	return memories
+}
+
+// plannedMigProfile returns the profile a new slice of memory MB gets on dev when planned
+// together with the slices this container has already queued on it.
+func plannedMigProfile(dev *device.DeviceUsage, queued device.ContainerDevices, memory int32, preferred []string) (device.MigProfile, bool) {
+	memories := queuedMigMemories(queued, dev.ID)
+	memories = append(memories, memory)
+	profiles, _, ok := planMigContainer(dev.MigProfiles, occupiedMigPlacements(dev.MigAllocationsInUse), memories, preferred)
+	if !ok {
+		return device.MigProfile{}, false
+	}
+	return profiles[len(profiles)-1], true
+}
+
+// migProfilesByMemory returns the profiles ordered smallest first.
+func migProfilesByMemory(profiles []device.MigProfile) []device.MigProfile {
 	candidates := append([]device.MigProfile(nil), profiles...)
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].MemoryMB != candidates[j].MemoryMB {
@@ -643,7 +735,22 @@ func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlace
 		}
 		return candidates[i].SliceCount < candidates[j].SliceCount
 	})
-	for _, profile := range candidates {
+	return candidates
+}
+
+// migProfileForMemory returns the smallest profile whose memory covers the request.
+func migProfileForMemory(profiles []device.MigProfile, memory int32, preferred []string) (device.MigProfile, bool) {
+	for _, profile := range migProfileCandidates(profiles, preferred) {
+		if profile.MemoryMB >= memory {
+			return profile, true
+		}
+	}
+	return device.MigProfile{}, false
+}
+
+// selectMigCandidate picks the smallest covering profile that still has a free placement, and its best placement.
+func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32, preferred []string) (device.MigProfile, device.MigPlacement, bool) {
+	for _, profile := range migProfileCandidates(profiles, preferred) {
 		if profile.MemoryMB < memory {
 			continue
 		}
@@ -655,13 +762,135 @@ func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlace
 	return device.MigProfile{}, device.MigPlacement{}, false
 }
 
+// planMigAllocations maps each request to its smallest covering profile and places them all jointly.
+// The returned slices are aligned with memories.
+func planMigAllocations(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+	chosen := make([]device.MigProfile, len(memories))
+	requested := make([]string, len(memories))
+	for i, memory := range memories {
+		profile, ok := migProfileForMemory(profiles, memory, preferred)
+		if !ok {
+			return nil, nil, false
+		}
+		chosen[i] = profile
+		requested[i] = profile.Name
+	}
+	placements, ok := placeMigProfiles(profiles, occupied, requested)
+	if !ok {
+		return nil, nil, false
+	}
+	return chosen, placements, true
+}
+
+func planMigSequentially(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+	occupied = slices.Clone(occupied)
+	chosen := make([]device.MigProfile, len(memories))
+	placements := make([]device.MigPlacement, len(memories))
+	for i, memory := range memories {
+		profile, placement, ok := selectMigCandidate(profiles, occupied, memory, preferred)
+		if !ok {
+			return nil, nil, false
+		}
+		chosen[i], placements[i] = profile, placement
+		occupied = append(occupied, placement)
+	}
+	return chosen, placements, true
+}
+
+func planMigContainer(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+	orders := [][]string{nil}
+	if len(preferred) > 0 {
+		orders = [][]string{preferred, nil}
+	}
+	for _, order := range orders {
+		if chosen, placements, ok := planMigAllocations(profiles, occupied, memories, order); ok {
+			return chosen, placements, true
+		}
+		// Fall back to the sequential path, which may upgrade a request to a larger profile.
+		if chosen, placements, ok := planMigSequentially(profiles, occupied, memories, order); ok {
+			return chosen, placements, true
+		}
+	}
+	return nil, nil, false
+}
+
+// recordMigPlans stores the jointly planned profile and placement on each tentative slice so AddResourceUsage commits that layout.
+// Slices on a card with no joint plan have any stale plan removed.
+func recordMigPlans(devices []*device.DeviceUsage, tentative device.ContainerDevices, preferred []string) {
+	usageByID := make(map[string]*device.DeviceUsage, len(devices))
+	for _, dev := range devices {
+		if dev.Mode == MigMode {
+			usageByID[dev.ID] = dev
+		}
+	}
+	grouped := make(map[string][]int)
+	order := make([]string, 0, len(tentative))
+	for idx, ctr := range tentative {
+		if _, ok := usageByID[ctr.UUID]; !ok {
+			continue
+		}
+		if _, seen := grouped[ctr.UUID]; !seen {
+			order = append(order, ctr.UUID)
+		}
+		grouped[ctr.UUID] = append(grouped[ctr.UUID], idx)
+	}
+	for _, id := range order {
+		indices := grouped[id]
+		usage := usageByID[id]
+		memories := make([]int32, len(indices))
+		for i, idx := range indices {
+			memories[i] = tentative[idx].Usedmem
+		}
+		profiles, placements, ok := planMigContainer(usage.MigProfiles, occupiedMigPlacements(usage.MigAllocationsInUse), memories, preferred)
+		for i, idx := range indices {
+			ctr := &tentative[idx]
+			if !ok {
+				if ctr.CustomInfo != nil {
+					delete(ctr.CustomInfo, MigProfileCustomInfo)
+					delete(ctr.CustomInfo, MigPlacementCustomInfo)
+				}
+				continue
+			}
+			if ctr.CustomInfo == nil {
+				ctr.CustomInfo = make(map[string]any)
+			}
+			ctr.CustomInfo[MigProfileCustomInfo] = profiles[i].Name
+			ctr.CustomInfo[MigPlacementCustomInfo] = placements[i]
+		}
+	}
+}
+
+// plannedMigAllocation returns the plan recorded on ctr if it is still legal and conflict-free.
+func plannedMigAllocation(profiles []device.MigProfile, occupied []device.MigPlacement, ctr *device.ContainerDevice) (device.MigProfile, device.MigPlacement, bool) {
+	if ctr.CustomInfo == nil {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	name, nameOK := ctr.CustomInfo[MigProfileCustomInfo].(string)
+	placement, placementOK := ctr.CustomInfo[MigPlacementCustomInfo].(device.MigPlacement)
+	if !nameOK || !placementOK {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	profile, ok := findMigProfile(profiles, name)
+	if !ok || profile.MemoryMB < ctr.Usedmem {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	if !slices.Contains(profile.Placements, placement) || migPlacementConflicts(placement, occupied) {
+		return device.MigProfile{}, device.MigPlacement{}, false
+	}
+	return profile, placement, true
+}
+
 func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
 func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	if n.Mode == MigMode {
-		profile, placement, ok := selectMigCandidate(n.MigProfiles, occupiedMigPlacements(n.MigAllocationsInUse), ctr.Usedmem)
+		occupied := occupiedMigPlacements(n.MigAllocationsInUse)
+		profile, placement, ok := plannedMigAllocation(n.MigProfiles, occupied, ctr)
+		if !ok {
+			profile, placement, ok = selectMigCandidate(n.MigProfiles, occupied, ctr.Usedmem, podMigProfilePreference(pod))
+		}
 		if !ok {
 			return errors.New("MIG profile and placement allocation failed")
 		}
@@ -741,6 +970,10 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
 	cordoned := cordonedDevices(nodeInfo)
+	preferred := migProfilePreference(pod.GetAnnotations())
+	if len(preferred) > 0 {
+		klog.V(4).InfoS("MIG profile preference", "pod", klog.KObj(pod), "preferred", preferred)
+	}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -798,7 +1031,19 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memreq), int64(k.Coresreq)) {
+		// A MIG slice is booked and charged its profile's capacity, not the raw request, so resolve
+		// the profile before the quota check and keep it on the tentative slice.
+		usedmem, usedcores := memreq, k.Coresreq
+		if dev.Mode == MigMode {
+			profile, ok := plannedMigProfile(dev, tmpDevs[k.Type], memreq, preferred)
+			if !ok {
+				reason[common.CardMigTopologyInfeasible]++
+				klog.V(5).InfoS(common.CardMigTopologyInfeasible, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "allocations", dev.MigAllocationsInUse)
+				continue
+			}
+			usedmem, usedcores = profile.MemoryMB, profile.Core
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(usedmem), int64(usedcores)) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue
@@ -828,7 +1073,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		// CustomFilterRule must see the resolved memory request, not the raw (possibly zero) Memreq field.
 		resolvedReq := request
 		resolvedReq.Memreq = memreq
-		if !nv.CustomFilterRule(allocated, resolvedReq, tmpDevs[k.Type], dev) {
+		if !nv.CustomFilterRule(allocated, resolvedReq, tmpDevs[k.Type], dev, preferred) {
 			// In MIG mode, CustomFilterRule rejects when the requested memory
 			// does not fit an allowed profile with a free placement on this
 			// device. Surface this as a distinct reason so users can tell
@@ -852,12 +1097,13 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,
-				Usedmem:   memreq,
-				Usedcores: k.Coresreq,
+				Usedmem:   usedmem,
+				Usedcores: usedcores,
 			})
 		}
 		if k.Nums == 0 && !needTopology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			recordMigPlans(devices, tmpDevs[k.Type], preferred)
 			return true, tmpDevs, ""
 		}
 		if dev.Mode == "mig" {
@@ -867,6 +1113,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	if needTopology {
 		if len(tmpDevs[k.Type]) == int(originReq) {
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			recordMigPlans(devices, tmpDevs[k.Type], preferred)
 			return true, tmpDevs, ""
 		}
 		if len(tmpDevs[k.Type]) > int(originReq) {
@@ -888,6 +1135,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				tmpDevs[k.Type] = combination
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			}
+			recordMigPlans(devices, tmpDevs[k.Type], preferred)
 			return true, tmpDevs, ""
 		}
 	}
