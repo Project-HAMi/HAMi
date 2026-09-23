@@ -611,7 +611,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		}
 		assert.NilError(t, l.Update())
 
-		got, ok := l.containers["uid8_ctr"]
+		_, ok := l.containers["uid8_ctr"]
 		assert.Equal(t, ok, true)
 		_, owned := l.wholeGPU.ownedContainerKeys["uid8_ctr"]
 		assert.Equal(t, owned, true)
