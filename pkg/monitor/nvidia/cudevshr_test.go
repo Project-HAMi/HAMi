@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -735,4 +736,69 @@ func TestContainerListerIndependentMappings(t *testing.T) {
 	require.NoError(t, os.RemoveAll(root))
 	require.ErrorIs(t, l.Update(), os.ErrNotExist)
 	require.Empty(t, l.containers)
+}
+
+func TestMappedUsageRemainsValidUntilUnlock(t *testing.T) {
+	for _, action := range []string{"replace", "remove", "close"} {
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "pod_gpu")
+			require.NoError(t, os.Mkdir(dir, 0o755))
+			path := writeCacheFile(t, dir, "x.cache", makeV0CacheBytes(1, []uint64{1024}))
+			l := &ContainerLister{
+				containerPath: root, containers: map[string]*ContainerUsage{}, stopCh: make(chan struct{}),
+				podLister: &fakePodLister{pods: []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "pod"}}}},
+			}
+			t.Cleanup(l.Close)
+			require.NoError(t, l.Update())
+			switch action {
+			case "replace":
+				replacement := writeCacheFile(t, dir, "replacement.cache", makeV0CacheBytes(1, []uint64{2048}))
+				require.NoError(t, os.Rename(replacement, path))
+			case "remove":
+				require.NoError(t, os.RemoveAll(dir))
+			}
+			l.Lock()
+			var unlockOnce sync.Once
+			unlock := func() { unlockOnce.Do(l.UnLock) }
+			defer unlock()
+			usage := l.ListContainers()["pod_gpu"]
+			started, done := make(chan struct{}), make(chan error, 1)
+			go func() {
+				close(started)
+				if action == "close" {
+					l.Close()
+					done <- nil
+				} else {
+					done <- l.Update()
+				}
+			}()
+			<-started
+			select {
+			case <-done:
+				t.Fatal("mapping released while a caller holds the lister lock")
+			case <-time.After(30 * time.Millisecond):
+			}
+			// Exercise the real mmap, including a feedback write, while the
+			// concurrent replacement/removal/shutdown is waiting for the lock.
+			require.Equal(t, uint64(1024), usage.Info.DeviceMemoryLimit(0))
+			usage.Info.SetRecentKernel(7)
+			require.Equal(t, int32(7), usage.Info.GetRecentKernel())
+			unlock()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("cleanup did not finish after unlock")
+			}
+			l.Lock()
+			defer l.UnLock()
+			if action == "replace" {
+				require.NotSame(t, usage, l.ListContainers()["pod_gpu"])
+				require.Equal(t, uint64(2048), l.ListContainers()["pod_gpu"].Info.DeviceMemoryLimit(0))
+			} else {
+				require.Empty(t, l.ListContainers())
+			}
+		})
+	}
 }

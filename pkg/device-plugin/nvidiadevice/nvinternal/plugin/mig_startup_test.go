@@ -11,6 +11,8 @@
 package plugin
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -21,6 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -234,4 +239,64 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 	require.Equal(t, 2, resets)
 	require.Equal(t, 1, destroyedGI)
 	require.Equal(t, 1, destroyedCI)
+}
+
+func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	informer, err := nodepodinformer.New(client, "node-a")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	informer.Start(ctx)
+	require.Eventually(t, func() bool { _, err := informer.List(); return err == nil }, time.Second, time.Millisecond)
+	// Keep the watch connected but suppress new events to reproduce delayed
+	// propagation independently from the authoritative fake API tracker.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "new-pod", Namespace: "default", UID: "new-uid", Annotations: map[string]string{
+			nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+		}},
+		Spec: corev1.PodSpec{NodeName: "node-a"}, Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	apiErr := error(nil)
+	client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		if apiErr != nil {
+			return true, nil, apiErr
+		}
+		items := []corev1.Pod{}
+		if pod != nil {
+			items = append(items, *pod)
+		}
+		return true, &corev1.PodList{Items: items}, nil
+	})
+	cached, err := informer.List()
+	require.NoError(t, err)
+	require.Empty(t, cached)
+	manager, dev := mockMigRecoveryDevice(t)
+	giDestroyed, ciDestroyed := 0, 0
+	ci := &nvmlmock.ComputeInstance{DestroyFunc: func() nvml.Return { ciDestroyed++; return nvml.SUCCESS }}
+	gi := &nvmlmock.GpuInstance{
+		GetComputeInstanceByIdFunc: func(int) (nvml.ComputeInstance, nvml.Return) { return ci, nvml.SUCCESS },
+		DestroyFunc:                func() nvml.Return { giDestroyed++; return nvml.SUCCESS },
+	}
+	dev.GetGpuInstanceByIdFunc = func(int) (nvml.GpuInstance, nvml.Return) { return gi, nvml.SUCCESS }
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 1, CIID: 2}
+	manager.byAllocationMigUUID["MIG-test"] = key
+	plugin := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true,
+		listNodePods: func() ([]*corev1.Pod, error) { return informer.ListFresh(t.Context()) },
+	}
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Contains(t, manager.byAllocation, key)
+	require.Zero(t, giDestroyed)
+	require.Zero(t, ciDestroyed)
+	apiErr = errors.New("API unavailable")
+	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), apiErr)
+	require.Contains(t, manager.byAllocation, key)
+	require.Zero(t, giDestroyed)
+	require.Zero(t, ciDestroyed)
+	apiErr, pod = nil, nil
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Empty(t, manager.byAllocation)
+	require.Equal(t, 1, giDestroyed)
+	require.Equal(t, 1, ciDestroyed)
 }

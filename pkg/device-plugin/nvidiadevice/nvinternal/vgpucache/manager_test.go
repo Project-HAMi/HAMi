@@ -37,7 +37,7 @@ func newTestManager(t *testing.T, root string, pods func() ([]*corev1.Pod, error
 		Root:         root,
 		ScanInterval: time.Second,
 		GracePeriod:  time.Minute,
-	}, pods)
+	}, pods, pods)
 	require.NoError(t, err)
 	return manager
 }
@@ -138,11 +138,13 @@ func TestNewValidatesConfig(t *testing.T) {
 		{Root: t.TempDir(), ScanInterval: 0},
 		{Root: t.TempDir(), ScanInterval: time.Second, GracePeriod: -1},
 	} {
-		_, err := New(config, list)
+		_, err := New(config, list, list)
 		require.Error(t, err)
 	}
 	valid := Config{Root: t.TempDir(), ScanInterval: time.Second}
-	_, err := New(valid, nil)
+	_, err := New(valid, nil, list)
+	require.Error(t, err)
+	_, err = New(valid, list, nil)
 	require.Error(t, err)
 }
 
@@ -162,7 +164,7 @@ func TestRunRetriesUnavailableSnapshotAndStops(t *testing.T) {
 			return nil, errors.New("snapshot unavailable")
 		}
 		return nil, nil
-	})
+	}, func() ([]*corev1.Pod, error) { return nil, nil })
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -294,4 +296,79 @@ func TestCacheFilesystemPermissionErrors(t *testing.T) {
 		require.FileExists(t, filepath.Join(blocked, "cache"))
 		require.NoDirExists(t, other)
 	})
+}
+
+func TestScanConfirmsStaleSnapshotBeforeDeleting(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodPending, corev1.PodRunning, corev1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			root := t.TempDir()
+			manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
+			manager.gracePeriod = 0
+			live, err := manager.Prepare("live", "gpu")
+			require.NoError(t, err)
+			stale, err := manager.Prepare("stale", "gpu")
+			require.NoError(t, err)
+			calls := 0
+			manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+				calls++
+				return []*corev1.Pod{nil, {ObjectMeta: metav1.ObjectMeta{UID: "live"}, Status: corev1.PodStatus{Phase: phase}}}, nil
+			}
+			require.NoError(t, manager.scan())
+			require.DirExists(t, live)
+			require.NoDirExists(t, stale)
+			require.Equal(t, 1, calls, "batch confirmation once per scan")
+		})
+	}
+}
+
+func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
+	root := t.TempDir()
+	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
+	manager.gracePeriod = 0
+	first, err := manager.Prepare("a", "gpu")
+	require.NoError(t, err)
+	second, err := manager.Prepare("b", "gpu")
+	require.NoError(t, err)
+	for _, failure := range []error{errors.New("API unavailable"), context.DeadlineExceeded, context.Canceled} {
+		manager.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, failure }
+		require.ErrorIs(t, manager.scan(), failure)
+		require.DirExists(t, first)
+		require.DirExists(t, second)
+	}
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	require.NoError(t, manager.scan())
+	require.NoDirExists(t, first)
+	require.NoDirExists(t, second)
+}
+
+func TestScanAvoidsLiveQueryWithoutExpiredCandidates(t *testing.T) {
+	root := t.TempDir()
+	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "known"}}}, nil
+	})
+	_, err := manager.Prepare("known", "gpu")
+	require.NoError(t, err)
+	_, err = manager.Prepare("recent", "gpu")
+	require.NoError(t, err)
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		t.Fatal("no deletion candidate should trigger an API request")
+		return nil, nil
+	}
+	require.NoError(t, manager.scan())
+}
+
+func TestScanRechecksDirectoryAfterLiveConfirmation(t *testing.T) {
+	root := t.TempDir()
+	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
+	manager.gracePeriod = 0
+	target, err := manager.Prepare("pod", "gpu")
+	require.NoError(t, err)
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		// Simulate an external replacement while the API request is in flight.
+		require.NoError(t, os.Rename(target, target+".old"))
+		require.NoError(t, os.Mkdir(target, 0o777))
+		return nil, nil
+	}
+	require.NoError(t, manager.scan())
+	require.DirExists(t, target)
 }

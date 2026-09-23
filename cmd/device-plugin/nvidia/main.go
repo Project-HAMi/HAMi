@@ -289,7 +289,8 @@ func start(c *cli.Context, o *options) (resultErr error) {
 	if err != nil {
 		return fmt.Errorf("create device-plugin node Pod informer: %w", err)
 	}
-	cacheManager, err := vgpucache.New(resolveVGPUCacheConfig(), nodePods.List)
+	listLiveNodePods := func() ([]*corev1.Pod, error) { return nodePods.ListFresh(processCtx) }
+	cacheManager, err := vgpucache.New(resolveVGPUCacheConfig(), nodePods.List, listLiveNodePods)
 	if err != nil {
 		return fmt.Errorf("create vGPU cache manager: %w", err)
 	}
@@ -339,7 +340,7 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, nodePods.List, cacheManager.Prepare)
+	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, listLiveNodePods, cacheManager.Prepare)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}

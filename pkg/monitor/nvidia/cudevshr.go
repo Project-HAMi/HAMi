@@ -164,6 +164,9 @@ func (l *ContainerLister) UnLock() {
 	l.mutex.Unlock()
 }
 
+// ListContainers exposes the mapped containers. Callers must hold Lock until
+// they finish accessing the map and every returned ContainerUsage.Info, including
+// writes. Keeping a pointer after UnLock does not keep its mmap alive.
 func (l *ContainerLister) ListContainers() map[string]*ContainerUsage {
 	return l.containers
 }

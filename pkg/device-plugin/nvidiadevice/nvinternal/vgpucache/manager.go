@@ -42,22 +42,26 @@ type Config struct {
 // Manager serializes Allocate-time preparation and GC so a scan cannot remove
 // a directory while it is being prepared for a new container.
 type Manager struct {
-	root         string
-	scanInterval time.Duration
-	gracePeriod  time.Duration
-	listNodePods func() ([]*corev1.Pod, error)
-	mutex        sync.Mutex
+	root             string
+	scanInterval     time.Duration
+	gracePeriod      time.Duration
+	listNodePods     func() ([]*corev1.Pod, error)
+	listLiveNodePods func() ([]*corev1.Pod, error)
+	mutex            sync.Mutex
 }
 
 // New constructs a cache manager around the device-plugin process's shared Pod
-// informer snapshot function.
-func New(config Config, listNodePods func() ([]*corev1.Pod, error)) (*Manager, error) {
+// informer snapshot and an authoritative API-server confirmation function.
+func New(config Config, listNodePods, listLiveNodePods func() ([]*corev1.Pod, error)) (*Manager, error) {
 	root := filepath.Clean(config.Root)
 	if !filepath.IsAbs(root) || root == string(filepath.Separator) {
 		return nil, fmt.Errorf("vGPU cache root must be an absolute non-root path: %q", config.Root)
 	}
 	if listNodePods == nil {
 		return nil, errors.New("node Pod list function is nil")
+	}
+	if listLiveNodePods == nil {
+		return nil, errors.New("live node Pod list function is nil")
 	}
 	if config.ScanInterval <= 0 {
 		return nil, fmt.Errorf("vGPU cache scan interval must be positive: %v", config.ScanInterval)
@@ -66,10 +70,11 @@ func New(config Config, listNodePods func() ([]*corev1.Pod, error)) (*Manager, e
 		return nil, fmt.Errorf("vGPU cache grace period must not be negative: %v", config.GracePeriod)
 	}
 	return &Manager{
-		root:         root,
-		scanInterval: config.ScanInterval,
-		gracePeriod:  config.GracePeriod,
-		listNodePods: listNodePods,
+		root:             root,
+		scanInterval:     config.ScanInterval,
+		gracePeriod:      config.GracePeriod,
+		listNodePods:     listNodePods,
+		listLiveNodePods: listLiveNodePods,
 	}, nil
 }
 
@@ -154,6 +159,7 @@ func (m *Manager) scan() error {
 	}
 
 	var scanErr error
+	var confirmedPodUIDs map[string]struct{}
 	now := time.Now()
 	for _, entry := range entries {
 		podUID, _, ok := parseCacheDirectoryName(entry.Name())
@@ -181,6 +187,25 @@ func (m *Manager) scan() error {
 			continue
 		}
 		if before.ModTime().Add(m.gracePeriod).After(now) {
+			continue
+		}
+
+		// Only query the API if the informer and grace period found a GC
+		// candidate. One authoritative list covers this serialized scan;
+		// Prepare cannot create a new directory until the scan releases mutex.
+		if confirmedPodUIDs == nil {
+			livePods, err := m.listLiveNodePods()
+			if err != nil {
+				return errors.Join(scanErr, fmt.Errorf("confirm node Pods before cache GC: %w", err))
+			}
+			confirmedPodUIDs = make(map[string]struct{}, len(livePods))
+			for _, pod := range livePods {
+				if pod != nil {
+					confirmedPodUIDs[string(pod.UID)] = struct{}{}
+				}
+			}
+		}
+		if _, exists := confirmedPodUIDs[podUID]; exists {
 			continue
 		}
 

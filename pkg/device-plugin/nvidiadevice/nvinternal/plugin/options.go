@@ -96,7 +96,9 @@ func WithImexChannels(imexChannels imex.Channels) Option {
 	}
 }
 
-// WithNodePodList injects the device-plugin process's node-scoped Pod cache.
+// WithNodePodList injects an authoritative node-scoped Pod list. It must confirm
+// current API-server state or return an error, since MIG reconciliation and
+// mode changes may destroy resources absent from the returned list.
 func WithNodePodList(list func() ([]*corev1.Pod, error)) Option {
 	return func(m *options) {
 		m.listNodePods = list
