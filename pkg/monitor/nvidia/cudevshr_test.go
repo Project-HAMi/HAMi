@@ -376,6 +376,8 @@ func Test_loadCache(t *testing.T) {
 	})
 }
 
+// Test_ContainerLister_Update checks mapping discovery, replacement, and removal across Pod and
+// cache-directory changes.
 func Test_ContainerLister_Update(t *testing.T) {
 	t.Run("container path missing", func(t *testing.T) {
 		l := &ContainerLister{
@@ -593,6 +595,8 @@ func Test_ContainerLister_Update(t *testing.T) {
 	})
 }
 
+// TestContainerListerCloseReleasesMappings checks that repeated Close calls stop the informer
+// and release mappings safely.
 func TestContainerListerCloseReleasesMappings(t *testing.T) {
 	cacheDir := t.TempDir()
 	writeCacheFile(t, cacheDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
@@ -612,6 +616,8 @@ func TestContainerListerCloseReleasesMappings(t *testing.T) {
 	}
 }
 
+// TestNewContainerListerCacheRoot checks configured cache roots, legacy fallback, and invalid
+// path rejection.
 func TestNewContainerListerCacheRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name, root string
@@ -671,6 +677,8 @@ func TestNewContainerListerCacheRoot(t *testing.T) {
 	}
 }
 
+// TestContainerListerIndependentMappings checks that replacing or removing one container cache
+// preserves other mappings.
 func TestContainerListerIndependentMappings(t *testing.T) {
 	root := t.TempDir()
 	pods := &fakePodLister{pods: []*corev1.Pod{
@@ -738,6 +746,8 @@ func TestContainerListerIndependentMappings(t *testing.T) {
 	require.Empty(t, l.containers)
 }
 
+// TestMappedUsageRemainsValidUntilUnlock checks that replacement, removal, and shutdown wait for
+// access to real mmap data to finish.
 func TestMappedUsageRemainsValidUntilUnlock(t *testing.T) {
 	for _, action := range []string{"replace", "remove", "close"} {
 		t.Run(action, func(t *testing.T) {

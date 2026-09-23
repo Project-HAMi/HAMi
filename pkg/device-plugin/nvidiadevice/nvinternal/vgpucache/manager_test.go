@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// newTestManager constructs an isolated manager with a shared test Pod provider for cached and
+// live reads.
 func newTestManager(t *testing.T, root string, pods func() ([]*corev1.Pod, error)) *Manager {
 	t.Helper()
 	manager, err := New(Config{
@@ -42,6 +44,8 @@ func newTestManager(t *testing.T, root string, pods func() ([]*corev1.Pod, error
 	return manager
 }
 
+// TestPrepareReplacesDirectory checks that Prepare clears old data and creates a writable
+// container cache directory.
 func TestPrepareReplacesDirectory(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "containers")
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
@@ -58,6 +62,7 @@ func TestPrepareReplacesDirectory(t *testing.T) {
 	require.Equal(t, os.FileMode(0o777), info.Mode().Perm())
 }
 
+// TestPrepareRejectsSymlinkRoot checks that preparation refuses a symlink cache root.
 func TestPrepareRejectsSymlinkRoot(t *testing.T) {
 	target := t.TempDir()
 	root := filepath.Join(t.TempDir(), "containers")
@@ -67,6 +72,7 @@ func TestPrepareRejectsSymlinkRoot(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestScanFailsClosedWhenPodListFails checks that failed Pod reads preserve cache directories.
 func TestScanFailsClosedWhenPodListFails(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "pod-uid_main")
@@ -81,6 +87,8 @@ func TestScanFailsClosedWhenPodListFails(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestScanUsesPodExistenceRegardlessOfPhase checks that all existing Pods retain their cache
+// directories.
 func TestScanUsesPodExistenceRegardlessOfPhase(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "pod-uid_main")
@@ -98,6 +106,8 @@ func TestScanUsesPodExistenceRegardlessOfPhase(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestScanDeleteAndSafetyRules checks expired orphan deletion and preservation of live,
+// malformed, or unsafe entries.
 func TestScanDeleteAndSafetyRules(t *testing.T) {
 	t.Run("delete stale valid directory", func(t *testing.T) {
 		root := t.TempDir()
@@ -130,6 +140,7 @@ func TestScanDeleteAndSafetyRules(t *testing.T) {
 	})
 }
 
+// TestNewValidatesConfig checks cache root, timing, and Pod provider validation.
 func TestNewValidatesConfig(t *testing.T) {
 	list := func() ([]*corev1.Pod, error) { return nil, nil }
 	for _, config := range []Config{
@@ -148,6 +159,8 @@ func TestNewValidatesConfig(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestRunRetriesUnavailableSnapshotAndStops checks periodic retry after Pod lookup failure and
+// cancellation of the GC loop.
 func TestRunRetriesUnavailableSnapshotAndStops(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "missing_main")
@@ -189,6 +202,8 @@ func TestRunRetriesUnavailableSnapshotAndStops(t *testing.T) {
 	require.DirExists(t, target)
 }
 
+// TestPrepareRejectsInvalidIdentity checks that invalid container identities cannot escape the
+// cache root.
 func TestPrepareRejectsInvalidIdentity(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
@@ -206,6 +221,7 @@ func TestPrepareRejectsInvalidIdentity(t *testing.T) {
 	require.Empty(t, entries)
 }
 
+// TestScanRootSafety checks handling of missing, symlink, and non-directory cache roots.
 func TestScanRootSafety(t *testing.T) {
 	t.Run("missing root is harmless", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "missing")
@@ -245,6 +261,8 @@ func TestScanRootSafety(t *testing.T) {
 	})
 }
 
+// TestScanHonorsGracePeriodAndNilPods checks grace-period protection and tolerance of nil Pod
+// entries.
 func TestScanHonorsGracePeriodAndNilPods(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return []*corev1.Pod{nil}, nil })
@@ -258,6 +276,8 @@ func TestScanHonorsGracePeriodAndNilPods(t *testing.T) {
 	require.NoDirExists(t, target)
 }
 
+// TestCacheFilesystemPermissionErrors checks propagation of filesystem access failures during
+// preparation and GC.
 func TestCacheFilesystemPermissionErrors(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permission checks")
@@ -298,6 +318,8 @@ func TestCacheFilesystemPermissionErrors(t *testing.T) {
 	})
 }
 
+// TestScanConfirmsStaleSnapshotBeforeDeleting checks that live Pods in any phase survive stale
+// cached absence while true orphans are deleted.
 func TestScanConfirmsStaleSnapshotBeforeDeleting(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodPending, corev1.PodRunning, corev1.PodSucceeded} {
 		t.Run(string(phase), func(t *testing.T) {
@@ -321,6 +343,8 @@ func TestScanConfirmsStaleSnapshotBeforeDeleting(t *testing.T) {
 	}
 }
 
+// TestScanLiveConfirmationFailurePreservesAllCandidates checks that API errors preserve all
+// candidates until confirmation succeeds.
 func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
@@ -341,6 +365,8 @@ func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
 	require.NoDirExists(t, second)
 }
 
+// TestScanAvoidsLiveQueryWithoutExpiredCandidates checks that live API calls are skipped when no
+// expired orphan candidate exists.
 func TestScanAvoidsLiveQueryWithoutExpiredCandidates(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) {
@@ -357,6 +383,8 @@ func TestScanAvoidsLiveQueryWithoutExpiredCandidates(t *testing.T) {
 	require.NoError(t, manager.scan())
 }
 
+// TestScanRechecksDirectoryAfterLiveConfirmation checks that a directory replaced during API
+// confirmation is preserved.
 func TestScanRechecksDirectoryAfterLiveConfirmation(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })

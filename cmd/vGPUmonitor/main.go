@@ -67,6 +67,8 @@ func init() {
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
+// start runs monitor feedback and metrics collection and releases mappings when the process
+// exits.
 func start() error {
 	if err := ValidateEnvVars(); err != nil {
 		return fmt.Errorf("failed to validate environment variables: %v", err)

@@ -408,6 +408,8 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	return nil
 }
 
+// activeMigAllocationKeys extracts active placement reservations, including Pending Pods, and
+// rejects invalid allocation metadata.
 func (plugin *NvidiaDevicePlugin) activeMigAllocationKeys(pods []*corev1.Pod) (map[migAllocationKey]struct{}, error) {
 	active := make(map[migAllocationKey]struct{})
 	for _, pod := range pods {
@@ -481,6 +483,8 @@ func uint32Ptr(value uint32) *uint32 {
 	return &value
 }
 
+// reconcileActiveMigAllocations holds applyMutex throughout MIG recovery and cleanup to
+// serialize them with Allocate.
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
 	plugin.applyMutex.Lock()
 	defer plugin.applyMutex.Unlock()
@@ -552,6 +556,8 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	return err
 }
 
+// listNodePodSnapshot calls the authoritative node Pod provider and propagates failures without
+// substituting an empty snapshot.
 func (plugin *NvidiaDevicePlugin) listNodePodSnapshot() ([]*corev1.Pod, error) {
 	if plugin.listNodePods == nil {
 		return nil, errors.New("node Pod informer is not configured")
@@ -559,6 +565,8 @@ func (plugin *NvidiaDevicePlugin) listNodePodSnapshot() ([]*corev1.Pod, error) {
 	return plugin.listNodePods()
 }
 
+// primeMigManagerFromPods adopts active runtime allocations while allowing Pending reservations
+// that have not created instances yet.
 func (plugin *NvidiaDevicePlugin) primeMigManagerFromPods(pods []*corev1.Pod) error {
 	for _, pod := range pods {
 		if pod == nil {
@@ -600,7 +608,8 @@ func (plugin *NvidiaDevicePlugin) primeMigManagerFromPods(pods []*corev1.Pod) er
 	return nil
 }
 
-// recoverDynamicMIGCDI is called before the server can receive Allocate.
+// recoverDynamicMIGCDI republishes adopted MIG instances during initialization.
+// The caller holds applyMutex, including when retrying deferred initialization.
 func (plugin *NvidiaDevicePlugin) recoverDynamicMIGCDI() error {
 	handler, ok := plugin.cdiHandler.(cdi.DynamicMIGInterface)
 	if !ok {

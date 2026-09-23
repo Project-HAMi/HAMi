@@ -25,6 +25,8 @@ import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
+// TestResolveVGPUCacheConfigReusesExistingEnvironment checks that explicit shared-cache settings
+// override defaults.
 func TestResolveVGPUCacheConfigReusesExistingEnvironment(t *testing.T) {
 	t.Setenv(vgpuCacheRootEnvName, "/var/lib/hami/containers")
 	t.Setenv(vgpuCacheGracePeriodEnvName, "7m")
@@ -40,6 +42,8 @@ func TestResolveVGPUCacheConfigReusesExistingEnvironment(t *testing.T) {
 	}
 }
 
+// TestResolveVGPUCacheConfigDefaultsFromHookPath checks cache path fallback and handling of
+// invalid grace periods.
 func TestResolveVGPUCacheConfigDefaultsFromHookPath(t *testing.T) {
 	t.Setenv(vgpuCacheRootEnvName, "")
 	t.Setenv(vgpuCacheGracePeriodEnvName, "invalid")

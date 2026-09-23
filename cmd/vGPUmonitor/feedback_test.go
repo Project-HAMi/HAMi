@@ -283,10 +283,12 @@ type blockingFeedbackInfo struct {
 	once      sync.Once
 }
 
+// pause blocks the selected feedback access until the test releases it.
 func (b *blockingFeedbackInfo) pause() {
 	b.once.Do(func() { close(b.entered); <-b.release })
 }
 
+// GetRecentKernel pauses reads when requested to expose concurrent mapping cleanup.
 func (b *blockingFeedbackInfo) GetRecentKernel() int32 {
 	if b.blockRead {
 		b.pause()
@@ -294,6 +296,7 @@ func (b *blockingFeedbackInfo) GetRecentKernel() int32 {
 	return b.stubInfo.GetRecentKernel()
 }
 
+// SetRecentKernel pauses writes when requested to expose concurrent mapping cleanup.
 func (b *blockingFeedbackInfo) SetRecentKernel(value int32) {
 	if !b.blockRead {
 		b.pause()
@@ -301,6 +304,8 @@ func (b *blockingFeedbackInfo) SetRecentKernel(value int32) {
 	b.stubInfo.SetRecentKernel(value)
 }
 
+// TestObserveProtectsUsageUntilReadsAndWritesFinish checks that Update cannot remove mappings
+// during feedback reads or writes.
 func TestObserveProtectsUsageUntilReadsAndWritesFinish(t *testing.T) {
 	for _, blockRead := range []bool{true, false} {
 		t.Run(fmt.Sprintf("blockRead=%v", blockRead), func(t *testing.T) {

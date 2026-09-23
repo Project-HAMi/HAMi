@@ -80,6 +80,8 @@ func mustStrategies(t *testing.T, strategies ...string) v1.DeviceListStrategies 
 	return dls
 }
 
+// newTestPlugin constructs an allocation test plugin with fake dependencies and isolated cache
+// storage.
 func newTestPlugin(t *testing.T) *NvidiaDevicePlugin {
 	t.Helper()
 	prevHookPath := os.Getenv("HOOK_PATH")
@@ -120,6 +122,7 @@ func newTestPlugin(t *testing.T) *NvidiaDevicePlugin {
 	}
 }
 
+// testCachePreparer provides an isolated cache directory callback for allocation tests.
 func testCachePreparer(t *testing.T) func(string, string) (string, error) {
 	t.Helper()
 	root := t.TempDir()
@@ -594,6 +597,8 @@ func TestAllocate_SingleContainer(t *testing.T) {
 	require.True(t, hasLdSoPreloadMount(response.ContainerResponses[0].Mounts))
 }
 
+// TestAllocate_PropagatesVGPUCachePreparationError checks that cache preparation failures abort
+// allocation.
 func TestAllocate_PropagatesVGPUCachePreparationError(t *testing.T) {
 	setupInRequestDevices(t)
 	plugin := newTestPlugin(t)

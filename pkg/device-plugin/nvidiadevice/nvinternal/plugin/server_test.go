@@ -91,6 +91,8 @@ type recordingDynamicMIGCDI struct {
 func (r *recordingDynamicMIGCDI) EnsureDynamicMIGDevice(cdi.DynamicMIGDevice) (string, error) {
 	return "", nil
 }
+
+// RemoveDynamicMIGDevice delegates removal to the test callback to support failure injection.
 func (r *recordingDynamicMIGCDI) RemoveDynamicMIGDevice(uuid string) error {
 	if r.remove != nil {
 		return r.remove(uuid)
@@ -850,6 +852,8 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 	require.Contains(t, err.Error(), "device number not matched")
 }
 
+// TestAllocateUsesSelectedUUIDsAndHostPIDBroker checks that allocation preserves selected device
+// identities and host PID broker configuration.
 func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	t.Setenv(hostpid.EnvironmentVariable, "1")
 	prepareCalls := 0
@@ -993,6 +997,8 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	require.ErrorContains(t, err, "failed to prepare host PID lock parent")
 }
 
+// TestAllocatePreservesContainerOrderWhenOneContainerFallsBack checks mixed allocation paths
+// preserve response order across containers.
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
@@ -1228,6 +1234,8 @@ func TestResolveOperatingMode(t *testing.T) {
 	}
 }
 
+// TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication checks that deferred MIG recovery
+// retries failed CDI publication.
 func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
 	manager, _ := mockMigRecoveryDevice(t)
 	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})
@@ -1259,6 +1267,8 @@ func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
 	require.Equal(t, 2, specCalls)
 }
 
+// TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot checks that failed CDI removals
+// remain pending for later reconciliation.
 func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
 	manager, _ := mockMigRecoveryDevice(t)
 	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})

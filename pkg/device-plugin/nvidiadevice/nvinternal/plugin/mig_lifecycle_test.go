@@ -237,6 +237,8 @@ func TestHamiCorePluginStartStopRestart(t *testing.T) {
 	}
 }
 
+// TestApplyStartupMigModeDisableRequiresReset checks that disabling MIG reports GPUs that
+// require a reset.
 func TestApplyStartupMigModeDisableRequiresReset(t *testing.T) {
 	afterSet := false
 	dev := &nvmlmock.Device{
@@ -350,6 +352,7 @@ func idleA100Device(setCalls *int, afterSetCurrent, afterSetPending int) *nvmlmo
 	}
 }
 
+// TestApplyStartupMigModeDisableSucceeds checks that idle GPUs can leave MIG mode at startup.
 func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
@@ -362,6 +365,8 @@ func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 	}
 }
 
+// TestApplyStartupMigModeDisableIgnoresProfileAllowlist checks that the profile allowlist does
+// not restrict disabling MIG.
 func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
@@ -374,6 +379,8 @@ func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
 	}
 }
 
+// TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails checks that unreadable Pod
+// state prevents disabling MIG on potentially busy GPUs.
 func TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
@@ -430,6 +437,8 @@ func TestRegistrationRequiresRunningMigManagerSession(t *testing.T) {
 	}
 }
 
+// TestMigReconcilerTicksAndStopsAfterSnapshotRead checks periodic reconciliation and shutdown
+// without a nested apply lock.
 func TestMigReconcilerTicksAndStopsAfterSnapshotRead(t *testing.T) {
 	p, _ := lifecyclePlugin(t)
 	p.initialize()

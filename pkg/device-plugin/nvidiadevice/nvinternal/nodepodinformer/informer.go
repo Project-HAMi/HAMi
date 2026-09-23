@@ -78,13 +78,26 @@ func New(kubeClient kubernetes.Interface, nodeName string) (*Informer, error) {
 	}, nil
 }
 
-// Start starts the informer at most once and returns immediately. Cache sync is
-// deliberately observed by List so destructive consumers can fail closed
-// without delaying device-plugin startup.
+// Start starts the informer at most once and returns immediately. Call
+// WaitForSync before starting consumers that require an initial Pod snapshot.
 func (i *Informer) Start(ctx context.Context) {
 	i.startOnce.Do(func() {
 		i.factory.Start(ctx.Done())
 	})
+}
+
+// WaitForSync waits for the initial Pod list or returns the context error.
+// Start must be called first, and callers should provide a bounded context.
+// Successful initial sync does not guarantee freshness; destructive consumers
+// must still use ListFresh to confirm Pod state with the API server.
+func (i *Informer) WaitForSync(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !cache.WaitForCacheSync(ctx.Done(), i.informer.HasSynced) {
+		return fmt.Errorf("initial Pod cache sync failed: %w", ctx.Err())
+	}
+	return ctx.Err()
 }
 
 // List returns the Pods currently held in the local node-scoped cache. The Pod

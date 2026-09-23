@@ -122,12 +122,15 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 
+// scanAndLog runs one GC pass and logs skipped or incomplete cleanup.
 func (m *Manager) scanAndLog() {
 	if err := m.scan(); err != nil {
 		klog.InfoS("vGPU cache GC skipped or incomplete", "err", err)
 	}
 }
 
+// scan serializes GC with Prepare and confirms expired candidates against live Pod state before
+// deletion.
 func (m *Manager) scan() error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -229,6 +232,7 @@ func (m *Manager) scan() error {
 	return scanErr
 }
 
+// ensureRoot creates the cache root when absent and rejects symlinks and non-directories.
 func (m *Manager) ensureRoot() error {
 	info, err := os.Lstat(m.root)
 	if os.IsNotExist(err) {
@@ -246,6 +250,8 @@ func (m *Manager) ensureRoot() error {
 	return nil
 }
 
+// parseCacheDirectoryName extracts the Pod UID and container name, rejecting malformed names and
+// path separators.
 func parseCacheDirectoryName(name string) (string, string, bool) {
 	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
 		return "", "", false

@@ -279,6 +279,8 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 	return config, nil
 }
 
+// start owns the process lifecycle, including Pod synchronization, cache GC, and plugin
+// restarts.
 func start(c *cli.Context, o *options) (resultErr error) {
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	client.InitGlobalClient()
@@ -295,6 +297,12 @@ func start(c *cli.Context, o *options) (resultErr error) {
 		return fmt.Errorf("create vGPU cache manager: %w", err)
 	}
 	nodePods.Start(processCtx)
+	syncCtx, cancelSync := context.WithTimeout(processCtx, 30*time.Second)
+	err = nodePods.WaitForSync(syncCtx)
+	cancelSync()
+	if err != nil {
+		return fmt.Errorf("wait for device-plugin node Pod informer sync: %w", err)
+	}
 	go cacheManager.Run(processCtx)
 
 	kubeletSocketDir := filepath.Dir(o.kubeletSocket)
@@ -399,6 +407,8 @@ exit:
 	return resultErr
 }
 
+// resolveVGPUCacheConfig resolves the shared cache root and GC grace period from the deployment
+// environment.
 func resolveVGPUCacheConfig() vgpucache.Config {
 	root := os.Getenv(vgpuCacheRootEnvName)
 	if root == "" {
@@ -426,6 +436,8 @@ func resolveVGPUCacheConfig() vgpucache.Config {
 	}
 }
 
+// startPlugins builds and starts plugins with process-scoped Pod and cache callbacks, reporting
+// whether startup should retry.
 func startPlugins(
 	processCtx context.Context,
 	c *cli.Context,

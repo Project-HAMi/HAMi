@@ -111,6 +111,8 @@ func init() {
 	}
 }
 
+// NewContainerLister constructs the monitor mapping owner and starts its node Pod informer. Call
+// Close on shutdown.
 func NewContainerLister() (*ContainerLister, error) {
 	hookPath, ok := os.LookupEnv("HOOK_PATH")
 	if !ok {
@@ -189,6 +191,8 @@ func (l *ContainerLister) SetContainersForTest(m map[string]*ContainerUsage) {
 	l.containers = m
 }
 
+// Update refreshes cache mappings under the lister lock without deleting files owned by the
+// device plugin.
 func (l *ContainerLister) Update() error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -265,6 +269,8 @@ func (l *ContainerLister) Update() error {
 	return nil
 }
 
+// cacheMappingIsCurrent checks whether a mapping still refers to the same file identity and
+// size.
 func cacheMappingIsCurrent(usage *ContainerUsage) bool {
 	if usage.cacheFilePath == "" || usage.cacheFileInfo == nil {
 		return false
@@ -276,6 +282,7 @@ func cacheMappingIsCurrent(usage *ContainerUsage) bool {
 	return os.SameFile(usage.cacheFileInfo, info) && usage.cacheFileInfo.Size() == info.Size()
 }
 
+// unmapContainer releases and removes one mapping. The caller must hold the lister lock.
 func (l *ContainerLister) unmapContainer(name string) {
 	usage, ok := l.containers[name]
 	if !ok {
@@ -289,6 +296,7 @@ func (l *ContainerLister) unmapContainer(name string) {
 	delete(l.containers, name)
 }
 
+// unmapAll releases every mapping. The caller must hold the lister lock.
 func (l *ContainerLister) unmapAll() {
 	for name := range l.containers {
 		l.unmapContainer(name)
@@ -306,6 +314,8 @@ func (l *ContainerLister) Close() {
 	})
 }
 
+// loadCache maps a supported cache file and records its identity for replacement detection. The
+// caller owns the returned mapping.
 func loadCache(fpath string) (*ContainerUsage, error) {
 	klog.Infof("Checking path %s", fpath)
 	files, err := os.ReadDir(fpath)

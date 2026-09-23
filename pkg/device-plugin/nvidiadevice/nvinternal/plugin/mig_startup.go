@@ -89,6 +89,8 @@ func activeMigGPUUUIDs(pods []*corev1.Pod) (map[string]struct{}, error) {
 	return out, nil
 }
 
+// kubernetesAllocatedMigGPUs resolves active Pod MIG reservations to parent GPU indices and
+// rejects unresolvable allocations.
 func (m *MigInstanceManager) kubernetesAllocatedMigGPUs(pods []*corev1.Pod) (map[int]struct{}, error) {
 	uuids, err := activeMigGPUUUIDs(pods)
 	if err != nil {

@@ -74,6 +74,8 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 	return false
 }
 
+// Observe reads utilization and writes feedback while holding the lister lock to keep mmap
+// pointers valid.
 func Observe(lister *nvidia.ContainerLister) {
 	// Info points into mmap memory. Hold the same lock as Update, Close and
 	// metrics collection through both the reads and the feedback writes.

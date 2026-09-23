@@ -42,6 +42,8 @@ func TestSortedIntSetKeys(t *testing.T) {
 	}
 }
 
+// TestActiveMigGPUUUIDs checks which Pod phases and deletion states keep MIG parent GPUs
+// reserved.
 func TestActiveMigGPUUUIDs(t *testing.T) {
 	now := metav1.NewTime(time.Now())
 	pods := []corev1.Pod{
@@ -88,6 +90,8 @@ func TestActiveMigGPUUUIDs(t *testing.T) {
 	}
 }
 
+// TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation checks that malformed MIG annotations
+// prevent allocation-state inference.
 func TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation(t *testing.T) {
 	pods := []*corev1.Pod{{
 		ObjectMeta: metav1.ObjectMeta{
@@ -104,6 +108,7 @@ func TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation(t *testing.T) {
 	}
 }
 
+// mockMigRecoveryDevice provides the NVML device identity used by MIG recovery tests.
 func mockMigRecoveryDevice(t *testing.T) (*MigInstanceManager, *nvmlmock.Device) {
 	t.Helper()
 	dev := &nvmlmock.Device{
@@ -125,6 +130,8 @@ func mockMigRecoveryDevice(t *testing.T) (*MigInstanceManager, *nvmlmock.Device)
 	return manager, dev
 }
 
+// TestMigRecoveryAllowsPendingReservations checks that Pending reservations without runtime
+// identities remain protected during recovery.
 func TestMigRecoveryAllowsPendingReservations(t *testing.T) {
 	manager, _ := mockMigRecoveryDevice(t)
 	pod := &corev1.Pod{
@@ -148,6 +155,8 @@ func TestMigRecoveryAllowsPendingReservations(t *testing.T) {
 	require.Contains(t, plugin.migMgr.byAllocation, key)
 }
 
+// TestMigRecoveryRejectsInvalidRuntimeIdentity checks that incomplete active MIG identities
+// abort recovery.
 func TestMigRecoveryRejectsInvalidRuntimeIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -176,6 +185,8 @@ func TestMigRecoveryRejectsInvalidRuntimeIdentity(t *testing.T) {
 	}
 }
 
+// TestMigRecoveryRetriesResetAfterInformerSync checks that deferred startup reset resumes only
+// after Pod state is available.
 func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 	manager, dev := mockMigRecoveryDevice(t)
 	resets := 0
@@ -241,6 +252,8 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 	require.Equal(t, 1, destroyedCI)
 }
 
+// TestMigReconciliationConfirmsMissingPodBeforeDestroy checks that live reservations and API
+// failures prevent deletion despite stale cached absence.
 func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	informer, err := nodepodinformer.New(client, "node-a")

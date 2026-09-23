@@ -36,6 +36,8 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
+// TestInformerListFailsClosedUntilSynced checks that an uninitialized cache cannot be read as an
+// empty Pod list.
 func TestInformerListFailsClosedUntilSynced(t *testing.T) {
 	informer, err := New(fake.NewSimpleClientset(), "node-a")
 	require.NoError(t, err)
@@ -43,6 +45,8 @@ func TestInformerListFailsClosedUntilSynced(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotSynced)
 }
 
+// TestInformerStartsOnceAndUsesNodeFieldSelector checks idempotent startup and node-scoped API
+// selection.
 func TestInformerStartsOnceAndUsesNodeFieldSelector(t *testing.T) {
 	client := fake.NewSimpleClientset(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "default"},
@@ -68,6 +72,7 @@ func TestInformerStartsOnceAndUsesNodeFieldSelector(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 }
 
+// TestNewValidatesInputs checks rejection of a missing Kubernetes client or node name.
 func TestNewValidatesInputs(t *testing.T) {
 	_, err := New(nil, "node-a")
 	require.Error(t, err)
@@ -75,6 +80,8 @@ func TestNewValidatesInputs(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestListFreshRejectsUnsyncedInformer checks that live confirmation retains the initial
+// synchronization gate.
 func TestListFreshRejectsUnsyncedInformer(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	informer, err := New(client, "node-a")
@@ -84,6 +91,8 @@ func TestListFreshRejectsUnsyncedInformer(t *testing.T) {
 	require.Empty(t, client.Actions())
 }
 
+// TestListFreshConfirmsPodsMissingFromSyncedCache checks authoritative reads protect Pods
+// omitted from a stale cache and propagate API failures.
 func TestListFreshConfirmsPodsMissingFromSyncedCache(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	informer, err := New(client, "node-a")
@@ -126,6 +135,8 @@ func TestListFreshConfirmsPodsMissingFromSyncedCache(t *testing.T) {
 	require.Nil(t, live, "never fall back to the stale empty snapshot")
 }
 
+// TestListFreshHonorsCancellation checks that live API requests stop on caller cancellation or
+// deadline expiry.
 func TestListFreshHonorsCancellation(t *testing.T) {
 	informer, err := New(fake.NewSimpleClientset(), "node-a")
 	require.NoError(t, err)
@@ -167,4 +178,106 @@ func TestListFreshHonorsCancellation(t *testing.T) {
 	pods, err := informer.ListFresh(timeoutCtx)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Nil(t, pods)
+}
+
+// TestWaitForSyncWaitsForInitialList verifies consumers cannot proceed while the
+// API's initial list is pending, and can read the populated cache after sync.
+func TestWaitForSyncWaitsForInitialList(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "existing-pod", Namespace: "default"},
+		Spec:       corev1.PodSpec{NodeName: "node-a"},
+	})
+	listStarted := make(chan struct{})
+	releaseList := make(chan struct{})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		select {
+		case <-listStarted:
+		default:
+			close(listStarted)
+		}
+		select {
+		case <-releaseList:
+			return false, nil, nil
+		case <-ctx.Done():
+			return true, nil, ctx.Err()
+		}
+	})
+	informer, err := New(client, "node-a")
+	require.NoError(t, err)
+	defer informer.factory.Shutdown()
+	defer cancel()
+	informer.Start(ctx)
+	select {
+	case <-listStarted:
+	case <-ctx.Done():
+		t.Fatal("initial Pod list did not start")
+	}
+	done := make(chan error, 1)
+	go func() { done <- informer.WaitForSync(ctx) }()
+	select {
+	case err := <-done:
+		t.Fatalf("WaitForSync returned before the initial list completed: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(releaseList)
+	require.NoError(t, <-done)
+	pods, err := informer.List()
+	require.NoError(t, err)
+	require.Len(t, pods, 1)
+	require.Equal(t, "existing-pod", pods[0].Name)
+	require.NoError(t, informer.WaitForSync(ctx), "already synced callers can proceed")
+	cancel()
+	require.ErrorIs(t, informer.WaitForSync(ctx), context.Canceled)
+}
+
+// TestWaitForSyncStopsWhenContextEnds verifies failed API lists cannot permit
+// startup and that both deadlines and explicit cancellation end the wait.
+func TestWaitForSyncStopsWhenContextEnds(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "cancellation"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+			client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+				return true, nil, errors.New("API unavailable")
+			})
+			informer, err := New(client, "node-a")
+			require.NoError(t, err)
+			processCtx, stop := context.WithCancel(t.Context())
+			defer informer.factory.Shutdown()
+			defer stop()
+			informer.Start(processCtx)
+			require.Eventually(t, func() bool { return len(client.Actions()) > 0 }, time.Second, time.Millisecond)
+			ctx, cancel := context.WithCancel(processCtx)
+			want := context.Canceled
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(processCtx, 30*time.Millisecond)
+				want = context.DeadlineExceeded
+			}
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- informer.WaitForSync(ctx) }()
+			if !deadline {
+				select {
+				case err := <-done:
+					t.Fatalf("WaitForSync returned before cancellation: %v", err)
+				case <-time.After(30 * time.Millisecond):
+				}
+				cancel()
+			}
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, want)
+			case <-time.After(time.Second):
+				t.Fatal("WaitForSync ignored context completion")
+			}
+			_, err = informer.List()
+			require.ErrorIs(t, err, ErrNotSynced)
+		})
+	}
 }
