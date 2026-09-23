@@ -238,6 +238,16 @@ type ContainerDeviceRequest struct {
 	Memreq           int32
 	MemPercentagereq int32
 	Coresreq         int32
+	// TotalCoresreq preserves a NeuronCore request until the candidate node's
+	// cores-per-device geometry is known. Other backends leave it zero.
+	TotalCoresreq int64
+}
+
+// CoreMaskAccounting is implemented by backends whose Usedcores values are
+// bit masks rather than additive core counts.
+type CoreMaskAccounting interface {
+	AccumulateCores(used, allocated int32) int32
+	CountAllocatedCores(allocated int32) int64
 }
 
 type ContainerDevices []ContainerDevice

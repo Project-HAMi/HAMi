@@ -46,6 +46,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -130,6 +131,39 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
+	previous := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{
+		awsneuron.AWSNeuronDevice: awsneuron.InitAWSNeuronDevice(awsneuron.AWSNeuronConfig{
+			ResourceCountName: "aws.amazon.com/neuron",
+			ResourceCoreName:  "aws.amazon.com/neuroncore",
+		}),
+	}
+	t.Cleanup(func() { device.DevicesMap = previous })
+	nodes := newNodeManager()
+	nodes.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{awsneuron.AWSNeuronDevice: {{
+			ID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice,
+			Count: 4, Devcore: 15, Health: true,
+		}}},
+	})
+	pods := device.NewPodManager()
+	for i, mask := range []int32{1, 2} {
+		pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			UID:  types.UID(fmt.Sprintf("neuron-%d", i)),
+			Name: fmt.Sprintf("neuron-%d", i), Namespace: "default",
+		}}, "node1", device.PodDevices{awsneuron.AWSNeuronDevice: {{
+			{UUID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice, Usedcores: mask},
+		}}})
+	}
+	s := Scheduler{nodeManager: nodes, podManager: pods}
+	nodeNames := []string{"node1"}
+	usage, _, _, err := s.getNodesUsage(&nodeNames, nil)
+	require.NoError(t, err)
+	assert.Equal(t, (*usage)["node1"].Devices.DeviceLists[0].Device.Usedcores, int32(3))
 }
 
 // Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()

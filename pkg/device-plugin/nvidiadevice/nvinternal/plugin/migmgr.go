@@ -715,11 +715,19 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 }
 
 func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocationKey]struct{}) error {
+	_, err := m.ReconcileActiveAllocationsWithDestroyed(active)
+	return err
+}
+
+// ReconcileActiveAllocationsWithDestroyed reports only MIG UUIDs whose GI/CI
+// pair was actually destroyed, so CDI cleanup cannot remove a live entry.
+func (m *MigInstanceManager) ReconcileActiveAllocationsWithDestroyed(active map[migAllocationKey]struct{}) ([]string, error) {
 	done, err := m.beginOperation()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer done()
+	destroyed := []string{}
 
 	m.mu.Lock()
 	keys := make([]migAllocationKey, 0, len(m.byAllocation))
@@ -740,16 +748,17 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 			oldUUID := inst.MigUUID
 			if err := m.destroyMigInstance(key.GPUIndex, inst); err != nil {
 				lk.Unlock()
-				return err
+				return destroyed, err
 			}
 			m.mu.Lock()
 			delete(m.byAllocation, key)
 			delete(m.byAllocationMigUUID, oldUUID)
 			m.mu.Unlock()
+			destroyed = append(destroyed, oldUUID)
 		}
 		lk.Unlock()
 	}
-	return nil
+	return destroyed, nil
 }
 
 type migAllocationRuntimeInfo struct {

@@ -243,7 +243,11 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d does not divide evenly across %d devices", corenums, n)}
 					}
 					corenums /= n
-				} else if corenums > 100 {
+				}
+				// Re-check after the division: a total that divides evenly can
+				// still leave a per card value above 100, and a value above 100
+				// with a single device never entered the branch above.
+				if corenums > 100 {
 					klog.ErrorS(nil, "iluvatar core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
