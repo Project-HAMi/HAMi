@@ -32,6 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
 )
 
 // TestResolveVGPUCacheConfigReusesExistingEnvironment checks that explicit shared-cache settings
@@ -262,5 +264,37 @@ func TestVGPUCacheEventQueueDoesNotBlock(t *testing.T) {
 	case <-queued:
 	case <-time.After(time.Second):
 		t.Fatal("full notification queue blocked cleanup")
+	}
+}
+
+// TestVGPUCacheGracePeriodIndependentOfMonitor covers the new environment
+// contract, including startup rejection of negative durations by the manager.
+func TestVGPUCacheGracePeriodIndependentOfMonitor(t *testing.T) {
+	for _, tc := range []struct {
+		name, grace, resync string
+		want                time.Duration
+		invalid             bool
+	}{
+		{name: "default", want: 5 * time.Minute},
+		{name: "legacy setting ignored", resync: "1s", want: 5 * time.Minute},
+		{name: "independent custom values", grace: "7m", resync: "1s", want: 7 * time.Minute},
+		{name: "invalid uses default", grace: "invalid", resync: "1s", want: 5 * time.Minute},
+		{name: "zero grace", grace: "0s", resync: "5m"},
+		{name: "negative rejected", grace: "-1s", want: -time.Second, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HAMI_VGPU_CACHE_GRACE_PERIOD", tc.grace)
+			t.Setenv("HAMI_RESYNC_INTERVAL", tc.resync)
+			t.Setenv(vgpuCacheRootEnvName, t.TempDir())
+			cfg := resolveVGPUCacheConfig()
+			require.Equal(t, tc.want, cfg.GracePeriod)
+			list := func() ([]*corev1.Pod, error) { return nil, nil }
+			_, err := vgpucache.New(cfg, list, list)
+			if tc.invalid {
+				require.ErrorContains(t, err, "grace period must not be negative")
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }

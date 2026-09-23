@@ -173,9 +173,41 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
-| `devicePlugin.monitor.resyncInterval` | Pod informer resync interval and stale cache GC grace period | `"5m"` |
+| `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
+
+### vGPU Cache Garbage Collection
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devicePlugin.vgpuCache.gracePeriod` | Minimum directory age (based on modification time) before the NVIDIA Device Plugin considers a stale libvgpu cache directory for deletion. Independent of monitor resync. | `"5m"` |
+
+The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
+`HAMI_VGPU_CACHE_GRACE_PERIOD`. Use a Go duration string such as `"30s"`, `"5m"`,
+or `"1h"`. An omitted or empty value uses `"5m"`. An invalid duration string logs
+a warning and uses `"5m"`; negative durations prevent Device Plugin startup.
+`"0s"` removes the grace period, **not** garbage collection: deletion still
+requires live Pod confirmation and the existing safety checks.
+
+```yaml
+devicePlugin:
+  monitor:
+    resyncInterval: "30s"
+  vgpuCache:
+    gracePeriod: "5m"
+```
+
+**Migration:** `devicePlugin.monitor.resyncInterval` / `HAMI_RESYNC_INTERVAL`
+no longer controls Device Plugin directory GC. If you previously used a custom
+monitor resync value to tune cleanup, set `devicePlugin.vgpuCache.gracePeriod`
+explicitly to retain that GC grace period. For deployments without Helm, set
+`HAMI_VGPU_CACHE_GRACE_PERIOD` on the Device Plugin container. Without the new
+setting, GC uses `5m`, regardless of monitor resync. The monitor retains its
+existing resync and mmap-release behavior and does not delete directories.
+
+This setting does not change the GC scan interval, confirmation retry backoff,
+or the five-failure limit for directory deletion.
 
 ### Device Plugin Other Configuration
 

@@ -373,6 +373,12 @@ devicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
+  vgpuCache:
+    # @param devicePlugin.vgpuCache.gracePeriod Minimum directory age before stale cache GC.
+    # Independent of monitor.resyncInterval. Uses Go duration syntax (e.g. "5m").
+    # "0s" removes the grace period, but still requires live Pod confirmation.
+    # Negative durations are rejected; invalid duration strings fall back to "5m".
+    gracePeriod: "5m"
   monitor:
     ## @param image.registry monitor image registry
     ## @param image.repository monitor image repository
@@ -396,6 +402,8 @@ devicePlugin:
       ##
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
+    # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
+    # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
     extraArgs:
       - -v=4

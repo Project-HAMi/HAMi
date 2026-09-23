@@ -65,7 +65,7 @@ const (
 	defaultVGPUCacheScanInterval = 5 * time.Second
 	defaultVGPUCacheGracePeriod  = 5 * time.Minute
 	vgpuCacheRootEnvName         = "HAMI_VGPU_CACHE_ROOT"
-	vgpuCacheGracePeriodEnvName  = "HAMI_RESYNC_INTERVAL"
+	vgpuCacheGracePeriodEnvName  = "HAMI_VGPU_CACHE_GRACE_PERIOD"
 	gpuOperatorNvidiaDriverRoot  = "/run/nvidia/driver"
 	hostContainerRoot            = "/host"
 )

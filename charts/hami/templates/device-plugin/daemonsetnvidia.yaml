@@ -136,8 +136,8 @@ spec:
               value: {{ .Values.global.gpuHookPath }}
             - name: HAMI_VGPU_CACHE_ROOT
               value: {{ .Values.devicePlugin.monitor.ctrPath | quote }}
-            - name: HAMI_RESYNC_INTERVAL
-              value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            - name: HAMI_VGPU_CACHE_GRACE_PERIOD
+              value: {{ get (.Values.devicePlugin.vgpuCache | default dict) "gracePeriod" | default "5m" | quote }}
             {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
             - name: LIBVGPU_HOSTPID_BROKER
               value: "1"
