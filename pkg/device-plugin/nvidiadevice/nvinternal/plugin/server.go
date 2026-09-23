@@ -777,6 +777,15 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 		}
 		return nil
 	}
+	// Already non-MIG hardware needs no Pod lookup or mode mutation. In
+	// particular, a delayed informer must not block ordinary HamiCore startup.
+	needsDisable, err := plugin.migMgr.needsMigDisable(deviceNumbers)
+	if err != nil {
+		return fmt.Errorf("inspect MIG state for %s: %w", plugin.operatingMode, err)
+	}
+	if !needsDisable {
+		return nil
+	}
 	pods, detectErr := plugin.listLiveNodePodSnapshot()
 	var inUse map[int]struct{}
 	if detectErr == nil {

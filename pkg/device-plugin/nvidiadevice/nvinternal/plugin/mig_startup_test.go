@@ -30,6 +30,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 )
 
 func TestSortedIntSetKeys(t *testing.T) {
@@ -416,5 +417,103 @@ func TestMIGCleanupRequiresLiveConfirmation(t *testing.T) {
 			require.Contains(t, manager.byAllocation, key)
 			require.Equal(t, primed, plugin.migPrimed)
 		}
+	}
+}
+
+// TestPodSyncGateUsesResolvedMode checks that only the final MIG mode waits,
+// including a node label overriding a configured MIG mode with remote mode.
+func TestPodSyncGateUsesResolvedMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, configured string
+		remote           bool
+		wait             bool
+	}{
+		{name: "MIG", configured: nvidia.MigMode, wait: true},
+		{name: "HamiCore", configured: nvidia.HamiCoreMode},
+		{name: "remote label overrides MIG", configured: nvidia.MigMode, remote: true},
+		{name: "unlabelled remote falls back", configured: nvidia.RemoteMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &corev1.Node{}
+			if tc.remote {
+				node.Labels = map[string]string{remotegpu.LupineServerLabel: ""}
+			}
+			calls := 0
+			o := &options{}
+			WithNodePodSync(func(ctx context.Context) error {
+				calls++
+				deadline, ok := ctx.Deadline()
+				require.True(t, ok)
+				require.InDelta(t, 30, time.Until(deadline).Seconds(), 1)
+				return nil
+			})(o)
+			err := o.waitForPodSync(t.Context(), resolveOperatingMode(tc.configured, node))
+			require.NoError(t, err)
+			if tc.wait {
+				require.Equal(t, 1, calls)
+			} else {
+				require.Zero(t, calls)
+			}
+		})
+	}
+}
+
+// TestPodSyncGatePropagatesFailure preserves cancellation, deadlines and missing
+// configuration as startup failures instead of permitting unsynced MIG recovery.
+func TestPodSyncGatePropagatesFailure(t *testing.T) {
+	o := &options{}
+	require.ErrorContains(t, o.waitForPodSync(t.Context(), nvidia.MigMode), "not configured")
+	for _, deadline := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(t.Context())
+		want := context.Canceled
+		if deadline {
+			cancel()
+			ctx, cancel = context.WithTimeout(t.Context(), time.Millisecond)
+			want = context.DeadlineExceeded
+		} else {
+			cancel()
+		}
+		o.waitForNodePodSync = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+		require.ErrorIs(t, o.waitForPodSync(ctx, nvidia.MigMode), want)
+		cancel()
+	}
+	failure := errors.New("sync unavailable")
+	o.waitForNodePodSync = func(context.Context) error { return failure }
+	require.ErrorIs(t, o.waitForPodSync(t.Context(), nvidia.MigMode), failure)
+}
+
+// TestHamiCoreStartupWithoutPodSync verifies hardware-only startup and protects
+// current or pending MIG instances when Pod state is unavailable.
+func TestHamiCoreStartupWithoutPodSync(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		current, pending int
+		ret              nvml.Return
+		wantError        bool
+		liveCalls        int
+	}{
+		{name: "disabled", ret: nvml.SUCCESS},
+		{name: "unsupported", ret: nvml.ERROR_NOT_SUPPORTED},
+		{name: "enabled", current: nvml.DEVICE_MIG_ENABLE, pending: nvml.DEVICE_MIG_ENABLE, ret: nvml.SUCCESS, wantError: true, liveCalls: 1},
+		{name: "pending enable", pending: nvml.DEVICE_MIG_ENABLE, ret: nvml.SUCCESS, wantError: true, liveCalls: 1},
+		{name: "pending disable", current: nvml.DEVICE_MIG_ENABLE, ret: nvml.SUCCESS, wantError: true, liveCalls: 1},
+		{name: "unknown hardware state", ret: nvml.ERROR_UNKNOWN, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := &nvmlmock.Device{GetMigModeFunc: func() (int, int, nvml.Return) { return tc.current, tc.pending, tc.ret }}
+			// No mutation methods are mocked: any attempt to destroy an instance
+			// or change MIG mode fails the test.
+			p, _ := a100HamiCorePlugin(t, dev)
+			liveCalls := 0
+			p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nodepodinformer.ErrNotSynced }
+			p.listLiveNodePods = func() ([]*corev1.Pod, error) { liveCalls++; return nil, nodepodinformer.ErrNotSynced }
+			err := p.applyStartupMigMode(1, nil)
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.liveCalls, liveCalls)
+		})
 	}
 }

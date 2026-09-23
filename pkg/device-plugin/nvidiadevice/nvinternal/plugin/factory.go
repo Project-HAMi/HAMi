@@ -35,6 +35,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
@@ -63,9 +64,10 @@ type options struct {
 
 	imexChannels imex.Channels
 
-	listNodePods     func() ([]*corev1.Pod, error)
-	listLiveNodePods func() ([]*corev1.Pod, error)
-	prepareVGPUCache func(string, string) (string, error)
+	waitForNodePodSync func(context.Context) error
+	listNodePods       func() ([]*corev1.Pod, error)
+	listLiveNodePods   func() ([]*corev1.Pod, error)
+	prepareVGPUCache   func(string, string) (string, error)
 }
 
 // New a new set of plugins with the supplied options.
@@ -91,6 +93,9 @@ func New(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, de
 	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
+	}
+	if err := o.waitForPodSync(ctx, mode); err != nil {
+		return nil, err
 	}
 	if setter, ok := o.cdiHandler.(interface{ SetDynamicMIGMode(bool) }); ok {
 		setter.SetDynamicMIGMode(mode == nvidia.MigMode)
@@ -165,4 +170,21 @@ func (o *options) resolveStrategy(strategy string) string {
 		return "tegra"
 	}
 	return strategy
+}
+
+// waitForPodSync gates MIG construction on initial Pod synchronization. Other
+// modes can start safely without a Pod snapshot and leave GC to retry later.
+func (o *options) waitForPodSync(ctx context.Context, mode string) error {
+	if mode != nvidia.MigMode {
+		return nil
+	}
+	if o.waitForNodePodSync == nil {
+		return fmt.Errorf("node Pod synchronization is not configured for MIG mode")
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := o.waitForNodePodSync(syncCtx); err != nil {
+		return fmt.Errorf("wait for device-plugin node Pod informer sync: %w", err)
+	}
+	return nil
 }

@@ -33,6 +33,7 @@
 package plugin
 
 import (
+	"context"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
@@ -116,4 +117,9 @@ func WithVGPUCachePreparer(prepare func(string, string) (string, error)) Option 
 	return func(m *options) {
 		m.prepareVGPUCache = prepare
 	}
+}
+
+// WithNodePodSync injects the initial synchronization gate used only by MIG mode.
+func WithNodePodSync(wait func(context.Context) error) Option {
+	return func(m *options) { m.waitForNodePodSync = wait }
 }

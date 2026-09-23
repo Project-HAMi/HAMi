@@ -297,12 +297,6 @@ func start(c *cli.Context, o *options) (resultErr error) {
 		return fmt.Errorf("create vGPU cache manager: %w", err)
 	}
 	nodePods.Start(processCtx)
-	syncCtx, cancelSync := context.WithTimeout(processCtx, 30*time.Second)
-	err = nodePods.WaitForSync(syncCtx)
-	cancelSync()
-	if err != nil {
-		return fmt.Errorf("wait for device-plugin node Pod informer sync: %w", err)
-	}
 	go cacheManager.Run(processCtx)
 
 	kubeletSocketDir := filepath.Dir(o.kubeletSocket)
@@ -348,7 +342,7 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, nodePods.List, listLiveNodePods, cacheManager.Prepare)
+	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, nodePods.List, listLiveNodePods, nodePods.WaitForSync, cacheManager.Prepare)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
@@ -444,6 +438,7 @@ func startPlugins(
 	o *options,
 	hostPIDBroker *runningHostPIDBroker,
 	listNodePods, listLiveNodePods func() ([]*corev1.Pod, error),
+	waitForNodePodSync func(context.Context) error,
 	prepareVGPUCache func(string, string) (string, error),
 ) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
@@ -498,7 +493,7 @@ func startPlugins(
 
 	// Get the set of plugins.
 	klog.Info("Retrieving plugins.")
-	plugins, err := GetPlugins(processCtx, infolib, nvmllib, devicelib, &devConfig, listNodePods, listLiveNodePods, prepareVGPUCache)
+	plugins, err := GetPlugins(processCtx, infolib, nvmllib, devicelib, &devConfig, listNodePods, listLiveNodePods, waitForNodePodSync, prepareVGPUCache)
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
