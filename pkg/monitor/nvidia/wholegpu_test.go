@@ -315,7 +315,8 @@ func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
 
 	got, ok := l.containers["uid1_ctr"]
 	assert.Equal(t, ok, true)
-	assert.Equal(t, got.synthesized, true)
+	_, owned := l.wholeGPU.ownedContainerKeys["uid1_ctr"]
+	assert.Equal(t, owned, true)
 	assert.Equal(t, got.PodUID, "uid1")
 	assert.Equal(t, got.ContainerName, "ctr")
 	assert.Assert(t, got.data == nil)
@@ -360,7 +361,8 @@ func Test_reconcileWholeGPU_replacesRealShmEntry(t *testing.T) {
 	got, ok := l.containers[key]
 	assert.Equal(t, ok, true)
 	assert.Assert(t, got != existing)
-	assert.Equal(t, got.synthesized, true)
+	_, owned := l.wholeGPU.ownedContainerKeys[key]
+	assert.Equal(t, owned, true)
 	assert.Assert(t, got.data == nil)
 }
 
@@ -611,6 +613,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 
 		got, ok := l.containers["uid8_ctr"]
 		assert.Equal(t, ok, true)
-		assert.Equal(t, got.synthesized, true)
+		_, owned := l.wholeGPU.ownedContainerKeys["uid8_ctr"]
+		assert.Equal(t, owned, true)
 	})
 }

@@ -109,6 +109,14 @@ type wholeGPUState struct {
 	// consume this window; see causePhysUnreadable.
 	firstSeenAt map[string]time.Time
 
+	// ownedContainerKeys tracks keys in ContainerLister.containers that were
+	// installed by reconcileWholeGPU. Only these keys are garbage-collected
+	// when the pod's NVIDIA allocation annotation disappears; cache-file-backed
+	// entries remain owned by Update's cache-dir scan.
+	//
+	// Guarded by ContainerLister.mutex: reconcileWholeGPU runs inside Update().
+	ownedContainerKeys map[string]struct{}
+
 	// physTotalMiB resolves a device's physical memory in MiB via NVML;
 	// declared as a field so tests can stub it. Populated when the state
 	// is created.
@@ -233,9 +241,10 @@ func (u *wholeGPUUsage) deviceMemory(idx int) (nvml.Memory, bool) {
 func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
 	if l.wholeGPU == nil {
 		l.wholeGPU = &wholeGPUState{
-			nvmllib:     nvml.New(),
-			verdicts:    make(map[string]wholeGPUVerdict),
-			firstSeenAt: make(map[string]time.Time),
+			nvmllib:            nvml.New(),
+			verdicts:           make(map[string]wholeGPUVerdict),
+			firstSeenAt:        make(map[string]time.Time),
+			ownedContainerKeys: make(map[string]struct{}),
 		}
 		l.wholeGPU.getNodeDevices = l.fetchNodeDevices
 		l.wholeGPU.physTotalMiB = func(uuid string) (int32, bool) {
@@ -243,6 +252,9 @@ func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
 		}
 	}
 	state := l.wholeGPU
+	if state.ownedContainerKeys == nil {
+		state.ownedContainerKeys = make(map[string]struct{})
+	}
 	now := time.Now()
 
 	if !state.nvmlInitialized {
@@ -329,17 +341,18 @@ func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
 				l.containers[cand.key] = &ContainerUsage{
 					PodUID:        cand.podUID,
 					ContainerName: cand.ctrName,
-					synthesized:   true,
 					Info:          &wholeGPUUsage{nvmllib: state.nvmllib, uuids: uuids},
 				}
+				state.ownedContainerKeys[cand.key] = struct{}{}
 				klog.Infof("wholegpu: synthesized whole-GPU usage for %s (%d device(s))", cand.key, len(uuids))
 			}
 		}
 	}
 
-	for key, c := range l.containers {
-		if c.synthesized && !stillAnnotated[key] {
+	for key := range state.ownedContainerKeys {
+		if !stillAnnotated[key] {
 			delete(l.containers, key)
+			delete(state.ownedContainerKeys, key)
 		}
 	}
 	for key := range state.verdicts {

@@ -78,10 +78,6 @@ type ContainerUsage struct {
 	ContainerName string
 	data          []byte
 	Info          UsageInfo
-	// synthesized marks entries created by reconcileWholeGPU from NVML data
-	// rather than loaded from a libvgpu shm cache file. data is always nil
-	// for these, so no Munmap is required when they're removed.
-	synthesized bool
 }
 
 type ContainerLister struct {
