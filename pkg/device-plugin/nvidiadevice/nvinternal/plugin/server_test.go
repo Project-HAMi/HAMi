@@ -1132,6 +1132,32 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	require.Empty(t, mode, "no mode is chosen when the node is unknown")
 }
 
+// REPORT_NODE_CAPACITY is the env-var escape hatch for enabling node capacity
+// reporting without a config file or CLI flag change.
+func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
+	previous := client.KubeClient
+	nodeName := "node-report-capacity"
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	t.Cleanup(func() { client.KubeClient = previous })
+
+	previousNodeName := util.NodeName
+	util.NodeName = nodeName
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+
+	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+
+	t.Setenv("REPORT_NODE_CAPACITY", "true")
+
+	sConfig, _, err := LoadNvidiaDevicePluginConfig()
+	require.NoError(t, err)
+	require.NotNil(t, sConfig.NvidiaConfig.ReportNodeCapacity)
+	require.True(t, *sConfig.NvidiaConfig.ReportNodeCapacity)
+}
+
 // The lupine label is the operator's one declaration that a node serves its
 // GPUs over the network. Deriving the mode from it keeps the plugin and the
 // scheduler's pool from disagreeing about which fleet a node belongs to.

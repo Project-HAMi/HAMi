@@ -716,3 +716,95 @@ func TestRegisterInAnnotationReportNodeCapacityAllUnhealthy(t *testing.T) {
 		t.Errorf("nvidia.com/gpucores allocatable = %v, want 0 once all devices are unhealthy", allocCores.Value())
 	}
 }
+
+// TestRegisterInAnnotationReportNodeCapacityDefaultsAndPatchError covers the
+// default resource-name fallback (ResourceMemoryName/ResourceCoreName unset)
+// and the patch-error path, which is logged but does not fail registration.
+func TestRegisterInAnnotationReportNodeCapacityDefaultsAndPatchError(t *testing.T) {
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	t.Cleanup(func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	})
+
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+
+	nodeName := "node-test-capacity-defaults"
+	util.NodeName = nodeName
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fake node: %v", err)
+	}
+
+	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok || patchAction.GetSubresource() != "status" {
+			return false, nil, nil
+		}
+		return true, nil, fmt.Errorf("simulated patch failure")
+	})
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				"GPU-1111": &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "GPU-1111", Health: "Healthy"}},
+			}
+		},
+	}
+
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	mockDev := &nvmlmock.Device{
+		GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{Total: 32768 * 1024 * 1024}, nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100", nvml.SUCCESS },
+		GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '0', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+		},
+	}
+
+	originalGetHandle := nvml.DeviceGetHandleByUUID
+	nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+		return mockDev, nvml.SUCCESS
+	}
+	defer func() { nvml.DeviceGetHandleByUUID = originalGetHandle }()
+
+	splitCount := uint(2)
+	coreScaling := 1.0
+	memScaling := 1.0
+	reportCap := true
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+		schedulerConfig: nvidia.NvidiaConfig{
+			// ResourceMemoryName and ResourceCoreName left unset to exercise
+			// the "nvidia.com/gpumem"/"nvidia.com/gpucores" fallback defaults.
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceSplitCount:    &splitCount,
+				DeviceCoreScaling:   &coreScaling,
+				DeviceMemoryScaling: &memScaling,
+				ReportNodeCapacity:  &reportCap,
+			},
+		},
+	}
+
+	// A failed capacity patch is logged, not propagated: registration itself
+	// must still succeed.
+	if _, err := plugin.RegisterInAnnotation(); err != nil {
+		t.Fatalf("RegisterInAnnotation() error = %v, want nil (patch errors are logged, not returned)", err)
+	}
+}
