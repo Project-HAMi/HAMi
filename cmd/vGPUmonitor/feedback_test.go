@@ -18,8 +18,11 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 
@@ -269,4 +272,87 @@ func TestObserveDoesNotAllocatePerPriorityValue(t *testing.T) {
 	// The container still has to be accounted for, not skipped.
 	assert.DeepEqual(t, blocked, []bool{false})
 	assert.DeepEqual(t, throttled, []bool{false})
+}
+
+// blockingFeedbackInfo pauses Observe inside either a read or a feedback write.
+type blockingFeedbackInfo struct {
+	*stubInfo
+	blockRead bool
+	entered   chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+// pause blocks the selected feedback access until the test releases it.
+func (b *blockingFeedbackInfo) pause() {
+	b.once.Do(func() { close(b.entered); <-b.release })
+}
+
+// GetRecentKernel pauses reads when requested to expose concurrent mapping cleanup.
+func (b *blockingFeedbackInfo) GetRecentKernel() int32 {
+	if b.blockRead {
+		b.pause()
+	}
+	return b.stubInfo.GetRecentKernel()
+}
+
+// SetRecentKernel pauses writes when requested to expose concurrent mapping cleanup.
+func (b *blockingFeedbackInfo) SetRecentKernel(value int32) {
+	if !b.blockRead {
+		b.pause()
+	}
+	b.stubInfo.SetRecentKernel(value)
+}
+
+// TestObserveProtectsUsageUntilReadsAndWritesFinish checks that Update cannot remove mappings
+// during feedback reads or writes.
+func TestObserveProtectsUsageUntilReadsAndWritesFinish(t *testing.T) {
+	for _, blockRead := range []bool{true, false} {
+		t.Run(fmt.Sprintf("blockRead=%v", blockRead), func(t *testing.T) {
+			info := &blockingFeedbackInfo{
+				stubInfo:  &stubInfo{recentKernel: 2, uuids: []string{"gpu-0"}},
+				blockRead: blockRead, entered: make(chan struct{}), release: make(chan struct{}),
+			}
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(info.release) }) }
+			defer release()
+			lister := &nvidia.ContainerLister{}
+			lister.SetContainersForTest(map[string]*nvidia.ContainerUsage{"pod_gpu": {Info: info}})
+			observed := make(chan struct{})
+			go func() { Observe(lister); close(observed) }()
+			select {
+			case <-info.entered:
+			case <-time.After(time.Second):
+				t.Fatal("Observe did not access Info")
+			}
+			started, updated := make(chan struct{}), make(chan error, 1)
+			go func() { close(started); updated <- lister.Update() }()
+			<-started
+			select {
+			case <-updated:
+				release()
+				<-observed
+				t.Fatal("Update removed containers while Observe was still accessing Info")
+			case <-time.After(30 * time.Millisecond):
+			}
+			release()
+			select {
+			case <-observed:
+			case <-time.After(time.Second):
+				t.Fatal("Observe did not finish")
+			}
+			select {
+			case err := <-updated:
+				// The zero-value lister has no root; Update releases its entries.
+				if !os.IsNotExist(err) {
+					t.Fatalf("Update error = %v, want missing root", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Update remained blocked after Observe finished")
+			}
+			lister.Lock()
+			defer lister.UnLock()
+			assert.Equal(t, len(lister.ListContainers()), 0)
+		})
+	}
 }

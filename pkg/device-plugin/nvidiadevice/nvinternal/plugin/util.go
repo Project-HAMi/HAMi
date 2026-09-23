@@ -326,6 +326,8 @@ func containsModel(target string, models []string) bool {
 	return false
 }
 
+// GetContainerDeviceStrArray resolves container devices. In MIG mode the caller
+// must hold applyMutex across this call and the runtime annotation update.
 func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevices, pod *corev1.Pod, containerName string) ([]string, error) {
 	if nv.operatingMode != "mig" {
 		out := make([]string, 0, len(c))
@@ -368,9 +370,6 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	sort.Slice(containerAllocations, func(i, j int) bool { return containerAllocations[i].DeviceIndex < containerAllocations[j].DeviceIndex })
 	if len(containerAllocations) != len(c) {
 		return nil, fmt.Errorf("container %s has %d MIG reservations, requested %d devices", containerName, len(containerAllocations), len(c))
-	}
-	if err := nv.reconcileActiveMigAllocations(); err != nil {
-		return nil, fmt.Errorf("reconcile MIG allocations before allocation: %w", err)
 	}
 	createdMigUUIDs := make([]string, 0, len(c))
 	allocationCompleted := false

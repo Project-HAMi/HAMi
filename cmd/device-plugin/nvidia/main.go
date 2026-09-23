@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -33,13 +34,18 @@ import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/watch"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -53,10 +59,15 @@ type options struct {
 }
 
 const (
-	autoNvidiaDriverRoot        = "auto"
-	hostNvidiaDriverRoot        = "/"
-	gpuOperatorNvidiaDriverRoot = "/run/nvidia/driver"
-	hostContainerRoot           = "/host"
+	autoNvidiaDriverRoot         = "auto"
+	hostNvidiaDriverRoot         = "/"
+	defaultVGPUCacheRoot         = "/usr/local/vgpu/containers"
+	defaultVGPUCacheScanInterval = 5 * time.Second
+	defaultVGPUCacheGracePeriod  = 5 * time.Minute
+	vgpuCacheRootEnvName         = "HAMI_VGPU_CACHE_ROOT"
+	vgpuCacheGracePeriodEnvName  = "HAMI_VGPU_CACHE_GRACE_PERIOD"
+	gpuOperatorNvidiaDriverRoot  = "/run/nvidia/driver"
+	hostContainerRoot            = "/host"
 )
 
 var gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
@@ -270,9 +281,27 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 	return config, nil
 }
 
+// start owns the process lifecycle, including Pod synchronization, cache GC, and plugin
+// restarts.
 func start(c *cli.Context, o *options) (resultErr error) {
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	client.InitGlobalClient()
+	processCtx, cancelProcess := context.WithCancel(c.Context)
+	defer cancelProcess()
+
+	nodePods, err := nodepodinformer.New(client.GetClient(), util.NodeName)
+	if err != nil {
+		return fmt.Errorf("create device-plugin node Pod informer: %w", err)
+	}
+	listLiveNodePods := func() ([]*corev1.Pod, error) { return nodePods.ListFresh(processCtx) }
+	cacheConfig := resolveVGPUCacheConfig()
+	cacheConfig.OnAbandoned = startVGPUCacheEvents(processCtx, client.GetClient(), util.NodeName)
+	cacheManager, err := vgpucache.New(cacheConfig, nodePods.List, listLiveNodePods)
+	if err != nil {
+		return fmt.Errorf("create vGPU cache manager: %w", err)
+	}
+	nodePods.Start(processCtx)
+	go cacheManager.Run(processCtx)
 
 	kubeletSocketDir := filepath.Dir(o.kubeletSocket)
 	klog.Infof("Starting FS watcher for %v", kubeletSocketDir)
@@ -317,7 +346,7 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(c, o, hostPIDBroker)
+	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, nodePods.List, listLiveNodePods, nodePods.WaitForSync, cacheManager.Prepare)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
@@ -376,8 +405,46 @@ exit:
 	return resultErr
 }
 
-func startPlugins(c *cli.Context, o *options,
-	hostPIDBroker *runningHostPIDBroker) ([]plugin.Interface, bool, error) {
+// resolveVGPUCacheConfig resolves the shared cache root and GC grace period from the deployment
+// environment.
+func resolveVGPUCacheConfig() vgpucache.Config {
+	root := os.Getenv(vgpuCacheRootEnvName)
+	if root == "" {
+		hookPath := os.Getenv("HOOK_PATH")
+		if hookPath == "" {
+			root = defaultVGPUCacheRoot
+		} else {
+			root = filepath.Join(hookPath, "vgpu", "containers")
+		}
+	}
+
+	gracePeriod := defaultVGPUCacheGracePeriod
+	if raw := os.Getenv(vgpuCacheGracePeriodEnvName); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			klog.Warningf("Invalid %s value %q, using default %v", vgpuCacheGracePeriodEnvName, raw, gracePeriod)
+		} else {
+			gracePeriod = parsed
+		}
+	}
+	return vgpucache.Config{
+		Root:         root,
+		ScanInterval: defaultVGPUCacheScanInterval,
+		GracePeriod:  gracePeriod,
+	}
+}
+
+// startPlugins builds and starts plugins with process-scoped Pod and cache callbacks, reporting
+// whether startup should retry.
+func startPlugins(
+	processCtx context.Context,
+	c *cli.Context,
+	o *options,
+	hostPIDBroker *runningHostPIDBroker,
+	listNodePods, listLiveNodePods func() ([]*corev1.Pod, error),
+	waitForNodePodSync func(context.Context) error,
+	prepareVGPUCache func(string, string) (string, error),
+) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
 	klog.Info("Loading configuration.")
 	config, err := loadConfig(c, o.flags)
@@ -430,7 +497,7 @@ func startPlugins(c *cli.Context, o *options,
 
 	// Get the set of plugins.
 	klog.Info("Retrieving plugins.")
-	plugins, err := GetPlugins(c.Context, infolib, nvmllib, devicelib, &devConfig)
+	plugins, err := GetPlugins(processCtx, infolib, nvmllib, devicelib, &devConfig, listNodePods, listLiveNodePods, waitForNodePodSync, prepareVGPUCache)
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
@@ -617,5 +684,54 @@ func disableResourceRenamingInConfig(config *spec.Config) {
 	}
 	if setsDevices {
 		klog.Warning("Customizing the 'devices' field in sharing.timeSlicing.resources is not yet supported in the config. Ignoring...")
+	}
+}
+
+// startVGPUCacheEvents queues one warning per abandoned directory. A bounded
+// worker issues no LISTs, limits reports to one per five seconds, and does not
+// retry failed notifications: the cleanup decision and Error log remain valid.
+func startVGPUCacheEvents(ctx context.Context, kubeClient kubernetes.Interface, nodeName string) func(string, int, error) {
+	messages := make(chan string, 16)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case message := <-messages:
+				if ctx.Err() != nil {
+					return
+				}
+				reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				node, err := kubeClient.CoreV1().Nodes().Get(reportCtx, nodeName, metav1.GetOptions{})
+				if err == nil {
+					now := metav1.Now()
+					_, err = kubeClient.CoreV1().Events(corev1.NamespaceDefault).Create(reportCtx, &corev1.Event{
+						ObjectMeta:     metav1.ObjectMeta{GenerateName: "vgpu-cache-cleanup-", Namespace: corev1.NamespaceDefault},
+						InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: node.Name, UID: node.UID},
+						Type:           corev1.EventTypeWarning, Reason: "VGPUCacheCleanupAbandoned", Message: message,
+						Source:         corev1.EventSource{Component: "hami-device-plugin", Host: nodeName},
+						FirstTimestamp: now, LastTimestamp: now, Count: 1,
+					}, metav1.CreateOptions{})
+				}
+				cancel()
+				if err != nil {
+					klog.ErrorS(err, "Failed to report abandoned vGPU cache cleanup", "node", nodeName, "message", message)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}
+	}()
+	return func(path string, attempts int, err error) {
+		message := fmt.Sprintf("Stopped cleaning %s after %d deletion failures: %v. Remove it manually or restart the device plugin after fixing the cause.", path, attempts, err)
+		select {
+		case <-ctx.Done():
+		case messages <- message:
+		default:
+			klog.ErrorS(nil, "vGPU cache warning queue is full; notification dropped", "message", message)
+		}
 	}
 }
