@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -144,6 +145,7 @@ func TestMigRecoveryAllowsPendingReservations(t *testing.T) {
 		migMgr: manager, migResetDeviceCount: 1,
 		listNodePods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
 	}
+	plugin.listLiveNodePods = plugin.listNodePods
 	// No runtime identity exists yet. Recovery must allow Allocate to create it.
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.True(t, plugin.migPrimed)
@@ -178,6 +180,7 @@ func TestMigRecoveryRejectsInvalidRuntimeIdentity(t *testing.T) {
 					}}, nil
 				},
 			}
+			plugin.listLiveNodePods = plugin.listNodePods
 			// The mock has no destructive methods: any reset would panic.
 			require.Error(t, plugin.reconcileActiveMigAllocations())
 			require.False(t, plugin.migPrimed)
@@ -231,6 +234,7 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 			return nil, nil
 		},
 	}
+	plugin.listLiveNodePods = plugin.listNodePods
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
 	require.Zero(t, resets)
 	synced = true
@@ -296,7 +300,8 @@ func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
 	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 1, CIID: 2}
 	manager.byAllocationMigUUID["MIG-test"] = key
 	plugin := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true,
-		listNodePods: func() ([]*corev1.Pod, error) { return informer.ListFresh(t.Context()) },
+		listNodePods:     informer.List,
+		listLiveNodePods: func() ([]*corev1.Pod, error) { return informer.ListFresh(t.Context()) },
 	}
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.Contains(t, manager.byAllocation, key)
@@ -312,4 +317,104 @@ func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
 	require.Empty(t, manager.byAllocation)
 	require.Equal(t, 1, giDestroyed)
 	require.Equal(t, 1, ciDestroyed)
+}
+
+// TestMIGReconcileSkipsLiveListWithoutCandidates verifies idle and fully reserved
+// MIG layouts never poll the API server after startup.
+func TestMIGReconcileSkipsLiveListWithoutCandidates(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+	}}, Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	calls := 0
+	plugin := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true,
+		listNodePods:     func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
+		listLiveNodePods: func() ([]*corev1.Pod, error) { calls++; return nil, errors.New("API unavailable") },
+	}
+	for range 3 {
+		require.NoError(t, plugin.reconcileActiveMigAllocations())
+	}
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test"}
+	for range 3 {
+		require.NoError(t, plugin.reconcileActiveMigAllocations())
+	}
+	require.Zero(t, calls)
+	require.Contains(t, manager.byAllocation, key)
+}
+
+// TestMIGCleanupDiscardsConfirmationAcrossAllocate verifies slow API cleanup
+// releases the allocation lock and never deletes using a pre-allocation snapshot.
+func TestMIGCleanupDiscardsConfirmationAcrossAllocate(t *testing.T) {
+	manager, _ := mockMigRecoveryDevice(t)
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test"}
+	entered, release := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	plugin := &NvidiaDevicePlugin{migMgr: manager, migPrimed: true, operatingMode: nvidia.MigMode,
+		listNodePods: func() ([]*corev1.Pod, error) { return nil, nil },
+		listLiveNodePods: func() ([]*corev1.Pod, error) {
+			close(entered)
+			select {
+			case <-release:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+	}
+	done := make(chan error, 1)
+	go func() { done <- plugin.reconcileActiveMigAllocations() }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not request confirmation")
+	}
+	// Exercise the actual kubelet entry point while confirmation is blocked.
+	// Even an allocation that later fails invalidates the cleanup snapshot.
+	lookupErr := errors.New("pending Pod lookup failed")
+	previousLookup := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return nil, lookupErr }
+	t.Cleanup(func() { getPendingPod = previousLookup })
+	allocated := make(chan error, 1)
+	go func() {
+		_, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{})
+		allocated <- err
+	}()
+	select {
+	case err := <-allocated:
+		require.ErrorIs(t, err, lookupErr)
+	case <-time.After(time.Second):
+		t.Fatal("live confirmation blocked Allocate")
+	}
+	close(release)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not finish")
+	}
+	require.Contains(t, manager.byAllocation, key, "mock has no Destroy methods; cleanup must be skipped")
+}
+
+// TestMIGCleanupRequiresLiveConfirmation keeps both tracked instances and startup
+// hardware intact when a candidate cannot be confirmed with the API server.
+func TestMIGCleanupRequiresLiveConfirmation(t *testing.T) {
+	for _, primed := range []bool{false, true} {
+		for _, configured := range []bool{false, true} {
+			manager, _ := mockMigRecoveryDevice(t)
+			key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+			manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test"}
+			plugin := &NvidiaDevicePlugin{migMgr: manager, migPrimed: primed, migResetDeviceCount: 1,
+				listNodePods: func() ([]*corev1.Pod, error) { return nil, nil },
+			}
+			if configured {
+				plugin.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, errors.New("API unavailable") }
+			}
+			require.Error(t, plugin.reconcileActiveMigAllocations())
+			require.Contains(t, manager.byAllocation, key)
+			require.Equal(t, primed, plugin.migPrimed)
+		}
+	}
 }

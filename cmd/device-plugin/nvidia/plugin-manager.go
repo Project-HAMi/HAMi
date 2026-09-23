@@ -39,7 +39,7 @@ func GetPlugins(
 	nvmllib nvml.Interface,
 	devicelib device.Interface,
 	config *nvidia.DeviceConfig,
-	listNodePods func() ([]*corev1.Pod, error),
+	listNodePods, listLiveNodePods func() ([]*corev1.Pod, error),
 	prepareVGPUCache func(string, string) (string, error),
 ) ([]plugin.Interface, error) {
 	// TODO: We could consider passing this as an argument since it should already be used to construct nvmllib.
@@ -80,6 +80,7 @@ func GetPlugins(
 		plugin.WithFailOnInitError(*config.Flags.FailOnInitError),
 		plugin.WithImexChannels(imexChannels),
 		plugin.WithNodePodList(listNodePods),
+		plugin.WithLiveNodePodList(listLiveNodePods),
 		plugin.WithVGPUCachePreparer(prepareVGPUCache),
 	)
 	if err != nil {

@@ -64,6 +64,7 @@ type options struct {
 	imexChannels imex.Channels
 
 	listNodePods     func() ([]*corev1.Pod, error)
+	listLiveNodePods func() ([]*corev1.Pod, error)
 	prepareVGPUCache func(string, string) (string, error)
 }
 

@@ -348,7 +348,7 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, listLiveNodePods, cacheManager.Prepare)
+	plugins, restartPlugins, err := startPlugins(processCtx, c, o, hostPIDBroker, nodePods.List, listLiveNodePods, cacheManager.Prepare)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
@@ -443,7 +443,7 @@ func startPlugins(
 	c *cli.Context,
 	o *options,
 	hostPIDBroker *runningHostPIDBroker,
-	listNodePods func() ([]*corev1.Pod, error),
+	listNodePods, listLiveNodePods func() ([]*corev1.Pod, error),
 	prepareVGPUCache func(string, string) (string, error),
 ) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
@@ -498,7 +498,7 @@ func startPlugins(
 
 	// Get the set of plugins.
 	klog.Info("Retrieving plugins.")
-	plugins, err := GetPlugins(processCtx, infolib, nvmllib, devicelib, &devConfig, listNodePods, prepareVGPUCache)
+	plugins, err := GetPlugins(processCtx, infolib, nvmllib, devicelib, &devConfig, listNodePods, listLiveNodePods, prepareVGPUCache)
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}

@@ -121,6 +121,7 @@ type NvidiaDevicePlugin struct {
 	pendingCDIRemovals map[string]struct{}
 	deviceCache        string
 	listNodePods       func() ([]*corev1.Pod, error)
+	listLiveNodePods   func() ([]*corev1.Pod, error)
 	prepareCache       func(string, string) (string, error)
 
 	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
@@ -128,11 +129,14 @@ type NvidiaDevicePlugin struct {
 	// NVML; Start/Stop pair Init and Shutdown. The annotation reconciler runs
 	// only when operatingMode == "mig".
 	migMgr *MigInstanceManager
-	// migPrimed prevents reconciliation from releasing instances before the
-	// manager has adopted the informer snapshot's active allocations.
+	// migPrimed records completed authoritative startup recovery, reset and CDI
+	// publication. Cached adoption alone must not mark this work complete.
 	migPrimed bool
+	// migAllocationGeneration changes under applyMutex whenever Allocate starts.
+	// Cleanup must discard an API confirmation spanning an allocation attempt.
+	migAllocationGeneration uint64
 	// migResetDeviceCount retains the startup allowlist decision for delayed
-	// initialization. Both fields are protected by applyMutex.
+	// initialization. These lifecycle fields are protected by applyMutex.
 	migResetDeviceCount int
 
 	imexChannels imex.Channels
@@ -270,6 +274,7 @@ func (o *options) newNvidiaDevicePlugin(
 		imexChannels:               o.imexChannels,
 		deviceCache:                "",
 		listNodePods:               o.listNodePods,
+		listLiveNodePods:           o.listLiveNodePods,
 		prepareCache:               o.prepareVGPUCache,
 
 		// These will be reinitialized every
@@ -483,16 +488,17 @@ func uint32Ptr(value uint32) *uint32 {
 	return &value
 }
 
-// reconcileActiveMigAllocations holds applyMutex throughout MIG recovery and cleanup to
-// serialize them with Allocate.
+// reconcileActiveMigAllocations serializes MIG state changes with Allocate.
+// API confirmation runs without applyMutex and is discarded if Allocate intervenes.
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
 	plugin.applyMutex.Lock()
 	defer plugin.applyMutex.Unlock()
 	return plugin.reconcileActiveMigAllocationsLocked()
 }
 
-// reconcileActiveMigAllocationsLocked requires applyMutex, also held throughout
-// Allocate so recovery and cleanup cannot interleave with instance creation.
+// reconcileActiveMigAllocationsLocked requires applyMutex on entry and return.
+// It releases the lock only for live confirmation, then revalidates allocation
+// generation before resetting hardware or deleting instances.
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	pods, err := plugin.listNodePodSnapshot()
 	if err != nil {
@@ -502,9 +508,40 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	if err != nil {
 		return err
 	}
+	// Cached absence only identifies candidates. Idle reconciler ticks and
+	// pending CDI removals require no API request once startup is complete.
+	needsConfirmation := !plugin.migPrimed
+	plugin.migMgr.mu.Lock()
+	for key := range plugin.migMgr.byAllocation {
+		if _, exists := active[key]; !exists {
+			needsConfirmation = true
+			break
+		}
+	}
+	plugin.migMgr.mu.Unlock()
+	if needsConfirmation {
+		generation := plugin.migAllocationGeneration
+		// The caller owns applyMutex. Drop it around network I/O so kubelet
+		// allocation is not stalled by a slow cleanup confirmation.
+		plugin.applyMutex.Unlock()
+		pods, err = plugin.listLiveNodePodSnapshot()
+		plugin.applyMutex.Lock()
+		if generation != plugin.migAllocationGeneration {
+			// A new allocation may not have been visible to the API request.
+			// Retry next tick with a new cache snapshot and confirmation.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		active, err = plugin.activeMigAllocationKeys(pods)
+		if err != nil {
+			return err
+		}
+	}
 	if !plugin.migPrimed {
 		if err := plugin.primeMigManagerFromPods(pods); err != nil {
-			return fmt.Errorf("prime MIG manager from Pod cache: %w", err)
+			return fmt.Errorf("prime MIG manager from Pod snapshot: %w", err)
 		}
 		inUse, err := plugin.migMgr.collectInUseGPUs(pods)
 		if err != nil {
@@ -556,8 +593,30 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	return err
 }
 
-// listNodePodSnapshot calls the authoritative node Pod provider and propagates failures without
-// substituting an empty snapshot.
+// prepareMigAllocationsLocked adopts cached runtime identities without resetting
+// GPUs, deleting instances, replacing CDI state, or querying the API server.
+// The caller holds applyMutex; destructive startup work is retried separately.
+func (plugin *NvidiaDevicePlugin) prepareMigAllocationsLocked() error {
+	if plugin.migPrimed {
+		return nil
+	}
+	pods, err := plugin.listNodePodSnapshot()
+	if err != nil {
+		return err
+	}
+	return plugin.primeMigManagerFromPods(pods)
+}
+
+// listLiveNodePodSnapshot confirms Pod state for destructive MIG operations.
+// Missing configuration or API failures never fall back to cached absence.
+func (plugin *NvidiaDevicePlugin) listLiveNodePodSnapshot() ([]*corev1.Pod, error) {
+	if plugin.listLiveNodePods == nil {
+		return nil, errors.New("live node Pod confirmation is not configured")
+	}
+	return plugin.listLiveNodePods()
+}
+
+// listNodePodSnapshot returns cached node Pods without contacting the API server.
 func (plugin *NvidiaDevicePlugin) listNodePodSnapshot() ([]*corev1.Pod, error) {
 	if plugin.listNodePods == nil {
 		return nil, errors.New("node Pod informer is not configured")
@@ -718,7 +777,7 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 		}
 		return nil
 	}
-	pods, detectErr := plugin.listNodePodSnapshot()
+	pods, detectErr := plugin.listLiveNodePodSnapshot()
 	var inUse map[int]struct{}
 	if detectErr == nil {
 		inUse, detectErr = plugin.migMgr.collectInUseGPUs(pods)
@@ -1136,8 +1195,14 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	// pod selection, GI/CI creation, and annotation consumption atomic.
 	plugin.applyMutex.Lock()
 	defer plugin.applyMutex.Unlock()
+	plugin.migAllocationGeneration++
 	allocationCompleted := false
 	if plugin.operatingMode == nvidia.MigMode && plugin.migMgr != nil {
+		// Adopt existing instances before recording the rollback baseline;
+		// a later allocation failure must never release recovered workloads.
+		if err := plugin.prepareMigAllocationsLocked(); err != nil {
+			return nil, fmt.Errorf("recover MIG allocations before allocation: %w", err)
+		}
 		plugin.migMgr.mu.Lock()
 		before := make(map[string]struct{}, len(plugin.migMgr.byAllocationMigUUID))
 		for uuid := range plugin.migMgr.byAllocationMigUUID {

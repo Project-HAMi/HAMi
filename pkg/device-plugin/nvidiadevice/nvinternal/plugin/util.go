@@ -371,9 +371,6 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	if len(containerAllocations) != len(c) {
 		return nil, fmt.Errorf("container %s has %d MIG reservations, requested %d devices", containerName, len(containerAllocations), len(c))
 	}
-	if err := nv.reconcileActiveMigAllocationsLocked(); err != nil {
-		return nil, fmt.Errorf("reconcile MIG allocations before allocation: %w", err)
-	}
 	createdMigUUIDs := make([]string, 0, len(c))
 	allocationCompleted := false
 	defer func() {

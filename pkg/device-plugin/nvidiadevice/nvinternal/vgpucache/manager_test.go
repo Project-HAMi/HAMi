@@ -349,6 +349,8 @@ func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
 	root := t.TempDir()
 	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
 	manager.gracePeriod = 0
+	now := time.Now().Add(time.Hour)
+	manager.now = func() time.Time { return now }
 	first, err := manager.Prepare("a", "gpu")
 	require.NoError(t, err)
 	second, err := manager.Prepare("b", "gpu")
@@ -358,6 +360,7 @@ func TestScanLiveConfirmationFailurePreservesAllCandidates(t *testing.T) {
 		require.ErrorIs(t, manager.scan(), failure)
 		require.DirExists(t, first)
 		require.DirExists(t, second)
+		now = now.Add(time.Minute)
 	}
 	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
 	require.NoError(t, manager.scan())
@@ -399,4 +402,182 @@ func TestScanRechecksDirectoryAfterLiveConfirmation(t *testing.T) {
 	}
 	require.NoError(t, manager.scan())
 	require.DirExists(t, target)
+}
+
+// TestScanAllowsPrepareDuringConfirmationAndEventuallyCleans verifies a slow LIST
+// neither blocks Prepare nor authorizes deletion of its newly prepared cache.
+func TestScanAllowsPrepareDuringConfirmationAndEventuallyCleans(t *testing.T) {
+	manager := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return nil, nil })
+	manager.gracePeriod = 0
+	old, err := manager.Prepare("old", "gpu")
+	require.NoError(t, err)
+	replaced, err := manager.Prepare("replaced", "gpu")
+	require.NoError(t, err)
+	entered, release := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var calls atomic.Int32
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return nil, nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- manager.scan() }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("GC did not start confirmation")
+	}
+	prepared := make(chan error, 1)
+	go func() { _, err := manager.Prepare("replaced", "gpu"); prepared <- err }()
+	select {
+	case err := <-prepared:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Prepare blocked behind live LIST")
+	}
+	// Another GC scan must not queue a second request or block behind this one.
+	overlapped := make(chan error, 1)
+	go func() { overlapped <- manager.scan() }()
+	select {
+	case err := <-overlapped:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("overlapping scan blocked")
+	}
+	require.Equal(t, int32(1), calls.Load())
+	close(release)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("GC did not finish")
+	}
+	require.DirExists(t, old, "concurrent Prepare invalidates the entire batch")
+	require.DirExists(t, replaced)
+	// On a subsequent stable round both orphaned directories are collectible.
+	require.NoError(t, manager.scan())
+	require.NoDirExists(t, old)
+	require.NoDirExists(t, replaced)
+	require.Equal(t, int32(2), calls.Load(), "one LIST confirms the whole batch")
+}
+
+// TestScanConfirmationBackoffIsBoundedAndResets verifies suppressed retries retain
+// files, retries continue after failures, and success restores the normal cadence.
+func TestScanConfirmationBackoffIsBoundedAndResets(t *testing.T) {
+	manager := newTestManager(t, t.TempDir(), func() ([]*corev1.Pod, error) { return nil, nil })
+	manager.gracePeriod = 0
+	now := time.Now().Add(time.Hour)
+	manager.now = func() time.Time { return now }
+	target, err := manager.Prepare("orphan", "gpu")
+	require.NoError(t, err)
+	failure := errors.New("API unavailable")
+	calls := 0
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { calls++; return nil, failure }
+	for _, delay := range []time.Duration{1, 2, 4, 8, 16, 32, 60, 60} {
+		require.ErrorIs(t, manager.scan(), failure)
+		previousCalls := calls
+		now = now.Add(delay*time.Second - time.Nanosecond)
+		require.NoError(t, manager.scan())
+		require.Equal(t, previousCalls, calls, "LIST must be suppressed before retry deadline")
+		require.DirExists(t, target)
+		now = now.Add(time.Nanosecond)
+	}
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { calls++; return nil, nil }
+	require.NoError(t, manager.scan())
+	require.NoDirExists(t, target, "API recovery must eventually permit cleanup")
+	// A new orphan can be collected immediately; the successful round reset backoff.
+	target, err = manager.Prepare("another", "gpu")
+	require.NoError(t, err)
+	previousCalls := calls
+	require.NoError(t, manager.scan())
+	require.Equal(t, previousCalls+1, calls)
+	require.NoDirExists(t, target)
+	// A later outage must restart at the initial one-second retry delay.
+	_, err = manager.Prepare("last", "gpu")
+	require.NoError(t, err)
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, failure }
+	require.ErrorIs(t, manager.scan(), failure)
+	manager.listLiveNodePods = func() ([]*corev1.Pod, error) { calls++; return nil, nil }
+	now = now.Add(time.Second)
+	require.NoError(t, manager.scan())
+	require.NoDirExists(t, filepath.Join(manager.root, "last_gpu"))
+}
+
+// TestScanRechecksRootAndCandidateAfterConfirmation verifies external filesystem
+// changes during the unlocked API request cannot redirect or accelerate deletion.
+func TestScanRechecksRootAndCandidateAfterConfirmation(t *testing.T) {
+	for _, change := range []string{"root replaced", "root symlink", "mtime changed", "candidate removed"} {
+		t.Run(change, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "containers")
+			manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
+			manager.gracePeriod = 0
+			target, err := manager.Prepare("orphan", "gpu")
+			require.NoError(t, err)
+			manager.listLiveNodePods = func() ([]*corev1.Pod, error) {
+				switch change {
+				case "root replaced":
+					require.NoError(t, os.Rename(root, root+".old"))
+					require.NoError(t, os.MkdirAll(target, 0o777))
+				case "root symlink":
+					require.NoError(t, os.Rename(root, root+".old"))
+					require.NoError(t, os.Symlink(root+".old", root))
+				case "mtime changed":
+					future := time.Now().Add(time.Hour)
+					require.NoError(t, os.Chtimes(target, future, future))
+				case "candidate removed":
+					require.NoError(t, os.RemoveAll(target))
+				}
+				return nil, nil
+			}
+			require.NoError(t, manager.scan())
+			if change == "candidate removed" {
+				require.NoDirExists(t, target)
+			} else {
+				require.DirExists(t, target)
+			}
+		})
+	}
+}
+
+// TestRunEventuallyCleansAfterConfirmationFailure verifies the periodic worker
+// retries a failed live read and converges without a manual scan or restart.
+func TestRunEventuallyCleansAfterConfirmationFailure(t *testing.T) {
+	root := t.TempDir()
+	var recovered atomic.Bool
+	failed := make(chan struct{}, 1)
+	manager, err := New(Config{Root: root, ScanInterval: 10 * time.Millisecond},
+		func() ([]*corev1.Pod, error) { return nil, nil },
+		func() ([]*corev1.Pod, error) {
+			if !recovered.Load() {
+				select {
+				case failed <- struct{}{}:
+				default:
+				}
+				return nil, errors.New("API unavailable")
+			}
+			return nil, nil
+		})
+	require.NoError(t, err)
+	target, err := manager.Prepare("orphan", "gpu")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); manager.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	select {
+	case <-failed:
+	case <-time.After(time.Second):
+		t.Fatal("GC did not attempt confirmation")
+	}
+	require.DirExists(t, target)
+	recovered.Store(true)
+	require.Eventually(t, func() bool { _, err := os.Stat(target); return os.IsNotExist(err) }, time.Second, time.Millisecond)
 }

@@ -96,13 +96,18 @@ func WithImexChannels(imexChannels imex.Channels) Option {
 	}
 }
 
-// WithNodePodList injects an authoritative node-scoped Pod list. It must confirm
-// current API-server state or return an error, since MIG reconciliation and
-// mode changes may destroy resources absent from the returned list.
+// WithNodePodList injects cached, read-only node Pod snapshots for allocation
+// recovery and detecting cleanup candidates. Absence does not authorize deletion.
 func WithNodePodList(list func() ([]*corev1.Pod, error)) Option {
 	return func(m *options) {
 		m.listNodePods = list
 	}
+}
+
+// WithLiveNodePodList injects API confirmation for destructive MIG operations.
+// Errors must preserve existing resources; callers must never fall back to cache.
+func WithLiveNodePodList(list func() ([]*corev1.Pod, error)) Option {
+	return func(m *options) { m.listLiveNodePods = list }
 }
 
 // WithVGPUCachePreparer injects Allocate-time preparation of a container's

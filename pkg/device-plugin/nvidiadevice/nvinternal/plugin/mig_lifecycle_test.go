@@ -280,6 +280,7 @@ func TestApplyStartupMigModeDisableRequiresReset(t *testing.T) {
 	}
 	defer p.migMgr.Shutdown()
 	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	p.listLiveNodePods = p.listNodePods
 	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
 	if err == nil {
 		t.Fatal("expected pending-reset error")
@@ -357,6 +358,7 @@ func TestApplyStartupMigModeDisableSucceeds(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
 	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	p.listLiveNodePods = p.listNodePods
 	if err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"}); err != nil {
 		t.Fatal(err)
 	}
@@ -371,6 +373,7 @@ func TestApplyStartupMigModeDisableIgnoresProfileAllowlist(t *testing.T) {
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
 	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	p.listLiveNodePods = p.listNodePods
 	if err := p.applyStartupMigMode(1, []string{"NVIDIA H100 80GB HBM3"}); err != nil {
 		t.Fatal(err)
 	}
@@ -385,6 +388,7 @@ func TestApplyStartupMigModeDisableFailsClosedWhenAllocationLookupFails(t *testi
 	setCalls := 0
 	p, _ := a100HamiCorePlugin(t, idleA100Device(&setCalls, nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE))
 	p.listNodePods = func() ([]*corev1.Pod, error) { return nil, errors.New("snapshot unavailable") }
+	p.listLiveNodePods = p.listNodePods
 	err := p.applyStartupMigMode(1, []string{"NVIDIA A100-SXM4-40GB"})
 	if err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("applyStartupMigMode error = %v, want in-use fail-closed", err)

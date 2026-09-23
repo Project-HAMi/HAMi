@@ -273,10 +273,13 @@ func TestNewNvidiaDevicePluginPropagatesOptions(t *testing.T) {
 	listNodePods := func() ([]*corev1.Pod, error) {
 		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "cached"}}}, nil
 	}
+	liveCalls := 0
+	liveList := func() ([]*corev1.Pod, error) { liveCalls++; return nil, nil }
 	prepareCache := func(string, string) (string, error) { return "/cache", nil }
 	o := &options{
 		imexChannels:     channels,
 		listNodePods:     listNodePods,
+		listLiveNodePods: liveList,
 		prepareVGPUCache: prepareCache,
 		config: &nvidia.DeviceConfig{
 			Config: &v1.Config{
@@ -307,6 +310,9 @@ func TestNewNvidiaDevicePluginPropagatesOptions(t *testing.T) {
 
 	require.Equal(t, channels, plugin.imexChannels,
 		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+	_, err = plugin.listLiveNodePodSnapshot()
+	require.NoError(t, err)
+	require.Equal(t, 1, liveCalls)
 	pods, err := plugin.listNodePods()
 	require.NoError(t, err)
 	require.Equal(t, "cached", pods[0].Name)
@@ -1259,6 +1265,7 @@ func TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication(t *testing.T) {
 	require.Equal(t, "MIG-existing", handler.live[0].MIGUUID)
 	require.Zero(t, specCalls)
 	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	plugin.listLiveNodePods = plugin.listNodePods
 	require.ErrorIs(t, plugin.applyStartupMigMode(0, nil), specErr)
 	require.False(t, plugin.migPrimed)
 	require.Equal(t, 1, specCalls)
@@ -1292,6 +1299,7 @@ func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
 	require.Zero(t, calls)
 	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	plugin.listLiveNodePods = plugin.listNodePods
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), removeErr)
 	require.Contains(t, plugin.pendingCDIRemovals, "MIG-destroyed")
 	removeErr = nil

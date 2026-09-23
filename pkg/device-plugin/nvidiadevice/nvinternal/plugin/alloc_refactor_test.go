@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -860,4 +862,111 @@ func TestAllocate_PatchErasedAnnotationError(t *testing.T) {
 	_, err := plugin.Allocate(context.Background(), request)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "patch not allowed")
+}
+
+// TestMIGAllocateDoesNotListLivePods exercises kubelet allocation and runtime
+// annotation updates while cleanup's live LIST is unavailable.
+func TestMIGAllocateDoesNotListLivePods(t *testing.T) {
+	for _, primed := range []bool{false, true} {
+		name := "cached recovery"
+		if primed {
+			name = "initialized"
+		}
+		t.Run(name, func(t *testing.T) {
+			setupInRequestDevices(t)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "allocate", Namespace: "default", Annotations: map[string]string{
+					"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{{cd("GPU-test", "NVIDIA", 1024, 20)}}),
+					nvidia.MigAllocationsAnnotation:    `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+				}},
+				Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "gpu"}}},
+				Status: corev1.PodStatus{Phase: corev1.PodPending},
+			}
+			mockAllocateGlobals(t, pod)
+			previousClient := client.KubeClient
+			fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+			client.KubeClient = fakeClient
+			t.Cleanup(func() { client.KubeClient = previousClient })
+			fakeClient.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+				return true, nil, errors.New("Pod LIST unavailable")
+			})
+			manager, _ := mockMigRecoveryDevice(t)
+			placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+			key := allocationKey(0, "1g.5gb", placement)
+			manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 1, CIID: 2, Profile: "1g.5gb", Placement: placement}
+			manager.byAllocationMigUUID["MIG-test"] = key
+			plugin := newTestPlugin(t)
+			plugin.operatingMode, plugin.migMgr, plugin.migPrimed = nvidia.MigMode, manager, primed
+			plugin.config.Flags.Plugin.DeviceIDStrategy = ptr(v1.DeviceIDStrategyUUID)
+			cachedCalls, liveCalls := 0, 0
+			plugin.listNodePods = func() ([]*corev1.Pod, error) { cachedCalls++; return []*corev1.Pod{pod.DeepCopy()}, nil }
+			plugin.listLiveNodePods = func() ([]*corev1.Pod, error) { liveCalls++; return nil, errors.New("Pod LIST unavailable") }
+			response, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{
+				ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{DevicesIds: []string{"GPU-test-0"}}},
+			})
+			require.NoError(t, err)
+			require.Len(t, response.ContainerResponses, 1)
+			require.Contains(t, response.ContainerResponses[0].Envs, "NVIDIA_VISIBLE_DEVICES")
+			require.Equal(t, "MIG-test", response.ContainerResponses[0].Envs["NVIDIA_VISIBLE_DEVICES"])
+			require.Zero(t, liveCalls)
+			if primed {
+				require.Zero(t, cachedCalls)
+			} else {
+				require.Equal(t, 1, cachedCalls)
+			}
+			require.Contains(t, manager.byAllocation, key)
+			for _, action := range fakeClient.Actions() {
+				require.NotEqual(t, "list", action.GetVerb())
+			}
+		})
+	}
+}
+
+// TestMIGAllocateFailurePreservesAdoptedInstances verifies cached recovery cannot
+// add an existing workload to the rollback set of a later failed allocation.
+func TestMIGAllocateFailurePreservesAdoptedInstances(t *testing.T) {
+	manager, dev := mockMigRecoveryDevice(t)
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	ci := &nvmlmock.ComputeInstance{GetInfoFunc: func() (nvml.ComputeInstanceInfo, nvml.Return) {
+		return nvml.ComputeInstanceInfo{Id: 2}, nvml.SUCCESS
+	}}
+	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
+		GetComputeInstanceProfileInfoFunc: func(int, int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			return nvml.ComputeInstanceProfileInfo{}, nvml.SUCCESS
+		},
+		GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+			return []nvml.ComputeInstance{ci}, nvml.SUCCESS
+		},
+	}
+	dev.GetGpuInstanceProfileInfoFunc = func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+		return nvml.GpuInstanceProfileInfo{}, nvml.SUCCESS
+	}
+	dev.GetGpuInstancesFunc = func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+		return []nvml.GpuInstance{gi}, nvml.SUCCESS
+	}
+	dev.GetMaxMigDeviceCountFunc = func() (int, nvml.Return) { return 1, nvml.SUCCESS }
+	dev.GetMigDeviceHandleByIndexFunc = func(int) (nvml.Device, nvml.Return) {
+		return &nvmlmock.Device{
+			GetGpuInstanceIdFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+			GetUUIDFunc:          func() (string, nvml.Return) { return "MIG-existing", nvml.SUCCESS },
+		}, nvml.SUCCESS
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1},"migUUID":"MIG-existing","gpuInstanceID":1,"computeInstanceID":2}]`,
+	}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	plugin := &NvidiaDevicePlugin{operatingMode: nvidia.MigMode, migMgr: manager,
+		listNodePods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
+	}
+	lookupErr := errors.New("pending Pod lookup failed")
+	previousLookup := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return nil, lookupErr }
+	t.Cleanup(func() { getPendingPod = previousLookup })
+	_, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{})
+	require.ErrorIs(t, err, lookupErr)
+	require.Contains(t, manager.byAllocationMigUUID, "MIG-existing")
+	require.Contains(t, manager.byAllocation, allocationKey(0, "1g.5gb", placement))
+	require.False(t, plugin.migPrimed, "cached recovery must not mark destructive startup complete")
 }

@@ -39,8 +39,8 @@ type Config struct {
 	GracePeriod  time.Duration
 }
 
-// Manager serializes Allocate-time preparation and GC so a scan cannot remove
-// a directory while it is being prepared for a new container.
+// Manager serializes cache mutations with Prepare, while live Pod confirmation
+// runs outside the mutation lock. Concurrent preparation invalidates a GC batch.
 type Manager struct {
 	root             string
 	scanInterval     time.Duration
@@ -48,6 +48,13 @@ type Manager struct {
 	listNodePods     func() ([]*corev1.Pod, error)
 	listLiveNodePods func() ([]*corev1.Pod, error)
 	mutex            sync.Mutex
+	// generation is protected by mutex and advances before any Prepare mutation.
+	generation uint64
+	// scanMutex protects scan/retry state without blocking Prepare.
+	scanMutex        sync.Mutex
+	now              func() time.Time
+	retryDelay       time.Duration
+	nextConfirmation time.Time
 }
 
 // New constructs a cache manager around the device-plugin process's shared Pod
@@ -75,6 +82,7 @@ func New(config Config, listNodePods, listLiveNodePods func() ([]*corev1.Pod, er
 		gracePeriod:      config.GracePeriod,
 		listNodePods:     listNodePods,
 		listLiveNodePods: listLiveNodePods,
+		now:              time.Now,
 	}, nil
 }
 
@@ -92,6 +100,7 @@ func (m *Manager) Prepare(podUID, containerName string) (string, error) {
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
+	m.generation++
 	if err := m.ensureRoot(); err != nil {
 		return "", err
 	}
@@ -129,9 +138,18 @@ func (m *Manager) scanAndLog() {
 	}
 }
 
-// scan serializes GC with Prepare and confirms expired candidates against live Pod state before
-// deletion.
+// scan collects expired candidates under mutex, confirms them without blocking
+// Prepare, then rechecks identities before deletion. A concurrent Prepare skips
+// the whole batch; the next scan retries from a new snapshot.
 func (m *Manager) scan() error {
+	// Skip overlapping scans instead of queuing redundant API requests.
+	if !m.scanMutex.TryLock() {
+		return nil
+	}
+	defer m.scanMutex.Unlock()
+	if m.now().Before(m.nextConfirmation) {
+		return nil
+	}
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -162,8 +180,13 @@ func (m *Manager) scan() error {
 	}
 
 	var scanErr error
-	var confirmedPodUIDs map[string]struct{}
-	now := time.Now()
+	type candidate struct {
+		podUID string
+		path   string
+		info   os.FileInfo
+	}
+	var candidates []candidate
+	now := m.now()
 	for _, entry := range entries {
 		podUID, _, ok := parseCacheDirectoryName(entry.Name())
 		if !ok {
@@ -193,24 +216,53 @@ func (m *Manager) scan() error {
 			continue
 		}
 
-		// Only query the API if the informer and grace period found a GC
-		// candidate. One authoritative list covers this serialized scan;
-		// Prepare cannot create a new directory until the scan releases mutex.
-		if confirmedPodUIDs == nil {
-			livePods, err := m.listLiveNodePods()
-			if err != nil {
-				return errors.Join(scanErr, fmt.Errorf("confirm node Pods before cache GC: %w", err))
-			}
-			confirmedPodUIDs = make(map[string]struct{}, len(livePods))
-			for _, pod := range livePods {
-				if pod != nil {
-					confirmedPodUIDs[string(pod.UID)] = struct{}{}
-				}
-			}
+		candidates = append(candidates, candidate{podUID: podUID, path: target, info: before})
+	}
+	if len(candidates) == 0 {
+		return scanErr
+	}
+	generation := m.generation
+	m.mutex.Unlock()
+	livePods, confirmErr := m.listLiveNodePods()
+	m.mutex.Lock()
+	if confirmErr != nil {
+		// Back off only failed API confirmations. The normal scan interval is
+		// the initial delay, doubled on each failure and capped at one minute.
+		if m.retryDelay == 0 {
+			m.retryDelay = min(m.scanInterval, time.Minute)
+		} else {
+			m.retryDelay = min(2*m.retryDelay, time.Minute)
 		}
-		if _, exists := confirmedPodUIDs[podUID]; exists {
+		m.nextConfirmation = m.now().Add(m.retryDelay)
+		return errors.Join(scanErr, fmt.Errorf("confirm node Pods before cache GC: %w", confirmErr))
+	}
+	m.retryDelay = 0
+	m.nextConfirmation = time.Time{}
+	if generation != m.generation {
+		return scanErr
+	}
+	// The root may have been replaced externally while the mutex was released.
+	currentRoot, err := os.Lstat(m.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return scanErr
+		}
+		return errors.Join(scanErr, fmt.Errorf("recheck vGPU cache root %s: %w", m.root, err))
+	}
+	if !currentRoot.IsDir() || !os.SameFile(rootInfo, currentRoot) {
+		return scanErr
+	}
+	confirmedPodUIDs := make(map[string]struct{}, len(livePods))
+	for _, pod := range livePods {
+		if pod != nil {
+			confirmedPodUIDs[string(pod.UID)] = struct{}{}
+		}
+	}
+	for _, entry := range candidates {
+		if _, exists := confirmedPodUIDs[entry.podUID]; exists {
 			continue
 		}
+		target, before := entry.path, entry.info
 
 		current, err := os.Lstat(target)
 		if err != nil {
@@ -227,7 +279,7 @@ func (m *Manager) scan() error {
 			scanErr = errors.Join(scanErr, fmt.Errorf("remove vGPU cache directory %s: %w", target, err))
 			continue
 		}
-		klog.InfoS("Removed stale vGPU cache directory", "directory", target, "podUID", podUID)
+		klog.InfoS("Removed stale vGPU cache directory", "directory", target, "podUID", entry.podUID)
 	}
 	return scanErr
 }
