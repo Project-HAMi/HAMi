@@ -34,9 +34,9 @@ package plugin
 
 import (
 	"context"
+
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 
