@@ -42,6 +42,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
@@ -62,6 +64,53 @@ import (
 
 func ptr[T any](value T) *T {
 	return &value
+}
+
+func TestDynamicMIGCDIResponseUsesPublishedClass(t *testing.T) {
+	name, err := cdi.DynamicMIGName("MIG-GPU-parent/1/2")
+	require.NoError(t, err)
+	handler := &cdi.InterfaceMock{QualifiedNameFunc: func(class, id string) string {
+		return "nvidia.com/" + class + "=" + id
+	}}
+	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})
+	require.NoError(t, err)
+	plugin := &NvidiaDevicePlugin{operatingMode: nvidia.MigMode, cdiHandler: handler, deviceListStrategies: strategies}
+	response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
+	require.NoError(t, plugin.updateResponseForCDI(response, "test", "MIG-GPU-parent/1/2"))
+	require.Len(t, response.CdiDevices, 1)
+	require.Equal(t, "nvidia.com/dynamic-mig="+name, response.CdiDevices[0].Name)
+}
+
+type recordingDynamicMIGCDI struct {
+	*cdi.InterfaceMock
+	live []cdi.DynamicMIGDevice
+}
+
+func (r *recordingDynamicMIGCDI) EnsureDynamicMIGDevice(cdi.DynamicMIGDevice) (string, error) {
+	return "", nil
+}
+func (r *recordingDynamicMIGCDI) RemoveDynamicMIGDevice(string) error { return nil }
+func (r *recordingDynamicMIGCDI) ReplaceDynamicMIGDevices(live []cdi.DynamicMIGDevice) error {
+	r.live = live
+	return nil
+}
+
+func TestDynamicMIGCDIStartupRecoveryUsesAdoptedGeometry(t *testing.T) {
+	gpu := &nvmlmock.Device{
+		GetUUIDFunc:        func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS },
+		GetMinorNumberFunc: func() (int, nvml.Return) { return 5, nvml.SUCCESS },
+	}
+	lib := &nvmlmock.Interface{DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return gpu, nvml.SUCCESS }}
+	m := newMigInstanceManager(lib)
+	key := migAllocationKey{GPUIndex: 0, Profile: "1g.5gb", Start: 1, Size: 2}
+	m.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 3, CIID: 4}
+	handler := &recordingDynamicMIGCDI{InterfaceMock: &cdi.InterfaceMock{}}
+	plugin := &NvidiaDevicePlugin{migMgr: m, cdiHandler: handler}
+	require.NoError(t, plugin.recoverDynamicMIGCDI())
+	require.Equal(t, []cdi.DynamicMIGDevice{{
+		MIGUUID: "MIG-test", ParentGPUUUID: "GPU-parent", ParentMinor: 5,
+		GPUInstanceID: 3, ComputeInstanceID: 4,
+	}}, handler.live)
 }
 
 func TestCDIAllocateResponse(t *testing.T) {
