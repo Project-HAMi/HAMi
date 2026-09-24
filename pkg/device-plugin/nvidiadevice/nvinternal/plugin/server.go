@@ -167,7 +167,10 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	sConfig, err := config.LoadConfig(*ConfigFile)
 	if err != nil {
-		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
+		// Fail closed rather than aborting the process: a bad config file
+		// must surface as an error the caller can act on, not a Fatalf that
+		// takes the plugin (and any test binary) down with it.
+		return nil, "", fmt.Errorf("load device config file %s: %w", *ConfigFile, err)
 	}
 	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath)
 	if err != nil {

@@ -138,7 +138,10 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 	if !ok {
 		return nil
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, err := dev.GenerateResourceRequests(ctr)
+	if err != nil {
+		return err
+	}
 	for _, each := range allocated {
 		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
 		if bounded && each.Usedmem > limit {

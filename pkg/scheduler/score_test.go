@@ -81,7 +81,10 @@ func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
 			}},
 		}}},
 	}
-	requests := device.Resourcereqs(pod)
+	requests, err := device.Resourcereqs(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name  string
 		mask  int32
@@ -99,7 +102,7 @@ func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
 			quota.Quotas[namespace] = &device.DeviceQuota{
 				"aws.amazon.com/neuroncore": &device.Quota{Used: tc.used, Limit: tc.limit, LimitSet: true},
 			}
-			if !fitResourceQuota(pod) {
+			if err := fitResourceQuota(pod); err != nil {
 				t.Fatal("admission should defer whole-device core accounting until node placement")
 			}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "neuron-node"}}
@@ -4505,8 +4508,8 @@ func (m *fitMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, err
 }
 func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *fitMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 func (m *fitMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil

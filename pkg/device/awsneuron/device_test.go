@@ -527,9 +527,10 @@ func Test_checkType(t *testing.T) {
 
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
-		name string
-		args *corev1.Container
-		want device.ContainerDeviceRequest
+		name    string
+		args    *corev1.Container
+		want    device.ContainerDeviceRequest
+		wantErr bool
 	}{
 		{
 			name: "allocate neuron device",
@@ -560,7 +561,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:    device.ContainerDeviceRequest{},
+			wantErr: true,
 		},
 		{
 			name: "allocate neuron core",
@@ -624,7 +626,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:    device.ContainerDeviceRequest{},
+			wantErr: true,
 		},
 		{
 			name: "reject negative neuron core request when admission is bypassed",
@@ -635,7 +638,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:    device.ContainerDeviceRequest{},
+			wantErr: true,
 		},
 		{
 			name: "reject neuron core request that exceeds the supported maximum when admission is bypassed",
@@ -646,7 +650,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want:    device.ContainerDeviceRequest{},
+			wantErr: true,
 		},
 	}
 	for _, test := range tests {
@@ -656,7 +661,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			result := dev.GenerateResourceRequests(test.args)
+			result, err := dev.GenerateResourceRequests(test.args)
+			if test.wantErr {
+				assert.Assert(t, err != nil)
+				return
+			}
+			assert.NilError(t, err)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
