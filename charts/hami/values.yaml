@@ -94,6 +94,9 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Only used when --profiling is enabled in scheduler.extender.extraArgs.
+  # Keep loopback binding and use kubectl port-forward to access pprof.
+  profilingBindAddress: "127.0.0.1:6060"
   # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
   # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
   # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
