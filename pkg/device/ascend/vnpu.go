@@ -44,6 +44,8 @@ type VNPUConfig struct {
 // live here rather than on each VNPUConfig.
 type VNPUs struct {
 	HamiVnpuCore     bool         `yaml:"hamiVnpuCore"`
+	Enpu             bool         `yaml:"enpu"`
+	EnpuPolicy       string       `yaml:"enpuPolicy,omitempty"`
 	OverwriteEnv     bool         `yaml:"overwriteEnv"`
 	RuntimeClassName string       `yaml:"runtimeClassName"`
 	Configs          []VNPUConfig `yaml:"configs"`

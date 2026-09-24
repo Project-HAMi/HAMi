@@ -133,6 +133,8 @@ data:
       resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      enpu: {{ .Values.devices.ascend.enpu | default false }}
+      enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
