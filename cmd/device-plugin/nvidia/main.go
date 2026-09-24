@@ -56,10 +56,15 @@ const (
 	autoNvidiaDriverRoot        = "auto"
 	hostNvidiaDriverRoot        = "/"
 	gpuOperatorNvidiaDriverRoot = "/run/nvidia/driver"
-	hostContainerRoot           = "/host"
+	toolkitContainerDriverRoot  = "/"
 )
 
-var gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
+var (
+	gpuOperatorDriverReadyFile = "/run/nvidia/validations/driver-ready"
+	// hostContainerRoot is where the chart mounts the host root when a CDI
+	// device list strategy is used with an auto-detected driver root.
+	hostContainerRoot = "/host"
+)
 
 func main() {
 	c := cli.NewApp()
@@ -478,7 +483,7 @@ func resolveNvidiaDriverRoot(config *spec.Config) error {
 			"devRoot", devRoot)
 	}
 
-	containerDriverRoot, err := autoContainerDriverRoot(driverRoot)
+	containerDriverRoot, err := autoContainerDriverRoot(config, driverRoot)
 	if err != nil {
 		return err
 	}
@@ -494,18 +499,49 @@ func resolveNvidiaDriverRoot(config *spec.Config) error {
 	return nil
 }
 
-func autoContainerDriverRoot(driverRoot string) (string, error) {
+// autoContainerDriverRoot returns where the plugin reads the NVIDIA driver
+// inside its own container. Host-side roots only describe what is returned to
+// the runtime, so they do not require the host filesystem to be mounted:
+// NVML initialization and GPU discovery use the driver injected into this
+// container by the NVIDIA Container Toolkit. Only CDI spec generation needs to
+// walk the host driver layout, because library paths inside the container may
+// not match the host (for example /usr/lib64 versus /usr/lib/x86_64-linux-gnu).
+func autoContainerDriverRoot(config *spec.Config, driverRoot string) (string, error) {
+	cdiEnabled, err := anyCDIEnabled(config)
+	if err != nil {
+		return "", err
+	}
+	if !cdiEnabled {
+		return toolkitContainerDriverRoot, nil
+	}
+
+	var containerDriverRoot string
 	cleaned := filepath.Clean(driverRoot)
 	switch cleaned {
 	case hostNvidiaDriverRoot:
-		return hostContainerRoot, nil
+		containerDriverRoot = hostContainerRoot
 	case gpuOperatorNvidiaDriverRoot:
 		// GPU Operator's driver root is under the host root, so reuse the
 		// single host-root mount and append the host path as a suffix.
-		return filepath.Join(hostContainerRoot, strings.TrimPrefix(cleaned, "/")), nil
+		containerDriverRoot = filepath.Join(hostContainerRoot, strings.TrimPrefix(cleaned, "/"))
 	default:
 		return "", fmt.Errorf("unsupported auto-detected NVIDIA driver root %q", driverRoot)
 	}
+	if _, err := os.Stat(hostContainerRoot); err != nil {
+		return "", fmt.Errorf("CDI device list strategies with an auto-detected NVIDIA driver root require the host root to be mounted at %s: %w", hostContainerRoot, err)
+	}
+	return containerDriverRoot, nil
+}
+
+func anyCDIEnabled(config *spec.Config) (bool, error) {
+	if config.Flags.Plugin == nil || config.Flags.Plugin.DeviceListStrategy == nil {
+		return false, nil
+	}
+	strategies, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+	if err != nil {
+		return false, fmt.Errorf("invalid device list strategy: %w", err)
+	}
+	return strategies.AnyCDIEnabled(), nil
 }
 
 func readGPUOperatorDriverRoots(path string) (string, string, error) {

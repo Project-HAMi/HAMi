@@ -485,6 +485,9 @@ devicePlugin:
   # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
   # and device roots from GPU Operator's driver-ready contract. If the
   # contract is absent, both roots default to / for a host-installed driver.
+  # In auto mode the device plugin uses the driver injected by the NVIDIA
+  # Container Toolkit, so it must run with the NVIDIA runtime; the host root is
+  # mounted read-only only when deviceListStrategy uses a cdi-* strategy.
   nvidiaDriverRoot: "auto"
   gdrcopyEnabled: null
   gdsEnabled: null
