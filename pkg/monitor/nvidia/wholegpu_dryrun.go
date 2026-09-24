@@ -149,7 +149,7 @@ func RunWholeGPUDryRun(ctx context.Context, client kubernetes.Interface, nvmllib
 
 	for _, candidate := range candidates {
 		var initErr error
-		verdict, _ := evaluateContainerWholeGPU(candidate.devices, nodeDevs, func(uuid string) (int32, bool) {
+		verdict, cause := evaluateContainerWholeGPU(candidate.devices, nodeDevs, func(uuid string) (int32, bool) {
 			if err := startNVML(); err != nil {
 				initErr = err
 				return 0, false
@@ -160,7 +160,7 @@ func RunWholeGPUDryRun(ctx context.Context, client kubernetes.Interface, nvmllib
 			return nil, initErr
 		}
 		if verdict != confirmedWholeGPU {
-			report.Diagnostics = append(report.Diagnostics, wholeGPUVerdictDiagnostic(candidate, verdict, nodeDevs))
+			report.Diagnostics = append(report.Diagnostics, wholeGPUVerdictDiagnostic(candidate, verdict, cause, nodeDevs))
 			continue
 		}
 		report.ConfirmedContainers++
@@ -224,12 +224,17 @@ func matchesWholeGPUPodFilter(pod *corev1.Pod, opts WholeGPUDryRunOptions) bool 
 	return (opts.Namespace == "" || pod.Namespace == opts.Namespace) && (opts.Pod == "" || pod.Name == opts.Pod)
 }
 
-func wholeGPUVerdictDiagnostic(candidate wholeGPUCandidate, verdict wholeGPUVerdict, nodeDevs map[string]*device.DeviceInfo) WholeGPUDiagnostic {
+func wholeGPUVerdictDiagnostic(candidate wholeGPUCandidate, verdict wholeGPUVerdict, cause indeterminateCause, nodeDevs map[string]*device.DeviceInfo) WholeGPUDiagnostic {
 	diagnostic := WholeGPUDiagnostic{Namespace: candidate.pod.Namespace, Pod: candidate.pod.Name, Container: candidate.container}
 	switch verdict {
 	case indeterminate:
-		diagnostic.Status = "unregistered-device"
-		diagnostic.Message = "one or more allocated UUIDs are absent from the node device registry"
+		if cause == causePhysUnreadable {
+			diagnostic.Status = "nvml-unreadable"
+			diagnostic.Message = "physical memory of one or more allocated devices could not be read through NVML"
+		} else {
+			diagnostic.Status = "unregistered-device"
+			diagnostic.Message = "one or more allocated UUIDs are absent from the node device registry"
+		}
 	default:
 		diagnostic.Status = "not-whole-gpu"
 		for _, allocated := range candidate.devices {

@@ -151,7 +151,7 @@ func TestRunWholeGPUDryRun(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Equal(t, report.ConfirmedContainers, 0)
 		assert.Equal(t, len(report.Diagnostics), 1)
-		assert.Equal(t, report.Diagnostics[0].Status, "unregistered-device")
+		assert.Equal(t, report.Diagnostics[0].Status, "nvml-unreadable")
 		// The registry-clean candidate still brought NVML up for its
 		// physical check, so the library must also be shut down.
 		assert.Equal(t, initialized, 1)
