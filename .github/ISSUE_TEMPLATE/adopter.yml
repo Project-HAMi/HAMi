@@ -76,10 +76,11 @@ body:
   - type: dropdown
     id: public
     attributes:
-      label: Can we mention you publicly in community updates?
+      label: Would you like a public shoutout?
+      description: "This controls whether we may mention your company in public community updates. Your company can still be listed in ADOPTERS.md even if you choose not to be publicly highlighted."
       options:
-        - "Yes — include us publicly"
-        - "List only — no public mention"
+        - "Yes — I’m happy with a public shoutout"
+        - "No — please list us only, without a public shoutout"
     validations:
       required: true
 
