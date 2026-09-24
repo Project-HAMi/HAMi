@@ -80,6 +80,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
+| `scheduler.profilingBindAddress` | Dedicated pprof HTTP bind address; only used when `--profiling` is enabled | `"127.0.0.1:6060"` |
 | `scheduler.kubeQPS` | QPS to use while talking with the kube-apiserver; empty keeps the binary default (`5`) | `""` |
 | `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
 | `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
@@ -91,6 +92,39 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.replicas` | Number of replicas | `1` |
 | `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
 | `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
+
+### Scheduler profiling
+
+Profiling is disabled by default. To enable it, include `--profiling` in the
+scheduler's extra arguments while retaining any other arguments you need:
+
+```yaml
+scheduler:
+  profilingBindAddress: "127.0.0.1:6060"
+  extender:
+    extraArgs:
+      - --debug
+      - -v=4
+      - --profiling
+```
+
+The dedicated profiling listener serves plain HTTP and defaults to loopback.
+The scheduler Service does not expose its port. Access it using port-forwarding:
+
+```bash
+kubectl -n kube-system port-forward pod/<scheduler-pod> 6060:6060
+```
+
+Then open `http://127.0.0.1:6060/debug/pprof/` locally.
+
+Previously, enabling profiling exposed pprof on the scheduler's cluster-facing
+HTTP server. Those routes are now available only on the dedicated profiling
+listener. Operators using the old endpoint must switch to port-forwarding or
+explicitly set `scheduler.profilingBindAddress` to a non-loopback address.
+Non-loopback binding logs a security warning: pprof has no authentication and
+can expose process diagnostics. Restrict network access if you choose to expose
+it. With profiling disabled, the bind address is ignored and no profiling
+listener is started.
 
 ### Kube Scheduler Configuration
 

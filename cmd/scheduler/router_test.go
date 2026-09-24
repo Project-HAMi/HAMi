@@ -17,13 +17,107 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/klog/v2"
 )
+
+func TestProfilingNonLoopbackWarning(t *testing.T) {
+	state := klog.CaptureState()
+	t.Cleanup(state.Restore)
+	var logs bytes.Buffer
+	klog.LogToStderr(false)
+	klog.SetOutput(&logs)
+	for _, tt := range []struct {
+		address string
+		warn    bool
+	}{
+		{"127.0.0.1:0", false},
+		{"0.0.0.0:0", true},
+	} {
+		logs.Reset()
+		listener, err := listenProfiling(true, tt.address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.Close()
+		klog.Flush()
+		if warned := strings.Contains(logs.String(), "is not a loopback address"); warned != tt.warn {
+			t.Errorf("listenProfiling(%q) warning = %v, want %v", tt.address, warned, tt.warn)
+		}
+	}
+}
+
+func TestProfilingDefaults(t *testing.T) {
+	for name, want := range map[string]string{"profiling": "false", "profiling-bind-address": "127.0.0.1:6060"} {
+		if got := rootCmd.Flags().Lookup(name).DefValue; got != want {
+			t.Errorf("%s default = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestProfilingRouteIsolation(t *testing.T) {
+	previous := enableProfiling
+	enableProfiling = true
+	t.Cleanup(func() { enableProfiling = previous })
+	for name, router := range map[string]http.Handler{"cluster": clusterRouter(nil), "extender": extenderRouter(nil)} {
+		for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine", "/debug/pprof/heap", "/debug/pprof/cmdline", "/debug/pprof/symbol", "/debug/pprof/profile", "/debug/pprof/trace"} {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s router serves %s: status %d", name, path, rec.Code)
+			}
+		}
+	}
+
+	mux := profilingMux()
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine", "/debug/pprof/heap", "/debug/pprof/cmdline", "/debug/pprof/symbol", "/debug/pprof/profile?seconds=1", "/debug/pprof/trace?seconds=0.01"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK || rec.Body.Len() == 0 {
+			t.Errorf("profiling route %s: status %d, body length %d", path, rec.Code, rec.Body.Len())
+		}
+	}
+	for _, path := range []string{"/", "/healthz", "/readyz", "/metrics", "/webhook", "/refit", "/filter", "/bind", "/debug/pprof/unknown"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+			if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("profiling mux serves %s %s: status %d", method, path, rec.Code)
+			}
+		}
+	}
+}
+
+func TestListenProfiling(t *testing.T) {
+	listener, err := listenProfiling(true, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := listener.Addr().String()
+	for _, addr := range []string{address, "invalid address"} {
+		if disabled, err := listenProfiling(false, addr); disabled != nil || err != nil {
+			t.Fatalf("disabled profiling tried to listen on %q: %v, %v", addr, disabled, err)
+		}
+	}
+	duplicate, err := listenProfiling(true, address)
+	if duplicate != nil {
+		duplicate.Close()
+		t.Fatal("profiling unexpectedly bound an occupied port")
+	}
+	var networkError *net.OpError
+	if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "profiling address") {
+		t.Fatalf("expected wrapped profiling listener error, got %v", err)
+	}
+}
 
 // Malformed on purpose: every handler rejects it while decoding, before it
 // reaches the scheduler, so routing can be asserted against a nil one.

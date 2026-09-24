@@ -45,12 +45,13 @@ import (
 //var version string
 
 var (
-	sher            *scheduler.Scheduler
-	tlsKeyFile      string
-	tlsCertFile     string
-	enableProfiling bool
-	legacyMetrics   bool
-	rootCmd         = &cobra.Command{
+	sher                 *scheduler.Scheduler
+	tlsKeyFile           string
+	tlsCertFile          string
+	enableProfiling      bool
+	profilingBindAddress string
+	legacyMetrics        bool
+	rootCmd              = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,6 +79,7 @@ func init() {
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Timeout, "kube-timeout", client.DefaultTimeout, "Timeout to use while talking with kube-apiserver.")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable pprof profiling via HTTP server")
+	rootCmd.Flags().StringVar(&profilingBindAddress, "profiling-bind-address", "127.0.0.1:6060", "Bind address for the dedicated pprof HTTP server when profiling is enabled")
 	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
 	rootCmd.Flags().DurationVar(&config.NodeLockRetryTimeout, "node-lock-retry-timeout", 28*time.Second, "timeout for retrying LockNode when contended by another PodGroup member (0 disables retry). Align the Extender's httpTimeout in KubeSchedulerConfiguration with this value.")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
@@ -94,23 +96,29 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
-// injectProfilingRoute injects pprof routes into the router.
-func injectProfilingRoute(router *httprouter.Router) {
-	router.GET("/debug/pprof/*suffix", func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-		suffix := params.ByName("suffix")
-		switch suffix {
-		case "/cmdline":
-			pprof.Cmdline(w, r)
-		case "/profile":
-			pprof.Profile(w, r)
-		case "/symbol":
-			pprof.Symbol(w, r)
-		case "/trace":
-			pprof.Trace(w, r)
-		default:
-			pprof.Index(w, r)
-		}
-	})
+// profilingMux keeps diagnostic handlers off the cluster and extender routers.
+func profilingMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	return mux
+}
+
+func listenProfiling(enabled bool, address string) (net.Listener, error) {
+	if !enabled {
+		return nil, nil
+	}
+	if !isLoopbackAddr(address) {
+		klog.Warningf("--profiling-bind-address=%s is not a loopback address: pprof authenticates no caller and exposes process diagnostics", address)
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on the profiling address %s: %w", address, err)
+	}
+	return listener, nil
 }
 
 func start() error {
@@ -154,14 +162,7 @@ func start() error {
 	}
 	defer sher.Stop()
 
-	// start monitor metrics
-	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
-
 	router := clusterRouter(sher)
-	if enableProfiling {
-		injectProfilingRoute(router)
-		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
-	}
 
 	if !isLoopbackAddr(config.ExtenderBind) {
 		klog.Warningf("--extender-bind=%s is not a loopback address: /filter and /bind authenticate no caller, "+
@@ -186,7 +187,7 @@ func start() error {
 		}()
 	}
 
-	// Both ports are claimed before either is served, so a port already in use
+	// Extender, cluster, and profiling ports are claimed before serving, so a port already in use
 	// fails startup outright instead of surfacing from inside a goroutine once
 	// the scheduler looks healthy.
 	extenderListener, err := net.Listen("tcp", config.ExtenderBind)
@@ -199,10 +200,25 @@ func start() error {
 		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
 	}
 	defer clusterListener.Close()
+	profilingListener, err := listenProfiling(enableProfiling, profilingBindAddress)
+	if err != nil {
+		return err
+	}
+	if profilingListener != nil {
+		defer profilingListener.Close()
+	}
 
-	// Either listener failing takes the process down: a scheduler that cannot
-	// answer /filter is as unusable as one that cannot answer /webhook.
-	errCh := make(chan error, 2)
+	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
+
+	// Supervise profiling alongside the scheduler listeners so server failures
+	// are returned to the caller instead of leaving a partially working process.
+	errCh := make(chan error, 3)
+	if profilingListener != nil {
+		klog.Infof("Profiling enabled, visit http://%s/debug/pprof/ to view profiles", profilingListener.Addr())
+		go func() {
+			errCh <- fmt.Errorf("profiling server error: %w", serve(profilingListener, profilingMux(), nil))
+		}()
+	}
 	go func() {
 		errCh <- fmt.Errorf("extender server error: %w", serve(extenderListener, extenderRouter(sher), tlsCfg))
 	}()
