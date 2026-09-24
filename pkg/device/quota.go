@@ -283,14 +283,15 @@ func (q *QuotaManager) recalcLimitLocked(namespace, resourceName string) {
 	}
 }
 
-// isScopedQuota returns true if the ResourceQuota defines scopes or scope selectors.
+// isScopedQuota returns true if the ResourceQuota defines scopes or non-empty scope selectors.
 // HAMi tracks usage at namespace granularity and does not evaluate pod scopes in FitQuota,
 // so scoped quotas are skipped to avoid over-restricting pods outside their scope.
 func isScopedQuota(quota *corev1.ResourceQuota) bool {
 	if quota == nil {
 		return false
 	}
-	return len(quota.Spec.Scopes) > 0 || quota.Spec.ScopeSelector != nil
+	hasScopeSelector := quota.Spec.ScopeSelector != nil && len(quota.Spec.ScopeSelector.MatchExpressions) > 0
+	return len(quota.Spec.Scopes) > 0 || hasScopeSelector
 }
 
 // addQuotaLocked requires q.mutex to be held.

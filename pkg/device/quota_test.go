@@ -680,3 +680,40 @@ func TestScopedQuotaIgnored(t *testing.T) {
 	}
 }
 
+func TestEmptyScopeSelectorTreatedAsUnscoped(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "team-empty-selector"
+	memName := "nvidia.com/gpumem"
+
+	// A ResourceQuota with a non-nil ScopeSelector that has empty MatchExpressions
+	// and no Scopes should be treated as unscoped and enforced.
+	emptySelectorQuota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "empty-selector", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			ScopeSelector: &corev1.ScopeSelector{
+				MatchExpressions: []corev1.ScopedResourceSelectorRequirement{},
+			},
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(1500, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(emptySelectorQuota)
+
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 1500 {
+		t.Fatalf("expected memory limit 1500 for quota with empty ScopeSelector, got %d", got)
+	}
+	if !(*qm.Quotas[ns])[memName].LimitSet {
+		t.Fatalf("expected LimitSet true for quota with empty ScopeSelector")
+	}
+
+	qm.DelQuota(emptySelectorQuota)
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 0 {
+		t.Errorf("expected memory limit 0 after deleting quota with empty ScopeSelector, got %d", got)
+	}
+	if (*qm.Quotas[ns])[memName].LimitSet {
+		t.Errorf("expected LimitSet false after delete")
+	}
+}
+
