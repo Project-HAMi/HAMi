@@ -18,13 +18,16 @@ package scheduler
 
 import (
 	"maps"
+	"strings"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -208,4 +211,32 @@ func Test_onDelPod_AnnotationlessOldUIDDoesNotDeleteReplacement(t *testing.T) {
 	)
 	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpumem"), int64(20000))
 	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpucores"), int64(100))
+}
+
+func Test_onAddPod_ReportsUndecodableBoundAllocation(t *testing.T) {
+	initReplayDevices(t)
+	recorder := record.NewFakeRecorder(1)
+	s := NewScheduler()
+	s.eventRecorder = recorder
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bad-allocation",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "node1",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node1"},
+	}
+
+	s.onAddPod(pod)
+
+	select {
+	case event := <-recorder.Events:
+		assert.Assert(t, strings.Contains(event, EventReasonAllocationDecodeFailed), "event: %q", event)
+		assert.Assert(t, strings.Contains(event, "node1"), "event: %q", event)
+	case <-time.After(time.Second):
+		t.Fatal("expected allocation decode failure event")
+	}
 }

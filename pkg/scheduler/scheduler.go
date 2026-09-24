@@ -239,14 +239,14 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
-	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
 	if util.IsPodInTerminatedState(pod) {
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
+		return
+	}
+	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -263,7 +263,10 @@ func (s *Scheduler) onAddPod(obj any) {
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
+		if pod.Spec.NodeName == nodeID {
+			s.recordAllocationDecodeFailureEvent(pod, nodeID, err)
+		}
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "node", nodeID)
 		return
 	}
 
@@ -282,14 +285,14 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
-	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
-		return
-	}
-
 	if util.IsPodInTerminatedState(newPod) {
 		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
 			s.quotaManager.RmUsage(newPod, pi.Devices)
 		}
+		return
+	}
+
+	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
 		return
 	}
 

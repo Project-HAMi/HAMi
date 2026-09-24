@@ -45,6 +45,10 @@ const (
 	EventReasonNumaRefitFailed = "NumaRefitFailed"
 	// EventReasonNumaRefitSucceed indicates that a NUMA refit succeeded.
 	EventReasonNumaRefitSucceed = "NumaRefitSucceed"
+
+	// EventReasonAllocationDecodeFailed indicates that a live Pod allocation
+	// annotation could not be decoded during scheduler accounting.
+	EventReasonAllocationDecodeFailed = "AllocationDecodeFailed"
 )
 
 func (s *Scheduler) addAllEventHandlers() {
@@ -81,6 +85,16 @@ func (s *Scheduler) recordNumaRefitResultEvent(pod *corev1.Pod, successMsg strin
 	} else {
 		s.eventRecorder.Event(pod, corev1.EventTypeWarning, EventReasonNumaRefitFailed, refitErr.Error())
 	}
+}
+
+// recordAllocationDecodeFailureEvent reports an allocation that could not be
+// reconstructed without changing candidate-node selection.
+func (s *Scheduler) recordAllocationDecodeFailureEvent(pod *corev1.Pod, nodeID string, decodeErr error) {
+	if pod == nil || s.eventRecorder == nil || decodeErr == nil {
+		return
+	}
+	s.eventRecorder.Eventf(pod, corev1.EventTypeWarning, EventReasonAllocationDecodeFailed,
+		"Failed to decode HAMi allocated-device annotations for node %q: %v", nodeID, decodeErr)
 }
 
 func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, successMsg string, schedulerErr error) {
