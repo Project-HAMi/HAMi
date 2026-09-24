@@ -252,6 +252,25 @@ func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, sk
 	return nil
 }
 
+// podAwaitingAllocation reports whether the pod named by a node lock is still
+// pending, which is the window in which the device plugin reads that lock to
+// find out which pod its Allocate belongs to. A pod that is gone, or that has
+// moved past Pending, can no longer be handed an allocation, so its lock is
+// free to take.
+func podAwaitingAllocation(ctx context.Context, ns, name string) (bool, error) {
+	if ns == "" || name == "" {
+		return false, nil
+	}
+	pod, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return pod.Status.Phase == corev1.PodPending, nil
+}
+
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if pods == nil {
 		return fmt.Errorf("cannot lock node: pod is nil")
@@ -280,6 +299,23 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	var skipOwnerCheck = false
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
+		// The holder may still be waiting for its Allocate. The kubelet passes
+		// no pod identity to a device plugin, so the plugin reads this lock to
+		// learn which pod it is serving; handing the lock to another pod while
+		// the holder waits makes the holder read that other pod's allocation
+		// (issue #3096). Leave the lock alone until the holder is past the
+		// point of being allocated. Only another pod's allocation can be
+		// crossed with this one, so a pod reclaiming its own expired lock
+		// still re-stamps it below and keeps its place.
+		if ns != pods.Namespace || previousPodName != pods.Name {
+			waiting, err := podAwaitingAllocation(ctx, ns, previousPodName)
+			if err != nil {
+				return err
+			}
+			if waiting {
+				return fmt.Errorf("node %s lock expired while %s/%s still waits to be allocated: %w", nodeName, ns, previousPodName, ErrNodeLockContention)
+			}
+		}
 		skipOwnerCheck = true
 	} else if ns == pods.Namespace && previousPodName == pods.Name {
 		// The lock is already held by this exact pod. lockAllDevices calls
