@@ -170,6 +170,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
 {{- end -}}
 
+{{/*
+With an auto-detected driver root, the device plugin loads NVML from the driver
+injected by the NVIDIA Container Toolkit. The host root is mounted only when a
+CDI device list strategy needs to walk the host driver layout.
+*/}}
+{{- define "hami.devicePlugin.autoDriverRootHostMount" -}}
+{{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (toString .Values.devicePlugin.deviceListStrategy)) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "hami.scheduler.patch.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.image) "global" .Values.global) }}
 {{- end -}}
