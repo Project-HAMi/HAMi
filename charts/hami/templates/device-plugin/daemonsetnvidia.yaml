@@ -214,6 +214,9 @@ spec:
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
               readOnly: true
+            - name: host
+              mountPath: /host
+              readOnly: true
             {{- end }}
             {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
             - name: numa-refit-ca
@@ -330,6 +333,12 @@ spec:
           hostPath:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | default "/run/nvidia/validations" }}
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
+        - name: host
+          hostPath:
+            path: /
+            type: Directory
         {{- end }}
         {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: driver-root

@@ -87,6 +87,9 @@ func New(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, de
 	if err != nil {
 		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
 	}
+	if setter, ok := o.cdiHandler.(interface{ SetDynamicMIGMode(bool) }); ok {
+		setter.SetDynamicMIGMode(mode == nvidia.MigMode)
+	}
 
 	resourceManagers, err := o.getResourceManagers()
 	if err != nil {

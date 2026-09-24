@@ -46,6 +46,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -58,6 +59,10 @@ import (
 const (
 	defaultResync    = 1 * time.Hour
 	syncedPollPeriod = 100 * time.Millisecond
+
+	// sessionReconcileTimeout caps how long the lupine session stub reconcile
+	// may hold the scheduler lock it runs under.
+	sessionReconcileTimeout = 30 * time.Second
 )
 
 type Scheduler struct {
@@ -662,6 +667,19 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	}
 	s.overviewstatus = *overallnodeMap
 
+	// The lupine fleet keeps a relay pod on each of its servers so a user can
+	// port-forward to something other than the server. Reconciled here because
+	// this is the loop that already runs only on the leader.
+	// Bounded, because register holds s.lock for its whole body and this
+	// issues List, Delete and Create calls: a stalled apiserver would
+	// otherwise keep every reader of that lock waiting for as long as it takes
+	// to answer.
+	if dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionReconcileTimeout)
+		dev.ReconcileSessionStubs(ctx)
+		cancel()
+	}
+
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced.Store(true)
 }
@@ -900,7 +918,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							slots := max(udevice.Slots, 1)
 							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
-							d.Device.Usedcores += udevice.Usedcores
+							if accounting, ok := device.GetDevices()[udevice.Type].(device.CoreMaskAccounting); ok {
+								d.Device.Usedcores = accounting.AccumulateCores(d.Device.Usedcores, udevice.Usedcores)
+							} else {
+								d.Device.Usedcores += udevice.Usedcores
+							}
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
 							if allocations := allocationsByGPU[udevice.UUID]; len(allocations) > 0 {
