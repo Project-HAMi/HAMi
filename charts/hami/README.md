@@ -121,6 +121,10 @@ Previously, enabling profiling exposed pprof on the scheduler's cluster-facing
 HTTP server. Those routes are now available only on the dedicated profiling
 listener. Operators using the old endpoint must switch to port-forwarding or
 explicitly set `scheduler.profilingBindAddress` to a non-loopback address.
+Changing this address does not expose pprof through the scheduler Service;
+the old Service endpoint still returns 404 for pprof routes. For non-loopback
+access, reach the Pod IP and profiling port through an appropriately restricted
+network path, or use the Pod port-forward shown above.
 Non-loopback binding logs a security warning: pprof has no authentication and
 can expose process diagnostics. Restrict network access if you choose to expose
 it. With profiling disabled, the bind address is ignored and no profiling

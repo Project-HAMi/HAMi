@@ -121,6 +121,23 @@ func listenProfiling(enabled bool, address string) (net.Listener, error) {
 	return listener, nil
 }
 
+// startProfilingServer returns the listener for the caller to close.
+// Serving errors use the same channel as the scheduler's other HTTP servers.
+func startProfilingServer(enabled bool, address string, errCh chan<- error) (net.Listener, error) {
+	listener, err := listenProfiling(enabled, address)
+	if err != nil {
+		return nil, err
+	}
+	if listener == nil {
+		return nil, nil
+	}
+	klog.Infof("Profiling enabled, visit http://%s/debug/pprof/ to view profiles", listener.Addr())
+	go func() {
+		errCh <- fmt.Errorf("profiling server error: %w", serve(listener, profilingMux(), nil))
+	}()
+	return listener, nil
+}
+
 func start() error {
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
@@ -200,7 +217,8 @@ func start() error {
 		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
 	}
 	defer clusterListener.Close()
-	profilingListener, err := listenProfiling(enableProfiling, profilingBindAddress)
+	errCh := make(chan error, 3)
+	profilingListener, err := startProfilingServer(enableProfiling, profilingBindAddress, errCh)
 	if err != nil {
 		return err
 	}
@@ -212,13 +230,6 @@ func start() error {
 
 	// Supervise profiling alongside the scheduler listeners so server failures
 	// are returned to the caller instead of leaving a partially working process.
-	errCh := make(chan error, 3)
-	if profilingListener != nil {
-		klog.Infof("Profiling enabled, visit http://%s/debug/pprof/ to view profiles", profilingListener.Addr())
-		go func() {
-			errCh <- fmt.Errorf("profiling server error: %w", serve(profilingListener, profilingMux(), nil))
-		}()
-	}
 	go func() {
 		errCh <- fmt.Errorf("extender server error: %w", serve(extenderListener, extenderRouter(sher), tlsCfg))
 	}()

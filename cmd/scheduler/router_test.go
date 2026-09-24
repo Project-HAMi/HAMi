@@ -29,6 +29,65 @@ import (
 	"k8s.io/klog/v2"
 )
 
+func TestStartProfilingServer(t *testing.T) {
+	errCh := make(chan error, 1)
+	listener, err := startProfilingServer(true, "127.0.0.1:0", errCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	client := &http.Client{Timeout: 5 * time.Second}
+	for path, want := range map[string]int{
+		"/debug/pprof/": http.StatusOK,
+		"/healthz":      http.StatusNotFound,
+		"/webhook":      http.StatusNotFound,
+	} {
+		resp, err := client.Get("http://" + listener.Addr().String() + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s status = %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+	listener.Close()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, net.ErrClosed) || !strings.Contains(err.Error(), "profiling server error") {
+			t.Fatalf("expected supervised listener error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("profiling server did not report its listener failure")
+	}
+}
+
+func TestStartProfilingServerDisabledAndBindFailure(t *testing.T) {
+	errCh := make(chan error, 1)
+	listener, err := startProfilingServer(false, "invalid address", errCh)
+	if listener != nil || err != nil {
+		t.Fatalf("disabled profiling = %v, %v; want nil, nil", listener, err)
+	}
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	listener, err = startProfilingServer(true, occupied.Addr().String(), errCh)
+	if listener != nil {
+		listener.Close()
+		t.Fatal("profiling bound an occupied port")
+	}
+	if _, ok := errors.AsType[*net.OpError](err); !ok {
+		t.Fatalf("expected synchronous listener failure, got %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("no server should have started, got async error %v", err)
+	default:
+	}
+}
+
 func TestProfilingNonLoopbackWarning(t *testing.T) {
 	state := klog.CaptureState()
 	t.Cleanup(state.Restore)
