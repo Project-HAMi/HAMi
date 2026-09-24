@@ -86,7 +86,12 @@ func newWholeGPUDryRunKubernetesClient() (kubernetes.Interface, error) {
 func loadWholeGPUDryRunKubeConfig() (*rest.Config, error) {
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
-		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+		if home := os.Getenv("HOME"); home != "" {
+			candidate := filepath.Join(home, ".kube", "config")
+			if _, err := os.Stat(candidate); err == nil {
+				kubeconfig = candidate
+			}
+		}
 	}
 	if kubeconfig != "" {
 		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
