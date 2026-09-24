@@ -66,6 +66,8 @@ body:
       label: Cluster / GPU details (optional)
       description: "For example: 3 nodes, A100 cluster, or 4 x 4090."
       placeholder: "3 nodes, 24x A100"
+    validations:
+      required: true
 
   - type: dropdown
     id: public
