@@ -1,0 +1,85 @@
+name: "Add my company as a HAMi adopter"
+description: "Tell us you're using HAMi — get listed in ADOPTERS.md and help showcase community adoption."
+title: "Adopter: [Company Name]"
+labels: ["adopter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for using HAMi! Filling in this form helps us:
+        - ✅ Add your company to the HAMi adopter list
+        - ✅ Keep the public adoption record up to date
+        - 📣 Share your usage publicly if you opt in
+
+        We'll take it from here — no PR needed.
+
+  - type: input
+    id: company
+    attributes:
+      label: Company / Project name
+      placeholder: "Acme Corp"
+    validations:
+      required: true
+
+  - type: input
+    id: website
+    attributes:
+      label: Company website
+      placeholder: "https://example.com"
+    validations:
+      required: true
+
+  - type: input
+    id: contact
+    attributes:
+      label: Contact name or handle
+      description: "This is the name or handle we should use for the contact entry in the adopter list."
+      placeholder: "alice@example.com or @alice"
+    validations:
+      required: true
+
+  - type: input
+    id: project
+    attributes:
+      label: Project name (optional)
+      description: "If you're using HAMi as part of a named project or product."
+      placeholder: "My Platform"
+
+  - type: input
+    id: project_url
+    attributes:
+      label: Project URL (optional)
+      placeholder: "https://example.com/my-platform"
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: How are you using HAMi?
+      description: "One or two sentences is enough. We'll use this in ADOPTERS.md."
+      placeholder: "We use HAMi to share GPU resources across multiple AI training jobs and improve utilization in our Kubernetes cluster."
+    validations:
+      required: true
+
+  - type: input
+    id: cluster
+    attributes:
+      label: Cluster / GPU details (optional)
+      description: "For example: 3 nodes, A100 cluster, or 4 x 4090."
+      placeholder: "3 nodes, 24x A100"
+
+  - type: dropdown
+    id: public
+    attributes:
+      label: Can we mention you publicly in community updates?
+      options:
+        - "Yes — include us publicly"
+        - "List only — no public mention"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional notes (optional)
+      description: "Anything else you'd like us to know?"
+      placeholder: "We deployed HAMi in production in early 2026..."
