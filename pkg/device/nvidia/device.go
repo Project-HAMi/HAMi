@@ -52,6 +52,11 @@ const (
 	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
+	// AllocatedDevicesAnnotation records the devices bound to a pod. Unlike
+	// InRequestDevices' "-to-allocate" annotation, the device plugin never
+	// clears this one after Allocate, so it stays readable for the lifetime
+	// of the pod.
+	AllocatedDevicesAnnotation = "hami.io/vgpu-devices-allocated"
 	// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
 	// GPU UUIDs to exclude from new allocations, without affecting pods already
 	// running on those devices. It's a live, per-GPU equivalent of `kubectl cordon`;
@@ -66,6 +71,11 @@ const (
 	// rather than to pods of its own. The remote-gpu backend hands such a card
 	// out cluster wide, so this backend must leave it alone.
 	RemoteMode = "remote"
+
+	// WholeGPUUsedCores is the cores percentage recorded in the
+	// vgpu-devices-allocated annotation when a container holds the entire GPU.
+	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
+	WholeGPUUsedCores int32 = 100
 )
 
 var (
@@ -170,7 +180,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	_, ok := device.InRequestDevices[NvidiaGPUDevice]
 	if !ok {
 		device.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
+		device.SupportDevices[NvidiaGPUDevice] = AllocatedDevicesAnnotation
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
 	if err := ValidateMigProfileAllowlist(nvconfig.MigProfileAllowlist); err != nil {

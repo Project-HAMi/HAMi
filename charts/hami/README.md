@@ -173,6 +173,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.skipHookForWholeGPU` | Skip the ld.so.preload hook for whole-GPU containers (inject `CUDA_DISABLE_CONTROL=true`) and synthesize their metrics via NVML; over-subscribed nodes always keep the hook | `false` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 

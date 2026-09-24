@@ -397,6 +397,14 @@ devicePlugin:
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
     resyncInterval: "5m"
+    ## @param devicePlugin.monitor.skipHookForWholeGPU skip mounting the
+    ## ld.so.preload interception hook for containers whose allocations are all
+    ## whole physical GPUs (the device plugin injects CUDA_DISABLE_CONTROL=true
+    ## instead), and let vGPUmonitor synthesize their metrics by querying NVML
+    ## directly, since such pods no longer write libvgpu shm cache data.
+    ## Over-subscribed nodes (deviceMemoryScaling/deviceCoreScaling != 1)
+    ## always keep the hook regardless of this setting.
+    skipHookForWholeGPU: false
     extraArgs:
       - -v=4
     extraEnvs: {}

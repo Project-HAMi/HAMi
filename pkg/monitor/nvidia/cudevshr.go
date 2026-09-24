@@ -87,6 +87,10 @@ type ContainerLister struct {
 	clientset     *kubernetes.Clientset
 	nodeName      string
 
+	// wholeGPU holds the whole-GPU reconciliation state; nil unless
+	// HAMI_WHOLE_GPU_SKIP_HOOK is enabled.
+	wholeGPU *wholeGPUState
+
 	// Fields for the informer-based pod cache mechanism
 	informerFactory informers.SharedInformerFactory
 	podInformer     cache.SharedIndexInformer
@@ -193,6 +197,10 @@ func (l *ContainerLister) Update() error {
 	podUIDs := make(map[string]bool, len(pods))
 	for _, pod := range pods {
 		podUIDs[string(pod.UID)] = true
+	}
+
+	if wholeGPUSkipHookEnabled {
+		l.reconcileWholeGPU(pods)
 	}
 
 	for _, entry := range entries {
