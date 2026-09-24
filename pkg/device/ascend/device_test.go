@@ -19,6 +19,7 @@ package ascend
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"testing"
@@ -780,7 +781,7 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "resourcememoryname is invalid",
+			name: "resourcememoryname above capacity is deferred until node filtering",
 			args: struct {
 				ctr corev1.Container
 				pod corev1.Pod
@@ -795,7 +796,7 @@ func Test_MutateAdmission(t *testing.T) {
 				},
 				pod: corev1.Pod{},
 			},
-			want: false,
+			want: true,
 		},
 		{
 			name: "resourcememoryname not within the template scope，but smaller than MemoryCapacity",
@@ -1484,7 +1485,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantCore:      20,
 		},
 		{
-			name: "no vnpu-mode annotation: no postStart, memory trimmed",
+			name: "no vnpu-mode annotation: memory is preserved for node filtering",
 			args: struct {
 				ctr corev1.Container
 				pod corev1.Pod
@@ -1505,7 +1506,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 				pod: corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
 			},
 			wantPostStart: false,
-			wantMem:       32768, // no template configured -> MemoryAllocatable
+			wantMem:       15360,
 			wantCore:      0,
 		},
 		{
@@ -3021,10 +3022,18 @@ func TestDevices_Fit(t *testing.T) {
 			}
 
 			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
+				annotations := make(map[string]string, len(test.annos)+1)
+				maps.Copy(annotations, test.annos)
+				// These table cases model requests after template-mode admission.
+				// Keep their generic Fit assertions independent of the
+				// mode-agnostic path covered below.
+				if _, explicit := annotations[VNPUModeAnnotation]; !explicit && test.nodeAnnotation[VNPUNodeSelectorAnnotation] != "true" {
+					annotations[VNPUModeAnnotation] = VNPUModeTemplate
+				}
 				allocated := &device.PodDevices{}
 				pod := &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Annotations: test.annos,
+						Annotations: annotations,
 					},
 				}
 				nodeInfo := &device.NodeInfo{
@@ -3132,6 +3141,150 @@ func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
 			fit, _, reason := dev.Fit(devices, request, pod, nodeInfo, &device.PodDevices{})
 			assert.Equal(t, fit, test.wantFit)
 			assert.Equal(t, reason, test.wantReason)
+		})
+	}
+}
+
+func TestDevices_ModeAgnosticMemoryIsResolvedPerCandidateNode(t *testing.T) {
+	dev := &Devices{config: VNPUConfig{
+		CommonWord:         "Ascend910B4",
+		ResourceName:       "huawei.com/Ascend910B4",
+		ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+		MemoryAllocatable:  16384,
+		MemoryCapacity:     16384,
+		Templates: []Template{
+			{Name: "vir08", Memory: 8192},
+			{Name: "vir16", Memory: 16384},
+		},
+	}}
+
+	newContainer := func() corev1.Container {
+		return corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"huawei.com/Ascend910B4":        resource.MustParse("1"),
+			"huawei.com/Ascend910B4-memory": resource.MustParse("10000"),
+		}}}
+	}
+	memory := corev1.ResourceName("huawei.com/Ascend910B4-memory")
+	for _, test := range []struct {
+		name string
+		mode string
+		want int64
+	}{
+		{name: "template mode is trimmed at admission", mode: VNPUModeTemplate, want: 16384},
+		{name: "hami-core mode preserves exact memory", mode: VNPUModeHamiCore, want: 10000},
+		{name: "unspecified mode preserves exact memory", want: 10000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctr := newContainer()
+			pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+			if test.mode != "" {
+				pod.Annotations[VNPUModeAnnotation] = test.mode
+			}
+			ok, err := dev.MutateAdmission(&ctr, &pod)
+			assert.NilError(t, err)
+			assert.Assert(t, ok)
+			limit := ctr.Resources.Limits[memory]
+			request := ctr.Resources.Requests[memory]
+			assert.Equal(t, limit.Value(), test.want)
+			assert.Equal(t, request.Value(), test.want)
+		})
+	}
+
+	t.Run("unknown vnpu mode is rejected", func(t *testing.T) {
+		ctr := newContainer()
+		pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUModeAnnotation: "unknown",
+		}}}
+		found, err := dev.MutateAdmission(&ctr, &pod)
+		assert.Assert(t, !found)
+		assert.ErrorContains(t, err, "unsupported vNPU mode")
+	})
+
+	request := device.ContainerDeviceRequest{Nums: 1, Type: dev.CommonWord(), Memreq: 10000}
+	devices := []*device.DeviceUsage{{
+		ID: "dev-0", Type: dev.CommonWord(), Index: 0, Count: 1,
+		Totalmem: 16384, Totalcore: 100, Health: true,
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+	t.Run("Fit rejects an unknown vnpu mode", func(t *testing.T) {
+		invalidPod := pod.DeepCopy()
+		invalidPod.Annotations[VNPUModeAnnotation] = "unknown"
+		fit, _, reason := dev.Fit(devices, request, invalidPod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Assert(t, !fit)
+		assert.Assert(t, strings.Contains(reason, "unsupported vNPU mode"))
+	})
+
+	templateNode := &device.NodeInfo{Node: &corev1.Node{}}
+	fit, allocation, reason := dev.Fit(devices, request, pod, templateNode, &device.PodDevices{})
+	assert.Assert(t, fit, reason)
+	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int32(16384))
+	templateAllocation := allocation
+	// Fit must not mutate the request reused for another candidate node.
+	assert.Equal(t, request.Memreq, int32(10000))
+
+	hamiCoreNode := &device.NodeInfo{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUNodeSelectorAnnotation: "true",
+	}}}}
+	fit, allocation, reason = dev.Fit(devices, request, pod, hamiCoreNode, &device.PodDevices{})
+	assert.Assert(t, fit, reason)
+	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int32(10000))
+	hamiCoreAllocation := allocation
+
+	for _, test := range []struct {
+		name string
+		node *device.NodeInfo
+		want bool
+	}{
+		{name: "template node rejects a fractional multi-device request", node: templateNode, want: false},
+		{name: "hami-core node accepts an exact multi-device request", node: hamiCoreNode, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			multiRequest := request
+			multiRequest.Nums = 2
+			// 8000 rounds to the 8192 template rather than the full 16384
+			// allocation. This is the fractional multi-device case that template
+			// nodes must reject, while hami-core nodes keep the exact request.
+			multiRequest.Memreq = 8000
+			multiDevices := append([]*device.DeviceUsage{}, devices...)
+			multiDevices = append(multiDevices, &device.DeviceUsage{
+				ID: "dev-1", Type: dev.CommonWord(), Index: 1, Count: 1,
+				Totalmem: 16384, Totalcore: 100, Health: true,
+			})
+			fit, result, reason := dev.Fit(multiDevices, multiRequest, pod, test.node, &device.PodDevices{})
+			assert.Equal(t, fit, test.want, reason)
+			if test.want {
+				assert.Equal(t, len(result[dev.CommonWord()]), 2)
+				assert.Equal(t, result[dev.CommonWord()][0].Usedmem, int32(8000))
+			}
+		})
+	}
+
+	ctr := newContainer()
+	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)] = resource.MustParse("2")
+	found, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+	assert.Assert(t, found)
+	assert.NilError(t, err)
+
+	emptyTemplateDev := &Devices{config: VNPUConfig{
+		CommonWord: dev.CommonWord(), MemoryAllocatable: 16384, MemoryCapacity: 16384,
+	}}
+	fit, emptyTemplateAllocation, reason := emptyTemplateDev.Fit(devices, request, pod, templateNode, &device.PodDevices{})
+	assert.Assert(t, fit, reason)
+	assert.Equal(t, emptyTemplateAllocation[dev.CommonWord()][0].Usedmem, int32(16384))
+
+	for _, test := range []struct {
+		name       string
+		allocation map[string]device.ContainerDevices
+		wantTemp   bool
+	}{
+		{name: "template runtime metadata includes a template", allocation: templateAllocation, wantTemp: true},
+		{name: "hami-core runtime metadata has no template", allocation: hamiCoreAllocation, wantTemp: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			annotations := map[string]string{}
+			dev.PatchAnnotations(pod, &annotations, device.PodDevices{dev.CommonWord(): device.PodSingleDevice{test.allocation[dev.CommonWord()]}})
+			runtime := annotations["huawei.com/"+dev.CommonWord()]
+			assert.Equal(t, strings.Contains(runtime, `"temp"`), test.wantTemp)
 		})
 	}
 }
@@ -3466,7 +3619,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 					Used:       0,
 					Count:      100,
 					Usedmem:    0,
-					Totalmem:   128,
+					Totalmem:   65536,
 					Totalcore:  100,
 					Usedcores:  0,
 					Numa:       0,
@@ -3479,7 +3632,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 					Used:       0,
 					Count:      100,
 					Usedmem:    0,
-					Totalmem:   128,
+					Totalmem:   65536,
 					Totalcore:  100,
 					Usedcores:  0,
 					Numa:       0,
@@ -3492,7 +3645,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 					Used:       0,
 					Count:      100,
 					Usedmem:    0,
-					Totalmem:   128,
+					Totalmem:   65536,
 					Totalcore:  100,
 					Usedcores:  0,
 					Numa:       0,
@@ -3502,7 +3655,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 			},
 			request: device.ContainerDeviceRequest{
 				Nums:             2,
-				Memreq:           128,
+				Memreq:           65536,
 				MemPercentagereq: 0,
 				Coresreq:         100,
 			},
