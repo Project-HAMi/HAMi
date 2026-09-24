@@ -1181,6 +1181,32 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	require.Empty(t, mode, "no mode is chosen when the node is unknown")
 }
 
+// REPORT_NODE_CAPACITY is the env-var escape hatch for enabling node capacity
+// reporting without a config file or CLI flag change.
+func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
+	previous := client.KubeClient
+	nodeName := "node-report-capacity"
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	t.Cleanup(func() { client.KubeClient = previous })
+
+	previousNodeName := util.NodeName
+	util.NodeName = nodeName
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+
+	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+
+	t.Setenv("REPORT_NODE_CAPACITY", "true")
+
+	sConfig, _, err := LoadNvidiaDevicePluginConfig()
+	require.NoError(t, err)
+	require.NotNil(t, sConfig.NvidiaConfig.ReportNodeCapacity)
+	require.True(t, *sConfig.NvidiaConfig.ReportNodeCapacity)
+}
+
 // The lupine label is the operator's one declaration that a node serves its
 // GPUs over the network. Deriving the mode from it keeps the plugin and the
 // scheduler's pool from disagreeing about which fleet a node belongs to.
@@ -1208,6 +1234,33 @@ func TestResolveOperatingMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
+		})
+	}
+}
+
+// The chart always passes --report-node-capacity explicitly (true or
+// false), so chartDefault is realistically never nil in that deployment.
+// A per-node Nodeconfig override must still survive it.
+func TestResolveReportNodeCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		perNode      *bool
+		chartDefault *bool
+		want         *bool
+	}{
+		{"per-node true wins over chart-wide false", ptr(true), ptr(false), ptr(true)},
+		{"per-node false wins over chart-wide true", ptr(false), ptr(true), ptr(false)},
+		{"no per-node value falls back to the chart-wide default", nil, ptr(true), ptr(true)},
+		{"neither set stays nil", nil, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveReportNodeCapacity(tc.perNode, tc.chartDefault)
+			if tc.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tc.want, *got)
 		})
 	}
 }
