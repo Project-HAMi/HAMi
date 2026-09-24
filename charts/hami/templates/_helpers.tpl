@@ -173,10 +173,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 With an auto-detected driver root, the device plugin loads NVML from the driver
 injected by the NVIDIA Container Toolkit. The host root is mounted only when a
-CDI device list strategy needs to walk the host driver layout.
+CDI device list strategy needs to walk the host driver layout. The strategy can
+also be overridden through extraArgs or extraEnvs, so check those too.
 */}}
 {{- define "hami.devicePlugin.autoDriverRootHostMount" -}}
-{{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (toString .Values.devicePlugin.deviceListStrategy)) -}}
+{{- $strategies := list (toString .Values.devicePlugin.deviceListStrategy) -}}
+{{- $takeNext := false -}}
+{{- range .Values.devicePlugin.extraArgs -}}
+{{- $arg := toString . -}}
+{{- if $takeNext -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- $takeNext = regexMatch "^--?device-list-strategy$" $arg -}}
+{{- if regexMatch "^--?device-list-strategy=" $arg -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.devicePlugin.extraEnvs -}}
+{{- if eq (toString .name) "DEVICE_LIST_STRATEGY" -}}
+{{- $strategies = append $strategies (toString .value) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (join "," $strategies)) -}}
 true
 {{- end -}}
 {{- end -}}
