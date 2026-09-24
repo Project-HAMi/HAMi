@@ -118,7 +118,6 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 	}
 	if c.IsSet("report-node-capacity") || c.Bool("report-node-capacity") {
 		reportCap := c.Bool("report-node-capacity")
-		config.NvidiaConfig.ReportNodeCapacity = &reportCap
 		devcfg.ReportNodeCapacity = &reportCap
 	}
 	devcfg.ResourceName = &config.NvidiaConfig.ResourceCountName

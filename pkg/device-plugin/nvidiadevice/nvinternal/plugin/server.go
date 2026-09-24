@@ -207,6 +207,20 @@ func resolveOperatingMode(configured string, node *corev1.Node) string {
 	return configured
 }
 
+// resolveReportNodeCapacity lets a per-node Nodeconfig entry decide whether
+// this node reports gpumem/gpucores to Node capacity, overriding the
+// chart-wide --report-node-capacity/REPORT_NODE_CAPACITY default.
+//
+// The chart always passes --report-node-capacity explicitly (true or
+// false), so chartDefault is never nil in that deployment; without this
+// precedence a per-node override could never survive past it.
+func resolveReportNodeCapacity(perNode, chartDefault *bool) *bool {
+	if perNode != nil {
+		return perNode
+	}
+	return chartDefault
+}
+
 // getPluginSocketPath returns the socket to use for the specified resource.
 func getPluginSocketPath(resource spec.ResourceName) string {
 	_, name := resource.Split()
@@ -224,9 +238,11 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)
 	}
-	if nvconfig != nil && nvconfig.ReportNodeCapacity != nil {
-		sConfig.NvidiaConfig.ReportNodeCapacity = nvconfig.ReportNodeCapacity
+	var chartDefault *bool
+	if nvconfig != nil {
+		chartDefault = nvconfig.ReportNodeCapacity
 	}
+	sConfig.NvidiaConfig.ReportNodeCapacity = resolveReportNodeCapacity(sConfig.NvidiaConfig.ReportNodeCapacity, chartDefault)
 	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
 		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
 	}

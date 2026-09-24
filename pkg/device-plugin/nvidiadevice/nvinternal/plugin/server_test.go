@@ -1188,3 +1188,30 @@ func TestResolveOperatingMode(t *testing.T) {
 		})
 	}
 }
+
+// The chart always passes --report-node-capacity explicitly (true or
+// false), so chartDefault is realistically never nil in that deployment.
+// A per-node Nodeconfig override must still survive it.
+func TestResolveReportNodeCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		perNode      *bool
+		chartDefault *bool
+		want         *bool
+	}{
+		{"per-node true wins over chart-wide false", ptr(true), ptr(false), ptr(true)},
+		{"per-node false wins over chart-wide true", ptr(false), ptr(true), ptr(false)},
+		{"no per-node value falls back to the chart-wide default", nil, ptr(true), ptr(true)},
+		{"neither set stays nil", nil, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveReportNodeCapacity(tc.perNode, tc.chartDefault)
+			if tc.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tc.want, *got)
+		})
+	}
+}
