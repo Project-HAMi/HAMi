@@ -4,7 +4,7 @@ Using HAMi? We'd love to hear about it.
 
 Seeing how our community uses the project helps us validate new features, prioritize our roadmap, and build trust with new users. If you are using HAMi in a production, testing, or research environment, we would love to include you!
 
-**[Open an issue]()** — no PR needed, we'll take it from there.
+**[Open an issue](https://github.com/Project-HAMi/HAMi/issues/new?template=adopter.yml)** — no PR needed, we'll take it from there.
 
 ## Adopters list
 
