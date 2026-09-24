@@ -6,14 +6,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Important: GitHub issue submissions are public. Any information you enter here, including company name, contact details, use case, and cluster information, may be visible to anyone who can view the issue tracker.
-
-        If you want your information to remain private, please do not submit it through this issue form. Use a private communication channel instead.
-
         ## What you get
         - ✅ Your company is added to the HAMi adopter list in ADOPTERS.md
         - ✅ Your usage helps showcase real-world HAMi adoption in the community
-        - 📣 If you opt in, we may give you a public shoutout on community channels
+        - 📣 If you opt in, we may give you a public shoutout on community channels and LinkedIn.
 
         We'll take it from here — no PR needed.
 
