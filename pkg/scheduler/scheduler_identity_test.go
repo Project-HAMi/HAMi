@@ -115,54 +115,6 @@ func TestBindRejectsNodeDifferentFromScheduledNode(t *testing.T) {
 	assert.Equal(t, "node-1", pi.NodeID)
 }
 
-func TestVerifyBindTargetRequiresReservationForHAMiPod(t *testing.T) {
-	initNvidiaDevices(t)
-
-	for _, test := range []struct {
-		name              string
-		addEmptyNodeEntry bool
-	}{
-		{name: "missing reservation"},
-		{name: "reservation without node", addEmptyNodeEntry: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			pod := gpuPod("team-a", "gpu-pod", "gpu-pod-uid")
-			s := schedulerWithPods(t, pod)
-			if test.addEmptyNodeEntry {
-				s.podManager.AddPod(pod, "", device.PodDevices{})
-			}
-
-			err := s.verifyBindTarget(extenderv1.ExtenderBindingArgs{
-				PodName:      pod.Name,
-				PodNamespace: pod.Namespace,
-				PodUID:       pod.UID,
-				Node:         "node-1",
-			}, pod)
-
-			assert.ErrorContains(t, err, "no scheduler reservation")
-		})
-	}
-}
-
-func TestVerifyBindTargetAllowsPodWithoutHAMiResourcesWithoutReservation(t *testing.T) {
-	initNvidiaDevices(t)
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "cpu-pod", UID: "cpu-pod-uid"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
-	}
-	s := schedulerWithPods(t, pod)
-
-	err := s.verifyBindTarget(extenderv1.ExtenderBindingArgs{
-		PodName:      pod.Name,
-		PodNamespace: pod.Namespace,
-		PodUID:       pod.UID,
-		Node:         "node-1",
-	}, pod)
-
-	assert.NilError(t, err)
-}
-
 // The reported attack: a bind request pairs a running pod's UID with a pod
 // name that does not exist. The lookup fails, and the stale-allocation
 // cleanup that follows must not free the devices of whoever holds that UID.

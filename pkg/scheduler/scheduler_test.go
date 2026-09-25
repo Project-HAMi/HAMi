@@ -3486,6 +3486,47 @@ func TestSchedulerIsSynced(t *testing.T) {
 	assert.Equal(t, true, s.IsSynced())
 }
 
+// Test_register_OverviewIncludesCachedNodesOutsideSelector covers a cached node
+// that stops matching the registration selector. The selector controls which
+// nodes are refreshed, but overviewstatus must continue to include the entire
+// registered-node cache for metrics.
+func Test_register_OverviewIncludesCachedNodesOutsideSelector(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{}
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	selectedNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "node-a",
+		Labels: map[string]string{"registration": "enabled"},
+	}}
+	unselectedNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}}
+	nodeIndexer := informerFactory.Core().V1().Nodes().Informer().GetIndexer()
+	require.NoError(t, nodeIndexer.Add(selectedNode))
+	require.NoError(t, nodeIndexer.Add(unselectedNode))
+
+	s.addNode(selectedNode.Name, testNodeInfo(selectedNode.Name, 1))
+	s.addNode(unselectedNode.Name, testNodeInfo(unselectedNode.Name, 1))
+
+	s.register(labels.SelectorFromSet(labels.Set{"registration": "enabled"}))
+
+	overview := *s.InspectAllNodesUsage()
+	require.Len(t, overview, 2)
+	assert.Assert(t, overview["node-a"] != nil)
+	assert.Assert(t, overview["node-b"] != nil)
+}
+
 // Test_register_PrintedLogPrunedOnNodeDelete covers the printedLog bookkeeping
 // across a node's full lifecycle. The map used to be a loop-local in
 // RegisterFromNodeAnnotations, so onDelNode could not reach it: entries

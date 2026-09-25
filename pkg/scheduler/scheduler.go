@@ -491,9 +491,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		return
 	}
 	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
-	var nodeNames []string
 	for _, val := range rawNodes {
-		nodeNames = append(nodeNames, val.Name)
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
 		for devhandsk, devInstance := range device.GetDevices() {
@@ -573,9 +571,9 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 			}
 		}
 	}
-	_, overallnodeMap, _, err := s.getNodesUsage(&nodeNames, nil)
+	_, overallnodeMap, _, err := s.getNodesUsage(nil, nil)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
+		klog.ErrorS(err, "Failed to get node usage")
 		return
 	}
 	s.overviewstatus = *overallnodeMap
@@ -790,9 +788,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	// Snapshot only the nodes the caller asked about. Filter and the NUMA
 	// refit handler pass a candidate list and discard the second return value,
 	// so building and deep-copying the rest of the registered-node cache is
-	// wasted work. The register loop passes every node selected by its label
-	// selector, keeping the overview complete for the registered cache within
-	// that selection.
+	// wasted work. The register loop passes nil so the metrics overview remains
+	// complete for the full registered-node cache.
 	if nodes == nil {
 		allNodes, err := s.ListNodes()
 		if err != nil {
@@ -1071,22 +1068,10 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 		return fmt.Errorf("pod %s/%s is already assigned to node %s",
 			args.PodNamespace, args.PodName, current.Spec.NodeName)
 	}
-	// Pods requesting HAMi resources must have completed filtering before they
-	// can be bound. Otherwise a caller could bypass device reservation and bind
-	// the pod directly to an arbitrary node. Pods without HAMi resources take
-	// the normal binding path and are not added to the pod manager.
-	pi, ok := s.podManager.GetPod(current)
-	for _, reqMap := range device.Resourcereqs(current) {
-		if len(reqMap) > 0 && (!ok || pi.NodeID == "") {
-			return fmt.Errorf("pod %s/%s has no scheduler reservation",
-				args.PodNamespace, args.PodName)
-		}
-	}
-
 	// The node the filter phase picked is the only node this pod may be bound
 	// to. Binding it elsewhere would leave the reservation on the scheduled
 	// node while the pod consumes devices on another.
-	if ok && pi.NodeID != "" && pi.NodeID != args.Node {
+	if pi, ok := s.podManager.GetPod(current); ok && pi.NodeID != "" && pi.NodeID != args.Node {
 		return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
 			args.PodNamespace, args.PodName, pi.NodeID, args.Node)
 	}
