@@ -6,7 +6,7 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.12.0
 	github.com/NVIDIA/go-nvml v0.13.4-0
-	github.com/NVIDIA/k8s-device-plugin v0.20.0
+	github.com/NVIDIA/k8s-device-plugin v0.20.1
 	github.com/NVIDIA/nvidia-container-toolkit v1.20.1
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/fsnotify/fsnotify v1.10.1
