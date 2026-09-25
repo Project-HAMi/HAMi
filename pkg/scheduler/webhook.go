@@ -22,7 +22,11 @@ import (
 	"fmt"
 	"net/http"
 
+	admissionv1 "k8s.io/api/admission/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
@@ -32,6 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
@@ -51,12 +56,15 @@ func NewWebHook() (*admission.Webhook, error) {
 	return wh, nil
 }
 
-func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Response {
+func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.Response {
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
 		klog.Errorf("Failed to decode request: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
+	}
+	if req.Operation == admissionv1.Update {
+		return h.handleUpdate(ctx, req, pod)
 	}
 	if len(pod.Spec.Containers) == 0 {
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
@@ -136,8 +144,8 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			return admission.Denied("pod has node assigned")
 		}
 	}
-	if !fitResourceQuota(pod) {
-		return admission.Denied("exceeding resource quota")
+	if err := fitResourceQuota(pod); err != nil {
+		return admission.Denied(err.Error())
 	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
@@ -147,12 +155,75 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
 }
 
-// schedulerOwnedAnnotation reports an annotation the scheduler writes after a
-// pod is admitted. The webhook runs on create only, so a pod that already
-// carries one did not get it from the scheduler: it was either written by hand
-// or copied from a scheduled pod's manifest, and in both cases the device
-// plugin would act on it as though the scheduler had decided it.
-func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
+// handleUpdate guards the same annotations on an existing pod. Denying them at
+// create closes only half the door: the keys can be patched in afterward by
+// anyone holding update on pods, and the device plugin hands out devices from
+// whatever they name, so the pod is served memory and cores the scheduler never
+// accounted for. An update that leaves those keys alone is not ours to judge
+// and passes through as-is, which also keeps the create path's mutation off an
+// existing pod, whose schedulerName the API server will not let us change.
+func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *corev1.Pod) admission.Response {
+	oldPod := &corev1.Pod{}
+	if err := h.decoder.DecodeRaw(req.OldObject, oldPod); err != nil {
+		klog.Errorf("Failed to decode old object: %v", err)
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)
+	if !changed {
+		return admission.Allowed("no scheduler-owned annotation changed")
+	}
+	// HAMi rewrites these itself once a pod is admitted: the scheduler patches
+	// them as it filters and binds, and a device plugin rewrites them as each
+	// container gets its devices. Both hold node write access for the locks they
+	// take around that work, and both only ever touch a pod this scheduler was
+	// asked to place, so a request failing either test is neither of them.
+	if !canWriteNodes(ctx, req.UserInfo) {
+		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
+	}
+	if len(config.SchedulerName) > 0 && pod.Spec.SchedulerName != config.SchedulerName {
+		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
+	}
+	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+// canWriteNodes asks the API server whether the caller may patch nodes.
+func canWriteNodes(ctx context.Context, user authenticationv1.UserInfo) bool {
+	kubeClient := client.GetClient()
+	if kubeClient == nil {
+		klog.Error("No client to review node write access with, refusing the annotation change")
+		return false
+	}
+	extra := make(map[string]authorizationv1.ExtraValue, len(user.Extra))
+	for key, value := range user.Extra {
+		extra[key] = authorizationv1.ExtraValue(value)
+	}
+	review, err := kubeClient.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:   user.Username,
+			UID:    user.UID,
+			Groups: user.Groups,
+			Extra:  extra,
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Verb:     "patch",
+				Resource: "nodes",
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		klog.Errorf("Failed to review node write access for %s, refusing the annotation change: %v", user.Username, err)
+		return false
+	}
+	return review.Status.Allowed
+}
+
+func denySchedulerOwnedAnnotation(pod *corev1.Pod, username, annotation string) admission.Response {
+	klog.Warningf(template+" - Denying update as %s writes %s", pod.Namespace, pod.Name, pod.UID, username, annotation)
+	return admission.Denied(fmt.Sprintf("annotation %s is written by the scheduler and cannot be set by %s", annotation, username))
+}
+
+// schedulerOwnedAnnotationKeys lists the annotations the scheduler writes after
+// a pod is admitted, together with the per-device keys each backend fills in.
+func schedulerOwnedAnnotationKeys() []string {
 	keys := []string{
 		util.AssignedNodeAnnotations,
 		util.BindTimeAnnotations,
@@ -163,8 +234,28 @@ func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range keys {
+	return keys
+}
+
+// schedulerOwnedAnnotation reports an annotation the scheduler writes after a
+// pod is admitted. A pod that already carries one at create did not get it from
+// the scheduler: it was either written by hand or copied from a scheduled pod's
+// manifest, and in both cases the device plugin would act on it as though the
+// scheduler had decided it.
+func schedulerOwnedAnnotation(pod *corev1.Pod) (string, bool) {
+	for _, key := range schedulerOwnedAnnotationKeys() {
 		if _, ok := pod.Annotations[key]; ok {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+// changedSchedulerOwnedAnnotation reports a scheduler-owned annotation the
+// update adds, rewrites or drops.
+func changedSchedulerOwnedAnnotation(oldPod, newPod *corev1.Pod) (string, bool) {
+	for _, key := range schedulerOwnedAnnotationKeys() {
+		if oldPod.Annotations[key] != newPod.Annotations[key] {
 			return key, true
 		}
 	}
@@ -191,7 +282,7 @@ func isPrivilegedContainer(ctr *corev1.Container) bool {
 		*ctr.SecurityContext.Privileged
 }
 
-func fitResourceQuota(pod *corev1.Pod) bool {
+func fitResourceQuota(pod *corev1.Pod) error {
 	for deviceName, dev := range device.GetDevices() {
 		resourceNames := dev.GetResourceNames()
 		if len(resourceNames.ResourceMemoryName) == 0 && len(resourceNames.ResourceCoreName) == 0 {
@@ -204,24 +295,37 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// so this keeps admission and the scheduler on the same numbers.
 		var appMemoryReq, appCoresReq int64
 		for i := range pod.Spec.Containers {
-			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+			req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if reqErr != nil {
+				return reqErr
+			}
 			if req.Nums == 0 {
 				continue
 			}
 			appMemoryReq += int64(req.Memreq) * int64(req.Nums)
-			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
+			if req.TotalCoresreq > 0 {
+				appCoresReq += req.TotalCoresreq
+			} else {
+				appCoresReq += int64(req.Coresreq) * int64(req.Nums)
+			}
 		}
 
 		var initPeakMemoryReq, initPeakCoresReq int64
 		var sidecarMemoryReq, sidecarCoresReq int64
 		for i := range pod.Spec.InitContainers {
 			c := &pod.Spec.InitContainers[i]
-			req := dev.GenerateResourceRequests(c)
+			req, reqErr := dev.GenerateResourceRequests(c)
+			if reqErr != nil {
+				return reqErr
+			}
 			if req.Nums == 0 {
 				continue
 			}
 			mem := int64(req.Memreq) * int64(req.Nums)
 			cores := int64(req.Coresreq) * int64(req.Nums)
+			if req.TotalCoresreq > 0 {
+				cores = req.TotalCoresreq
+			}
 			if util.IsSidecarContainer(c) {
 				sidecarMemoryReq += mem
 				sidecarCoresReq += cores
@@ -242,8 +346,8 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		klog.V(5).Infof("Checking quota for device %s: memory %d, cores %d, factor %d", deviceName, memoryReq, coresReq, resourceNames.MemoryFactor)
 		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, resourceNames.MemoryFactor, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
-			return false
+			return fmt.Errorf("exceeding resource quota for device %s", deviceName)
 		}
 	}
-	return true
+	return nil
 }

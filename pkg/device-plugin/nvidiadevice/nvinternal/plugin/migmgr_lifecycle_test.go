@@ -8,6 +8,9 @@
 package plugin
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -226,7 +229,15 @@ func TestMigManagerAllocationUsesOneSession(t *testing.T) {
 	if err := m.AdoptAllocation(0, "1g.5gb", "MIG-test", placement, 1, 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}}); err != nil {
+	destroyed, err := m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}})
+	if err != nil || len(destroyed) != 0 {
+		t.Fatalf("active reconciliation destroyed devices: %v, %v", destroyed, err)
+	}
+	destroyed, err = m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{})
+	if err != nil || len(destroyed) != 1 || destroyed[0] != "MIG-test" {
+		t.Fatalf("destroyed MIG identities = %v, %v", destroyed, err)
+	}
+	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Release("MIG-test"); err != nil {
@@ -248,5 +259,169 @@ func TestMigManagerAllocationUsesOneSession(t *testing.T) {
 	}
 	if len(lib.ShutdownCalls()) != 1 {
 		t.Fatal("NVML was not shut down once")
+	}
+}
+
+func TestDisableIdleGPUsTurnsOffMig(t *testing.T) {
+	current, pending := nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE
+	setCalls := 0
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) { return current, pending, nvml.SUCCESS },
+		SetMigModeFunc: func(n int) (nvml.Return, nvml.Return) {
+			setCalls++
+			if n != nvml.DEVICE_MIG_DISABLE {
+				t.Fatalf("SetMigMode(%d)", n)
+			}
+			current, pending = nvml.DEVICE_MIG_DISABLE, nvml.DEVICE_MIG_DISABLE
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	m := newMigInstanceManager(lib)
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	disabled, err := m.DisableIdleGPUs(1, nil)
+	if err != nil || len(disabled) != 1 || disabled[0] != 0 || setCalls != 1 {
+		t.Fatalf("DisableIdleGPUs = %v, %v, setCalls=%d", disabled, err, setCalls)
+	}
+	if current != nvml.DEVICE_MIG_DISABLE {
+		t.Fatal("hardware MIG mode was not disabled")
+	}
+}
+
+func TestDisableIdleGPUsRequiresReset(t *testing.T) {
+	afterSet := false
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			if afterSet {
+				return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_DISABLE, nvml.SUCCESS
+			}
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			afterSet = true
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	m := newMigInstanceManager(lib)
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	_, err := m.DisableIdleGPUs(1, nil)
+	if err == nil {
+		t.Fatal("expected pending-reset error")
+	}
+	if !errors.Is(err, errMigModeNeedsReset) {
+		t.Fatalf("DisableIdleGPUs error = %v, want errors.Is(errMigModeNeedsReset)", err)
+	}
+	if !strings.Contains(err.Error(), "reboot the VM") || !strings.Contains(err.Error(), nvidiaMIGGettingStartedURL) {
+		t.Fatalf("operator guidance missing from error: %v", err)
+	}
+}
+
+func TestDisableIdleGPUsUnsupportedIsNoop(t *testing.T) {
+	setCalls := 0
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) { return 0, 0, nvml.ERROR_NOT_SUPPORTED },
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			setCalls++
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	m := newMigInstanceManager(lib)
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	disabled, err := m.DisableIdleGPUs(1, nil)
+	if err != nil || len(disabled) != 1 || setCalls != 0 {
+		t.Fatalf("DisableIdleGPUs = %v, %v, setCalls=%d", disabled, err, setCalls)
+	}
+}
+
+func TestDisableIdleGPUsAlreadyPendingMatchesResetSentinel(t *testing.T) {
+	setCalls := 0
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_DISABLE, nvml.SUCCESS
+		},
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			setCalls++
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	m := newMigInstanceManager(lib)
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	_, err := m.DisableIdleGPUs(1, nil)
+	if err == nil || setCalls != 0 {
+		t.Fatalf("DisableIdleGPUs = %v, setCalls=%d", err, setCalls)
+	}
+	if !errors.Is(err, errMigModeNeedsReset) {
+		t.Fatalf("pending disable must match reset sentinel: %v", err)
+	}
+	wrapped := fmt.Errorf("disable MIG for hami-core: %w", err)
+	if !errors.Is(wrapped, errMigModeNeedsReset) {
+		t.Fatal("sentinel must survive wrapping")
+	}
+}
+
+func TestDisableIdleGPUsBusyMIGFails(t *testing.T) {
+	setCalls := 0
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		SetMigModeFunc: func(int) (nvml.Return, nvml.Return) {
+			setCalls++
+			return nvml.SUCCESS, nvml.SUCCESS
+		},
+	}
+	lib := &nvmlmock.Interface{
+		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc:               func() nvml.Return { return nvml.SUCCESS },
+		DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return dev, nvml.SUCCESS },
+	}
+	m := newMigInstanceManager(lib)
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	_, err := m.DisableIdleGPUs(1, map[int]struct{}{0: {}})
+	if err == nil || !strings.Contains(err.Error(), "in use") || setCalls != 0 {
+		t.Fatalf("DisableIdleGPUs error = %v, setCalls=%d", err, setCalls)
+	}
+	if errors.Is(err, errMigModeNeedsReset) {
+		t.Fatalf("in-use GPU must not match reset sentinel: %v", err)
 	}
 }

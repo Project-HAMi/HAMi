@@ -155,7 +155,8 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 	// Both GPU-less nodes see the same fleet.
 	assert.Equal(t, len(nodes["cpu-1"].Devices.DeviceLists), 2)
 
-	reqs := device.Resourcereqs(task)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
 	assert.Equal(t, reqs[0]["RemoteGPU"].Nums, int32(2), "GenerateResourceRequests must reach Resourcereqs")
 
 	s := NewScheduler()
@@ -192,7 +193,9 @@ func TestRemoteGPU_AllocationNeverSpansTwoServers(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0, "two cards on two servers must not be combined")
 	assert.Assert(t, failed["cpu-1"] != "")
@@ -228,7 +231,9 @@ func TestRemoteGPU_ReservationBlocksSecondClientNode(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0, "the only card is already held by another pod")
 	assert.Assert(t, failed["cpu-2"] != "", "the holder landed on cpu-1, yet cpu-2 must also be refused")
@@ -255,7 +260,9 @@ func TestRemoteGPU_FinishedPodReleasesCard(t *testing.T) {
 	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
 
 	s := NewScheduler()
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, map[string]string{})
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, map[string]string{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 1)
 }
@@ -306,7 +313,9 @@ func TestRemoteGPU_MemoryRequestFiltersCards(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0)
 	assert.Assert(t, failed["cpu-1"] != "")

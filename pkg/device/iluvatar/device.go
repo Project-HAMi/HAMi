@@ -184,7 +184,7 @@ func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
-func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count iluvatar devices for container ", ctr.Name)
 	iluvatarResourceCount := corev1.ResourceName(dev.config.ResourceCountName)
 	iluvatarResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
@@ -195,9 +195,14 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "iluvatar device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found iluvatar devices")
 			memnum := 0
@@ -210,7 +215,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "iluvatar memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 			}
@@ -220,28 +225,31 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
 			}
 			if ok {
-				corenums, parsed := core.AsInt64()
-				if !parsed || corenums < 0 {
+				corenums, ok := core.AsInt64()
+				if !ok || corenums < 0 {
 					klog.ErrorS(nil, "iluvatar core request is not a non-negative integer", "container", ctr.Name, "request", core.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %s is not a non-negative integer", core.String())}
 				}
-				// Coresreq is a per card percentage. MutateAdmission rewrites
-				// this limit to count*100 when more than one device is
-				// requested, so a value above 100 is a total across the cards
-				// and has to be divided back. A value at or below 100 is
-				// already per card, which is also what an operator writes when
-				// the admission webhook is disabled or bypassed, so it is left
-				// alone.
-				if corenums > 100 {
+				// Coresreq is a per card percentage, but MutateAdmission rewrites
+				// the limit to count*100 only when more than one device is
+				// requested, so a value above 100 with multiple devices is a
+				// total across the cards and has to be divided back. A value at
+				// or below 100 is already per card, and a value above 100 with a
+				// single requested device is plain invalid because
+				// MutateAdmission never writes one.
+				if corenums > 100 && n > 1 {
 					if corenums%n != 0 {
 						klog.ErrorS(nil, "iluvatar core request does not divide evenly across the requested devices", "container", ctr.Name, "request", core.String(), "devices", n)
-						return device.ContainerDeviceRequest{}
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d does not divide evenly across %d devices", corenums, n)}
 					}
 					corenums /= n
 				}
+				// Re-check after the division: a total that divides evenly can
+				// still leave a per card value above 100, and a value above 100
+				// with a single device never entered the branch above.
 				if corenums > 100 {
-					klog.ErrorS(nil, "iluvatar core request is out of range (must be 0-100 per device)", "container", ctr.Name, "request", core.String(), "perDevice", corenums)
-					return device.ContainerDeviceRequest{}
+					klog.ErrorS(nil, "iluvatar core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
 				corenum = int32(corenums)
 			}
@@ -257,10 +265,16 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
-			}
+			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "iluvatar device count request is not a plain integer", "container", ctr.Name, "request", v.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("device count %s is not a plain integer", v.String())}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *IluvatarDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

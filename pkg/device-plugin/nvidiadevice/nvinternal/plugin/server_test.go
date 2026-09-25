@@ -38,9 +38,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
@@ -48,6 +51,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/stretchr/testify/require"
@@ -60,6 +64,53 @@ import (
 
 func ptr[T any](value T) *T {
 	return &value
+}
+
+func TestDynamicMIGCDIResponseUsesPublishedClass(t *testing.T) {
+	name, err := cdi.DynamicMIGName("MIG-GPU-parent/1/2")
+	require.NoError(t, err)
+	handler := &cdi.InterfaceMock{QualifiedNameFunc: func(class, id string) string {
+		return "nvidia.com/" + class + "=" + id
+	}}
+	strategies, err := v1.NewDeviceListStrategies([]string{"cdi-cri"})
+	require.NoError(t, err)
+	plugin := &NvidiaDevicePlugin{operatingMode: nvidia.MigMode, cdiHandler: handler, deviceListStrategies: strategies}
+	response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
+	require.NoError(t, plugin.updateResponseForCDI(response, "test", "MIG-GPU-parent/1/2"))
+	require.Len(t, response.CdiDevices, 1)
+	require.Equal(t, "nvidia.com/dynamic-mig="+name, response.CdiDevices[0].Name)
+}
+
+type recordingDynamicMIGCDI struct {
+	*cdi.InterfaceMock
+	live []cdi.DynamicMIGDevice
+}
+
+func (r *recordingDynamicMIGCDI) EnsureDynamicMIGDevice(cdi.DynamicMIGDevice) (string, error) {
+	return "", nil
+}
+func (r *recordingDynamicMIGCDI) RemoveDynamicMIGDevice(string) error { return nil }
+func (r *recordingDynamicMIGCDI) ReplaceDynamicMIGDevices(live []cdi.DynamicMIGDevice) error {
+	r.live = live
+	return nil
+}
+
+func TestDynamicMIGCDIStartupRecoveryUsesAdoptedGeometry(t *testing.T) {
+	gpu := &nvmlmock.Device{
+		GetUUIDFunc:        func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS },
+		GetMinorNumberFunc: func() (int, nvml.Return) { return 5, nvml.SUCCESS },
+	}
+	lib := &nvmlmock.Interface{DeviceGetHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) { return gpu, nvml.SUCCESS }}
+	m := newMigInstanceManager(lib)
+	key := migAllocationKey{GPUIndex: 0, Profile: "1g.5gb", Start: 1, Size: 2}
+	m.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 3, CIID: 4}
+	handler := &recordingDynamicMIGCDI{InterfaceMock: &cdi.InterfaceMock{}}
+	plugin := &NvidiaDevicePlugin{migMgr: m, cdiHandler: handler}
+	require.NoError(t, plugin.recoverDynamicMIGCDI())
+	require.Equal(t, []cdi.DynamicMIGDevice{{
+		MIGUUID: "MIG-test", ParentGPUUUID: "GPU-parent", ParentMinor: 5,
+		GPUInstanceID: 3, ComputeInstanceID: 4,
+	}}, handler.live)
 }
 
 func TestCDIAllocateResponse(t *testing.T) {
@@ -1105,4 +1156,58 @@ func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
 	response, err := plugin.Allocate(context.Background(), request)
 	require.Nil(t, response)
 	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
+}
+
+// A node that cannot be read is not a node without the label. Falling back to
+// a local mode there would advertise to kubelet the cards lupine is already
+// serving over the network, putting two workloads on the same GPU.
+func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) {
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { client.KubeClient = previous })
+	t.Setenv(util.NodeNameEnvName, "absent-node")
+	previousNodeName := util.NodeName
+	util.NodeName = "absent-node"
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+
+	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+
+	_, mode, err := LoadNvidiaDevicePluginConfig()
+	require.Error(t, err)
+	require.Empty(t, mode, "no mode is chosen when the node is unknown")
+}
+
+// The lupine label is the operator's one declaration that a node serves its
+// GPUs over the network. Deriving the mode from it keeps the plugin and the
+// scheduler's pool from disagreeing about which fleet a node belongs to.
+func TestResolveOperatingMode(t *testing.T) {
+	labelled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "gpu-a",
+		Labels: map[string]string{remotegpu.LupineServerLabel: ""},
+	}}
+	plain := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-b"}}
+
+	for _, tc := range []struct {
+		name       string
+		configured string
+		node       *corev1.Node
+		want       string
+	}{
+		{"label wins over the configured mode", nvidia.HamiCoreMode, labelled, nvidia.RemoteMode},
+		{"label wins over mig too", nvidia.MigMode, labelled, nvidia.RemoteMode},
+		{"an unlabelled node keeps its configured mode", nvidia.MigMode, plain, nvidia.MigMode},
+		// Honouring remote here would hide the cards from both fleets: this
+		// backend would skip them and the pool would never discover the node.
+		{"remote without the label is refused", nvidia.RemoteMode, plain, nvidia.HamiCoreMode},
+		{"remote with no node readable is refused", nvidia.RemoteMode, nil, nvidia.HamiCoreMode},
+		{"no node readable keeps the configured mode", nvidia.HamiCoreMode, nil, nvidia.HamiCoreMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
+		})
+	}
 }

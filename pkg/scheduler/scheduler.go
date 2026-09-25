@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -45,6 +46,8 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -56,6 +59,10 @@ import (
 const (
 	defaultResync    = 1 * time.Hour
 	syncedPollPeriod = 100 * time.Millisecond
+
+	// sessionReconcileTimeout caps how long the lupine session stub reconcile
+	// may hold the scheduler lock it runs under.
+	sessionReconcileTimeout = 30 * time.Second
 )
 
 type Scheduler struct {
@@ -92,17 +99,22 @@ type Scheduler struct {
 	// cycle, so in the common path this adds no contention; it exists so these
 	// paths cannot observe or produce half-applied accounting.
 	allocLock sync.Mutex
+
+	allocationMetrics     *metrics.SchedulerOutcomeMetrics
+	allocationMetricsOnce sync.Once
 }
 
+// NewScheduler initializes the scheduler's managers and outcome metrics.
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:         make(chan struct{}),
-		overviewstatus: make(map[string]*NodeUsage),
-		printedLog:     make(map[string]bool),
-		nodeNotify:     make(chan struct{}, 1),
-		leaderNotify:   make(chan struct{}, 1),
-		started:        0,
+		stopCh:            make(chan struct{}),
+		overviewstatus:    make(map[string]*NodeUsage),
+		printedLog:        make(map[string]bool),
+		nodeNotify:        make(chan struct{}, 1),
+		leaderNotify:      make(chan struct{}, 1),
+		started:           0,
+		allocationMetrics: metrics.NewSchedulerOutcomeMetrics(),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -137,6 +149,81 @@ func (s *Scheduler) GetPodManager() *device.PodManager {
 func (s *Scheduler) GetLeaderManager() leaderelection.LeaderManager {
 	return s.leaderManager
 }
+
+// GetAllocationMetrics returns the scheduler's bounded-cardinality outcome metrics.
+func (s *Scheduler) GetAllocationMetrics() *metrics.SchedulerOutcomeMetrics {
+	s.allocationMetricsOnce.Do(func() {
+		if s.allocationMetrics == nil {
+			s.allocationMetrics = metrics.NewSchedulerOutcomeMetrics()
+		}
+	})
+	return s.allocationMetrics
+}
+
+// deviceTypeForRequests returns the single requested device type, or a bounded
+// fallback when the request contains zero or multiple device types.
+func deviceTypeForRequests(requests device.PodDeviceRequests) string {
+	types := make(map[string]struct{})
+	for _, container := range requests {
+		for deviceType := range container {
+			types[deviceType] = struct{}{}
+		}
+	}
+	if len(types) == 0 {
+		return "unknown"
+	}
+	if len(types) > 1 {
+		return "mixed"
+	}
+	for deviceType := range types {
+		return deviceType
+	}
+	return "unknown"
+}
+
+// deviceTypeForPodDevices returns the single allocated device type, or a
+// bounded fallback when the allocation contains zero or multiple types.
+func deviceTypeForPodDevices(devices device.PodDevices) string {
+	types := make(map[string]struct{})
+	for deviceType := range devices {
+		types[deviceType] = struct{}{}
+	}
+	if len(types) == 0 {
+		return "unknown"
+	}
+	if len(types) > 1 {
+		return "mixed"
+	}
+	for deviceType := range types {
+		return deviceType
+	}
+	return "unknown"
+}
+
+// podAllocationType returns the device type recorded for a cached pod.
+func (s *Scheduler) podAllocationType(pod *corev1.Pod) string {
+	if s.podManager == nil {
+		return "unknown"
+	}
+	if pi, ok := s.podManager.GetPod(pod); ok {
+		return deviceTypeForPodDevices(pi.Devices)
+	}
+	return "unknown"
+}
+
+// bindFailureReason maps internal bind errors to the bounded metric vocabulary.
+func bindFailureReason(err error) metrics.SchedulerFailureReason {
+	if errors.Is(err, nodelockutil.ErrNodeLockContention) {
+		return metrics.FailureReasonLock
+	}
+	if errors.Is(err, errBindAnnotationPatch) {
+		return metrics.FailureReasonAnnotationPatch
+	}
+	return metrics.FailureReasonBind
+}
+
+// errBindAnnotationPatch marks annotation patch failures during binding.
+var errBindAnnotationPatch = errors.New("bind annotation patch")
 
 func (s *Scheduler) doNodeNotify() {
 	select {
@@ -578,6 +665,19 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	}
 	s.overviewstatus = *overallnodeMap
 
+	// The lupine fleet keeps a relay pod on each of its servers so a user can
+	// port-forward to something other than the server. Reconciled here because
+	// this is the loop that already runs only on the leader.
+	// Bounded, because register holds s.lock for its whole body and this
+	// issues List, Delete and Create calls: a stalled apiserver would
+	// otherwise keep every reader of that lock waiting for as long as it takes
+	// to answer.
+	if dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionReconcileTimeout)
+		dev.ReconcileSessionStubs(ctx)
+		cancel()
+	}
+
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced.Store(true)
 }
@@ -856,7 +956,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							slots := max(udevice.Slots, 1)
 							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
-							d.Device.Usedcores += udevice.Usedcores
+							if accounting, ok := device.GetDevices()[udevice.Type].(device.CoreMaskAccounting); ok {
+								d.Device.Usedcores = accounting.AccumulateCores(d.Device.Usedcores, udevice.Usedcores)
+							} else {
+								d.Device.Usedcores += udevice.Usedcores
+							}
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
 							if allocations := allocationsByGPU[udevice.UUID]; len(allocations) > 0 {
@@ -1078,6 +1182,7 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 	return nil
 }
 
+// Bind validates and commits a reserved device allocation to the target node.
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
@@ -1097,11 +1202,13 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 				Namespace: args.PodNamespace,
 			},
 		})
+		s.GetAllocationMetrics().ObserveAllocationFailure("bind", "unknown", metrics.FailureReasonLookup)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 
 	if err := s.verifyBindTarget(args, current); err != nil {
 		klog.ErrorS(err, "Rejecting bind request", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+		s.GetAllocationMetrics().ObserveAllocationFailure("bind", s.podAllocationType(current), metrics.FailureReasonIdentity)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 	}
 
@@ -1111,7 +1218,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
+		deviceType := s.podAllocationType(current)
 		s.cleanupStalePodAllocation(current)
+		s.GetAllocationMetrics().ObserveAllocationFailure("bind", deviceType, metrics.FailureReasonLookup)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
@@ -1124,6 +1233,12 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
 		klog.InfoS("Release node locks", "node", args.Node)
 		s.releaseAllDevices(node, current)
+		reason := metrics.FailureReasonBind
+		if e != nil {
+			reason = bindFailureReason(e)
+		}
+		s.GetAllocationMetrics().ObserveAllocationFailure("bind", s.podAllocationType(current), reason)
+		s.GetAllocationMetrics().ObserveBindRollback("bind", s.podAllocationType(current), reason)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, e)
 		errStr := ""
 		if e != nil {
@@ -1139,7 +1254,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 	if err = util.PatchPodAnnotations(current, tmppatch); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		return fail(err)
+		return fail(fmt.Errorf("%w: %v", errBindAnnotationPatch, err))
 	}
 
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
@@ -1195,9 +1310,9 @@ func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
 	return live, nil
 }
 
+// Filter selects a node and reserves devices for a scheduler extender request.
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-
 	// Simulation callers describe pods that need not exist, and the path they
 	// take reserves nothing, so only the scheduling path resolves the pod.
 	pod := args.Pod
@@ -1210,7 +1325,20 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		pod = live
 	}
 
-	resourceReqs := device.Resourcereqs(pod)
+	resourceReqs, reqErr := device.Resourcereqs(pod)
+	if reqErr != nil {
+		// A container declared HAMi resources but the request is invalid
+		// (for example a core limit out of the 0-100 range). Failing closed
+		// rejects the pod here; treating it as device-less would bind it
+		// with no device at all.
+		err := fmt.Errorf("invalid device request for pod %v: %w", pod.Name, reqErr)
+		klog.ErrorS(nil, "Rejecting pod with an invalid device request", "pod", klog.KObj(pod), "error", reqErr)
+		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
+		return &extenderv1.ExtenderFilterResult{
+			FailedNodes: map[string]string{},
+			Error:       err.Error(),
+		}, err
+	}
 
 	hasHAMiResource := false
 
@@ -1245,6 +1373,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
 	if err != nil {
+		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonInternal)
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
@@ -1254,11 +1383,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
+		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonInternal)
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores", "pod", pod.Name)
+		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonNoFit)
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
@@ -1289,6 +1420,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}
 		err = util.PatchPodAnnotations(pod, annotations)
 		if err != nil {
+			s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonAnnotationPatch)
 			s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 			if added {
 				s.quotaManager.RmUsage(pod, effectiveDevices)
@@ -1298,6 +1430,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}
 	}
 
+	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}

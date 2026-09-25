@@ -75,8 +75,12 @@ func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interf
 		return nil, fmt.Errorf("unable to create plugins: %w", err)
 	}
 
-	if err := cdiHandler.CreateSpecFile(); err != nil {
-		return nil, fmt.Errorf("unable to create cdi spec file: %v", err)
+	// Dynamic MIG changes the parent GPU layout during Start. Its base CDI
+	// spec is generated only after startup MIG recovery, before Allocate serves.
+	if mode, ok := cdiHandler.(interface{ DynamicMIGMode() bool }); !ok || !mode.DynamicMIGMode() {
+		if err := cdiHandler.CreateSpecFile(); err != nil {
+			return nil, fmt.Errorf("unable to create cdi spec file: %v", err)
+		}
 	}
 
 	return plugins, nil

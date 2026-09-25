@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +46,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -129,6 +131,39 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
+	previous := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{
+		awsneuron.AWSNeuronDevice: awsneuron.InitAWSNeuronDevice(awsneuron.AWSNeuronConfig{
+			ResourceCountName: "aws.amazon.com/neuron",
+			ResourceCoreName:  "aws.amazon.com/neuroncore",
+		}),
+	}
+	t.Cleanup(func() { device.DevicesMap = previous })
+	nodes := newNodeManager()
+	nodes.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{awsneuron.AWSNeuronDevice: {{
+			ID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice,
+			Count: 4, Devcore: 15, Health: true,
+		}}},
+	})
+	pods := device.NewPodManager()
+	for i, mask := range []int32{1, 2} {
+		pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			UID:  types.UID(fmt.Sprintf("neuron-%d", i)),
+			Name: fmt.Sprintf("neuron-%d", i), Namespace: "default",
+		}}, "node1", device.PodDevices{awsneuron.AWSNeuronDevice: {{
+			{UUID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice, Usedcores: mask},
+		}}})
+	}
+	s := Scheduler{nodeManager: nodes, podManager: pods}
+	nodeNames := []string{"node1"}
+	usage, _, _, err := s.getNodesUsage(&nodeNames, nil)
+	require.NoError(t, err)
+	assert.Equal(t, (*usage)["node1"].Devices.DeviceLists[0].Device.Usedcores, int32(3))
 }
 
 // Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()
@@ -923,6 +958,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
+	successfulFilters := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()
@@ -938,6 +974,12 @@ func Test_Filter(t *testing.T) {
 			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
 				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
 			}
+			successfulFilters++
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(fmt.Sprintf(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter"} %d
+`, successfulFilters)), "hami_scheduler_allocations_total"))
 		})
 	}
 }
@@ -1370,8 +1412,8 @@ func (m *registerMockDevice) GetNodeDevices(node corev1.Node) ([]*device.DeviceI
 }
 func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *registerMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 func (m *registerMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil
@@ -2440,7 +2482,14 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
 	seedPods(t, s, pod)
-	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	require.NoError(t, err)
+	require.Empty(t, result.NodeNames)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+`), "hami_scheduler_allocation_failures_total"))
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
@@ -2998,6 +3047,11 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3053,6 +3107,11 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 type bindLockMockDevice struct {
@@ -3130,6 +3189,14 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "node lock contention")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+# HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
+# TYPE hami_scheduler_bind_rollbacks_total counter
+hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
@@ -3525,6 +3592,42 @@ func Test_register_OverviewIncludesCachedNodesOutsideSelector(t *testing.T) {
 	require.Len(t, overview, 2)
 	assert.Assert(t, overview["node-a"] != nil)
 	assert.Assert(t, overview["node-b"] != nil)
+}
+
+// TestFilterInvalidDeviceRequestFailsClosed makes sure a pod whose container
+// declares a HAMi device resource with an invalid value is rejected by the
+// filter instead of being treated as device-less and bound without any GPU.
+func TestFilterInvalidDeviceRequestFailsClosed(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-ic", Name: "invalid-cores", Namespace: "ns-invalid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpucores": *resource.NewQuantity(150, resource.BinarySI),
+			}},
+		}}},
+	}
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	nodeNames := []string{"node1"}
+	res, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+	assert.Assert(t, res != nil)
+	assert.Equal(t, res.Error, err.Error())
+	// No node may survive: the pod must not be schedulable as device-less.
+	assert.Assert(t, res.Nodes == nil && res.NodeNames == nil)
 }
 
 // Test_register_PrintedLogPrunedOnNodeDelete covers the printedLog bookkeeping

@@ -34,6 +34,7 @@ import (
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -107,7 +108,7 @@ func decodePodSingleDevice(dtype string, p *corev1.Pod) (device.PodSingleDevice,
 // from podSingleDev in place, returning the corresponding pod container and the
 // popped devices. The container resolution uses the same init-then-regular
 // ordering convention as the annotation encoder. It does NOT touch the API
-// server — the caller is responsible for patching the annotation once after the
+// server, the caller is responsible for patching the annotation once after the
 // loop completes.
 func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevice) (corev1.Container, device.ContainerDevices, error) {
 	initContainerCount := len(pod.Spec.InitContainers)
@@ -125,6 +126,70 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 		}
 	}
 	return corev1.Container{}, nil, errors.New("no pending device allocation found")
+}
+
+// validateContainerAllocation rejects an allocation handing the container more
+// than its own resource limits ask for (issue #3041).
+func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
+	if plugin.operatingMode == "mig" {
+		return nil
+	}
+	dev, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		return nil
+	}
+	req, err := dev.GenerateResourceRequests(ctr)
+	if err != nil {
+		return err
+	}
+	for _, each := range allocated {
+		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
+		if bounded && each.Usedmem > limit {
+			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
+				ctr.Name, each.Usedmem, each.UUID, limit)
+		}
+		if req.Coresreq > 0 && each.Usedcores > req.Coresreq {
+			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
+				ctr.Name, each.Usedcores, each.UUID, req.Coresreq)
+		}
+	}
+	return nil
+}
+
+// memoryLimitMB returns the memory the request entitles the container to on the
+// named card, and whether the request bounds it at all.
+func (plugin *NvidiaDevicePlugin) memoryLimitMB(req device.ContainerDeviceRequest, uuid string) (int32, bool) {
+	// A percentage leaves Memreq at 0 unless both were asked for, in which case
+	// the scheduler sized the slice from the percentage as well.
+	if req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100 {
+		total, ok := plugin.registeredMemoryMB(uuid)
+		if !ok {
+			return 0, false
+		}
+		return total * req.MemPercentagereq / 100, true
+	}
+	if req.Memreq > 0 {
+		return req.Memreq, true
+	}
+	return 0, false
+}
+
+// registeredMemoryMB returns the memory this plugin published for a card, which
+// is what the scheduler sized a percentage request against, oversubscription
+// included.
+func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int32, bool) {
+	if plugin.rm == nil {
+		return 0, false
+	}
+	card, ok := plugin.rm.Devices()[uuid]
+	if !ok || card == nil {
+		return 0, false
+	}
+	total := int32(card.TotalMemory / 1024 / 1024)
+	if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+		total = int32(float64(total) * *plugin.schedulerConfig.DeviceMemoryScaling)
+	}
+	return total, true
 }
 
 // patchErasedAnnotation patches the pod's device annotation with the given
@@ -319,6 +384,16 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		for i := len(createdMigUUIDs) - 1; i >= 0; i-- {
 			if err := nv.migMgr.Release(createdMigUUIDs[i]); err != nil {
 				klog.ErrorS(err, "failed to roll back partial MIG allocation", "uuid", createdMigUUIDs[i])
+			} else if nv.deviceListStrategies.AnyCDIEnabled() {
+				if handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface); ok {
+					if err := handler.RemoveDynamicMIGDevice(createdMigUUIDs[i]); err != nil {
+						klog.ErrorS(err, "failed to remove rolled-back MIG CDI entry", "uuid", createdMigUUIDs[i])
+						if nv.pendingCDIRemovals == nil {
+							nv.pendingCDIRemovals = make(map[string]struct{})
+						}
+						nv.pendingCDIRemovals[createdMigUUIDs[i]] = struct{}{}
+					}
+				}
 			}
 		}
 	}()
@@ -338,10 +413,43 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if created {
 			createdMigUUIDs = append(createdMigUUIDs, migUUID)
 		}
+		if nv.deviceListStrategies.AnyCDIEnabled() {
+			handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
+			if !ok {
+				return nil, fmt.Errorf("dynamic MIG CDI handler is unavailable")
+			}
+			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile,
+				nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+			if err != nil {
+				return nil, err
+			}
+			if _, err := handler.EnsureDynamicMIGDevice(record); err != nil {
+				return nil, fmt.Errorf("publish CDI entry for MIG device %s: %w", migUUID, err)
+			}
+		}
 		out = append(out, migUUID)
 	}
 	allocationCompleted = true
 	return out, nil
+}
+
+func (nv *NvidiaDevicePlugin) dynamicMIGRecord(gpuIndex int, parentUUID, profile string, placement nvml.GpuInstancePlacement) (cdi.DynamicMIGDevice, error) {
+	info, ok := nv.migMgr.AllocationRuntimeInfo(gpuIndex, profile, placement)
+	if !ok {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("MIG runtime information is missing for GPU %s", parentUUID)
+	}
+	gpu, ret := nv.migMgr.nvmllib.DeviceGetHandleByIndex(gpuIndex)
+	if ret != nvml.SUCCESS {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("get parent GPU %d: %s", gpuIndex, nvml.ErrorString(ret))
+	}
+	minor, ret := gpu.GetMinorNumber()
+	if ret != nvml.SUCCESS {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("get parent GPU minor: %s", nvml.ErrorString(ret))
+	}
+	return cdi.DynamicMIGDevice{
+		MIGUUID: info.MigUUID, ParentGPUUUID: parentUUID, ParentMinor: minor,
+		GPUInstanceID: info.GIID, ComputeInstanceID: info.CIID,
+	}, nil
 }
 
 var podAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {

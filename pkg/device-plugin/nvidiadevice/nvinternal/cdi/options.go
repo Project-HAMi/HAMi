@@ -123,3 +123,13 @@ func WithImexChannels(imexChannels imex.Channels) Option {
 		c.imexChannels = imexChannels
 	}
 }
+
+// WithDynamicMIGRoot overrides the CDI directory (primarily for tests).
+func WithDynamicMIGRoot(root string) Option {
+	return func(c *cdiHandler) { c.dynamicMIGRoot = root }
+}
+
+// WithDynamicMIGProcRoot overrides the procfs root (primarily for tests).
+func WithDynamicMIGProcRoot(root string) Option {
+	return func(c *cdiHandler) { c.dynamicMIGProcRoot = root }
+}
