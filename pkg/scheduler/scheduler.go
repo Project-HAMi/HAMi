@@ -578,9 +578,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		return
 	}
 	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
-	var nodeNames []string
 	for _, val := range rawNodes {
-		nodeNames = append(nodeNames, val.Name)
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
 		for devhandsk, devInstance := range device.GetDevices() {
@@ -660,9 +658,9 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 			}
 		}
 	}
-	_, overallnodeMap, _, err := s.getNodesUsage(&nodeNames, nil)
+	_, overallnodeMap, _, err := s.getNodesUsage(nil, nil)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
+		klog.ErrorS(err, "Failed to get node usage")
 		return
 	}
 	s.overviewstatus = *overallnodeMap
@@ -786,6 +784,8 @@ func numaBindingRequested(task *corev1.Pod) bool {
 	return err == nil && enforce
 }
 
+// buildNodeUsage creates the mutable device-usage view used while scoring a task
+// against node. The source NodeInfo is treated as an immutable cache snapshot.
 func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 	userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
 	nodeUsage := &NodeUsage{
@@ -816,8 +816,10 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 					DeviceVendor: d.DeviceVendor,
 					Numa:         d.Numa,
 					Health:       d.Health,
-					PodInfos:     make([]*device.PodInfo, 0),
-					CustomInfo:   maps.Clone(d.CustomInfo),
+					// PodInfos is left nil: every consumer ranges over it or
+					// appends to it, and this runs once per device per node on
+					// every Filter call.
+					CustomInfo: maps.Clone(d.CustomInfo),
 				},
 			})
 		}
@@ -875,19 +877,50 @@ func migAllocationUsage(allocation nvidia.MigAllocation) device.MigAllocation {
 	return usage
 }
 
-// returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
-// unschedulerable and nodeName.
+// getNodesUsage builds device-usage snapshots for the requested candidate nodes.
+// With nil candidates it builds a full snapshot of the scheduler's registered
+// node cache for the metrics overview.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
-	allNodes, err := s.ListNodes()
-	if err != nil {
-		return &overallnodeMap, &overallnodeMap, failedNodes, err
-	}
 
-	for _, node := range allNodes {
-		overallnodeMap[node.ID] = buildNodeUsage(node, task)
+	// Snapshot only the nodes the caller asked about. Filter and the NUMA
+	// refit handler pass a candidate list and discard the second return value,
+	// so building and deep-copying the rest of the registered-node cache is
+	// wasted work. The register loop passes nil so the metrics overview remains
+	// complete for the full registered-node cache.
+	if nodes == nil {
+		allNodes, err := s.ListNodes()
+		if err != nil {
+			return &overallnodeMap, &overallnodeMap, failedNodes, err
+		}
+		for _, node := range allNodes {
+			overallnodeMap[node.ID] = buildNodeUsage(node, task)
+		}
+	} else {
+		candidateNodes := s.GetNodes(*nodes)
+		for _, nodeID := range *nodes {
+			node, ok := candidateNodes[nodeID]
+			if !ok {
+				// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
+				klog.V(5).InfoS("node unregistered", "node", nodeID)
+				failedNodes[nodeID] = "node unregistered"
+				continue
+			}
+			// ListNodes drops entries whose Node is nil, but GetNodes retains
+			// them so the caller can report the candidate accurately. Building
+			// usage from one leaves a NodeUsage with a nil Node that the scoring
+			// path dereferences, so apply the same filter here.
+			if node == nil || node.Node == nil {
+				klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
+				failedNodes[nodeID] = "node usage unavailable"
+				continue
+			}
+			usage := buildNodeUsage(node, task)
+			overallnodeMap[node.ID] = usage
+			cachenodeMap[node.ID] = usage
+		}
 	}
 
 	podsInfo := s.podManager.ListPodsInfo()
@@ -902,8 +935,13 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
-			klog.V(5).InfoS("pod allocated unknown node resources",
-				"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
+			// With a candidate list most Pods sit on nodes that were
+			// deliberately not snapshotted, so only report this when every
+			// node was built and a miss really means an unknown node.
+			if nodes == nil {
+				klog.V(5).InfoS("pod allocated unknown node resources",
+					"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
+			}
 			continue
 		}
 		for _, podsingleds := range p.Devices {
@@ -979,25 +1017,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			}
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
-	}
-	if nodes == nil {
-		return &cachenodeMap, &overallnodeMap, failedNodes, nil
-	}
-	for _, nodeID := range *nodes {
-		node, err := s.GetNode(nodeID)
-		if err != nil {
-			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
-			klog.V(5).InfoS("node unregistered", "node", nodeID, "error", err)
-			failedNodes[nodeID] = "node unregistered"
-			continue
-		}
-		usage, ok := overallnodeMap[node.ID]
-		if !ok {
-			klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
-			failedNodes[nodeID] = "node usage unavailable"
-			continue
-		}
-		cachenodeMap[node.ID] = usage
 	}
 	return &cachenodeMap, &overallnodeMap, failedNodes, nil
 }

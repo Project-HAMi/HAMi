@@ -147,6 +147,39 @@ func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 	return nodeInfoCopy, nil
 }
 
+// GetNodes returns a point-in-time, deep-copied snapshot of the requested
+// cache entries. Unlike ListNodes, it does not copy entries that the caller
+// did not request. An entry with a nil NodeInfo or NodeInfo.Node is retained
+// so callers can distinguish it from an unregistered node.
+func (m *nodeManager) GetNodes(nodeIDs []string) map[string]*device.NodeInfo {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	nodesCopy := make(map[string]*device.NodeInfo, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodeInfo, ok := m.nodes[nodeID]
+		if !ok {
+			continue
+		}
+		if nodeInfo == nil {
+			nodesCopy[nodeID] = nil
+			continue
+		}
+		nodeInfoCopy := &device.NodeInfo{
+			ID:      nodeInfo.ID,
+			Devices: make(map[string][]device.DeviceInfo, len(nodeInfo.Devices)),
+		}
+		if nodeInfo.Node != nil {
+			nodeInfoCopy.Node = nodeInfo.Node.DeepCopy()
+		}
+		for vendor, devices := range nodeInfo.Devices {
+			nodeInfoCopy.Devices[vendor] = device.DeepCopyDeviceInfos(devices)
+		}
+		nodesCopy[nodeID] = nodeInfoCopy
+	}
+	return nodesCopy
+}
+
 func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
