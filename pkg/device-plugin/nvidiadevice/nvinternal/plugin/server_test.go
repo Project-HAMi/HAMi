@@ -40,6 +40,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -848,6 +849,13 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 		prepareHostPIDLockParentForAllocation =
 			previousPrepareHostPIDLockParent
 	}()
+	previousPrepareContainerCacheDirectory := prepareContainerCacheDirectory
+	prepareContainerCacheDirectory = func(string) error {
+		return nil
+	}
+	defer func() {
+		prepareContainerCacheDirectory = previousPrepareContainerCacheDirectory
+	}()
 	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
 	enableGetPreferredAllocation = true
 	defer func() {
@@ -1037,6 +1045,12 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
 	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
 
+	previousPrepareContainerCacheDirectory := prepareContainerCacheDirectory
+	prepareContainerCacheDirectory = func(string) error { return nil }
+	defer func() {
+		prepareContainerCacheDirectory = previousPrepareContainerCacheDirectory
+	}()
+
 	request := &kubeletdevicepluginv1beta1.AllocateRequest{
 		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
 			{DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"}},
@@ -1211,3 +1225,124 @@ func TestResolveOperatingMode(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareDefaultContainerCacheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "containers", "pod_ctr")
+
+	// Verify normal directory creation with restricted 0750 permissions
+	err := prepareDefaultContainerCacheDirectory(dir)
+	require.NoError(t, err)
+
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0750), info.Mode().Perm())
+	}
+
+	// Verify stale contents in existing directory are cleaned up
+	staleFile := filepath.Join(dir, "stale.cache")
+	require.NoError(t, os.WriteFile(staleFile, []byte("stale"), 0600))
+	require.NoError(t, prepareDefaultContainerCacheDirectory(dir))
+
+	info, err = os.Stat(dir)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	_, err = os.Stat(staleFile)
+	require.True(t, os.IsNotExist(err))
+
+	// Verify failure when path conflict prevents directory creation
+	conflictPath := filepath.Join(t.TempDir(), "not_a_dir")
+	require.NoError(t, os.WriteFile(conflictPath, []byte("file"), 0600))
+	err = prepareDefaultContainerCacheDirectory(filepath.Join(conflictPath, "child"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to create container cache directory")
+}
+
+func TestAllocateFailsWhenContainerCacheDirectoryPreparationFails(t *testing.T) {
+	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
+	prepareHostPIDLockParentForAllocation = func() error { return nil }
+	defer func() {
+		prepareHostPIDLockParentForAllocation = previousPrepareHostPIDLockParent
+	}()
+
+	previousPrepareContainerCacheDirectory := prepareContainerCacheDirectory
+	prepareContainerCacheDirectory = func(string) error {
+		return errors.New("simulated cache directory creation failure")
+	}
+	defer func() {
+		prepareContainerCacheDirectory = previousPrepareContainerCacheDirectory
+	}()
+
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	memScale := 1.0
+	logLevel := nvidia.Error
+
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &memScale,
+				LogLevel:            &logLevel,
+			},
+		},
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	allocationFailedCalled := false
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {
+		allocationFailedCalled = true
+	}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	client.KubeClient = fake.NewSimpleClientset(pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"},
+		}},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to prepare container cache directory")
+	require.True(t, allocationFailedCalled)
+}
+

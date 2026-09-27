@@ -80,10 +80,11 @@ const (
 )
 
 var (
-	hostHookPath                 string
-	ConfigFile                   *string
-	getPendingPod                = util.GetPendingPod
-	enableGetPreferredAllocation bool
+	hostHookPath                   string
+	ConfigFile                     *string
+	getPendingPod                  = util.GetPendingPod
+	enableGetPreferredAllocation   bool
+	prepareContainerCacheDirectory = prepareDefaultContainerCacheDirectory
 )
 
 func init() {
@@ -1240,10 +1241,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					response.Envs[util.CoreLimitSwitch] = "disable"
 				}
 				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-				os.RemoveAll(cacheFileHostDirectory)
-
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
+				if err := prepareContainerCacheDirectory(cacheFileHostDirectory); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("failed to prepare container cache directory: %w", err)
+				}
 				if err := prepareHostPIDLockParentForAllocation(); err != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf(
@@ -1306,6 +1307,24 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	allocationCompleted = true
 	return &responses, nil
+}
+
+// prepareDefaultContainerCacheDirectory cleans, creates, and sets 0750 permissions
+// on the container's GPU cache directory on the host.
+func prepareDefaultContainerCacheDirectory(cacheFileHostDirectory string) error {
+	if err := os.RemoveAll(cacheFileHostDirectory); err != nil {
+		klog.Errorf("failed to remove container cache directory %s: %v", cacheFileHostDirectory, err)
+		return fmt.Errorf("failed to remove container cache directory %s: %w", cacheFileHostDirectory, err)
+	}
+	if err := os.MkdirAll(cacheFileHostDirectory, 0750); err != nil {
+		klog.Errorf("failed to create container cache directory %s: %v", cacheFileHostDirectory, err)
+		return fmt.Errorf("failed to create container cache directory %s: %w", cacheFileHostDirectory, err)
+	}
+	if err := os.Chmod(cacheFileHostDirectory, 0750); err != nil {
+		klog.Errorf("failed to set permissions on container cache directory %s: %v", cacheFileHostDirectory, err)
+		return fmt.Errorf("failed to set permissions on container cache directory %s: %w", cacheFileHostDirectory, err)
+	}
+	return nil
 }
 
 func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*kubeletdevicepluginv1beta1.ContainerAllocateResponse, error) {

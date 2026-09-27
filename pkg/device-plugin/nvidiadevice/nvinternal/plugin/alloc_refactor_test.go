@@ -140,6 +140,10 @@ func mockAllocateGlobals(t *testing.T, pod *corev1.Pod) {
 	previousPodAllocationTrySuccess := podAllocationTrySuccess
 	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
 	t.Cleanup(func() { podAllocationTrySuccess = previousPodAllocationTrySuccess })
+
+	previousPrepareContainerCacheDirectory := prepareContainerCacheDirectory
+	prepareContainerCacheDirectory = func(string) error { return nil }
+	t.Cleanup(func() { prepareContainerCacheDirectory = previousPrepareContainerCacheDirectory })
 }
 
 // ---------------------------------------------------------------------------
