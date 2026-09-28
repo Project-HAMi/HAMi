@@ -33,10 +33,12 @@
 package plugin
 
 import (
+	"context"
+
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
@@ -93,4 +95,31 @@ func WithImexChannels(imexChannels imex.Channels) Option {
 	return func(m *options) {
 		m.imexChannels = imexChannels
 	}
+}
+
+// WithNodePodList injects cached, read-only node Pod snapshots for allocation
+// recovery and detecting cleanup candidates. Absence does not authorize deletion.
+func WithNodePodList(list func() ([]*corev1.Pod, error)) Option {
+	return func(m *options) {
+		m.listNodePods = list
+	}
+}
+
+// WithLiveNodePodList injects API confirmation for destructive MIG operations.
+// Errors must preserve existing resources; callers must never fall back to cache.
+func WithLiveNodePodList(list func() ([]*corev1.Pod, error)) Option {
+	return func(m *options) { m.listLiveNodePods = list }
+}
+
+// WithVGPUCachePreparer injects Allocate-time preparation of a container's
+// libvgpu cache directory.
+func WithVGPUCachePreparer(prepare func(string, string) (string, error)) Option {
+	return func(m *options) {
+		m.prepareVGPUCache = prepare
+	}
+}
+
+// WithNodePodSync injects the initial synchronization gate used only by MIG mode.
+func WithNodePodSync(wait func(context.Context) error) Option {
+	return func(m *options) { m.waitForNodePodSync = wait }
 }

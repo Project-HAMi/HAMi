@@ -17,12 +17,56 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
 )
+
+// TestResolveVGPUCacheConfigReusesExistingEnvironment checks that explicit shared-cache settings
+// override defaults.
+func TestResolveVGPUCacheConfigReusesExistingEnvironment(t *testing.T) {
+	t.Setenv(vgpuCacheRootEnvName, "/var/lib/hami/containers")
+	t.Setenv(vgpuCacheGracePeriodEnvName, "7m")
+	config := resolveVGPUCacheConfig()
+	if config.Root != "/var/lib/hami/containers" {
+		t.Fatalf("Root = %q", config.Root)
+	}
+	if config.GracePeriod != 7*time.Minute {
+		t.Fatalf("GracePeriod = %v", config.GracePeriod)
+	}
+	if config.ScanInterval != defaultVGPUCacheScanInterval {
+		t.Fatalf("ScanInterval = %v", config.ScanInterval)
+	}
+}
+
+// TestResolveVGPUCacheConfigDefaultsFromHookPath checks cache path fallback and handling of
+// invalid grace periods.
+func TestResolveVGPUCacheConfigDefaultsFromHookPath(t *testing.T) {
+	t.Setenv(vgpuCacheRootEnvName, "")
+	t.Setenv(vgpuCacheGracePeriodEnvName, "invalid")
+	t.Setenv("HOOK_PATH", "/opt/hami")
+	config := resolveVGPUCacheConfig()
+	if config.Root != "/opt/hami/vgpu/containers" {
+		t.Fatalf("Root = %q", config.Root)
+	}
+	if config.GracePeriod != defaultVGPUCacheGracePeriod {
+		t.Fatalf("GracePeriod = %v", config.GracePeriod)
+	}
+}
 
 func TestResolveNvidiaDriverRootFromGPUOperatorContract(t *testing.T) {
 	contractPath := filepath.Join(t.TempDir(), "driver-ready")
@@ -132,4 +176,125 @@ func setDriverReadyFileForTest(t *testing.T, path string) {
 	original := gpuOperatorDriverReadyFile
 	gpuOperatorDriverReadyFile = path
 	t.Cleanup(func() { gpuOperatorDriverReadyFile = original })
+}
+
+// TestVGPUCacheAbandonEvent reports the real Node identity without listing
+// events, and a failing event write does not retry or affect the caller.
+func TestVGPUCacheAbandonEvent(t *testing.T) {
+	for _, failWrite := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failWrite=%v", failWrite), func(t *testing.T) {
+			kubeClient := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-node", UID: "node-uid"}})
+			created := make(chan *corev1.Event, 1)
+			kubeClient.PrependReactor("create", "events", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				create, ok := action.(clienttesting.CreateAction)
+				if !ok {
+					return true, nil, errors.New("unexpected action")
+				}
+				event, ok := create.GetObject().(*corev1.Event)
+				if !ok {
+					return true, nil, errors.New("unexpected object")
+				}
+				created <- event.DeepCopy()
+				if failWrite {
+					return true, nil, errors.New("event API unavailable")
+				}
+				return true, event, nil
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			report := startVGPUCacheEvents(ctx, kubeClient, "gpu-node")
+			report("/cache/pod_gpu", 5, errors.New("permission denied"))
+			select {
+			case event := <-created:
+				require.Equal(t, "VGPUCacheCleanupAbandoned", event.Reason)
+				require.Equal(t, corev1.EventTypeWarning, event.Type)
+				require.Equal(t, "Node", event.InvolvedObject.Kind)
+				require.Equal(t, "node-uid", string(event.InvolvedObject.UID))
+				require.Equal(t, "gpu-node", event.InvolvedObject.Name)
+				require.Contains(t, event.Message, "/cache/pod_gpu")
+				require.Contains(t, event.Message, "5 deletion failures")
+				require.Contains(t, event.Message, "permission denied")
+			case <-time.After(time.Second):
+				t.Fatal("event was not reported")
+			}
+			// A second notification stays queued behind the rate limit.
+			report("/cache/another_gpu", 5, errors.New("permission denied"))
+			select {
+			case <-created:
+				t.Fatal("notification was not rate limited")
+			case <-time.After(30 * time.Millisecond):
+			}
+			cancel()
+			actions := kubeClient.Actions()
+			require.Len(t, actions, 2)
+			require.Equal(t, "get", actions[0].GetVerb())
+			require.Equal(t, "create", actions[1].GetVerb())
+		})
+	}
+}
+
+// TestVGPUCacheEventQueueDoesNotBlock keeps reporting bounded when the API is
+// stuck; once cancelled the worker drops pending notifications without retrying.
+func TestVGPUCacheEventQueueDoesNotBlock(t *testing.T) {
+	kubeClient := fake.NewSimpleClientset()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	kubeClient.PrependReactor("get", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		close(entered)
+		<-release
+		return true, nil, errors.New("Node API unavailable")
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	report := startVGPUCacheEvents(ctx, kubeClient, "gpu-node")
+	report("/cache/first_gpu", 5, os.ErrPermission)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start")
+	}
+	queued := make(chan struct{})
+	go func() {
+		for range 32 {
+			report("/cache/other_gpu", 5, os.ErrPermission)
+		}
+		close(queued)
+	}()
+	select {
+	case <-queued:
+	case <-time.After(time.Second):
+		t.Fatal("full notification queue blocked cleanup")
+	}
+}
+
+// TestVGPUCacheGracePeriodIndependentOfMonitor covers the new environment
+// contract, including startup rejection of negative durations by the manager.
+func TestVGPUCacheGracePeriodIndependentOfMonitor(t *testing.T) {
+	for _, tc := range []struct {
+		name, grace, resync string
+		want                time.Duration
+		invalid             bool
+	}{
+		{name: "default", want: 5 * time.Minute},
+		{name: "legacy setting ignored", resync: "1s", want: 5 * time.Minute},
+		{name: "independent custom values", grace: "7m", resync: "1s", want: 7 * time.Minute},
+		{name: "invalid uses default", grace: "invalid", resync: "1s", want: 5 * time.Minute},
+		{name: "zero grace", grace: "0s", resync: "5m"},
+		{name: "negative rejected", grace: "-1s", want: -time.Second, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HAMI_VGPU_CACHE_GRACE_PERIOD", tc.grace)
+			t.Setenv("HAMI_RESYNC_INTERVAL", tc.resync)
+			t.Setenv(vgpuCacheRootEnvName, t.TempDir())
+			cfg := resolveVGPUCacheConfig()
+			require.Equal(t, tc.want, cfg.GracePeriod)
+			list := func() ([]*corev1.Pod, error) { return nil, nil }
+			_, err := vgpucache.New(cfg, list, list)
+			if tc.invalid {
+				require.ErrorContains(t, err, "grace period must not be negative")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
