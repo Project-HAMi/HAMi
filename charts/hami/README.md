@@ -2,7 +2,7 @@
 
 This document provides detailed descriptions of all configurable values parameters for the HAMi Helm Chart.
 
-Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read.
+Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read. Supplying removed fields fails chart rendering and lists every old field with its replacement path.
 
 ## Global Configuration
 

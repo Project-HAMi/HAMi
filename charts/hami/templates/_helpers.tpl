@@ -197,6 +197,7 @@ Managed resources list for scheduler extender
 Returns a YAML list that can be used directly or converted to JSON via fromYaml | toJson
 */}}
 {{- define "hami-vgpu.scheduler.managedResources" -}}
+{{- include "hami-vgpu.validateDeviceValues" . -}}
 {{- $resources := list -}}
 {{/* Core NVIDIA resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCountName "ignoredByScheduler" true) -}}
@@ -277,4 +278,47 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceMemoryName "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- toYaml $resources -}}
+{{- end -}}
+
+{{- define "hami-vgpu.validateDeviceValues" -}}
+{{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
+{{- $removedRootFields := dict
+  "resourceName" "devices.nvidia.resourceCountName"
+  "resourceMem" "devices.nvidia.resourceMemoryName"
+  "resourceMemPercentage" "devices.nvidia.resourceMemoryPercentageName"
+  "resourceCores" "devices.nvidia.resourceCoreName"
+  "resourcePriority" "devices.nvidia.resourcePriorityName"
+  "mluResourceName" "devices.cambricon.resourceCountName"
+  "mluResourceMem" "devices.cambricon.resourceMemoryName"
+  "mluResourceCores" "devices.cambricon.resourceCoreName"
+  "hcuResourceName" "devices.hygon.resourceCountName"
+  "hcuResourceMem" "devices.hygon.resourceMemoryName"
+  "hcuResourceCores" "devices.hygon.resourceCoreName"
+  "metaxResourceName" "devices.metax.resourceVCountName"
+  "metaxResourceCore" "devices.metax.resourceVCoreName"
+  "metaxResourceMem" "devices.metax.resourceVMemoryName"
+  "metaxsGPUTopologyAware" "devices.metax.sgpuTopologyAware"
+  "enflameResourceNameDRSGCU" "devices.enflame.resourceNameDRSGCU"
+  "enflameResourceNameGCUMemory" "devices.enflame.resourceNameGCUMemory"
+  "enflameResourceNameGCUCore" "devices.enflame.resourceNameGCUCore"
+  "kunlunResourceName" "devices.kunlun.resourceCountName"
+  "kunlunResourceVCountName" "devices.kunlun.resourceVCountName"
+  "kunlunResourceVMemoryName" "devices.kunlun.resourceVMemoryName"
+  "vastaiResourceName" "devices.vastai.resourceCountName"
+  "birenResourceName" "devices.biren.resourceCountName"
+-}}
+{{- $errors := list -}}
+{{- range $old := keys $removedRootFields | sortAlpha -}}
+  {{- if hasKey $.Values $old -}}
+    {{- $errors = append $errors (printf "%s has been removed; use %s instead" $old (index $removedRootFields $old)) -}}
+  {{- end -}}
+{{- end -}}
+{{- range $field := list "deviceSplitCount" "deviceMemoryScaling" "deviceCoreScaling" "preConfiguredDeviceMemory" "enableNumaTopology" "runtimeClassName" -}}
+  {{- if hasKey $.Values.devicePlugin $field -}}
+    {{- $errors = append $errors (printf "devicePlugin.%s has been removed; use devices.nvidia.%s instead" $field $field) -}}
+  {{- end -}}
+{{- end -}}
+{{- if $errors -}}
+  {{- fail (printf "Removed device configuration fields:\n%s" (join "\n" $errors)) -}}
+{{- end -}}
 {{- end -}}
