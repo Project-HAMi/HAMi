@@ -151,7 +151,7 @@ func (s *Scheduler) onAddPod(obj any) {
 		}
 		return
 	}
-	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+	assignedNodeName, ok := pod.Annotations[util.AssignedNodeAnnotations]
 	if !ok {
 		return
 	}
@@ -169,16 +169,16 @@ func (s *Scheduler) onAddPod(obj any) {
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		if pod.Spec.NodeName == nodeID {
-			s.recordAllocationDecodeFailureEvent(pod, nodeID, err)
+		if pod.Spec.NodeName != "" {
+			s.recordAllocationDecodeFailureEvent(pod, pod.Spec.NodeName, err)
 		}
-		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "node", nodeID)
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "assignedNode", assignedNodeName, "nodeName", pod.Spec.NodeName)
 		return
 	}
 
 	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 
-	if s.podManager.AddPod(pod, nodeID, effectiveDevices) {
+	if s.podManager.AddPod(pod, assignedNodeName, effectiveDevices) {
 		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
 }
@@ -192,13 +192,16 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
 	if util.IsPodInTerminatedState(newPod) {
+		// Terminated update objects can omit annotations, but cached usage must
+		// still be removed to avoid leaving completed Pod allocations accounted.
 		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
 			s.quotaManager.RmUsage(newPod, pi.Devices)
 		}
 		return
 	}
 
-	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+	assignedNodeName, ok := newPod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
 		return
 	}
 
@@ -231,7 +234,10 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
-			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
+			if newPod.Spec.NodeName != "" {
+				s.recordAllocationDecodeFailureEvent(newPod, newPod.Spec.NodeName, err)
+			}
+			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod), "assignedNode", assignedNodeName, "nodeName", newPod.Spec.NodeName)
 			return
 		}
 

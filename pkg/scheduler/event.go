@@ -89,12 +89,12 @@ func (s *Scheduler) recordNumaRefitResultEvent(pod *corev1.Pod, successMsg strin
 
 // recordAllocationDecodeFailureEvent reports an allocation that could not be
 // reconstructed without changing candidate-node selection.
-func (s *Scheduler) recordAllocationDecodeFailureEvent(pod *corev1.Pod, nodeID string, decodeErr error) {
+func (s *Scheduler) recordAllocationDecodeFailureEvent(pod *corev1.Pod, nodeName string, decodeErr error) {
 	if pod == nil || s.eventRecorder == nil || decodeErr == nil {
 		return
 	}
 	s.eventRecorder.Eventf(pod, corev1.EventTypeWarning, EventReasonAllocationDecodeFailed,
-		"Failed to decode HAMi allocated-device annotations for node %q: %v", nodeID, decodeErr)
+		"Failed to decode HAMi allocated-device annotations for node %q: %v", nodeName, decodeErr)
 }
 
 func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, successMsg string, schedulerErr error) {
