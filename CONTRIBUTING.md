@@ -158,7 +158,9 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make verify_chart`.
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
-and verifies that the chart and application versions match.
+and verifies that the chart and application versions match. Install helm-docs v1.14.2
+and run `make update-chart-docs` after changing values or their descriptions;
+`make verify_chart` also checks that the generated chart README is current.
 
 For changes to a package that has benchmarks, also run `make bench`. CI runs the benchmarks to
 confirm they still execute; it does not compare timings, because shared runners are too noisy for

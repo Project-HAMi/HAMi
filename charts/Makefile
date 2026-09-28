@@ -5,8 +5,9 @@ include  ../Makefile.defs
 VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 CHART_FILE := "./hami/Chart.yaml"
 VALUES_FILE := "./hami/values.yaml"
+HELM_DOCS_VERSION := 1.14.2
 
-.PHONY: all lint update-versions deps validate clean
+.PHONY: all lint update-versions deps validate clean docs verify-docs check-helm-docs
 all: update-versions deps lint package
 
 # Validate the committed chart without updating release versions.
@@ -45,3 +46,14 @@ package: lint
 
 clean:
 	rm -f *.tgz
+
+check-helm-docs:
+	@test "`helm-docs --version`" = "helm-docs version $(HELM_DOCS_VERSION)" || { echo "Use helm-docs $(HELM_DOCS_VERSION) to generate chart documentation"; exit 1; }
+
+docs: check-helm-docs
+	helm-docs --chart-search-root ./hami
+
+verify-docs: check-helm-docs
+	@task_docs_file=$$(mktemp); trap 'rm -f "$$task_docs_file"' EXIT; \
+	helm-docs --chart-search-root ./hami --dry-run > "$$task_docs_file"; \
+	diff -u ./hami/README.md "$$task_docs_file"
