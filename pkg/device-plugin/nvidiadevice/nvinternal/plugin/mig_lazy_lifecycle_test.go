@@ -52,8 +52,14 @@ func TestMIGRecoveryCleansOrphanGPUInstance(t *testing.T) {
 				GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
 					return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
 				},
-				GetComputeInstanceProfileInfoFunc: func(int, int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
-					return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+				GetComputeInstanceProfileInfoFunc: func(profileID, _ int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+					if profileID != 0 {
+						return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+					}
+					return nvml.ComputeInstanceProfileInfo{Id: uint32(profileID)}, nvml.SUCCESS
+				},
+				GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+					return nil, nvml.SUCCESS
 				},
 				DestroyFunc: func() nvml.Return { return tc.destroyRet },
 			}
@@ -84,6 +90,40 @@ func TestMIGRecoveryCleansOrphanGPUInstance(t *testing.T) {
 			require.Empty(t, manager.byAllocation)
 		})
 	}
+}
+
+func TestMIGRecoveryPreservesGPUInstanceWhenComputeInspectionIsUnsupported(t *testing.T) {
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
+		GetComputeInstanceProfileInfoFunc: func(int, int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		DestroyFunc: func() nvml.Return { return nvml.SUCCESS },
+	}
+	profileID := profileNameToGIProfileID["1g"]
+	dev := &nvmlmock.Device{
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(id int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			if id != profileID {
+				return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+			}
+			return nvml.GpuInstanceProfileInfo{Id: uint32(id)}, nvml.SUCCESS
+		},
+		GetGpuInstancesFunc: func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+			return []nvml.GpuInstance{gi}, nvml.SUCCESS
+		},
+	}
+	manager := initializedLazyMIGManager(t, dev)
+
+	err := manager.RestoreAllocations(1, nil)
+	require.ErrorContains(t, err, "no supported compute instance profile could be inspected")
+	require.Empty(t, gi.DestroyCalls())
+	require.Empty(t, manager.byAllocation)
 }
 
 func TestMIGReleasedAllocationBecomesIdleAndIsReused(t *testing.T) {

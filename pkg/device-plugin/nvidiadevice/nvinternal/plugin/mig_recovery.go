@@ -131,6 +131,7 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 
 func liveComputeInstance(gi nvml.GpuInstance) (nvml.ComputeInstanceInfo, bool, error) {
 	var found *nvml.ComputeInstanceInfo
+	inspected := false
 	for profileID := 0; profileID < nvml.COMPUTE_INSTANCE_PROFILE_COUNT; profileID++ {
 		profileInfo, ret := gi.GetComputeInstanceProfileInfo(profileID, nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
 		if ret == nvml.ERROR_NOT_SUPPORTED || ret == nvml.ERROR_INVALID_ARGUMENT {
@@ -146,6 +147,7 @@ func liveComputeInstance(gi nvml.GpuInstance) (nvml.ComputeInstanceInfo, bool, e
 		if ret != nvml.SUCCESS {
 			return nvml.ComputeInstanceInfo{}, false, fmt.Errorf("list CI profile %d: %s", profileID, nvml.ErrorString(ret))
 		}
+		inspected = true
 		for _, ci := range instances {
 			info, ret := ci.GetInfo()
 			if ret != nvml.SUCCESS {
@@ -159,6 +161,9 @@ func liveComputeInstance(gi nvml.GpuInstance) (nvml.ComputeInstanceInfo, bool, e
 		}
 	}
 	if found == nil {
+		if !inspected {
+			return nvml.ComputeInstanceInfo{}, false, fmt.Errorf("no supported compute instance profile could be inspected")
+		}
 		return nvml.ComputeInstanceInfo{}, false, nil
 	}
 	return *found, true, nil
