@@ -40,7 +40,19 @@ type Devices interface {
 	GetNodeDevices(n corev1.Node) ([]*DeviceInfo, error)
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
-	GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest
+	// GenerateResourceRequests translates a container's resource limits into a
+	// device request. A zero Nums with a nil error means the container does not
+	// request this vendor's devices. A non-nil error means it does, but the
+	// request is invalid and the caller must fail closed instead of silently
+	// treating the pod as device-less.
+	//
+	// An explicitly requested count of zero is "no device", not an invalid
+	// request, so it belongs in the first case. Admission runs this on every
+	// pod, and charts commonly render a disabled GPU count as 0, so returning
+	// an error for it would deny ordinary CPU pods. A backend for which zero
+	// really is malformed should reject it in MutateAdmission instead, which
+	// only rejects containers that actually carry its resources.
+	GenerateResourceRequests(ctr *corev1.Container) (ContainerDeviceRequest, error)
 	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
 	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32
 	AddResourceUsage(pod *corev1.Pod, n *DeviceUsage, ctr *ContainerDevice) error
@@ -119,6 +131,7 @@ type DeviceUsage struct {
 	MigUsage            MigInUse   // Deprecated: unused by dynamic NVIDIA MIG.
 	Numa                int
 	Type                string
+	DeviceVendor        string
 	Health              bool
 	PodInfos            []*PodInfo
 	CustomInfo          map[string]any
@@ -225,6 +238,16 @@ type ContainerDeviceRequest struct {
 	Memreq           int32
 	MemPercentagereq int32
 	Coresreq         int32
+	// TotalCoresreq preserves a NeuronCore request until the candidate node's
+	// cores-per-device geometry is known. Other backends leave it zero.
+	TotalCoresreq int64
+}
+
+// CoreMaskAccounting is implemented by backends whose Usedcores values are
+// bit masks rather than additive core counts.
+type CoreMaskAccounting interface {
+	AccumulateCores(used, allocated int32) int32
+	CountAllocatedCores(allocated int32) int64
 }
 
 type ContainerDevices []ContainerDevice
@@ -256,23 +279,26 @@ func init() {
 	SupportDevices = make(map[string]string)
 }
 
+// DeepCopy returns a copy of DeviceUsage. It clones the PodInfos slice but
+// shares its read-only PodInfo entries, which callers must not mutate.
 func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	if d == nil {
 		return nil
 	}
 	dup := &DeviceUsage{
-		ID:        d.ID,
-		Index:     d.Index,
-		Used:      d.Used,
-		Count:     d.Count,
-		Usedmem:   d.Usedmem,
-		Totalmem:  d.Totalmem,
-		Totalcore: d.Totalcore,
-		Usedcores: d.Usedcores,
-		Mode:      d.Mode,
-		Numa:      d.Numa,
-		Type:      d.Type,
-		Health:    d.Health,
+		ID:           d.ID,
+		Index:        d.Index,
+		Used:         d.Used,
+		Count:        d.Count,
+		Usedmem:      d.Usedmem,
+		Totalmem:     d.Totalmem,
+		Totalcore:    d.Totalcore,
+		Usedcores:    d.Usedcores,
+		Mode:         d.Mode,
+		Numa:         d.Numa,
+		Type:         d.Type,
+		DeviceVendor: d.DeviceVendor,
+		Health:       d.Health,
 	}
 
 	if d.MigProfiles != nil {
@@ -291,12 +317,8 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 	}
 	dup.MigUsage = d.MigUsage.DeepCopy()
 
-	if d.PodInfos != nil {
-		dup.PodInfos = make([]*PodInfo, len(d.PodInfos))
-		for i, pi := range d.PodInfos {
-			dup.PodInfos[i] = pi.DeepCopy()
-		}
-	}
+	// Copy the slice while sharing its read-only PodInfo snapshots.
+	dup.PodInfos = slices.Clone(d.PodInfos)
 
 	if d.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(d.CustomInfo))
@@ -668,7 +690,24 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 	return templateIdx, slotIdx, nil
 }
 
-func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
+// ErrInvalidDeviceRequest is returned by GenerateResourceRequests when a
+// container declares this vendor's resources but the values cannot form a
+// valid request. Callers must treat it as a hard failure: dropping the entry
+// would make the pod look device-less and let it schedule with no device.
+type ErrInvalidDeviceRequest struct {
+	Container string
+	Device    string
+	Reason    string
+}
+
+func (e *ErrInvalidDeviceRequest) Error() string {
+	return fmt.Sprintf("invalid %s request for container %q: %s", e.Device, e.Container, e.Reason)
+}
+
+// Resourcereqs collects the device requests of every container. A container
+// whose request is invalid aborts the collection with the backend's error, so
+// the scheduler rejects the pod instead of scheduling it with no device.
+func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests, err error) {
 	// Total containers = init containers + regular containers
 	totalContainers := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
 	counts = make(PodDeviceRequests, totalContainers)
@@ -689,7 +728,10 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 			"containerIndex", i,
 			"containerName", pod.Spec.InitContainers[i].Name)
 		for idx, val := range devices {
-			request := val.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			request, reqErr := val.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			if reqErr != nil {
+				return nil, reqErr
+			}
 			if request.Nums > 0 {
 				cnt += request.Nums
 				counts[i][idx] = request
@@ -707,7 +749,10 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 			"containerIndex", initContainerOffset+i,
 			"containerName", pod.Spec.Containers[i].Name)
 		for idx, val := range devices {
-			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
+			request, reqErr := val.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if reqErr != nil {
+				return nil, reqErr
+			}
 			if request.Nums > 0 {
 				cnt += request.Nums
 				counts[initContainerOffset+i][idx] = request
@@ -719,7 +764,7 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 	} else {
 		klog.V(4).InfoS("Resource requirements collected", "pod", klog.KObj(pod), "requests", counts)
 	}
-	return counts
+	return counts, nil
 }
 
 func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
@@ -770,18 +815,22 @@ func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool 
 }
 
 // PodRequiresDevice returns true if any container (init container or regular container)
-// in the pod requests resources from the specified device generator.
+// in the pod requests resources from the specified device generator. An invalid
+// request still counts as requiring the device: the pod is not device-less and
+// must be rejected rather than silently passed through.
 func PodRequiresDevice(dev Devices, p *corev1.Pod) bool {
 	if p == nil || dev == nil {
 		return false
 	}
 	for i := range p.Spec.InitContainers {
-		if dev.GenerateResourceRequests(&p.Spec.InitContainers[i]).Nums > 0 {
+		req, err := dev.GenerateResourceRequests(&p.Spec.InitContainers[i])
+		if err != nil || req.Nums > 0 {
 			return true
 		}
 	}
 	for i := range p.Spec.Containers {
-		if dev.GenerateResourceRequests(&p.Spec.Containers[i]).Nums > 0 {
+		req, err := dev.GenerateResourceRequests(&p.Spec.Containers[i])
+		if err != nil || req.Nums > 0 {
 			return true
 		}
 	}

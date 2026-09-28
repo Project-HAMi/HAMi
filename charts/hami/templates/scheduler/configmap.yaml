@@ -26,19 +26,19 @@ data:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
     {{- if .Values.scheduler.admissionWebhook.enabled }}
-    - urlPrefix: "https://127.0.0.1:443"
+    - urlPrefix: "https://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}"
       enableHTTPS: true
       tlsConfig:
         insecure: true
     {{- else }}
-    - urlPrefix: "http://127.0.0.1:80"
+    - urlPrefix: "http://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}"
       enableHTTPS: false
     {{- end }}
       filterVerb: filter
       bindVerb: bind
       nodeCacheCapable: true
       weight: 1
-      httpTimeout: 30s
+      httpTimeout: {{ .Values.scheduler.extenderHTTPTimeout }}s
       managedResources:
       {{- include "hami-vgpu.scheduler.managedResources" . | nindent 6 }}
 {{- else }}
@@ -50,20 +50,20 @@ data:
         "extenders": [
             {
                 {{- if .Values.scheduler.admissionWebhook.enabled }}
-                "urlPrefix": "https://127.0.0.1:443",
+                "urlPrefix": "https://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}",
                 "enableHttps": true,
                 "tlsConfig": {
                     "insecure": true
                 },
                 {{- else }}
-                "urlPrefix": "http://127.0.0.1:80",
+                "urlPrefix": "http://127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}",
                 "enableHttps": false,
                 {{- end }}
                 "filterVerb": "filter",
                 "bindVerb": "bind",
                 "weight": 1,
                 "nodeCacheCapable": true,
-                "httpTimeout": 30000000000,
+                "httpTimeout": {{ mul .Values.scheduler.extenderHTTPTimeout 1000000000 }},
                 "managedResources": {{ include "hami-vgpu.scheduler.managedResources" . | fromYamlArray | toJson }},
                 "ignoreable": false
             }

@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +46,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -129,6 +131,39 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
+	previous := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{
+		awsneuron.AWSNeuronDevice: awsneuron.InitAWSNeuronDevice(awsneuron.AWSNeuronConfig{
+			ResourceCountName: "aws.amazon.com/neuron",
+			ResourceCoreName:  "aws.amazon.com/neuroncore",
+		}),
+	}
+	t.Cleanup(func() { device.DevicesMap = previous })
+	nodes := newNodeManager()
+	nodes.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{awsneuron.AWSNeuronDevice: {{
+			ID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice,
+			Count: 4, Devcore: 15, Health: true,
+		}}},
+	})
+	pods := device.NewPodManager()
+	for i, mask := range []int32{1, 2} {
+		pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			UID:  types.UID(fmt.Sprintf("neuron-%d", i)),
+			Name: fmt.Sprintf("neuron-%d", i), Namespace: "default",
+		}}, "node1", device.PodDevices{awsneuron.AWSNeuronDevice: {{
+			{UUID: "node1-AWSNeuron-0", Type: awsneuron.AWSNeuronDevice, Usedcores: mask},
+		}}})
+	}
+	s := Scheduler{nodeManager: nodes, podManager: pods}
+	nodeNames := []string{"node1"}
+	usage, _, _, err := s.getNodesUsage(&nodeNames, nil)
+	require.NoError(t, err)
+	assert.Equal(t, (*usage)["node1"].Devices.DeviceLists[0].Device.Usedcores, int32(3))
 }
 
 // Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()
@@ -923,6 +958,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
+	successfulFilters := 0
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()
@@ -938,6 +974,12 @@ func Test_Filter(t *testing.T) {
 			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
 				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
 			}
+			successfulFilters++
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(fmt.Sprintf(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="filter"} %d
+`, successfulFilters)), "hami_scheduler_allocations_total"))
 		})
 	}
 }
@@ -1142,7 +1184,7 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 						Name: "node",
 						Annotations: map[string]string{
 							"hami.io/node-handshake":     "Requesting_2025-06-13 09:07:40",
-							"hami.io/node-handshake-dcu": "Requesting_2025-06-13 09:07:40",
+							"hami.io/node-handshake-hcu": "Requesting_2025-06-13 09:07:40",
 						},
 					},
 				}
@@ -1171,19 +1213,19 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 					t.Errorf("missing annotation: hami.io/node-handshake")
 					return false
 				}
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
-				if !okDcu {
-					t.Errorf("missing annotation: hami.io/node-handshake-dcu")
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
+				if !okHcu {
+					t.Errorf("missing annotation: hami.io/node-handshake-hcu")
 					return false
 				}
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 				return true
@@ -1280,24 +1322,24 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 
 				// If annotations exist, check for specific annotations
 				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
-				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
+				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
 
 				// Here you can define what should happen when annotations are present but not set
-				if !okHami || !okDcu {
+				if !okHami || !okHcu {
 					t.Logf("expected annotations are missing, checking if handled properly...")
 					return true // Adjust based on expected behavior
 				}
 
 				// Verify time format in annotations if they exist
 				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
 
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
 				}
-				if errDcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+				if errHcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
 					return false
 				}
 
@@ -1370,8 +1412,8 @@ func (m *registerMockDevice) GetNodeDevices(node corev1.Node) ([]*device.DeviceI
 }
 func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *registerMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
-func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 func (m *registerMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil
@@ -1457,7 +1499,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, mockDev.nodeCleanedUp, 0)
 
@@ -1542,7 +1584,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 1, mockDev.nodeCleanedUp, "NodeCleanUp should be invoked when device is unhealthy even on discovery error")
 
@@ -1625,7 +1667,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Healthy(t *testing.T) {
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be invoked when device is healthy")
 
@@ -1752,7 +1794,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testi
 	})
 
 	atomic.StoreUint32(&s.started, 1)
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	assert.Equal(t, 0, devHealthy.nodeCleanedUp)
 	assert.Equal(t, 1, devUnhealthyErr.nodeCleanedUp)
@@ -1846,7 +1888,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	atomic.StoreUint32(&s.started, 1)
 
 	// Cycle 1: Transient discovery error occurs when fetching node devices.
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 1 semantics:
 	// - NodeCleanUp was NOT called because device is healthy.
@@ -1875,7 +1917,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.health = true
 	mockDev.needUpdate = true
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 2 recovery semantics:
 	// - Device state correctly recovers and updates in scheduler cache.
@@ -1890,7 +1932,7 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	mockDev.getNodeErr = nil
 	mockDev.nodeDevices = []*device.DeviceInfo{}
 
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Verify Cycle 3 zero-device semantics:
 	// - NodeCleanUp is NOT called because device is healthy.
@@ -2046,7 +2088,7 @@ func Test_register_StaleDeviceVendorRemoval(t *testing.T) {
 	// - For node-1: vendor-B (0 devices) is removed from cache (exercises ok == true branch);
 	//   vendor-D (0 devices) is not in cache (exercises ok == false branch).
 	// - For node-absent: node is absent from scheduler cache (exercises GetNode error branch).
-	s.register(labels.Everything(), map[string]bool{})
+	s.register(labels.Everything())
 
 	// Expect vendor-B to be removed from node-1 cache, while vendor-A and vendor-C remain
 	nodeInfo, err = s.GetNode("node-1")
@@ -2439,7 +2481,15 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	}
 	s.podManager.AddPod(pod, "node1", devs)
 	s.quotaManager.AddUsage(pod, devs)
-	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	seedPods(t, s, pod)
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	require.NoError(t, err)
+	require.Empty(t, result.NodeNames)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+`), "hami_scheduler_allocation_failures_total"))
 	_, inCache := s.podManager.GetPod(pod)
 	assert.Equal(t, false, inCache)
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
@@ -2997,6 +3047,11 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
@@ -3052,6 +3107,11 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Empty(t, podsAfter)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lookup",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total"))
 }
 
 type bindLockMockDevice struct {
@@ -3129,6 +3189,14 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "node lock contention")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+# HELP hami_scheduler_bind_rollbacks_total HAMi bind operations that released a reservation after failure.
+# TYPE hami_scheduler_bind_rollbacks_total counter
+hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
+`), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
@@ -3483,4 +3551,235 @@ func TestSchedulerIsSynced(t *testing.T) {
 	s.synced.Store(true)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+// Test_register_OverviewIncludesCachedNodesOutsideSelector covers a cached node
+// that stops matching the registration selector. The selector controls which
+// nodes are refreshed, but overviewstatus must continue to include the entire
+// registered-node cache for metrics.
+func Test_register_OverviewIncludesCachedNodesOutsideSelector(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{}
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	selectedNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   "node-a",
+		Labels: map[string]string{"registration": "enabled"},
+	}}
+	unselectedNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}}
+	nodeIndexer := informerFactory.Core().V1().Nodes().Informer().GetIndexer()
+	require.NoError(t, nodeIndexer.Add(selectedNode))
+	require.NoError(t, nodeIndexer.Add(unselectedNode))
+
+	s.addNode(selectedNode.Name, testNodeInfo(selectedNode.Name, 1))
+	s.addNode(unselectedNode.Name, testNodeInfo(unselectedNode.Name, 1))
+
+	s.register(labels.SelectorFromSet(labels.Set{"registration": "enabled"}))
+
+	overview := *s.InspectAllNodesUsage()
+	require.Len(t, overview, 2)
+	assert.Assert(t, overview["node-a"] != nil)
+	assert.Assert(t, overview["node-b"] != nil)
+}
+
+// TestFilterInvalidDeviceRequestFailsClosed makes sure a pod whose container
+// declares a HAMi device resource with an invalid value is rejected by the
+// filter instead of being treated as device-less and bound without any GPU.
+func TestFilterInvalidDeviceRequestFailsClosed(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-ic", Name: "invalid-cores", Namespace: "ns-invalid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpucores": *resource.NewQuantity(150, resource.BinarySI),
+			}},
+		}}},
+	}
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	nodeNames := []string{"node1"}
+	res, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+	assert.Assert(t, res != nil)
+	assert.Equal(t, res.Error, err.Error())
+	// No node may survive: the pod must not be schedulable as device-less.
+	assert.Assert(t, res.Nodes == nil && res.NodeNames == nil)
+}
+
+// Test_register_PrintedLogPrunedOnNodeDelete covers the printedLog bookkeeping
+// across a node's full lifecycle. The map used to be a loop-local in
+// RegisterFromNodeAnnotations, so onDelNode could not reach it: entries
+// accumulated for every node name ever seen, and a node recreated under an old
+// name was logged at V(5) as "updated" instead of at info level as "added".
+func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": &registerMockDevice{
+			nodeDevices: []*device.DeviceInfo{{
+				ID:           "gpu-1",
+				DeviceVendor: "mock-vendor",
+				Health:       true,
+			}},
+			health:     true,
+			needUpdate: true,
+		},
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	// A second node stands in for the rest of the cluster: deleting node-1 must
+	// not disturb it.
+	s.lock.Lock()
+	s.printedLog["node-2"] = true
+	s.lock.Unlock()
+
+	// First registration logs the node as added and records it.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "first registration should record the node")
+	s.lock.RUnlock()
+
+	// Deleting the node must drop its entry, and only its entry.
+	s.onDelNode(node)
+	s.lock.RLock()
+	_, stillPresent := s.printedLog["node-1"]
+	assert.Equal(t, false, stillPresent, "deleting a node should prune its printedLog entry")
+	assert.Equal(t, true, s.printedLog["node-2"], "deleting a node must not disturb other nodes")
+	s.lock.RUnlock()
+
+	// A node returning under the same name is treated as newly added again.
+	s.register(labels.Everything())
+	s.lock.RLock()
+	assert.Equal(t, true, s.printedLog["node-1"], "a recreated node should be recorded again")
+	s.lock.RUnlock()
+}
+
+// seedPods makes pods resolvable to Filter, which verifies the request against
+// the live object before it touches any reservation.
+func seedPods(t *testing.T, s *Scheduler, pods ...*corev1.Pod) {
+	t.Helper()
+	if s.kubeClient == nil {
+		s.kubeClient = fake.NewClientset()
+	}
+	for _, p := range pods {
+		if _, err := s.kubeClient.CoreV1().Pods(p.Namespace).Create(context.Background(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to seed pod %s/%s: %v", p.Namespace, p.Name, err)
+		}
+	}
+}
+
+// testNodeInfo builds a registered node carrying gpus idle NVIDIA devices.
+func testNodeInfo(name string, gpus int) *device.NodeInfo {
+	infos := make([]device.DeviceInfo, 0, gpus)
+	for j := range gpus {
+		infos = append(infos, device.DeviceInfo{
+			ID:           fmt.Sprintf("%s-gpu-%d", name, j),
+			Index:        uint(j),
+			Count:        10,
+			Devmem:       8192,
+			Devcore:      100,
+			Type:         nvidia.NvidiaGPUDevice,
+			Numa:         j % 2,
+			Health:       true,
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+		})
+	}
+	return &device.NodeInfo{
+		ID:      name,
+		Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: infos},
+	}
+}
+
+// Test_getNodesUsage_BuildsOnlyCandidateNodes pins the narrowing: Filter passes
+// a candidate list and discards the second return value, so nodes outside that
+// list must not be snapshotted at all.
+func Test_getNodesUsage_BuildsOnlyCandidateNodes(t *testing.T) {
+	nodeMage := newNodeManager()
+	for _, name := range []string{"node1", "node2", "node3"} {
+		nodeMage.addNode(name, testNodeInfo(name, 2))
+	}
+	s := Scheduler{nodeManager: nodeMage, podManager: device.NewPodManager()}
+
+	candidates := []string{"node2"}
+	cachenodeMap, overallnodeMap, failedNodes, err := s.getNodesUsage(&candidates, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(failedNodes), 0)
+
+	assert.Equal(t, len(*cachenodeMap), 1)
+	assert.Equal(t, len(*overallnodeMap), 1)
+	for _, absent := range []string{"node1", "node3"} {
+		_, present := (*overallnodeMap)[absent]
+		assert.Assert(t, !present, "%s was snapshotted but is not a candidate", absent)
+	}
+	_, present := (*cachenodeMap)["node2"]
+	assert.Assert(t, present, "node2 is a candidate and must be snapshotted")
+}
+
+// Test_getNodesUsage_NilCandidatesBuildsEveryNode covers the register loop's
+// contract: it needs usage for every node, because s.overviewstatus drives the
+// node metrics.
+func Test_getNodesUsage_NilCandidatesBuildsEveryNode(t *testing.T) {
+	nodeMage := newNodeManager()
+	for _, name := range []string{"node1", "node2", "node3"} {
+		nodeMage.addNode(name, testNodeInfo(name, 2))
+	}
+	s := Scheduler{nodeManager: nodeMage, podManager: device.NewPodManager()}
+
+	cachenodeMap, overallnodeMap, _, err := s.getNodesUsage(nil, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(*overallnodeMap), 3)
+	// The candidate map stays empty when no candidate list was supplied.
+	assert.Equal(t, len(*cachenodeMap), 0)
+}
+
+// Test_buildNodeUsage_LeavesPodInfosNil documents that the per-device PodInfos
+// slice is not preallocated. Every consumer ranges over it or appends to it.
+func Test_buildNodeUsage_LeavesPodInfosNil(t *testing.T) {
+	usage := buildNodeUsage(testNodeInfo("node1", 1), nil)
+	assert.Equal(t, len(usage.Devices.DeviceLists), 1)
+	assert.Assert(t, usage.Devices.DeviceLists[0].Device.PodInfos == nil)
 }

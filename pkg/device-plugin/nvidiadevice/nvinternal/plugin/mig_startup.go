@@ -11,18 +11,15 @@
 package plugin
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // sortedIntSetKeys returns the keys of a set-style map sorted ascending.
@@ -45,10 +42,10 @@ func sortedIntSetKeys(s map[int]struct{}) []int {
 // Failure to read Pod annotations is returned to the caller because startup
 // reset must not proceed without the authoritative allocation state. NVML
 // process detection is an additional safeguard and remains best effort.
-func collectInUseGPUs(ctx context.Context, nodeName string) (map[int]struct{}, error) {
+func (m *MigInstanceManager) collectInUseGPUs(pods []*corev1.Pod) (map[int]struct{}, error) {
 	out := make(map[int]struct{})
 
-	annotated, err := kubernetesAllocatedMigGPUs(ctx, nodeName)
+	annotated, err := m.kubernetesAllocatedMigGPUs(pods)
 	if err != nil {
 		return out, fmt.Errorf("list Kubernetes MIG allocations: %w", err)
 	}
@@ -56,7 +53,7 @@ func collectInUseGPUs(ctx context.Context, nodeName string) (map[int]struct{}, e
 		out[g] = struct{}{}
 	}
 
-	if busy, err := nvmlBusyGPUs(); err != nil {
+	if busy, err := m.nvmlBusyGPUs(); err != nil {
 		klog.InfoS("mig init: NVML busy-GPU detection skipped", "err", err)
 	} else {
 		for g := range busy {
@@ -70,16 +67,18 @@ func collectInUseGPUs(ctx context.Context, nodeName string) (map[int]struct{}, e
 // activeMigGPUUUIDs returns physical GPU UUIDs referenced by live HAMi MIG
 // allocations. The annotation preserves the physical GPU identity across a
 // device-plugin restart even though the MIG UUID is created at Allocate time.
-func activeMigGPUUUIDs(pods []corev1.Pod) map[string]struct{} {
+func activeMigGPUUUIDs(pods []*corev1.Pod) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
-	for i := range pods {
-		pod := &pods[i]
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
 		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("decode MIG allocations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		for _, allocation := range allocations {
 			if strings.HasPrefix(allocation.GPUUUID, "GPU-") {
@@ -87,24 +86,20 @@ func activeMigGPUUUIDs(pods []corev1.Pod) map[string]struct{} {
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
-func kubernetesAllocatedMigGPUs(ctx context.Context, nodeName string) (map[int]struct{}, error) {
-	kubeClient := client.GetClient()
-	if kubeClient == nil {
-		return nil, fmt.Errorf("Kubernetes client is not initialized")
-	}
-	pods, err := kubeClient.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + nodeName,
-	})
+// kubernetesAllocatedMigGPUs resolves active Pod MIG reservations to parent GPU indices and
+// rejects unresolvable allocations.
+func (m *MigInstanceManager) kubernetesAllocatedMigGPUs(pods []*corev1.Pod) (map[int]struct{}, error) {
+	uuids, err := activeMigGPUUUIDs(pods)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make(map[int]struct{})
-	for gpuUUID := range activeMigGPUUUIDs(pods.Items) {
-		idx, ok := gpuUUIDToIndex(gpuUUID)
+	for gpuUUID := range uuids {
+		idx, ok := m.gpuUUIDToIndex(gpuUUID)
 		if !ok {
 			return nil, fmt.Errorf("resolve GPU UUID %s", gpuUUID)
 		}
@@ -113,11 +108,13 @@ func kubernetesAllocatedMigGPUs(ctx context.Context, nodeName string) (map[int]s
 	return out, nil
 }
 
-func gpuUUIDToIndex(gpuUUID string) (int, bool) {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+func (m *MigInstanceManager) gpuUUIDToIndex(gpuUUID string) (int, bool) {
+	done, err := m.beginOperation()
+	if err != nil {
 		return 0, false
 	}
-	dev, ret := nvml.DeviceGetHandleByUUID(gpuUUID)
+	defer done()
+	dev, ret := m.nvmllib.DeviceGetHandleByUUID(gpuUUID)
 	if ret != nvml.SUCCESS {
 		return 0, false
 	}
@@ -128,18 +125,20 @@ func gpuUUIDToIndex(gpuUUID string) (int, bool) {
 // nvmlBusyGPUs returns the set of GPU indexes with at least one running
 // compute or graphics process. For MIG-enabled cards every live MIG instance
 // is inspected; for non-MIG cards the parent device is inspected directly.
-func nvmlBusyGPUs() (map[int]struct{}, error) {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return nil, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+func (m *MigInstanceManager) nvmlBusyGPUs() (map[int]struct{}, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return nil, err
 	}
-	count, ret := nvml.DeviceGetCount()
+	defer done()
+	count, ret := m.nvmllib.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("DeviceGetCount: %s", nvml.ErrorString(ret))
 	}
 
 	out := make(map[int]struct{})
 	for i := 0; i < count; i++ {
-		dev, ret := nvml.DeviceGetHandleByIndex(i)
+		dev, ret := m.nvmllib.DeviceGetHandleByIndex(i)
 		if ret != nvml.SUCCESS {
 			continue
 		}
@@ -183,4 +182,30 @@ func deviceHasProcesses(dev nvml.Device) bool {
 		return len(gprocs) > 0
 	}
 	return true
+}
+
+// deviceInventory borrows the manager session for the startup scan.
+func (m *MigInstanceManager) deviceInventory() (int, []string, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return 0, nil, err
+	}
+	defer done()
+	count, ret := m.nvmllib.DeviceGetCount()
+	if ret != nvml.SUCCESS {
+		return 0, nil, fmt.Errorf("get device count: %s", nvml.ErrorString(ret))
+	}
+	names := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		dev, ret := m.nvmllib.DeviceGetHandleByIndex(i)
+		if ret != nvml.SUCCESS {
+			return 0, nil, fmt.Errorf("get device %d: %s", i, nvml.ErrorString(ret))
+		}
+		name, ret := dev.GetName()
+		if ret != nvml.SUCCESS {
+			return 0, nil, fmt.Errorf("get device %d name: %s", i, nvml.ErrorString(ret))
+		}
+		names = append(names, name)
+	}
+	return count, names, nil
 }

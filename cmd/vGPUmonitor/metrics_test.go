@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,27 +69,67 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 }
 
+// descVariableLabels extracts the variable label names from a Prometheus
+// Desc's String() representation, e.g. the "node,device_index,..." part of
+// `variableLabels: {node,device_index,...}`. This lets callers check for an
+// exact label name instead of doing a substring match against the whole
+// descriptor string, which can spuriously match (any string containing
+// "node" also contains "node" as a substring, and "node" is itself a
+// substring of "nodeid").
+func descVariableLabels(desc *prometheus.Desc) []string {
+	s := desc.String()
+	const marker = "variableLabels: {"
+	start := strings.Index(s, marker)
+	if start == -1 {
+		return nil
+	}
+	start += len(marker)
+	end := strings.Index(s[start:], "}")
+	if end == -1 {
+		return nil
+	}
+	inner := s[start : start+end]
+	if inner == "" {
+		return nil
+	}
+	labels := strings.Split(inner, ",")
+	for i := range labels {
+		labels[i] = strings.TrimSpace(labels[i])
+	}
+	return labels
+}
+
+// descHasLabel reports whether desc declares label as one of its variable
+// labels (exact match, not a substring check).
+func descHasLabel(desc *prometheus.Desc, label string) bool {
+	return slices.Contains(descVariableLabels(desc), label)
+}
+
+// TestHostGPUMetricsDescriptorsIncludeNodeLabel verifies that the host GPU
+// descriptors declare the node label expected by per-node aggregation
+// (current descriptors use "node", legacy ones use "nodeid").
 func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 	initLegacyDescriptors()
 
-	hostGPUString := hostGPUdesc.String()
-	if !strings.Contains(hostGPUString, `"node"`) && !strings.Contains(hostGPUString, `node`) {
-		t.Errorf("hostGPUdesc does not contain 'node' label: %s", hostGPUString)
+	if !descHasLabel(hostGPUdesc, "node") {
+		t.Errorf("hostGPUdesc does not contain 'node' label: %s", hostGPUdesc.String())
 	}
 
-	hostGPUUtilString := hostGPUUtilizationdesc.String()
-	if !strings.Contains(hostGPUUtilString, `"node"`) && !strings.Contains(hostGPUUtilString, `node`) {
-		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilString)
+	if !descHasLabel(hostGPUUtilizationdesc, "node") {
+		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilizationdesc.String())
 	}
 
-	legacyHostGPUString := legacyHostGPUdesc.String()
-	if !strings.Contains(legacyHostGPUString, `"nodeid"`) && !strings.Contains(legacyHostGPUString, `nodeid`) {
-		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUString)
+	if !descHasLabel(hostGPUMemoryUtilizationdesc, "node") {
+		t.Errorf("hostGPUMemoryUtilizationdesc does not contain 'node' label: %s", hostGPUMemoryUtilizationdesc.String())
 	}
 
-	legacyHostGPUUtilString := legacyHostGPUUtilizationdesc.String()
-	if !strings.Contains(legacyHostGPUUtilString, `"nodeid"`) && !strings.Contains(legacyHostGPUUtilString, `nodeid`) {
-		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilString)
+	// Verify legacy host GPU descriptors include "nodeid" label
+	if !descHasLabel(legacyHostGPUdesc, "nodeid") {
+		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUdesc.String())
+	}
+
+	if !descHasLabel(legacyHostGPUUtilizationdesc, "nodeid") {
+		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilizationdesc.String())
 	}
 }
 
@@ -258,18 +300,35 @@ func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
 		t.Fatalf("collectGPUUtilizationMetrics: %v", err)
 	}
 	close(ch)
+	// NewConstMetric binds label values to names by position and only checks
+	// the count, so a reordered sendMetric call would still emit a metric.
+	// Compare each value against its label name to catch that.
+	wantLabels := map[string]string{
+		"node":         "test-node",
+		"device_index": "0",
+		"device_uuid":  "GPU-abc123",
+		"device_type":  "NVIDIA-A100",
+	}
 	var found bool
 	for m := range ch {
+		if m.Desc() != hostGPUMemoryUtilizationdesc {
+			continue
+		}
 		var dm dto.Metric
 		if err := m.Write(&dm); err != nil {
-			continue
+			t.Fatalf("write metric: %v", err)
 		}
-		if dm.Gauge == nil {
-			continue
+		if dm.Gauge == nil || dm.Gauge.GetValue() != float64(wantMemory) {
+			t.Fatalf("expected memory controller utilization value %v, got %v", wantMemory, dm.Gauge)
 		}
-		if *dm.Gauge.Value == float64(wantMemory) {
-			found = true
+		gotLabels := make(map[string]string, len(dm.Label))
+		for _, lp := range dm.Label {
+			gotLabels[lp.GetName()] = lp.GetValue()
 		}
+		if !maps.Equal(gotLabels, wantLabels) {
+			t.Errorf("labels = %v, want %v", gotLabels, wantLabels)
+		}
+		found = true
 	}
 	if !found {
 		t.Fatalf("expected memory controller utilization metric with value %v", wantMemory)
@@ -381,5 +440,25 @@ func TestHostGPUMetricsError(t *testing.T) {
 	close(ch)
 	for range ch {
 		t.Fatalf("expected no metrics emitted for errored hardware")
+	}
+}
+
+// A modern driver already reports the vendor prefix in nvmlDeviceGetName, so
+// the identity must not add a second one: the device_type label has to match
+// the model the device plugin writes into the node register annotation.
+func TestResolveGPUDeviceIdentityDoesNotDoublePrefixModel(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	cc := ClusterManagerCollector{}
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100-SXM4-40GB", nvml.SUCCESS },
+	}
+
+	identity, err := cc.resolveGPUDeviceIdentity(mockDev)
+	if err != nil {
+		t.Fatalf("resolveGPUDeviceIdentity failed: %v", err)
+	}
+	if identity.deviceName != "NVIDIA A100-SXM4-40GB" {
+		t.Errorf("deviceName = %q, want %q", identity.deviceName, "NVIDIA A100-SXM4-40GB")
 	}
 }

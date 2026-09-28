@@ -129,7 +129,7 @@ func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, boo
 	return true, true
 }
 
-func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count kunlun devices for container ", ctr.Name)
 	kunlunResourceCount := corev1.ResourceName(KunlunResourceCount)
 	v, ok := ctr.Resources.Limits[kunlunResourceCount]
@@ -138,9 +138,14 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "kunlun device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found kunlunxin devices")
 
@@ -150,10 +155,16 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device
 				Memreq:           0,
 				MemPercentagereq: 100,
 				Coresreq:         0,
-			}
+			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "kunlun device count request is not a plain integer", "container", ctr.Name, "request", v.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %s is not a plain integer", v.String())}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {

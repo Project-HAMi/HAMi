@@ -17,6 +17,7 @@ package scheduler
 
 import (
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -327,13 +329,34 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			return reason, false
 		}
 		for typ := range allocTypes {
-			if len(score.Devices[typ]) == appIndex {
+			if len(score.Devices[typ]) == numInitContainers+appIndex {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
 		}
 		appIndex++
 	}
 	return "", true
+}
+
+// neuronCorePeak counts actual allocated cores after Fit has resolved the
+// node's geometry. Init containers use the same peak/sidecar rule as admission.
+func neuronCorePeak(pod *corev1.Pod, allocations device.PodSingleDevice) int64 {
+	var sidecars, initPeak, app int64
+	for i, containerDevices := range allocations {
+		var cores int64
+		for _, allocation := range containerDevices {
+			cores += int64(bits.OnesCount32(uint32(allocation.Usedcores)))
+		}
+		if i >= len(pod.Spec.InitContainers) {
+			app += cores
+		} else if util.IsSidecarContainer(&pod.Spec.InitContainers[i]) {
+			sidecars += cores
+			initPeak = max(initPeak, sidecars)
+		} else {
+			initPeak = max(initPeak, sidecars+cores)
+		}
+	}
+	return max(initPeak, sidecars+app)
 }
 
 type nodeScoreResult struct {
@@ -372,23 +395,26 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	var initAllocs device.PodDevices
 	if numInitContainers > 0 {
 		allocs, fit, reason := allocateInitContainers(appNodeCopy, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
-		initAllocs = allocs
+		// Seed init/sidecar rows so app-phase Fit sees concurrent sidecar
+		// usage and so row indices match the pod spec. Ordinary init rows
+		// stay present for the annotation layout; Fit skips them when
+		// computing live occupancy.
+		for devType, initConList := range allocs {
+			score.Devices[devType] = append(device.PodSingleDevice{}, initConList...)
+		}
 	}
 
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
-
-	if numInitContainers > 0 && initAllocs != nil {
-		for devType, initConList := range initAllocs {
-			score.Devices[devType] = append(initConList, score.Devices[devType]...)
-		}
+	if cores := neuronCorePeak(task, score.Devices[awsneuron.AWSNeuronDevice]); cores > 0 &&
+		!s.quotaManager.FitQuota(task.Namespace, 0, 1, cores, awsneuron.AWSNeuronDevice) {
+		return nodeScoreResult{reason: "AWS NeuronCore quota exceeded"}
 	}
 
 	applyPeakUsage(node, appNodeCopy, peakUsage)

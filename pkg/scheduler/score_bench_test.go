@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -52,13 +53,18 @@ const (
 )
 
 // quietKlog silences klog for the duration of a benchmark. Fit logs once per
-// container request at Info level, so writing those lines to stderr would
-// otherwise dominate both the timing and the allocation counts. Uses the same
-// SetOutput and restore pattern as routes/route_test.go.
+// container request at Info level, so writing those lines out would otherwise
+// dominate both the timing and the allocation counts. SetOutput alone is not
+// enough: klog defaults to logtostderr, which writes to stderr directly and
+// never consults the configured output.
 func quietKlog(b *testing.B) {
 	b.Helper()
+	klog.LogToStderr(false)
 	klog.SetOutput(io.Discard)
-	b.Cleanup(func() { klog.SetOutput(os.Stderr) })
+	b.Cleanup(func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	})
 }
 
 // newBenchmarkNodes builds nodeCount nodes carrying gpusPerNode idle NVIDIA
@@ -199,6 +205,157 @@ func BenchmarkScoreNode(b *testing.B) {
 				}
 				if result.score == nil {
 					b.Fatalf("scoreNode did not fit the pod: %s", result.reason)
+				}
+			}
+		})
+	}
+}
+
+// benchTenantPod includes nested fields to exercise Pod copying costs.
+func benchTenantPod(index int) *corev1.Pod {
+	envs := make([]corev1.EnvVar, 0, 20)
+	for i := range 20 {
+		envs = append(envs, corev1.EnvVar{Name: fmt.Sprintf("ENV_%d", i), Value: fmt.Sprintf("value-%d-%d", index, i)})
+	}
+	mounts := make([]corev1.VolumeMount, 0, 6)
+	for i := range 6 {
+		mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("vol-%d", i), MountPath: fmt.Sprintf("/mnt/%d", i)})
+	}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        fmt.Sprintf("tenant-pod-%d", index),
+			Namespace:   "default",
+			UID:         k8stypes.UID(fmt.Sprintf("tenant-uid-%d", index)),
+			Labels:      map[string]string{"app": "train", "release": "v1", "team": "ml"},
+			Annotations: map[string]string{util.AssignedNodeAnnotations: "node-0"},
+		},
+		Spec: corev1.PodSpec{
+			NodeName:   "node-0",
+			Containers: []corev1.Container{{Name: "main", Image: "example.com/train:v1", Env: envs, VolumeMounts: mounts}},
+			Volumes:    []corev1.Volume{{Name: "vol-0"}, {Name: "vol-1"}},
+		},
+		Status: corev1.PodStatus{
+			Phase:             corev1.PodRunning,
+			Conditions:        []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+			ContainerStatuses: []corev1.ContainerStatus{{Name: "main", Image: "example.com/train:v1", Ready: true}},
+		},
+	}
+}
+
+// occupyBenchmarkNode marks every device on the node as hosting podsPerGPU
+// tenants, the way getNodesUsage does when it replays cached allocations.
+func occupyBenchmarkNode(node *NodeUsage, podsPerGPU int) {
+	index := 0
+	for _, deviceList := range node.Devices.DeviceLists {
+		dev := deviceList.Device
+		for range podsPerGPU {
+			dev.PodInfos = append(dev.PodInfos, &device.PodInfo{Pod: benchTenantPod(index), NodeID: node.NodeInfo.ID})
+			dev.Used++
+			dev.Usedmem += benchMemreq
+			dev.Usedcores += benchCoresreq
+			index++
+		}
+	}
+}
+
+// BenchmarkScoreNodeOccupied measures one node whose devices already host
+// other pods. Their PodInfos ride along in the NodeUsage copy scoreNode
+// takes, so the spread across these cases is what resident pods cost per
+// candidate node.
+func BenchmarkScoreNodeOccupied(b *testing.B) {
+	quietKlog(b)
+
+	scheduler := &Scheduler{}
+	weights := util.DefaultDeviceScoringWeights()
+	nodePolicy := util.NodeSchedulerPolicyBinpack.String()
+	pod := newBenchmarkPod(0)
+	requests := newBenchmarkRequests(0)
+
+	for _, podsPerGPU := range []int{0, 2, 4} {
+		b.Run(fmt.Sprintf("podsPerGPU=%d", podsPerGPU), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				nodes := *newBenchmarkNodes(1, 8)
+				node := nodes["node-0"]
+				occupyBenchmarkNode(node, podsPerGPU)
+				b.StartTimer()
+
+				result := scheduler.scoreNode("node-0", node, requests, pod, nodePolicy, weights)
+				if result.err != nil {
+					b.Fatalf("scoreNode returned an error: %v", result.err)
+				}
+				if result.score == nil {
+					b.Fatalf("scoreNode did not fit the pod: %s", result.reason)
+				}
+			}
+		})
+	}
+}
+
+// newBenchmarkScheduler builds a Scheduler whose node cache holds nodeCount
+// nodes of gpusPerNode devices each, and whose pod cache holds podCount pods
+// spread across them, each holding one device.
+func newBenchmarkScheduler(nodeCount, gpusPerNode, podCount int) *Scheduler {
+	nodeManager := newNodeManager()
+	nodeNames := make([]string, 0, nodeCount)
+	for i := range nodeCount {
+		nodeName := fmt.Sprintf("node-%d", i)
+		nodeNames = append(nodeNames, nodeName)
+		nodeManager.addNode(nodeName, testNodeInfo(nodeName, gpusPerNode))
+	}
+
+	podManager := device.NewPodManager()
+	for i := range podCount {
+		nodeName := nodeNames[i%nodeCount]
+		podManager.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("pod-%d", i),
+				Namespace: "default",
+				UID:       k8stypes.UID(fmt.Sprintf("uid-%d", i)),
+			},
+		}, nodeName, device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+				device.ContainerDevices{{
+					UUID:      fmt.Sprintf("%s-gpu-%d", nodeName, i%gpusPerNode),
+					Type:      nvidia.NvidiaGPUDevice,
+					Usedmem:   benchMemreq,
+					Usedcores: benchCoresreq,
+				}},
+			},
+		})
+	}
+
+	return &Scheduler{nodeManager: nodeManager, podManager: podManager}
+}
+
+// BenchmarkGetNodesUsage measures rebuilding the usage snapshot, which Filter
+// does once per scheduling attempt. It passes a single candidate node, which is
+// the shape Filter uses when kube-scheduler has already narrowed the field, so
+// the figures show how much of the cost is proportional to the whole cluster
+// rather than to the candidates.
+func BenchmarkGetNodesUsage(b *testing.B) {
+	sizes := []struct {
+		nodes       int
+		gpusPerNode int
+		pods        int
+	}{
+		{nodes: 50, gpusPerNode: 8, pods: 1000},
+		{nodes: 100, gpusPerNode: 16, pods: 5000},
+	}
+
+	quietKlog(b)
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("nodes=%d/gpus=%d/pods=%d", size.nodes, size.gpusPerNode, size.pods), func(b *testing.B) {
+			scheduler := newBenchmarkScheduler(size.nodes, size.gpusPerNode, size.pods)
+			task := newBenchmarkPod(0)
+			candidates := []string{"node-0"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, _, _, err := scheduler.getNodesUsage(&candidates, task); err != nil {
+					b.Fatal(err)
 				}
 			}
 		})

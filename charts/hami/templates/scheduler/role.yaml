@@ -10,3 +10,11 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "list", "watch", "get", "update", "patch"]
+{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.sessionImage }}
+  # One relay pod per lupine server, so a user port-forwards to the relay
+  # rather than to the server. Namespaced rather than cluster wide: the stubs
+  # live here and nowhere else.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete"]
+{{- end }}

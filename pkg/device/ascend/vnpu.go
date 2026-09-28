@@ -34,15 +34,17 @@ type VNPUConfig struct {
 	MemoryFactor       int32      `yaml:"memoryFactor"`
 	AICore             int32      `yaml:"aiCore"`
 	AICPU              int32      `yaml:"aiCPU"`
-	RuntimeClassName   string     `yaml:"runtimeClassName"`
-	OverwriteEnv       bool       `yaml:"overwriteEnv"`
 	Templates          []Template `yaml:"templates"`
 	SuperPod           bool       `yaml:"superPod"`
 }
 
 // VNPUs holds the global Ascend VNPU configuration, including a flag to enable
 // hami-vnpu-core soft-partitioning for all nodes and the per-chip config list.
+// OverwriteEnv and RuntimeClassName apply to every chip identically, so they
+// live here rather than on each VNPUConfig.
 type VNPUs struct {
-	HamiVnpuCore bool         `yaml:"hamiVnpuCore"`
-	Configs      []VNPUConfig `yaml:"configs"`
+	HamiVnpuCore     bool         `yaml:"hamiVnpuCore"`
+	OverwriteEnv     bool         `yaml:"overwriteEnv"`
+	RuntimeClassName string       `yaml:"runtimeClassName"`
+	Configs          []VNPUConfig `yaml:"configs"`
 }

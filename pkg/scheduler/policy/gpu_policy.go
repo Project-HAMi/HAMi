@@ -203,10 +203,13 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		return
 	}
 	request, core, mem := int32(0), int32(0), int32(0)
-	// Here we are required to use the same type device
+	// Here we are required to use the same type device. Compare against the
+	// vendor rather than the registered type: backends such as NVIDIA and
+	// Cambricon register a model name ("NVIDIA A100-SXM4-40GB", "MLU370-X8")
+	// as the type, while the request carries the vendor common word.
 	for _, container := range requests {
 
-		if container.Type != ds.Device.Type {
+		if container.Type != ds.Device.DeviceVendor {
 			continue
 		}
 

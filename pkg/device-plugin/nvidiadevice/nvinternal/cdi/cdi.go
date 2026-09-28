@@ -36,11 +36,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
+	nvcdispec "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/spec"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/transform"
 	transformroot "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/transform/root"
 	"github.com/sirupsen/logrus"
@@ -77,13 +79,27 @@ type cdiHandler struct {
 	mofedEnabled   bool
 	gdrcopyEnabled bool
 
-	imexChannels imex.Channels
+	imexChannels       imex.Channels
+	dynamicMIGMode     bool
+	dynamicMIGRoot     string
+	dynamicMIGProcRoot string
+	dynamicMIGLockMu   sync.Mutex
+	dynamicMIGLocks    map[string]*dynamicMIGLock
 
 	cdilibs         map[string]nvcdi.SpecGenerator
 	additionalModes []string
 }
 
 var _ Interface = &cdiHandler{}
+
+// SetDynamicMIGMode selects parent-only base CDI discovery before startup specs are written.
+func (cdi *cdiHandler) SetDynamicMIGMode(enabled bool) {
+	cdi.dynamicMIGMode = enabled
+}
+
+func (cdi *cdiHandler) DynamicMIGMode() bool {
+	return cdi.dynamicMIGMode
+}
 
 // New constructs a new instance of the 'cdi' interface
 func New(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, opts ...Option) (Interface, error) {
@@ -186,7 +202,7 @@ func (cdi *cdiHandler) CreateSpecFile() error {
 	for class, cdilib := range cdi.cdilibs {
 		cdi.logger.Infof("Generating CDI spec for resource: %s/%s", cdi.vendor, class)
 
-		if class == "gpu" {
+		if class == "gpu" && !cdi.dynamicMIGMode {
 			ret := cdi.nvmllib.Init()
 			if ret != nvml.SUCCESS {
 				return fmt.Errorf("failed to initialize NVML: %v", ret)
@@ -196,7 +212,32 @@ func (cdi *cdiHandler) CreateSpecFile() error {
 			}()
 		}
 
-		spec, err := cdilib.GetSpec()
+		var spec nvcdispec.Interface
+		var err error
+		if class == "gpu" && cdi.dynamicMIGMode {
+			count, ret := cdi.nvmllib.DeviceGetCount()
+			if ret != nvml.SUCCESS {
+				return fmt.Errorf("list parent GPUs for CDI: %s", nvml.ErrorString(ret))
+			}
+			if count == 0 {
+				return fmt.Errorf("dynamic MIG CDI requires at least one parent GPU")
+			}
+			ids := make([]string, 0, count)
+			for i := 0; i < count; i++ {
+				gpu, ret := cdi.nvmllib.DeviceGetHandleByIndex(i)
+				if ret != nvml.SUCCESS {
+					return fmt.Errorf("get parent GPU %d for CDI: %s", i, nvml.ErrorString(ret))
+				}
+				id, ret := gpu.GetUUID()
+				if ret != nvml.SUCCESS {
+					return fmt.Errorf("get parent GPU UUID for CDI: %s", nvml.ErrorString(ret))
+				}
+				ids = append(ids, id)
+			}
+			spec, err = cdilib.GetSpec(ids...)
+		} else {
+			spec, err = cdilib.GetSpec()
+		}
 		if err != nil {
 			return fmt.Errorf("failed to get CDI spec: %v", err)
 		}

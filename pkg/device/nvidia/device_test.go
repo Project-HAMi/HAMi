@@ -127,6 +127,84 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func hasInjectedNVDnone(env []corev1.EnvVar) bool {
+	for _, e := range env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			return true
+		}
+	}
+	return false
+}
+
+func Test_MutateAdmission_OverwriteEnvIdempotent(t *testing.T) {
+	// Webhook reinvocation (reinvocationPolicy: IfNeeded) must not append
+	// a duplicate entry.
+	dev := &NvidiaGPUDevices{config: NvidiaConfig{OverwriteEnv: true}}
+	ctr := &corev1.Container{Name: "main"}
+	pod := &corev1.Pod{}
+	for range 3 { // simulate multiple invocations
+		_, err := dev.MutateAdmission(ctr, pod)
+		assert.NilError(t, err)
+	}
+	count := 0
+	for _, e := range ctr.Env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1, "expected exactly one NVIDIA_VISIBLE_DEVICES=none")
+}
+
+func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
+	mkDev := func(overwriteEnv bool) *NvidiaGPUDevices {
+		return &NvidiaGPUDevices{
+			config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				DefaultGPUNum:                int32(1),
+				OverwriteEnv:                 overwriteEnv,
+			},
+		}
+	}
+	mkPod := func(ann map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: ann}}
+	}
+	nonGPUCtr := func() corev1.Container {
+		return corev1.Container{
+			Name:      "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		}
+	}
+
+	type tc struct {
+		name        string
+		configOn    bool
+		annotations map[string]string
+		wantInject  bool
+	}
+	cases := []tc{
+		{name: "unset config true injects none", configOn: true, wantInject: true},
+		{name: "unset config false skips", configOn: false, wantInject: false},
+		{name: "pod false skips despite config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false"}, wantInject: false},
+		{name: "pod true injects despite config false", configOn: false, annotations: map[string]string{"hami.io/overwrite-env": "true"}, wantInject: true},
+		{name: "container false overrides pod true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "true", "hami.io/overwrite-env-containers": `{"main":"false"}`}, wantInject: false},
+		{name: "container true reverse-overrides pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"true"}`}, wantInject: true},
+		{name: "invalid pod value falls back to config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "yes"}, wantInject: true},
+		{name: "invalid container value falls back to pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"maybe"}`}, wantInject: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dev := mkDev(c.configOn)
+			ctr := nonGPUCtr()
+			_, err := dev.MutateAdmission(&ctr, mkPod(c.annotations))
+			assert.NilError(t, err)
+			assert.Equal(t, hasInjectedNVDnone(ctr.Env), c.wantInject)
+		})
+	}
+}
+
 func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
@@ -2191,7 +2269,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := dev.GenerateResourceRequests(tt.ctr)
+			result, _ := dev.GenerateResourceRequests(tt.ctr)
 			assert.DeepEqual(t, result, tt.want)
 		})
 	}
@@ -2214,11 +2292,11 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 			},
 		},
 	}
-	result := dev.GenerateResourceRequests(ctr)
+	result, _ := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(2048))
 
 	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1Gi")
-	result = dev.GenerateResourceRequests(ctr)
+	result, _ = dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
@@ -2239,19 +2317,19 @@ func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 			},
 		},
 	}
-	result := dev.GenerateResourceRequests(ctr)
+	result, _ := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
 
 	// a percentage of 0 is unset, so it lands on defaultMemory just like nvidia.com/gpumem: 0
 	ctr.Resources.Limits["nvidia.com/gpumem-percentage"] = *resource.NewQuantity(0, resource.DecimalSI)
-	result = dev.GenerateResourceRequests(ctr)
+	result, _ = dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
 
 	delete(ctr.Resources.Limits, "nvidia.com/gpumem-percentage")
 	ctr.Resources.Limits["nvidia.com/gpumem"] = *resource.NewQuantity(0, resource.DecimalSI)
-	control := dev.GenerateResourceRequests(ctr)
+	control, _ := dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, control)
 }
 
@@ -2285,7 +2363,7 @@ func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
 			Type: NvidiaGPUDevice, Health: true,
 		}}
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, _ := dev.GenerateResourceRequests(ctr)
 
 	fit, result, reason := dev.Fit(newCard(0), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Assert(t, fit, "empty card should fit, reason: %s", reason)
@@ -2402,7 +2480,7 @@ func TestComputeBestCombination(t *testing.T) {
 func TestCustomFilterRule_NonMig(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{})
 	devusage := &device.DeviceUsage{Mode: ""}
-	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage)
+	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage, nil)
 	assert.Equal(t, result, true)
 }
 
@@ -2650,6 +2728,56 @@ func TestMutateAdmission_OverwriteEnv(t *testing.T) {
 	assert.Assert(t, found, "expected NVIDIA_VISIBLE_DEVICES=none env")
 }
 
+func TestMutateAdmissionManagedEnvIsIdempotent(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []corev1.EnvVar
+	}{
+		{
+			name: "missing managed variables",
+		},
+		{
+			name: "desired values shadowed by stale entries",
+			env: []corev1.EnvVar{
+				{Name: util.TaskPriority, Value: "5"},
+				{Name: util.TaskPriority, Value: "1"},
+				{Name: util.CoreLimitSwitch, Value: string(ForceCorePolicy)},
+				{Name: util.CoreLimitSwitch, Value: string(DisableCorePolicy)},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &NvidiaGPUDevices{config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourcePriority:             "nvidia.com/priority",
+				GPUCorePolicy:                ForceCorePolicy,
+			}}
+			ctr := &corev1.Container{
+				Env: test.env,
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/gpu":      resource.MustParse("1"),
+					"nvidia.com/priority": resource.MustParse("5"),
+				}},
+			}
+			pod := &corev1.Pod{}
+			_, err := dev.MutateAdmission(ctr, pod)
+			assert.NilError(t, err)
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.TaskPriority, "5"))
+			assert.Assert(t, hasEnvVarWithValue(ctr.Env, util.CoreLimitSwitch, string(ForceCorePolicy)))
+			afterFirstMutation := ctr.DeepCopy()
+
+			_, err = dev.MutateAdmission(ctr, pod)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, ctr, afterFirstMutation)
+		})
+	}
+}
+
 func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
 	dev := &NvidiaGPUDevices{config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu", ResourceCoreName: "nvidia.com/gpucores"}}
 	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
@@ -2714,6 +2842,35 @@ func TestGetNodeDevices_InvalidJSON(t *testing.T) {
 	}
 	_, err := dev.GetNodeDevices(node)
 	assert.Assert(t, err != nil)
+}
+
+// A node serving its GPUs through lupine publishes the same registration
+// annotation the remote-gpu backend reads. Claiming those cards here too would
+// hand one physical GPU to two pods at once, which was reproduced on a real
+// cluster before this filter existed.
+func TestGetNodeDevices_SkipsRemotelyServedGPUs(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	node := func(annos string) corev1.Node {
+		return corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-lupine",
+			Annotations: map[string]string{RegisterAnnos: annos},
+		}}
+	}
+
+	// Every card served remotely: zero devices and no error, so
+	// Scheduler.register prunes whatever this node had cached.
+	result, err := dev.GetNodeDevices(node(
+		`[{"id":"GPU-0","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"remote"}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 0)
+
+	// A mixed node keeps the cards it still serves locally.
+	result, err = dev.GetNodeDevices(node(
+		`[{"id":"GPU-0","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"remote"},` +
+			`{"id":"GPU-1","count":10,"devmem":81559,"devcore":100,"type":"NVIDIA-H100-80GB-HBM3","health":true,"mode":"hami-core"}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 1)
+	assert.Equal(t, result[0].ID, "GPU-1")
 }
 
 func TestGetNodeDevices_MigProfilesFromNode(t *testing.T) {
@@ -3407,7 +3564,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
 				assert.Equal(t, req.Nums, int32(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)
@@ -3612,6 +3769,105 @@ func TestDistinctCardCandidates(t *testing.T) {
 			assert.Equal(t, len(got), len(tc.want))
 			for i := range tc.want {
 				assert.Equal(t, got[i].UUID, tc.want[i])
+			}
+		})
+	}
+}
+
+// TestGenerateResourceRequests_InvalidCoresFailsClosed makes sure a core
+// request outside 0-100 returns an error instead of a zero request, so the
+// scheduler rejects the pod rather than binding it without devices.
+func TestGenerateResourceRequests_InvalidCoresFailsClosed(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":      resource.MustParse("1"),
+				"nvidia.com/gpucores": resource.MustParse("150"),
+			},
+		},
+	}
+	result, err := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, result)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+// TestGenerateResourceRequests_ZeroCountIsDeviceLess pins the distinction
+// between an explicit zero count and a genuinely invalid one. "nvidia.com/gpu: 0"
+// is a common way to say "no GPU" (chart templates render it that way whenever
+// GPU support is switched off), so it has to stay a device-less pod that is
+// admitted and scheduled normally rather than being denied. Only a negative or
+// out-of-int32 count is an error.
+func TestGenerateResourceRequests_ZeroCountIsDeviceLess(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	zero := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+			},
+		},
+	}
+	zeroResult, err := dev.GenerateResourceRequests(zero)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, zeroResult)
+
+	negative := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(-1, resource.BinarySI),
+			},
+		},
+	}
+	negativeResult, err := dev.GenerateResourceRequests(negative)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, negativeResult)
+	assert.ErrorContains(t, err, "out of range")
+
+	// The apiserver accepts 1Ei for an extended resource, but it does not
+	// fit in an int64, so AsInt64 reports failure. That has to fail closed
+	// rather than fall through to a device-less request.
+	tooLarge := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1Ei"),
+			},
+		},
+	}
+	tooLargeResult, err := dev.GenerateResourceRequests(tooLarge)
+	assert.DeepEqual(t, device.ContainerDeviceRequest{}, tooLargeResult)
+	assert.ErrorContains(t, err, "not a plain integer")
+}
+
+func TestNormalizeDeviceModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		// Drivers from R470 on already report the vendor in the model name.
+		{"already prefixed", "NVIDIA A100-SXM4-40GB", "NVIDIA A100-SXM4-40GB"},
+		{"already prefixed geforce", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 4090"},
+		// Older names carry no vendor, so HAMi adds one.
+		{"legacy tesla name", "Tesla V100-SXM2-16GB", "NVIDIA-Tesla V100-SXM2-16GB"},
+		{"empty", "", "NVIDIA-"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeDeviceModel(tt.model); got != tt.want {
+				t.Errorf("NormalizeDeviceModel(%q) = %q, want %q", tt.model, got, tt.want)
 			}
 		})
 	}

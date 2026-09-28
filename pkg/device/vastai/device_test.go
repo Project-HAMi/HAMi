@@ -458,7 +458,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := VastaiDevices{}
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -497,7 +497,7 @@ func TestDevices_LockNode(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["HCU"]: "some-value"},
 				},
 			}
 

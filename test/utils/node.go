@@ -19,11 +19,14 @@ package utils
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -59,33 +62,103 @@ func UpdateNode(clientSet *kubernetes.Clientset, node *v1.Node) (*v1.Node, error
 		return nil, err
 	}
 
-	time.Sleep(time.Second * 30)
 	return updatedNode, nil
 }
 
 func AddNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey, labelValue string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Labels == nil {
+			node.Labels = make(map[string]string)
+		}
+		node.Labels[labelKey] = labelValue
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	if node.Labels == nil {
-		node.Labels = make(map[string]string)
-	}
-	node.Labels[labelKey] = labelValue
-
-	return UpdateNode(clientSet, node)
+	return result, nil
 }
 
 func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Labels != nil {
+			delete(node.Labels, labelKey)
+		}
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
+	return result, nil
+}
 
-	if node.Labels != nil {
-		delete(node.Labels, labelKey)
+// WaitForDevicePluginReady polls until the HAMi device-plugin pod on the given
+// node is Running and Ready with no terminating pods from a previous revision,
+// and the node reports healthy GPU resources in its Allocatable capacity.
+// Call this after adding the gpu=on label and before creating GPU pods to avoid
+// "no healthy devices" admission errors from a device-plugin that hasn't
+// finished initializing.
+func WaitForDevicePluginReady(clientSet kubernetes.Interface, nodeName string, timeout, interval time.Duration) error {
+	namespace := GPUNameSpace
+	if ns := os.Getenv("HAMI_NAMESPACE"); ns != "" {
+		namespace = ns
 	}
 
-	return UpdateNode(clientSet, node)
+	return wait.PollUntilContextTimeout(context.TODO(), interval, timeout, true, func(ctx context.Context) (bool, error) {
+		// Check device-plugin pods: need at least one Ready, none terminating.
+		pods, err := clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/component=" + HamiDevicePlugin,
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return false, nil
+		}
+
+		hasReady := false
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.DeletionTimestamp != nil {
+				// A terminating device-plugin pod may still pass readiness
+				// checks briefly; wait for it to be fully removed.
+				return false, nil
+			}
+			if pod.Status.Phase != v1.PodRunning {
+				continue
+			}
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.Name == "device-plugin" && cs.Ready {
+					hasReady = true
+				}
+			}
+		}
+		if !hasReady {
+			return false, nil
+		}
+
+		// Verify the node reports healthy GPU resources (kubelet only
+		// populates Allocatable after the device-plugin registers healthy
+		// devices via its ListAndWatch stream).
+		node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		gpuAlloc, ok := node.Status.Allocatable[v1.ResourceName("nvidia.com/gpu")]
+		if !ok || gpuAlloc.Value() <= 0 {
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
