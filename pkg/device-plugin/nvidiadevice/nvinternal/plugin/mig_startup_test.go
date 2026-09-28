@@ -86,10 +86,88 @@ func TestActiveMigGPUUUIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]struct{}{"GPU-live": {}, "GPU-pending": {}}
+	want := map[string]struct{}{"GPU-live": {}, "GPU-pending": {}, "GPU-deleting": {}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("activeMigGPUUUIDs() = %v, want %v", got, want)
 	}
+}
+
+func TestPrimeMigManagerAdoptsTerminatingPod(t *testing.T) {
+	now := metav1.NewTime(time.Now())
+	manager, dev := mockMigRecoveryDevice(t)
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	ci := &nvmlmock.ComputeInstance{GetInfoFunc: func() (nvml.ComputeInstanceInfo, nvml.Return) {
+		return nvml.ComputeInstanceInfo{Id: 2}, nvml.SUCCESS
+	}}
+	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
+		GetComputeInstanceProfileInfoFunc: func(int, int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			return nvml.ComputeInstanceProfileInfo{}, nvml.SUCCESS
+		},
+		GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+			return []nvml.ComputeInstance{ci}, nvml.SUCCESS
+		},
+	}
+	dev.GetGpuInstanceProfileInfoFunc = func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+		return nvml.GpuInstanceProfileInfo{}, nvml.SUCCESS
+	}
+	dev.GetGpuInstancesFunc = func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+		return []nvml.GpuInstance{gi}, nvml.SUCCESS
+	}
+	dev.GetMaxMigDeviceCountFunc = func() (int, nvml.Return) { return 1, nvml.SUCCESS }
+	dev.GetMigDeviceHandleByIndexFunc = func(int) (nvml.Device, nvml.Return) {
+		return &nvmlmock.Device{
+			GetGpuInstanceIdFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+			GetUUIDFunc:          func() (string, nvml.Return) { return "MIG-running", nvml.SUCCESS },
+		}, nvml.SUCCESS
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			DeletionTimestamp: &now,
+			Annotations: map[string]string{
+				nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1},"migUUID":"MIG-running","gpuInstanceID":1,"computeInstanceID":2}]`,
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	plugin := &NvidiaDevicePlugin{migMgr: manager}
+
+	require.NoError(t, plugin.primeMigManagerFromPods([]*corev1.Pod{pod}))
+	key := allocationKey(0, "1g.5gb", placement)
+	require.Contains(t, manager.byAllocation, key)
+	require.Equal(t, migInstanceActive, manager.byAllocation[key].State)
+}
+
+func TestMIGReconcileKeepsTerminatingPodAllocationActive(t *testing.T) {
+	now := metav1.NewTime(time.Now())
+	manager, _ := mockMigRecoveryDevice(t)
+	key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-running", State: migInstanceActive}
+	manager.byAllocationMigUUID["MIG-running"] = key
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			DeletionTimestamp: &now,
+			Annotations: map[string]string{
+				nvidia.MigAllocationsAnnotation: `[{"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	plugin := &NvidiaDevicePlugin{
+		migMgr:           manager,
+		migPrimed:        true,
+		listNodePods:     func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
+		listLiveNodePods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil },
+	}
+
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Equal(t, migInstanceActive, manager.byAllocation[key].State)
+
+	pod.Status.Phase = corev1.PodSucceeded
+	require.NoError(t, plugin.reconcileActiveMigAllocations())
+	require.Equal(t, migInstanceIdle, manager.byAllocation[key].State)
 }
 
 // TestActiveMigGPUUUIDsFailsClosedOnInvalidAnnotation checks that malformed MIG annotations

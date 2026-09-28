@@ -408,7 +408,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	}()
 	if plugin.operatingMode == "mig" {
 		// Pod annotations are the allocation source of truth. Periodically
-		// reconcile the manager with live Pods so completed or deleted Pods
+		// reconcile the manager with live Pods so terminal or removed Pods
 		// release their exact profile+placement allocation.
 		plugin.workers.Add(1)
 		go func() {
@@ -428,7 +428,7 @@ func (plugin *NvidiaDevicePlugin) activeMigAllocationKeys(pods []*corev1.Pod) (m
 		if pod == nil {
 			continue
 		}
-		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		if util.IsPodInTerminatedState(pod) {
 			continue
 		}
 		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
@@ -665,7 +665,7 @@ func (plugin *NvidiaDevicePlugin) primeMigManagerFromPods(pods []*corev1.Pod) er
 		if pod == nil {
 			continue
 		}
-		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		if util.IsPodInTerminatedState(pod) {
 			continue
 		}
 		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])

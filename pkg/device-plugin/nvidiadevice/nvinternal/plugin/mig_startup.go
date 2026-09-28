@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // sortedIntSetKeys returns the keys of a set-style map sorted ascending.
@@ -73,7 +74,7 @@ func activeMigGPUUUIDs(pods []*corev1.Pod) (map[string]struct{}, error) {
 		if pod == nil {
 			continue
 		}
-		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		if util.IsPodInTerminatedState(pod) {
 			continue
 		}
 		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
