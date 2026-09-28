@@ -216,6 +216,40 @@ func Test_GetNode(t *testing.T) {
 	}
 }
 
+func TestGetNodesReturnsOnlyRequestedDeepCopies(t *testing.T) {
+	m := newNodeManager()
+	for _, name := range []string{"node-1", "node-2", "node-3"} {
+		m.addNode(name, &device.NodeInfo{
+			ID:   name,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+			Devices: map[string][]device.DeviceInfo{
+				"vendor": {{ID: name + "-device"}},
+			},
+		})
+	}
+	m.mutex.Lock()
+	m.nodes["nil-node-info"] = nil
+	m.mutex.Unlock()
+
+	got := m.GetNodes([]string{"node-2", "nil-node-info", "missing"})
+	assert.Equal(t, 2, len(got))
+	_, found := got["node-1"]
+	assert.Assert(t, !found, "unrequested node must not be returned")
+	_, found = got["node-3"]
+	assert.Assert(t, !found, "unrequested node must not be returned")
+	_, found = got["missing"]
+	assert.Assert(t, !found, "unregistered node must not be returned")
+	assert.Assert(t, got["nil-node-info"] == nil, "nil cache entries must be retained")
+
+	got["node-2"].Node.Labels = map[string]string{"copied": "true"}
+	got["node-2"].Devices["vendor"][0].ID = "changed"
+
+	stored, err := m.GetNode("node-2")
+	assert.NilError(t, err)
+	assert.Assert(t, stored.Node.Labels == nil, "node must be deep copied")
+	assert.Equal(t, "node-2-device", stored.Devices["vendor"][0].ID)
+}
+
 func TestNodeUsageDeepCopy(t *testing.T) {
 	tests := []struct {
 		name     string

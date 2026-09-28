@@ -61,8 +61,8 @@ func (m *MockDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (m *MockDevices) GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest {
-	return ContainerDeviceRequest{}
+func (m *MockDevices) GenerateResourceRequests(ctr *corev1.Container) (ContainerDeviceRequest, error) {
+	return ContainerDeviceRequest{}, nil
 }
 
 func (m *MockDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string {

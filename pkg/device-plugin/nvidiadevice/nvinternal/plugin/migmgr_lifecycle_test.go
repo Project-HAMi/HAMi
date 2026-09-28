@@ -229,7 +229,15 @@ func TestMigManagerAllocationUsesOneSession(t *testing.T) {
 	if err := m.AdoptAllocation(0, "1g.5gb", "MIG-test", placement, 1, 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}}); err != nil {
+	destroyed, err := m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}})
+	if err != nil || len(destroyed) != 0 {
+		t.Fatalf("active reconciliation destroyed devices: %v, %v", destroyed, err)
+	}
+	destroyed, err = m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{})
+	if err != nil || len(destroyed) != 1 || destroyed[0] != "MIG-test" {
+		t.Fatalf("destroyed MIG identities = %v, %v", destroyed, err)
+	}
+	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Release("MIG-test"); err != nil {
