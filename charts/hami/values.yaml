@@ -551,21 +551,16 @@ devices:
     resourceVCountName: "kunlunxin.com/vxpu"
     resourceVMemoryName: "kunlunxin.com/vxpu-memory"
     enabled: true
-    customresources:
-      - kunlunxin.com/xpu
-      - kunlunxin.com/vxpu
-      - kunlunxin.com/vxpu-memory
+    # devices.kunlun.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   enflame:
     resourceNameGCU: "enflame.com/gcu"
     resourceNameDRSGCU: "enflame.com/drs-gcu"
     resourceNameGCUMemory: "enflame.com/gcu-memory"
     resourceNameGCUCore: "enflame.com/gcu-core"
     enabled: true
-    customresources:
-      - enflame.com/drs-gcu
-      - enflame.com/gcu-memory
-      - enflame.com/gcu-core
-      - enflame.com/gcu
+    # devices.enflame.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   mthreads:
     enabled: true
     customresources:
@@ -583,13 +578,13 @@ devices:
   vastai:
     resourceCountName: "vastaitech.com/va"
     enabled: true
-    customresources:
-      - vastaitech.com/va
+    # devices.vastai.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   biren:
     resourceCountName: "birentech.com/gpu"
     enabled: true
-    customresources:
-      - birentech.com/gpu
+    # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   nvidia:
     migProfileAllowlist:
       - models: [ "A30" ]

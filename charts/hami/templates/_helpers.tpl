@@ -230,13 +230,15 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- end -}}
 {{/* Enflame resources */}}
 {{- if .Values.devices.enflame.enabled -}}
-{{- range .Values.devices.enflame.customresources -}}
+{{- $standardResources := list .Values.devices.enflame.resourceNameDRSGCU .Values.devices.enflame.resourceNameGCUMemory .Values.devices.enflame.resourceNameGCUCore .Values.devices.enflame.resourceNameGCU -}}
+{{- range (concat $standardResources .Values.devices.enflame.customresources | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
 {{/* Kunlun resources */}}
 {{- if .Values.devices.kunlun.enabled -}}
-{{- range .Values.devices.kunlun.customresources -}}
+{{- $standardResources := list .Values.devices.kunlun.resourceCountName .Values.devices.kunlun.resourceVCountName .Values.devices.kunlun.resourceVMemoryName -}}
+{{- range (concat $standardResources .Values.devices.kunlun.customresources | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
@@ -252,13 +254,15 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- end -}}
 {{/* Vastai resources */}}
 {{- if .Values.devices.vastai.enabled -}}
-{{- range .Values.devices.vastai.customresources -}}
+{{- $standardResources := list .Values.devices.vastai.resourceCountName -}}
+{{- range (concat $standardResources .Values.devices.vastai.customresources | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
 {{/* Biren resources */}}
 {{- if .Values.devices.biren.enabled -}}
-{{- range .Values.devices.biren.customresources -}}
+{{- $standardResources := list .Values.devices.biren.resourceCountName -}}
+{{- range (concat $standardResources .Values.devices.biren.customresources | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}

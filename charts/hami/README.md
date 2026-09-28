@@ -53,6 +53,12 @@ Keep `scheduler.overwriteEnv` and other `devicePlugin` settings at their existin
 paths, including `enabled`, images, `deviceListStrategy`, `migStrategy`,
 `disablecorelimit`, and `nodeConfiguration`.
 
+For Enflame, Kunlun, Vastai, and Biren, standard extender resources are now
+added from the named device resource fields. Their `customresources` lists
+contain only additional resources and default to `[]`. Remove any copied
+standard-resource entries from these lists and keep the extra resources you
+need. Standard resources are included even when `customresources` is empty.
+
 ### Back up the current configuration
 
 These examples use release `hami` in namespace `kube-system`. Replace the release,
@@ -419,12 +425,12 @@ host-installed drivers, or appends the GPU Operator path suffix
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
+| `devices.kunlun.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Enflame
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
+| `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
@@ -480,6 +486,11 @@ Configuration precedence remains `device-config.content`, then a bundled
 `device-config.content` replaces the complete document; it does not merge with
 `devices.*`.
 
-`devices.<vendor>.customresources` keeps its existing behavior and defaults.
-For vendors whose extender resources use this list, update it when changing
-runtime resource names or chip definitions.
+For Enflame, Kunlun, Vastai, and Biren, the scheduler extender's standard
+resources follow the named device resource fields. Their `customresources`
+lists add extra resource names and default to `[]`. Standard resources are
+always included when the vendor is enabled, and duplicate names within each
+vendor are removed.
+
+For other vendors whose extender resources use `customresources`, update those
+lists when changing resource names or chip definitions.
