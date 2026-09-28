@@ -716,4 +716,3 @@ func TestEmptyScopeSelectorTreatedAsUnscoped(t *testing.T) {
 		t.Errorf("expected LimitSet false after delete")
 	}
 }
-
