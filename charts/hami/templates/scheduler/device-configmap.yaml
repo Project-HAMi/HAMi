@@ -19,7 +19,7 @@ data:
       resourceMemoryPercentageName: {{ .Values.devices.nvidia.resourceMemoryPercentageName }}
       resourceCoreName: {{ .Values.devices.nvidia.resourceCoreName }}
       resourcePriorityName: {{ .Values.devices.nvidia.resourcePriorityName }}
-      overwriteEnv: {{ .Values.devices.nvidia.overwriteEnv | default "false" }}
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       defaultMemory: 0
       defaultCores: 0
       defaultGPUNum: 1
@@ -133,7 +133,7 @@ data:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
-      overwriteEnv: {{ .Values.devices.ascend.overwriteEnv | default "false" }}
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
       - chipName: 910A

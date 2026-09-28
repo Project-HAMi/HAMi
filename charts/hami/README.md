@@ -78,8 +78,7 @@ Device configuration fields use `devices.<vendor>` and match the field names in 
 |-----------|-------------|---------------|
 | `schedulerName` | Scheduler name | `"hami-scheduler"` |
 | `scheduler.nodeName` | Define node name, scheduler will schedule to this node | `""` |
-| `devices.nvidia.overwriteEnv` | Whether to overwrite NVIDIA environment variables | `false` |
-| `devices.ascend.overwriteEnv` | Whether to overwrite Ascend environment variables | `false` |
+| `scheduler.overwriteEnv` | Whether to overwrite environment variables | `"false"` |
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |

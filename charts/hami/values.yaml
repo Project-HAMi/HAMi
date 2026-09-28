@@ -50,6 +50,7 @@ scheduler:
   nodeName: ""
   #nodeLabelSelector:
   #  "gpu": "on"
+  overwriteEnv: "false"
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
@@ -570,7 +571,6 @@ devices:
     resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
     resourceCoreName: "nvidia.com/gpucores"
     resourcePriorityName: "nvidia.com/priority"
-    overwriteEnv: false
     deviceSplitCount: 10
     deviceMemoryScaling: 1
     deviceCoreScaling: 1
@@ -621,7 +621,6 @@ devices:
       tolerations: []
       resources: {}
   ascend:
-    overwriteEnv: false
     runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
     hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     enabled: false
