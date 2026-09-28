@@ -413,24 +413,24 @@ host-installed drivers, or appends the GPU Operator path suffix
 ### AWS Neuron
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.awsneuron.customresources` | Custom resources | `["aws.amazon.com/neuron", "aws.amazon.com/neuroncore"]` |
+| `devices.awsneuron.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
 
 ### Kunlunxin
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
+| `devices.kunlun.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
 
 ### Enflame
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
+| `devices.enflame.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.mthreads.enabled` | Whether to enable | `true` |
-| `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
+| `devices.mthreads.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
 
 ### NVIDIA
 | Parameter | Description | Default Value |
@@ -447,10 +447,34 @@ host-installed drivers, or appends the GPU Operator path suffix
 | `devices.ascend.extraArgs` | Extra arguments | `[]` |
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
-| `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
+| `devices.ascend.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
 
 ### Iluvatar
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.iluvatar.enabled` | Whether to enable | `false` |
-| `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |
+| `devices.iluvatar.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+
+## Device Config Overrides
+
+The chart renders the complete device configuration from `devices.<vendor>`.
+Config field names match `device-config.yaml`; `devices.ascend` renders as
+`vnpus`, and `devices.iluvatar.configs` renders as `iluvatars`.
+
+Supply a values file to override only the fields you need. Maps merge with chart
+defaults; lists such as `migProfileAllowlist`, Ascend `configs`, and the Iluvatar
+config list replace the corresponding default list in full.
+
+```yaml
+devices:
+  nvidia:
+    defaultMemory: 4096
+    defaultCores: 50
+  hygon:
+    memoryFactor: 1
+```
+
+`device-config.content` is an optional full replacement of the generated document.
+It does not merge with `devices.*`. Bundled `files/device-config.yaml` is no
+longer read. Built-in extender resource names are derived from the rendered device configuration; use
+`devices.<vendor>.customresources` only for additional resource names.
