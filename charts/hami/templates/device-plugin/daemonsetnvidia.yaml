@@ -38,8 +38,8 @@ spec:
         {{- toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
-      {{- if .Values.devicePlugin.runtimeClassName }}
-      runtimeClassName: {{ .Values.devicePlugin.runtimeClassName }}
+      {{- if .Values.devices.nvidia.runtimeClassName }}
+      runtimeClassName: {{ .Values.devices.nvidia.runtimeClassName }}
       {{- end }}
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical

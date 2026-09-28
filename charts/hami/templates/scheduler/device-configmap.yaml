@@ -14,24 +14,24 @@ data:
   {{- .Files.Get "files/device-config.yaml" | nindent 4}}
   {{- else }}
     nvidia:
-      resourceCountName: {{ .Values.resourceName }}
-      resourceMemoryName: {{ .Values.resourceMem }}
-      resourceMemoryPercentageName: {{ .Values.resourceMemPercentage }}
-      resourceCoreName: {{ .Values.resourceCores }}
-      resourcePriorityName: {{ .Values.resourcePriority }}
-      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+      resourceCountName: {{ .Values.devices.nvidia.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.nvidia.resourceMemoryName }}
+      resourceMemoryPercentageName: {{ .Values.devices.nvidia.resourceMemoryPercentageName }}
+      resourceCoreName: {{ .Values.devices.nvidia.resourceCoreName }}
+      resourcePriorityName: {{ .Values.devices.nvidia.resourcePriorityName }}
+      overwriteEnv: {{ .Values.devices.nvidia.overwriteEnv | default "false" }}
       defaultMemory: 0
       defaultCores: 0
       defaultGPUNum: 1
-      preConfiguredDeviceMemory: {{ .Values.devicePlugin.preConfiguredDeviceMemory | default 0 }}
+      preConfiguredDeviceMemory: {{ .Values.devices.nvidia.preConfiguredDeviceMemory | default 0 }}
       memoryFactor: 1
-      deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
-      deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
-      deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
-      enableNumaTopology: {{ .Values.devicePlugin.enableNumaTopology | default false }}
+      deviceSplitCount: {{ .Values.devices.nvidia.deviceSplitCount }}
+      deviceMemoryScaling: {{ .Values.devices.nvidia.deviceMemoryScaling }}
+      deviceCoreScaling: {{ .Values.devices.nvidia.deviceCoreScaling }}
+      enableNumaTopology: {{ .Values.devices.nvidia.enableNumaTopology | default false }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
-      runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
+      runtimeClassName: "{{ .Values.devices.nvidia.runtimeClassName }}"
       migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
@@ -52,25 +52,25 @@ data:
       - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
         profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
     cambricon:
-      resourceCountName: {{ .Values.mluResourceName }}
-      resourceMemoryName: {{ .Values.mluResourceMem }}
-      resourceCoreName: {{ .Values.mluResourceCores }}
+      resourceCountName: {{ .Values.devices.cambricon.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.cambricon.resourceMemoryName }}
+      resourceCoreName: {{ .Values.devices.cambricon.resourceCoreName }}
     hygon:
-      resourceCountName: {{ .Values.hcuResourceName }}
-      resourceMemoryName: {{ .Values.hcuResourceMem }}
-      resourceCoreName: {{ .Values.hcuResourceCores }}
+      resourceCountName: {{ .Values.devices.hygon.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.hygon.resourceMemoryName }}
+      resourceCoreName: {{ .Values.devices.hygon.resourceCoreName }}
       memoryFactor: 1
     metax:
       resourceCountName: "metax-tech.com/gpu"
-      resourceVCountName: {{ .Values.metaxResourceName }}
-      resourceVMemoryName: {{ .Values.metaxResourceMem }}
-      resourceVCoreName: {{ .Values.metaxResourceCore }}
-      sgpuTopologyAware: {{ .Values.metaxsGPUTopologyAware }}
+      resourceVCountName: {{ .Values.devices.metax.resourceVCountName }}
+      resourceVMemoryName: {{ .Values.devices.metax.resourceVMemoryName }}
+      resourceVCoreName: {{ .Values.devices.metax.resourceVCoreName }}
+      sgpuTopologyAware: {{ .Values.devices.metax.sgpuTopologyAware }}
     enflame:
       resourceNameGCU: "enflame.com/gcu"
-      resourceNameDRSGCU: {{ .Values.enflameResourceNameDRSGCU }}
-      resourceNameGCUMemory: {{ .Values.enflameResourceNameGCUMemory }}
-      resourceNameGCUCore: {{ .Values.enflameResourceNameGCUCore }}
+      resourceNameDRSGCU: {{ .Values.devices.enflame.resourceNameDRSGCU }}
+      resourceNameGCUMemory: {{ .Values.devices.enflame.resourceNameGCUMemory }}
+      resourceNameGCUCore: {{ .Values.devices.enflame.resourceNameGCUCore }}
     mthreads:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
@@ -117,9 +117,9 @@ data:
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
     {{- end }}
     kunlun:
-      resourceCountName: {{ .Values.kunlunResourceName }}
-      resourceVCountName: {{ .Values.kunlunResourceVCountName }}
-      resourceVMemoryName: {{ .Values.kunlunResourceVMemoryName }}
+      resourceCountName: {{ .Values.devices.kunlun.resourceCountName }}
+      resourceVCountName: {{ .Values.devices.kunlun.resourceVCountName }}
+      resourceVMemoryName: {{ .Values.devices.kunlun.resourceVMemoryName }}
     awsneuron:
       resourceCountName: "aws.amazon.com/neuron"
       resourceCoreName: "aws.amazon.com/neuroncore"
@@ -128,12 +128,12 @@ data:
       resourceCoreName: "amd.com/gpucores"
       resourceMemoryName: "amd.com/gpumem"
     vastai:
-      resourceCountName: {{ .Values.vastaiResourceName }}
+      resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:
-      resourceCountName: {{ .Values.birenResourceName }}
+      resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
-      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+      overwriteEnv: {{ .Values.devices.ascend.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
       - chipName: 910A

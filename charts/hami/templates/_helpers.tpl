@@ -199,22 +199,22 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- define "hami-vgpu.scheduler.managedResources" -}}
 {{- $resources := list -}}
 {{/* Core NVIDIA resources */}}
-{{- $resources = append $resources (dict "name" .Values.resourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceMem "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceCores "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceMemPercentage "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourcePriority "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourcePriorityName "ignoredByScheduler" true) -}}
 {{/* MLU resources */}}
-{{- $resources = append $resources (dict "name" .Values.mluResourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.cambricon.resourceCountName "ignoredByScheduler" true) -}}
 {{/* HCU resources */}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceMem "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceCores "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCoreName "ignoredByScheduler" true) -}}
 {{/* Metax resources */}}
 {{- $resources = append $resources (dict "name" "metax-tech.com/gpu" "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceCore "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceMem "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVMemoryName "ignoredByScheduler" true) -}}
 {{/* Ascend resources */}}
 {{- if .Values.devices.ascend.enabled -}}
 {{- range .Values.devices.ascend.customresources -}}

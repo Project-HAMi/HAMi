@@ -38,45 +38,6 @@ selinux:
   type: container_file_t
   level: s0
 
-#Nvidia GPU Parameters
-resourceName: "nvidia.com/gpu"
-resourceMem: "nvidia.com/gpumem"
-resourceMemPercentage: "nvidia.com/gpumem-percentage"
-resourceCores: "nvidia.com/gpucores"
-resourcePriority: "nvidia.com/priority"
-
-#MLU Parameters
-mluResourceName: "cambricon.com/vmlu"
-mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
-mluResourceCores: "cambricon.com/mlu.smlu.vcore"
-
-#Hygon HCU Parameters
-hcuResourceName: "hygon.com/hcunum"
-hcuResourceMem: "hygon.com/hcumem"
-hcuResourceCores: "hygon.com/hcucores"
-
-#Metax sGPU Parameters
-metaxResourceName: "metax-tech.com/sgpu"
-metaxResourceCore: "metax-tech.com/vcore"
-metaxResourceMem: "metax-tech.com/vmemory"
-metaxsGPUTopologyAware: "false"
-
-#Enflame DRS Parameters
-enflameResourceNameDRSGCU: "enflame.com/drs-gcu"
-enflameResourceNameGCUMemory: "enflame.com/gcu-memory"
-enflameResourceNameGCUCore: "enflame.com/gcu-core"
-
-#Kunlun XPU Parameters
-kunlunResourceName: "kunlunxin.com/xpu"
-kunlunResourceVCountName: "kunlunxin.com/vxpu"
-kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
-
-#Vastai Parameters
-vastaiResourceName: "vastaitech.com/va"
-
-#Biren Parameters
-birenResourceName: "birentech.com/gpu"
-
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -89,7 +50,6 @@ scheduler:
   nodeName: ""
   #nodeLabelSelector:
   #  "gpu": "on"
-  overwriteEnv: "false"
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
@@ -415,17 +375,10 @@ devicePlugin:
 #        cpu: 100m
 #        memory: 100Mi
 
-  deviceSplitCount: 10
-  deviceMemoryScaling: 1
-  deviceCoreScaling: 1
-  # Advertise the physical GPU's NUMA node on each vGPU replica so kubelet's
-  # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
-  # admission behavior when topologyManagerPolicy is single-numa-node.
-  enableNumaTopology: false
   # NUMA alignment refit (#2080): when enabled, the device plugin asks the
   # scheduler to re-run its fit over the NUMA-restricted device set kubelet
   # allows, keeping scheduler accounting authoritative. Requires
-  # enableNumaTopology plus the per-node enablegetpreferredallocation node
+  # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
   # configuration; pods opt in with the hami.io/numa-alignment annotation
   # (best-effort or strict). Disabled by default: mismatches are only logged.
   numaRefit:
@@ -443,10 +396,6 @@ devicePlugin:
     # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
-  # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
-  # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
-  # Can be overridden per-node via nodeConfiguration.config.
-  preConfiguredDeviceMemory: 0
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
@@ -473,9 +422,7 @@ devicePlugin:
     # If you want to use an existing ConfigMap, you can set the name here.
     # If this is set, the chart will not create the ConfigMap and will use the existing one.
     externalConfigName: ""
-  # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
-  runtimeClassName: ""
-  # Whether to create runtime class, name comes from runtimeClassName when it is set
+  # Whether to create the runtime class named by devices.nvidia.runtimeClassName
   createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
@@ -556,6 +503,19 @@ mockDevicePlugin:
     ##
     pullSecrets: []
 devices:
+  metax:
+    resourceVCountName: "metax-tech.com/sgpu"
+    resourceVCoreName: "metax-tech.com/vcore"
+    resourceVMemoryName: "metax-tech.com/vmemory"
+    sgpuTopologyAware: false
+  hygon:
+    resourceCountName: "hygon.com/hcunum"
+    resourceMemoryName: "hygon.com/hcumem"
+    resourceCoreName: "hygon.com/hcucores"
+  cambricon:
+    resourceCountName: "cambricon.com/vmlu"
+    resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
+    resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
     customresources:
       - amd.com/gpu
@@ -566,12 +526,18 @@ devices:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
   kunlun:
+    resourceCountName: "kunlunxin.com/xpu"
+    resourceVCountName: "kunlunxin.com/vxpu"
+    resourceVMemoryName: "kunlunxin.com/vxpu-memory"
     enabled: true
     customresources:
       - kunlunxin.com/xpu
       - kunlunxin.com/vxpu
       - kunlunxin.com/vxpu-memory
   enflame:
+    resourceNameDRSGCU: "enflame.com/drs-gcu"
+    resourceNameGCUMemory: "enflame.com/gcu-memory"
+    resourceNameGCUCore: "enflame.com/gcu-core"
     enabled: true
     customresources:
       - enflame.com/drs-gcu
@@ -589,14 +555,32 @@ devices:
     memoryPerCard:
       - 96
   vastai:
+    resourceCountName: "vastaitech.com/va"
     enabled: true
     customresources:
       - vastaitech.com/va
   biren:
+    resourceCountName: "birentech.com/gpu"
     enabled: true
     customresources:
       - birentech.com/gpu
   nvidia:
+    resourceCountName: "nvidia.com/gpu"
+    resourceMemoryName: "nvidia.com/gpumem"
+    resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
+    resourceCoreName: "nvidia.com/gpucores"
+    resourcePriorityName: "nvidia.com/priority"
+    overwriteEnv: false
+    deviceSplitCount: 10
+    deviceMemoryScaling: 1
+    deviceCoreScaling: 1
+    # Memory in MB for GPUs without memory queries; 0 uses auto-detection.
+    # The node configuration can override this for unified-memory GPUs.
+    preConfiguredDeviceMemory: 0
+    # Advertise the GPU's NUMA node to kubelet's TopologyManager.
+    # Opt-in because single-numa-node policy changes admission behavior.
+    enableNumaTopology: false
+    runtimeClassName: ""
     gpuCorePolicy: default
     libCudaLogLevel: 1
   remotegpu:
@@ -637,6 +621,9 @@ devices:
       tolerations: []
       resources: {}
   ascend:
+    overwriteEnv: false
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     enabled: false
     image: ""
     imagePullPolicy: IfNotPresent
@@ -644,8 +631,6 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
-    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
-    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory

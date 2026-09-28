@@ -1,9 +1,9 @@
 {{- if .Values.devicePlugin.enabled -}}
-{{- if and .Values.devicePlugin.createRuntimeClass .Values.devicePlugin.runtimeClassName }}
+{{- if and .Values.devicePlugin.createRuntimeClass .Values.devices.nvidia.runtimeClassName }}
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
-  name: {{ .Values.devicePlugin.runtimeClassName }}
+  name: {{ .Values.devices.nvidia.runtimeClassName }}
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
 handler: nvidia

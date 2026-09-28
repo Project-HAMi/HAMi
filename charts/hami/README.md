@@ -2,6 +2,8 @@
 
 This document provides detailed descriptions of all configurable values parameters for the HAMi Helm Chart.
 
+Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read.
+
 ## Global Configuration
 
 | Parameter | Description | Default Value |
@@ -29,46 +31,46 @@ This document provides detailed descriptions of all configurable values paramete
 ### NVIDIA GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `resourceName` | GPU resource name | `"nvidia.com/gpu"` |
-| `resourceMem` | GPU memory resource name | `"nvidia.com/gpumem"` |
-| `resourceMemPercentage` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
-| `resourceCores` | GPU core resource name | `"nvidia.com/gpucores"` |
-| `resourcePriority` | GPU priority resource name | `"nvidia.com/priority"` |
+| `devices.nvidia.resourceCountName` | GPU resource name | `"nvidia.com/gpu"` |
+| `devices.nvidia.resourceMemoryName` | GPU memory resource name | `"nvidia.com/gpumem"` |
+| `devices.nvidia.resourceMemoryPercentageName` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
+| `devices.nvidia.resourceCoreName` | GPU core resource name | `"nvidia.com/gpucores"` |
+| `devices.nvidia.resourcePriorityName` | GPU priority resource name | `"nvidia.com/priority"` |
 
 ### Cambricon MLU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `mluResourceName` | MLU resource name | `"cambricon.com/vmlu"` |
-| `mluResourceMem` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
-| `mluResourceCores` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
+| `devices.cambricon.resourceCountName` | MLU resource name | `"cambricon.com/vmlu"` |
+| `devices.cambricon.resourceMemoryName` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
+| `devices.cambricon.resourceCoreName` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
 
 ### Hygon HCU Resources
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `hcuResourceName` | HCU resource name | `"hygon.com/hcunum"` |
-| `hcuResourceMem` | HCU memory resource name | `"hygon.com/hcumem"` |
-| `hcuResourceCores` | HCU core resource name | `"hygon.com/hcucores"` |
+| `devices.hygon.resourceCountName` | HCU resource name | `"hygon.com/hcunum"` |
+| `devices.hygon.resourceMemoryName` | HCU memory resource name | `"hygon.com/hcumem"` |
+| `devices.hygon.resourceCoreName` | HCU core resource name | `"hygon.com/hcucores"` |
 
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `metaxResourceName` | GPU resource name | `"metax-tech.com/sgpu"` |
-| `metaxResourceCore` | GPU core resource name | `"metax-tech.com/vcore"` |
-| `metaxResourceMem` | GPU memory resource name | `"metax-tech.com/vmemory"` |
-| `metaxsGPUTopologyAware` | GPU topology awareness | `"false"` |
+| `devices.metax.resourceVCountName` | GPU resource name | `"metax-tech.com/sgpu"` |
+| `devices.metax.resourceVCoreName` | GPU core resource name | `"metax-tech.com/vcore"` |
+| `devices.metax.resourceVMemoryName` | GPU memory resource name | `"metax-tech.com/vmemory"` |
+| `devices.metax.sgpuTopologyAware` | GPU topology awareness | `false` |
 
 ### Enflame GCU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `enflameResourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
-| `enflameResourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
-| `enflameResourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
+| `devices.enflame.resourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
+| `devices.enflame.resourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
+| `devices.enflame.resourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
 
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `kunlunResourceName` | XPU resource name | `"kunlunxin.com/xpu"` |
+| `devices.kunlun.resourceCountName` | XPU resource name | `"kunlunxin.com/xpu"` |
 
 ## Scheduler Configuration
 
@@ -76,7 +78,8 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `schedulerName` | Scheduler name | `"hami-scheduler"` |
 | `scheduler.nodeName` | Define node name, scheduler will schedule to this node | `""` |
-| `scheduler.overwriteEnv` | Whether to overwrite environment variables | `"false"` |
+| `devices.nvidia.overwriteEnv` | Whether to overwrite NVIDIA environment variables | `false` |
+| `devices.ascend.overwriteEnv` | Whether to overwrite Ascend environment variables | `false` |
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
@@ -180,10 +183,10 @@ This document provides detailed descriptions of all configurable values paramete
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devicePlugin.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
-| `devicePlugin.deviceMemoryScaling` | Device memory scaling ratio | `1` |
-| `devicePlugin.deviceCoreScaling` | Device core scaling ratio | `1` |
-| `devicePlugin.runtimeClassName` | Runtime class name | `""` |
+| `devices.nvidia.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
+| `devices.nvidia.deviceMemoryScaling` | Device memory scaling ratio | `1` |
+| `devices.nvidia.deviceCoreScaling` | Device core scaling ratio | `1` |
+| `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
