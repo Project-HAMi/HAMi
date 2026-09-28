@@ -4,6 +4,116 @@ This document provides detailed descriptions of all configurable values paramete
 
 Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read. Supplying removed fields fails chart rendering and lists every old field with its replacement path.
 
+## Upgrade to v2.11
+
+Device-specific Helm values use `devices.<vendor>`. Move your existing overrides
+to the paths below before upgrading. The `device-config.yaml` format read by
+HAMi and the device plugins is unchanged.
+
+### Field migration table
+
+The previous fields are no longer read. The chart rejects them even when their
+value is `0`, `false`, or empty. Move each value to its new path and remove the
+old field.
+
+| Old Helm value | New Helm value |
+|----------------|----------------|
+| `resourceName` | `devices.nvidia.resourceCountName` |
+| `resourceMem` | `devices.nvidia.resourceMemoryName` |
+| `resourceMemPercentage` | `devices.nvidia.resourceMemoryPercentageName` |
+| `resourceCores` | `devices.nvidia.resourceCoreName` |
+| `resourcePriority` | `devices.nvidia.resourcePriorityName` |
+| `mluResourceName` | `devices.cambricon.resourceCountName` |
+| `mluResourceMem` | `devices.cambricon.resourceMemoryName` |
+| `mluResourceCores` | `devices.cambricon.resourceCoreName` |
+| `hcuResourceName` | `devices.hygon.resourceCountName` |
+| `hcuResourceMem` | `devices.hygon.resourceMemoryName` |
+| `hcuResourceCores` | `devices.hygon.resourceCoreName` |
+| `metaxResourceName` | `devices.metax.resourceVCountName` |
+| `metaxResourceCore` | `devices.metax.resourceVCoreName` |
+| `metaxResourceMem` | `devices.metax.resourceVMemoryName` |
+| `metaxsGPUTopologyAware` | `devices.metax.sgpuTopologyAware` |
+| `enflameResourceNameDRSGCU` | `devices.enflame.resourceNameDRSGCU` |
+| `enflameResourceNameGCUMemory` | `devices.enflame.resourceNameGCUMemory` |
+| `enflameResourceNameGCUCore` | `devices.enflame.resourceNameGCUCore` |
+| `kunlunResourceName` | `devices.kunlun.resourceCountName` |
+| `kunlunResourceVCountName` | `devices.kunlun.resourceVCountName` |
+| `kunlunResourceVMemoryName` | `devices.kunlun.resourceVMemoryName` |
+| `vastaiResourceName` | `devices.vastai.resourceCountName` |
+| `birenResourceName` | `devices.biren.resourceCountName` |
+| `devicePlugin.deviceSplitCount` | `devices.nvidia.deviceSplitCount` |
+| `devicePlugin.deviceMemoryScaling` | `devices.nvidia.deviceMemoryScaling` |
+| `devicePlugin.deviceCoreScaling` | `devices.nvidia.deviceCoreScaling` |
+| `devicePlugin.preConfiguredDeviceMemory` | `devices.nvidia.preConfiguredDeviceMemory` |
+| `devicePlugin.enableNumaTopology` | `devices.nvidia.enableNumaTopology` |
+| `devicePlugin.runtimeClassName` | `devices.nvidia.runtimeClassName` |
+| `devicePlugin.createRuntimeClass` | `devices.nvidia.createRuntimeClass` |
+
+Keep `scheduler.overwriteEnv` and other `devicePlugin` settings at their existing
+paths, including `enabled`, images, `deviceListStrategy`, `migStrategy`,
+`disablecorelimit`, and `nodeConfiguration`.
+
+### Back up the current configuration
+
+These examples use release `hami` in namespace `kube-system`. Replace the release,
+namespace, and ConfigMap names with those used by your installation.
+
+Export the release's user-supplied values and back up the device ConfigMap:
+
+```bash
+helm get values hami -n kube-system -o yaml > previous-values.yaml
+kubectl get configmap hami-scheduler-device -n kube-system -o yaml > device-config-backup.yaml
+```
+
+If you use node configuration, back up its ConfigMap too. Use the external
+ConfigMap name instead when `devicePlugin.nodeConfiguration.externalConfigName`
+is set:
+
+```bash
+kubectl get configmap hami-device-plugin -n kube-system -o yaml > node-config-backup.yaml
+```
+
+### Prepare the values file
+
+Create `my-values.yaml` from the saved user values. Apply the field migrations
+above and keep all other settings required by your installation.
+
+If you edited a ConfigMap manually, transfer only the settings you need to keep
+into the corresponding Helm values. Store node settings in
+`devicePlugin.nodeConfiguration.config` or your external ConfigMap. Do not
+restore the entire old ConfigMap over the new one, because this can overwrite
+new chart defaults.
+
+### Upgrade with the migrated values
+
+Update the chart repository and upgrade using the new chart defaults and your
+migrated values:
+
+```bash
+helm repo update hami-charts
+helm upgrade hami hami-charts/hami \
+  --namespace kube-system \
+  --version 2.11.0 \
+  --reset-values \
+  --values my-values.yaml
+```
+
+Replace `2.11.0` with the v2.11 patch version you want to install. `--reset-values`
+discards the release's previous values. Include every override you need to keep
+in `my-values.yaml` or the other values files passed to this command.
+
+Avoid `--reuse-values` and `--reset-then-reuse-values` during this migration.
+They can carry removed fields into the new chart and cause rendering to fail.
+
+After upgrading, check the generated ConfigMaps and the scheduler and device
+plugin rollout status. If you changed only the NVIDIA node configuration,
+restart the NVIDIA device plugin to load it:
+
+```bash
+kubectl rollout restart daemonset/hami-device-plugin -n kube-system
+kubectl rollout status daemonset/hami-device-plugin -n kube-system
+```
+
 ## Global Configuration
 
 | Parameter | Description | Default Value |
