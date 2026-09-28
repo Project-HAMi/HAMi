@@ -91,7 +91,11 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 				return fmt.Errorf("recover GI %d on gpu %d: %w", giInfo.Id, gpuIndex, err)
 			}
 			if !found {
-				return fmt.Errorf("recover GI %d on gpu %d: no compute instance exists", giInfo.Id, gpuIndex)
+				if ret := gi.Destroy(); ret != nvml.SUCCESS && ret != nvml.ERROR_NOT_FOUND {
+					return fmt.Errorf("destroy orphan GI %d on gpu %d during recovery: %s", giInfo.Id, gpuIndex, nvml.ErrorString(ret))
+				}
+				klog.InfoS("destroyed orphan MIG GPU instance without compute instance", "gpu", gpuIndex, "gpuInstanceID", giInfo.Id)
+				continue
 			}
 			migUUID, err := findMigUUIDForGI(dev, giInfo.Id)
 			if err != nil {

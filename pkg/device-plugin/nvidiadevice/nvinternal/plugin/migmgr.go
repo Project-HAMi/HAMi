@@ -599,9 +599,9 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	defer lk.Unlock()
 
 	m.mu.Lock()
-	if inst := m.byAllocation[key]; inst != nil {
+	if inst := m.byAllocation[key]; inst != nil && normalizedMIGState(inst) != migInstanceError {
 		state := normalizedMIGState(inst)
-		if state == migInstanceError || state == migInstanceDeleting || state == migInstanceReclaiming {
+		if state == migInstanceDeleting || state == migInstanceReclaiming {
 			m.mu.Unlock()
 			return migAllocationResult{}, fmt.Errorf("MIG allocation %s is in state %s", inst.MigUUID, state)
 		}
