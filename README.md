@@ -144,7 +144,7 @@ HAMi supports multiple scheduling modes for AI workloads:
 - **binpack**: pack workloads onto fewer nodes or devices to improve consolidation.
 - **spread**: distribute workloads across nodes or devices to reduce contention.
 - **topology-aware scheduling**: choose device combinations based on GPU topology when supported.
-- **dynamic MIG**: create and allocate NVIDIA MIG instances dynamically for supported cards and modes.
+- **dynamic MIG**: create, cache, reuse, and reclaim NVIDIA MIG instances dynamically for supported cards and modes. See the [Dynamic MIG instance lifecycle](docs/develop/dynamic-mig-lifecycle.md).
 
 HAMi works with the default Kubernetes scheduler path and can also be used with Volcano for batch-oriented AI workloads. See the [HAMi website](https://project-hami.io/docs/) for current scheduler integration guides.
 

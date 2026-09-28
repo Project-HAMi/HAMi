@@ -119,6 +119,9 @@ func mockMigRecoveryDevice(t *testing.T) (*MigInstanceManager, *nvmlmock.Device)
 			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
 		},
 		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
 	}
 	manager := newMigInstanceManager(&nvmlmock.Interface{
 		InitFunc:                   func() nvml.Return { return nvml.SUCCESS },
@@ -189,17 +192,23 @@ func TestMigRecoveryRejectsInvalidRuntimeIdentity(t *testing.T) {
 	}
 }
 
-// TestMigRecoveryRetriesResetAfterInformerSync checks that deferred startup reset resumes only
+// TestMigRecoveryRetriesRestoreAfterInformerSync checks that deferred startup restore resumes only
 // after Pod state is available.
-func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
+func TestMigRecoveryRetriesRestoreAfterInformerSync(t *testing.T) {
 	manager, dev := mockMigRecoveryDevice(t)
 	resets := 0
 	destroyedGI, destroyedCI := 0, 0
-	ci := &nvmlmock.ComputeInstance{DestroyFunc: func() nvml.Return {
-		destroyedCI++
-		return nvml.SUCCESS
-	}}
+	ci := &nvmlmock.ComputeInstance{
+		GetInfoFunc: func() (nvml.ComputeInstanceInfo, nvml.Return) {
+			return nvml.ComputeInstanceInfo{Id: 2}, nvml.SUCCESS
+		},
+		DestroyFunc: func() nvml.Return { destroyedCI++; return nvml.SUCCESS },
+	}
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
 	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
 		GetComputeInstanceProfileInfoFunc: func(profile, engine int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
 			if profile == 0 {
 				return nvml.ComputeInstanceProfileInfo{}, nvml.SUCCESS
@@ -220,7 +229,20 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 	dev.GetGpuInstancesFunc = func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
 		return []nvml.GpuInstance{gi}, nvml.SUCCESS
 	}
-	// Reset enumerates profiles only after checking/enabling MIG mode.
+	dev.GetMaxMigDeviceCountFunc = func() (int, nvml.Return) { return 1, nvml.SUCCESS }
+	dev.GetMigDeviceHandleByIndexFunc = func(int) (nvml.Device, nvml.Return) {
+		return &nvmlmock.Device{
+			GetGpuInstanceIdFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+			GetUUIDFunc:          func() (string, nvml.Return) { return "MIG-idle", nvml.SUCCESS },
+			GetComputeRunningProcessesFunc: func() ([]nvml.ProcessInfo, nvml.Return) {
+				return nil, nvml.SUCCESS
+			},
+			GetGraphicsRunningProcessesFunc: func() ([]nvml.ProcessInfo, nvml.Return) {
+				return nil, nvml.SUCCESS
+			},
+		}, nvml.SUCCESS
+	}
+	// Restore enumerates profiles only after checking/enabling MIG mode.
 	dev.GetMigModeFunc = func() (int, int, nvml.Return) {
 		resets++
 		return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
@@ -239,7 +261,7 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 	require.ErrorIs(t, plugin.reconcileActiveMigAllocations(), nodepodinformer.ErrNotSynced)
 	require.Zero(t, resets)
 	synced = true
-	// Concurrent callers must perform the initial scan/reset exactly once.
+	// Concurrent callers must perform the initial scan/restore exactly once.
 	var wg sync.WaitGroup
 	results := make(chan error, 16)
 	for range 16 {
@@ -251,15 +273,16 @@ func TestMigRecoveryRetriesResetAfterInformerSync(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.True(t, plugin.migPrimed)
-	// Once for busy detection, once for reset; subsequent reconciles do neither.
-	require.Equal(t, 2, resets)
-	require.Equal(t, 1, destroyedGI)
-	require.Equal(t, 1, destroyedCI)
+	// Once for busy detection and twice for restore mode checks; subsequent reconciles do neither.
+	require.Equal(t, 3, resets)
+	require.Zero(t, destroyedGI)
+	require.Zero(t, destroyedCI)
+	require.Equal(t, migInstanceIdle, manager.byAllocation[allocationKey(0, "1g", placement)].State)
 }
 
-// TestMigReconciliationConfirmsMissingPodBeforeDestroy checks that live reservations and API
+// TestMigReconciliationConfirmsMissingPodBeforeIdle checks that live reservations and API
 // failures prevent deletion despite stale cached absence.
-func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
+func TestMigReconciliationConfirmsMissingPodBeforeIdle(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	informer, err := nodepodinformer.New(client, "node-a")
 	require.NoError(t, err)
@@ -319,9 +342,10 @@ func TestMigReconciliationConfirmsMissingPodBeforeDestroy(t *testing.T) {
 	now = now.Add(time.Minute)
 	apiErr, pod = nil, nil
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
-	require.Empty(t, manager.byAllocation)
-	require.Equal(t, 1, giDestroyed)
-	require.Equal(t, 1, ciDestroyed)
+	require.Contains(t, manager.byAllocation, key)
+	require.Equal(t, migInstanceIdle, manager.byAllocation[key].State)
+	require.Zero(t, giDestroyed)
+	require.Zero(t, ciDestroyed)
 }
 
 // TestMIGReconcileSkipsLiveListWithoutCandidates verifies idle and fully reserved
@@ -534,7 +558,7 @@ func TestHamiCoreStartupWithoutPodSync(t *testing.T) {
 // TestMIGIncompleteConfirmationBackoff bounds queries even when the API succeeds
 // but reservations, hardware errors or allocation races prevent reclamation.
 func TestMIGIncompleteConfirmationBackoff(t *testing.T) {
-	for _, reason := range []string{"API failure", "live reservation", "destroy failure", "concurrent allocation", "invalid live annotation"} {
+	for _, reason := range []string{"API failure", "live reservation", "concurrent allocation", "invalid live annotation"} {
 		t.Run(reason, func(t *testing.T) {
 			manager, dev := mockMigRecoveryDevice(t)
 			key := allocationKey(0, "1g.5gb", nvml.GpuInstancePlacement{Start: 0, Size: 1})
@@ -583,7 +607,7 @@ func TestMIGIncompleteConfirmationBackoff(t *testing.T) {
 			}
 			for index, delay := range []time.Duration{5, 10, 20, 40, 60, 60} {
 				err := p.reconcileActiveMigAllocations()
-				if reason == "API failure" || reason == "destroy failure" || reason == "invalid live annotation" {
+				if reason == "API failure" || reason == "invalid live annotation" {
 					require.Error(t, err)
 				} else {
 					require.NoError(t, err)
@@ -600,8 +624,9 @@ func TestMIGIncompleteConfirmationBackoff(t *testing.T) {
 			broken = false
 			require.NoError(t, p.reconcileActiveMigAllocations())
 			require.Equal(t, 7, calls)
-			require.Equal(t, 1, destroyed)
-			require.Empty(t, manager.byAllocation)
+			require.Zero(t, destroyed)
+			require.Contains(t, manager.byAllocation, key)
+			require.Equal(t, migInstanceIdle, manager.byAllocation[key].State)
 			require.NoError(t, p.reconcileActiveMigAllocations())
 			require.Equal(t, 7, calls, "no candidate requires no query")
 		})

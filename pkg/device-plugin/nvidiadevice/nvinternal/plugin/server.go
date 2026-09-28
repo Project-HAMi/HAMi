@@ -528,8 +528,8 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	needsConfirmation := !plugin.migPrimed
 	var candidates []migAllocationKey
 	plugin.migMgr.mu.Lock()
-	for key := range plugin.migMgr.byAllocation {
-		if _, exists := active[key]; !exists {
+	for key, inst := range plugin.migMgr.byAllocation {
+		if _, exists := active[key]; !exists && normalizedMIGState(inst) == migInstanceActive {
 			needsConfirmation = true
 			candidates = append(candidates, key)
 		}
@@ -575,11 +575,10 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		if err != nil {
 			return err
 		}
-		reset, err := plugin.migMgr.ResetIdleGPUs(plugin.migResetDeviceCount, inUse)
-		if err != nil {
-			return fmt.Errorf("reset idle GPUs during MIG initialization: %w", err)
+		if err := plugin.migMgr.RestoreAllocations(plugin.migResetDeviceCount, inUse); err != nil {
+			return fmt.Errorf("restore MIG instances during initialization: %w", err)
 		}
-		klog.InfoS("mig init: resolved startup layout", "inUseGPUs", sortedIntSetKeys(inUse), "resetGPUs", reset)
+		klog.InfoS("mig init: restored startup layout", "inUseGPUs", sortedIntSetKeys(inUse))
 		if plugin.deviceListStrategies.AnyCDIEnabled() {
 			if err := plugin.recoverDynamicMIGCDI(); err != nil {
 				return fmt.Errorf("recover dynamic MIG CDI entries: %w", err)
@@ -590,13 +589,13 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		}
 		plugin.migPrimed = true
 	}
-	destroyed, err := plugin.migMgr.ReconcileActiveAllocationsWithDestroyed(active)
+	err = plugin.migMgr.ReconcileActiveAllocations(active)
 	// A live reservation omitted by the informer is still unresolved work,
 	// even when the API request and hardware reconciliation both succeeded.
 	complete = err == nil
 	plugin.migMgr.mu.Lock()
 	for _, key := range candidates {
-		if _, remains := plugin.migMgr.byAllocation[key]; remains {
+		if inst := plugin.migMgr.byAllocation[key]; normalizedMIGState(inst) == migInstanceActive {
 			complete = false
 		}
 	}
@@ -610,9 +609,6 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	}
 	if plugin.pendingCDIRemovals == nil {
 		plugin.pendingCDIRemovals = make(map[string]struct{})
-	}
-	for _, uuid := range destroyed {
-		plugin.pendingCDIRemovals[uuid] = struct{}{}
 	}
 	for uuid := range plugin.pendingCDIRemovals {
 		plugin.migMgr.mu.Lock()
@@ -1251,9 +1247,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			return nil, fmt.Errorf("recover MIG allocations before allocation: %w", err)
 		}
 		plugin.migMgr.mu.Lock()
-		before := make(map[string]struct{}, len(plugin.migMgr.byAllocationMigUUID))
-		for uuid := range plugin.migMgr.byAllocationMigUUID {
-			before[uuid] = struct{}{}
+		before := make(map[string]migInstanceState, len(plugin.migMgr.byAllocationMigUUID))
+		for uuid, key := range plugin.migMgr.byAllocationMigUUID {
+			before[uuid] = normalizedMIGState(plugin.migMgr.byAllocation[key])
 		}
 		plugin.migMgr.mu.Unlock()
 		defer func() {
@@ -1261,10 +1257,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return
 			}
 			plugin.migMgr.mu.Lock()
-			var created []string
+			var created, reused []string
 			for uuid := range plugin.migMgr.byAllocationMigUUID {
-				if _, existed := before[uuid]; !existed {
+				state, existed := before[uuid]
+				if !existed {
 					created = append(created, uuid)
+				} else if state == migInstanceIdle {
+					reused = append(reused, uuid)
 				}
 			}
 			plugin.migMgr.mu.Unlock()
@@ -1284,6 +1283,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						}
 					}
 				}
+			}
+			for _, uuid := range reused {
+				plugin.migMgr.MarkIdle(uuid)
 			}
 		}()
 	}
