@@ -1497,3 +1497,55 @@ func TestLockNodeExpiredReclaimedByOwnHolder(t *testing.T) {
 		t.Fatalf("the lock is %q, want it still held by the holder", node.Annotations[NodeLockKey])
 	}
 }
+
+// TestLockNodeExpiredTakenWhenHolderNameWasReused guards the gap the #3096
+// guard would otherwise open. The lock records only a namespace and a name, so
+// a StatefulSet replacement carries the same one. Treating that newer pod as
+// the holder would keep the node locked for as long as it stays pending, even
+// though the pod the lock was taken for is long gone.
+func TestLockNodeExpiredTakenWhenHolderNameWasReused(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-4"
+	lockedAt := time.Now().Add(-time.Hour)
+	staleLock := lockedAt.Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "web-0"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: staleLock},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	// The pod the lock was taken for is gone. This one took its name later.
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web-0",
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(lockedAt.Add(30 * time.Minute)),
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the replacement: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	if err := LockNode(nodeName, "", next); err != nil {
+		t.Fatalf("the node stayed locked for a pod the lock was never taken for: %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if !strings.Contains(node.Annotations[NodeLockKey], "next") {
+		t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+	}
+}

@@ -257,7 +257,13 @@ func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, sk
 // find out which pod its Allocate belongs to. A pod that is gone, or that has
 // moved past Pending, can no longer be handed an allocation, so its lock is
 // free to take.
-func podAwaitingAllocation(ctx context.Context, ns, name string) (bool, error) {
+//
+// The lock records only a namespace and a name, so a later pod can carry the
+// same one, as a StatefulSet replacement does. A pod created after the lock was
+// taken cannot be the pod the lock was taken for, and holding the node for it
+// would keep the node locked for as long as it stays pending, so only a pod
+// that already existed counts as the holder.
+func podAwaitingAllocation(ctx context.Context, ns, name string, lockTime time.Time) (bool, error) {
 	if ns == "" || name == "" {
 		return false, nil
 	}
@@ -267,6 +273,9 @@ func podAwaitingAllocation(ctx context.Context, ns, name string) (bool, error) {
 			return false, nil
 		}
 		return false, err
+	}
+	if pod.CreationTimestamp.After(lockTime) {
+		return false, nil
 	}
 	return pod.Status.Phase == corev1.PodPending, nil
 }
@@ -308,7 +317,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		// crossed with this one, so a pod reclaiming its own expired lock
 		// still re-stamps it below and keeps its place.
 		if ns != pods.Namespace || previousPodName != pods.Name {
-			waiting, err := podAwaitingAllocation(ctx, ns, previousPodName)
+			waiting, err := podAwaitingAllocation(ctx, ns, previousPodName, lockTime)
 			if err != nil {
 				return err
 			}
