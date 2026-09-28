@@ -186,7 +186,7 @@ Device configuration fields use `devices.<vendor>` and match the field names in 
 | `devices.nvidia.deviceMemoryScaling` | Device memory scaling ratio | `1` |
 | `devices.nvidia.deviceCoreScaling` | Device core scaling ratio | `1` |
 | `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
-| `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
+| `devices.nvidia.createRuntimeClass` | Create the NVIDIA RuntimeClass named by `devices.nvidia.runtimeClassName` when the device plugin is enabled | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |

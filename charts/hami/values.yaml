@@ -423,8 +423,6 @@ devicePlugin:
     # If you want to use an existing ConfigMap, you can set the name here.
     # If this is set, the chart will not create the ConfigMap and will use the existing one.
     externalConfigName: ""
-  # Whether to create the runtime class named by devices.nvidia.runtimeClassName
-  createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: true
@@ -581,6 +579,8 @@ devices:
     # Opt-in because single-numa-node policy changes admission behavior.
     enableNumaTopology: false
     runtimeClassName: ""
+    # Create the named NVIDIA RuntimeClass when the device plugin is enabled.
+    createRuntimeClass: false
     gpuCorePolicy: default
     libCudaLogLevel: 1
   remotegpu:

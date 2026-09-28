@@ -313,7 +313,7 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
     {{- $errors = append $errors (printf "%s has been removed; use %s instead" $old (index $removedRootFields $old)) -}}
   {{- end -}}
 {{- end -}}
-{{- range $field := list "deviceSplitCount" "deviceMemoryScaling" "deviceCoreScaling" "preConfiguredDeviceMemory" "enableNumaTopology" "runtimeClassName" -}}
+{{- range $field := list "deviceSplitCount" "deviceMemoryScaling" "deviceCoreScaling" "preConfiguredDeviceMemory" "enableNumaTopology" "runtimeClassName" "createRuntimeClass" -}}
   {{- if hasKey $.Values.devicePlugin $field -}}
     {{- $errors = append $errors (printf "devicePlugin.%s has been removed; use devices.nvidia.%s instead" $field $field) -}}
   {{- end -}}
