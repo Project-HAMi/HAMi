@@ -80,6 +80,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
 | `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
+| `scheduler.profilingBindAddress` | Dedicated pprof HTTP bind address; only used when `--profiling` is enabled | `"127.0.0.1:6060"` |
 | `scheduler.kubeQPS` | QPS to use while talking with the kube-apiserver; empty keeps the binary default (`5`) | `""` |
 | `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
 | `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
@@ -91,6 +92,43 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.replicas` | Number of replicas | `1` |
 | `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
 | `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
+
+### Scheduler profiling
+
+Profiling is disabled by default. To enable it, include `--profiling` in the
+scheduler's extra arguments while retaining any other arguments you need:
+
+```yaml
+scheduler:
+  profilingBindAddress: "127.0.0.1:6060"
+  extender:
+    extraArgs:
+      - --debug
+      - -v=4
+      - --profiling
+```
+
+The dedicated profiling listener serves plain HTTP and defaults to loopback.
+The scheduler Service does not expose its port. Access it using port-forwarding:
+
+```bash
+kubectl -n kube-system port-forward pod/<scheduler-pod> 6060:6060
+```
+
+Then open `http://127.0.0.1:6060/debug/pprof/` locally.
+
+Previously, enabling profiling exposed pprof on the scheduler's cluster-facing
+HTTP server. Those routes are now available only on the dedicated profiling
+listener. Operators using the old endpoint must switch to port-forwarding or
+explicitly set `scheduler.profilingBindAddress` to a non-loopback address.
+Changing this address does not expose pprof through the scheduler Service;
+the old Service endpoint still returns 404 for pprof routes. For non-loopback
+access, reach the Pod IP and profiling port through an appropriately restricted
+network path, or use the Pod port-forward shown above.
+Non-loopback binding logs a security warning: pprof has no authentication and
+can expose process diagnostics. Restrict network access if you choose to expose
+it. With profiling disabled, the bind address is ignored and no profiling
+listener is started.
 
 ### Kube Scheduler Configuration
 
@@ -172,9 +210,42 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.tag` | Monitor image tag | `""` |
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
-| `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
+
+### vGPU Cache Garbage Collection
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devicePlugin.vgpuCache.gracePeriod` | Minimum directory age (based on modification time) before the NVIDIA Device Plugin considers a stale libvgpu cache directory for deletion. Independent of monitor resync. | `"5m"` |
+
+The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
+`HAMI_VGPU_CACHE_GRACE_PERIOD`. Use a Go duration string such as `"30s"`, `"5m"`,
+or `"1h"`. An omitted or empty value uses `"5m"`. An invalid duration string logs
+a warning and uses `"5m"`; negative durations prevent Device Plugin startup.
+`"0s"` removes the grace period, **not** garbage collection: deletion still
+requires live Pod confirmation and the existing safety checks.
+
+```yaml
+devicePlugin:
+  monitor:
+    resyncInterval: "30s"
+  vgpuCache:
+    gracePeriod: "5m"
+```
+
+**Migration:** `devicePlugin.monitor.resyncInterval` / `HAMI_RESYNC_INTERVAL`
+no longer controls Device Plugin directory GC. If you previously used a custom
+monitor resync value to tune cleanup, set `devicePlugin.vgpuCache.gracePeriod`
+explicitly to retain that GC grace period. For deployments without Helm, set
+`HAMI_VGPU_CACHE_GRACE_PERIOD` on the Device Plugin container. Without the new
+setting, GC uses `5m`, regardless of monitor resync. The monitor retains its
+existing resync and mmap-release behavior and does not delete directories.
+
+This setting does not change the GC scan interval, confirmation retry backoff,
+or the five-failure limit for directory deletion.
 
 ### Device Plugin Other Configuration
 

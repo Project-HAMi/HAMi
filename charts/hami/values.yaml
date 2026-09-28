@@ -94,6 +94,9 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # Only used when --profiling is enabled in scheduler.extender.extraArgs.
+  # Keep loopback binding and use kubectl port-forward to access pprof.
+  profilingBindAddress: "127.0.0.1:6060"
   # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
   # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
   # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
@@ -373,6 +376,12 @@ devicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
+  vgpuCache:
+    # @param devicePlugin.vgpuCache.gracePeriod Minimum directory age before stale cache GC.
+    # Independent of monitor.resyncInterval. Uses Go duration syntax (e.g. "5m").
+    # "0s" removes the grace period, but still requires live Pod confirmation.
+    # Negative durations are rejected; invalid duration strings fall back to "5m".
+    gracePeriod: "5m"
   monitor:
     ## @param image.registry monitor image registry
     ## @param image.repository monitor image repository
@@ -396,6 +405,8 @@ devicePlugin:
       ##
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
+    # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
+    # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
     extraArgs:
       - -v=4

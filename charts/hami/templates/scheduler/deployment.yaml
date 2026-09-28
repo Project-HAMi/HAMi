@@ -133,6 +133,7 @@ spec:
             - --extender-bind=127.0.0.1:{{ .Values.scheduler.extenderPort | default 9444 }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
+            - --profiling-bind-address={{ .Values.scheduler.profilingBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
             - --force-overwrite-default-scheduler={{ .Values.scheduler.forceOverwriteDefaultScheduler}}

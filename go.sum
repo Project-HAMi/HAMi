@@ -12,6 +12,8 @@ github.com/NVIDIA/go-nvml v0.13.4-0 h1:o3jp9u2x1R9ShFE3v+Aesp55XOSIQFMJz/VGNUcJa
 github.com/NVIDIA/go-nvml v0.13.4-0/go.mod h1:id63qwpoDWpFXwnwM6psDCSqW4BmNu6mWpr4YeQtPGo=
 github.com/NVIDIA/k8s-device-plugin v0.20.0 h1:0Ssf0Rvv8kpLmE4Kf1wxHwhYWXJUo65EdPRSpFvo2X0=
 github.com/NVIDIA/k8s-device-plugin v0.20.0/go.mod h1:70L9RYkLcWG1/IzkA+d3gmRZKw0YljND+/IDMuoJ6BA=
+github.com/NVIDIA/k8s-device-plugin v0.20.1 h1:oDrpF646QFBTQVGLzUtJKC78NTOBE4snmzDJOTY+N6E=
+github.com/NVIDIA/k8s-device-plugin v0.20.1/go.mod h1:qNPJ/gWWs0WCc503ejutCucRXajo///9o716Vdn6k7E=
 github.com/NVIDIA/nvidia-container-toolkit v1.20.0 h1:RMOgXeDM7CdPOOLc18NCTitArQFqT2NUgUBB34JijDg=
 github.com/NVIDIA/nvidia-container-toolkit v1.20.0/go.mod h1:6otYPfCJdFX96mpi3WV58tyhjvwitYwVytHIifKbdcA=
 github.com/NVIDIA/nvidia-container-toolkit v1.20.1 h1:DsE0Pnu2XAl7IC00W2tmld7i/GerwnZGzRbmChj295Q=

@@ -125,7 +125,11 @@ func TestENPUInvalidConfiguredPolicyLeavesLegacyModesUnchanged(t *testing.T) {
 			if got := pod.Annotations["huawei.com/enpu-policy"]; got != "invalid-ENPU-only-override" {
 				t.Fatalf("legacy Pod ENPU-only policy was rewritten: %q", got)
 			}
-			fit, allocation, reason := dev.Fit([]*device.DeviceUsage{enpuTestUsage("free", nil)}, dev.GenerateResourceRequests(ctr), pod, enpuTestNode(tc.core, false), nil)
+			request, err := dev.GenerateResourceRequests(ctr)
+			if err != nil {
+				t.Fatalf("GenerateResourceRequests: %v", err)
+			}
+			fit, allocation, reason := dev.Fit([]*device.DeviceUsage{enpuTestUsage("free", nil)}, request, pod, enpuTestNode(tc.core, false), nil)
 			if !fit || len(allocation[Ascend910CType]) != 1 || allocation[Ascend910CType][0].Usedmem != int32(tc.wantMemory) {
 				t.Fatalf("legacy Fit = %v, allocation = %+v, reason = %q", fit, allocation, reason)
 			}

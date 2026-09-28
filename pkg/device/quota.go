@@ -108,7 +108,11 @@ func countPodDevices(podDev PodDevices) map[string]int64 {
 					res[resourceNames.ResourceMemoryName] += int64(ctrdevice.Usedmem)
 				}
 				if len(resourceNames.ResourceCoreName) > 0 {
-					res[resourceNames.ResourceCoreName] += int64(ctrdevice.Usedcores)
+					if accounting, ok := devs.(CoreMaskAccounting); ok {
+						res[resourceNames.ResourceCoreName] += accounting.CountAllocatedCores(ctrdevice.Usedcores)
+					} else {
+						res[resourceNames.ResourceCoreName] += int64(ctrdevice.Usedcores)
+					}
 				}
 			}
 		}
