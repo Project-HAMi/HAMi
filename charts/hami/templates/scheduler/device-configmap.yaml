@@ -134,7 +134,7 @@ data:
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
       enpu: {{ .Values.devices.ascend.enpu | default false }}
-      enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" }}
+      enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" | quote }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
