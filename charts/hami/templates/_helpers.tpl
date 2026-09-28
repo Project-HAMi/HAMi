@@ -192,39 +192,6 @@ Check if K8s version >= 1.22 (uses KubeSchedulerConfiguration)
 {{- ge (include "hami-vgpu.k8sMinorVersion" . | int) 22 -}}
 {{- end -}}
 
-{{/* Render only runtime device configuration, shared by the ConfigMap and extender. */}}
-{{- define "hami-vgpu.deviceConfig" -}}
-{{- include "hami-vgpu.validateDeviceValues" . -}}
-{{- if and (index .Values "device-config") (index .Values "device-config" "content") -}}
-  {{- index .Values "device-config" "content" -}}
-{{- else -}}
-  {{- $config := dict -}}
-  {{/* Parse the shared value as YAML to retain the existing string/bool input. */}}
-  {{- $overwriteEnv := (printf "overwriteEnv: %v" .Values.scheduler.overwriteEnv | fromYaml).overwriteEnv -}}
-  {{- range $vendor := list "nvidia" "cambricon" "hygon" "metax" "enflame" "mthreads" "kunlun" "awsneuron" "amd" "vastai" "biren" -}}
-    {{- $vendorConfig := omit (index $.Values.devices $vendor) "enabled" "customresources" "createRuntimeClass" -}}
-    {{- if eq $vendor "nvidia" -}}
-      {{- $_ := set $vendorConfig "overwriteEnv" $overwriteEnv -}}
-    {{- end -}}
-    {{- $_ := set $config $vendor $vendorConfig -}}
-  {{- end -}}
-  {{- $_ := set $config "iluvatars" .Values.devices.iluvatar.configs -}}
-  {{- $vnpus := omit .Values.devices.ascend "enabled" "image" "imagePullPolicy" "extraArgs" "nodeSelector" "tolerations" "customresources" -}}
-  {{- $_ := set $vnpus "overwriteEnv" $overwriteEnv -}}
-  {{- $_ := set $config "vnpus" $vnpus -}}
-  {{- if .Values.devices.remotegpu.enabled -}}
-    {{- $remoteConfig := deepCopy (omit .Values.devices.remotegpu "enabled" "server") -}}
-    {{/* null selects the configured device-plugin image; an empty string
-         explicitly disables the client enforcement image. */}}
-    {{- if kindIs "invalid" $remoteConfig.libImage -}}
-      {{- $_ := set $remoteConfig "libImage" (include "hami.devicePlugin.image" .) -}}
-    {{- end -}}
-    {{- $_ := set $config "remotegpu" $remoteConfig -}}
-  {{- end -}}
-  {{- toYaml $config -}}
-{{- end -}}
-{{- end -}}
-
 {{/*
 Managed resources list for scheduler extender
 Returns a YAML list that can be used directly or converted to JSON via fromYaml | toJson
@@ -232,56 +199,83 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- define "hami-vgpu.scheduler.managedResources" -}}
 {{- include "hami-vgpu.validateDeviceValues" . -}}
 {{- $resources := list -}}
-{{- $names := list -}}
-{{- $config := include "hami-vgpu.deviceConfig" . | fromYaml -}}
-{{/* Only the dimensions historically forwarded to the extender are selected.
-     Their names come from the same config as the device backend. */}}
-{{- range $vendor := list "nvidia" "cambricon" "hygon" "metax" "ascend" "mthreads" "enflame" "kunlun" "awsneuron" "iluvatar" "vastai" "biren" "amd" "remotegpu" -}}
-  {{- $device := index $.Values.devices $vendor -}}
-  {{- if or (not (hasKey $device "enabled")) $device.enabled -}}
-    {{- $key := $vendor -}}
-    {{- if eq $vendor "ascend" -}}
-      {{- $key = "vnpus" -}}
-    {{- else if eq $vendor "iluvatar" -}}
-      {{- $key = "iluvatars" -}}
-    {{- end -}}
-    {{- $configs := list -}}
-    {{- with index $config $key -}}
-      {{- $configs = list . -}}
-      {{- if eq $vendor "ascend" -}}
-        {{- $configs = .configs -}}
-      {{- else if eq $vendor "iluvatar" -}}
-        {{- $configs = . -}}
-      {{- end -}}
-    {{- end -}}
-    {{- $fields := list "resourceCountName" "resourceMemoryName" "resourceCoreName" -}}
-    {{- if eq $vendor "nvidia" -}}
-      {{- $fields = concat $fields (list "resourceMemoryPercentageName" "resourcePriorityName") -}}
-    {{- else if or (eq $vendor "cambricon") (eq $vendor "mthreads") -}}
-      {{- $fields = list "resourceCountName" -}}
-    {{- else if eq $vendor "metax" -}}
-      {{- $fields = list "resourceCountName" "resourceVCountName" "resourceVCoreName" "resourceVMemoryName" -}}
-    {{- else if eq $vendor "enflame" -}}
-      {{- $fields = list "resourceNameDRSGCU" "resourceNameGCUMemory" "resourceNameGCUCore" "resourceNameGCU" -}}
-    {{- else if eq $vendor "kunlun" -}}
-      {{- $fields = list "resourceCountName" "resourceVCountName" "resourceVMemoryName" -}}
-    {{- else if eq $vendor "ascend" -}}
-      {{- $fields = list "resourceName" "resourceMemoryName" "resourceCoreName" -}}
-    {{- end -}}
-    {{- range $config := $configs -}}
-      {{- range $field := $fields -}}
-        {{- with index $config $field -}}
-          {{- $names = append $names . -}}
-        {{- end -}}
-      {{- end -}}
-    {{- end -}}
-    {{- range $device.customresources -}}
-      {{- $names = append $names . -}}
-    {{- end -}}
-  {{- end -}}
+{{/* Core NVIDIA resources */}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourcePriorityName "ignoredByScheduler" true) -}}
+{{/* MLU resources */}}
+{{- $resources = append $resources (dict "name" .Values.devices.cambricon.resourceCountName "ignoredByScheduler" true) -}}
+{{/* HCU resources */}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCoreName "ignoredByScheduler" true) -}}
+{{/* Metax resources */}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVMemoryName "ignoredByScheduler" true) -}}
+{{/* Ascend resources */}}
+{{- if .Values.devices.ascend.enabled -}}
+{{- range .Values.devices.ascend.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
-{{- range $name := uniq $names -}}
-  {{- $resources = append $resources (dict "name" $name "ignoredByScheduler" true) -}}
+{{- end -}}
+{{/* Mthreads resources */}}
+{{- if .Values.devices.mthreads.enabled -}}
+{{- range .Values.devices.mthreads.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Enflame resources */}}
+{{- if .Values.devices.enflame.enabled -}}
+{{- range .Values.devices.enflame.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Kunlun resources */}}
+{{- if .Values.devices.kunlun.enabled -}}
+{{- range .Values.devices.kunlun.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* AWS Neuron resources */}}
+{{- range .Values.devices.awsneuron.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{/* Iluvatar resources */}}
+{{- if .Values.devices.iluvatar.enabled -}}
+{{- range .Values.devices.iluvatar.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Vastai resources */}}
+{{- if .Values.devices.vastai.enabled -}}
+{{- range .Values.devices.vastai.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Biren resources */}}
+{{- if .Values.devices.biren.enabled -}}
+{{- range .Values.devices.biren.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* AMD resources */}}
+{{- range .Values.devices.amd.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{/* Remote GPU (lupine) resources. A client pod requests these on a node that
+     owns no GPU, so ignoredByScheduler is what keeps that node a candidate:
+     kube-scheduler skips the node-fit check and leaves placement to the
+     extender, which still gets called because the resource is listed here.
+     Both names come straight from the values the device config uses, so
+     renaming a resource cannot leave it off this list and silently reinstate
+     the node-fit check that rejects every GPU-less node. */}}
+{{- if .Values.devices.remotegpu.enabled -}}
+{{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceMemoryName "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- toYaml $resources -}}
 {{- end -}}

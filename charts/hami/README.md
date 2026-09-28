@@ -413,25 +413,25 @@ host-installed drivers, or appends the GPU Operator path suffix
 ### AWS Neuron
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.awsneuron.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.awsneuron.customresources` | Custom resources | `["aws.amazon.com/neuron", "aws.amazon.com/neuroncore"]` |
 
 ### Kunlunxin
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
 
 ### Enflame
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.enflame.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.mthreads.enabled` | Whether to enable | `true` |
 | `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`; scalar values are rejected | `[96]` |
-| `devices.mthreads.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
 
 ### NVIDIA
 | Parameter | Description | Default Value |
@@ -448,23 +448,20 @@ host-installed drivers, or appends the GPU Operator path suffix
 | `devices.ascend.extraArgs` | Extra arguments | `[]` |
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
-| `devices.ascend.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
 
 ### Iluvatar
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.iluvatar.enabled` | Whether to enable | `false` |
-| `devices.iluvatar.customresources` | Additional resource names forwarded to the scheduler extender, beyond those derived from the device configuration | `[]` |
+| `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |
 
 ## Device Config Overrides
 
-The chart renders the complete device configuration from `devices.<vendor>`.
-Config field names match `device-config.yaml`; `devices.ascend` renders as
-`vnpus`, and `devices.iluvatar.configs` renders as `iluvatars`.
-
-Supply a values file to override only the fields you need. Maps merge with chart
-defaults; lists such as `migProfileAllowlist`, Ascend `configs`, and the Iluvatar
-config list replace the corresponding default list in full.
+Device configuration defaults are defined in `values.yaml`. Override individual
+fields under `devices.<vendor>` in your own values file. The chart keeps the
+existing runtime field names: `devices.ascend.configs` renders as `vnpus.configs`,
+and `devices.iluvatar.configs` renders as `iluvatars`.
 
 ```yaml
 devices:
@@ -472,10 +469,17 @@ devices:
     defaultMemory: 4096
     defaultCores: 50
   hygon:
-    memoryFactor: 1
+    memoryFactor: 2
 ```
 
-`device-config.content` is an optional full replacement of the generated document.
-It does not merge with `devices.*`. Bundled `files/device-config.yaml` is no
-longer read. Built-in extender resource names are derived from the rendered device configuration; use
-`devices.<vendor>.customresources` only for additional resource names.
+Lists such as `migProfileAllowlist`, Ascend `configs`, and Iluvatar `configs`
+replace the corresponding default list in full.
+
+Configuration precedence remains `device-config.content`, then a bundled
+`files/device-config.yaml`, then the configuration generated from values.
+`device-config.content` replaces the complete document; it does not merge with
+`devices.*`.
+
+`devices.<vendor>.customresources` keeps its existing behavior and defaults.
+For vendors whose extender resources use this list, update it when changing
+runtime resource names or chip definitions.

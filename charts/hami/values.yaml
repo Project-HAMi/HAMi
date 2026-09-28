@@ -536,27 +536,40 @@ devices:
     resourceCountName: "amd.com/gpu"
     resourceMemoryName: "amd.com/gpumem"
     resourceCoreName: "amd.com/gpucores"
-    customresources: []
+    customresources:
+      - amd.com/gpu
+      - amd.com/gpumem
+      - amd.com/gpucores
   awsneuron:
     resourceCountName: "aws.amazon.com/neuron"
     resourceCoreName: "aws.amazon.com/neuroncore"
-    customresources: []
+    customresources:
+      - aws.amazon.com/neuron
+      - aws.amazon.com/neuroncore
   kunlun:
     resourceCountName: "kunlunxin.com/xpu"
     resourceVCountName: "kunlunxin.com/vxpu"
     resourceVMemoryName: "kunlunxin.com/vxpu-memory"
     enabled: true
-    customresources: []
+    customresources:
+      - kunlunxin.com/xpu
+      - kunlunxin.com/vxpu
+      - kunlunxin.com/vxpu-memory
   enflame:
     resourceNameGCU: "enflame.com/gcu"
     resourceNameDRSGCU: "enflame.com/drs-gcu"
     resourceNameGCUMemory: "enflame.com/gcu-memory"
     resourceNameGCUCore: "enflame.com/gcu-core"
     enabled: true
-    customresources: []
+    customresources:
+      - enflame.com/drs-gcu
+      - enflame.com/gcu-memory
+      - enflame.com/gcu-core
+      - enflame.com/gcu
   mthreads:
     enabled: true
-    customresources: []
+    customresources:
+      - mthreads.com/vgpu
     resourceCountName: "mthreads.com/vgpu"
     resourceMemoryName: "mthreads.com/sgpu-memory"
     resourceCoreName: "mthreads.com/sgpu-core"
@@ -570,11 +583,13 @@ devices:
   vastai:
     resourceCountName: "vastaitech.com/va"
     enabled: true
-    customresources: []
+    customresources:
+      - vastaitech.com/va
   biren:
     resourceCountName: "birentech.com/gpu"
     enabled: true
-    customresources: []
+    customresources:
+      - birentech.com/gpu
   nvidia:
     migProfileAllowlist:
       - models: [ "A30" ]
@@ -810,7 +825,28 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
-    customresources: []
+    customresources:
+      - huawei.com/Ascend910A
+      - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910A-core
+      - huawei.com/Ascend910B2
+      - huawei.com/Ascend910B2-memory
+      - huawei.com/Ascend910B2-core
+      - huawei.com/Ascend910B3
+      - huawei.com/Ascend910B3-memory
+      - huawei.com/Ascend910B3-core
+      - huawei.com/Ascend910B4
+      - huawei.com/Ascend910B4-memory
+      - huawei.com/Ascend910B4-core
+      - huawei.com/Ascend910B4-1
+      - huawei.com/Ascend910B4-1-memory
+      - huawei.com/Ascend910B4-1-core
+      - huawei.com/Ascend310P
+      - huawei.com/Ascend310P-memory
+      - huawei.com/Ascend310P-core
+      - huawei.com/Ascend910C
+      - huawei.com/Ascend910C-memory
+      - huawei.com/Ascend910C-core
   iluvatar:
     configs:
       - chipName: MR-V100
@@ -834,14 +870,26 @@ devices:
         resourceMemoryName: iluvatar.ai/BI-V100.vMem
         resourceCoreName: iluvatar.ai/BI-V100.vCore
     enabled: false
-    customresources: []
+    customresources:
+      - iluvatar.ai/BI-V100-vgpu
+      - iluvatar.ai/BI-V100.vCore
+      - iluvatar.ai/BI-V100.vMem
+      - iluvatar.ai/BI-V150-vgpu
+      - iluvatar.ai/BI-V150.vCore
+      - iluvatar.ai/BI-V150.vMem
+      - iluvatar.ai/MR-V100-vgpu
+      - iluvatar.ai/MR-V100.vCore
+      - iluvatar.ai/MR-V100.vMem
+      - iluvatar.ai/MR-V50-vgpu
+      - iluvatar.ai/MR-V50.vCore
+      - iluvatar.ai/MR-V50.vMem
 
 legacyMetrics: false
 
 prometheus:
   enabled: false
 
-# Full replacement of device-config.yaml. Leave empty to render devices.*.
+# Full replacement of device-config.yaml; takes precedence over a bundled file and values.
 # This is a complete document, not a merge; prefer devices.<vendor> fields for partial overrides.
 device-config:
   content: ""
