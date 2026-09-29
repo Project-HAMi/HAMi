@@ -3,6 +3,9 @@ on:
   # Run this workflow every time a new commit pushed to upstream/fork repository.
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
   pull_request:
+  schedule:
+    # Keep a longer-running benchmark history without making PR feedback slow.
+    - cron: '17 3 * * 1'
   push:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
@@ -138,6 +141,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       # The libvgpu submodule holds no Go sources, so unlike the unit test job
       # this one does not need it to build the benchmarks.
@@ -145,11 +150,30 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      - name: Test benchmark comparison script
+        run: make test-bench-compare
+      - name: Install benchstat
+        if: github.event_name == 'pull_request'
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da
+      - name: Run PR base benchmarks
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add --detach ../hami-bench-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd ../hami-bench-base
+            BENCHTIME=10x make bench
+          )
+          mkdir -p _output/bench
+          cp ../hami-bench-base/_output/bench/results.txt _output/bench/base.txt
       - name: Run benchmarks
-        # A low benchtime keeps this a smoke test: the job proves every
-        # benchmark still runs, and deliberately does not compare timings,
-        # which are not reproducible on shared runners.
-        run: BENCHTIME=10x make bench
+        # PR comparisons use the same short benchtime for both revisions. The
+        # scheduled run is longer and retains an artifact for trend inspection.
+        run: BENCHTIME="${{ github.event_name == 'schedule' && '1s' || '10x' }}" make bench
+      - name: Compare PR benchmark results
+        if: github.event_name == 'pull_request'
+        run: >-
+          bash hack/bench-compare.sh _output/bench/base.txt _output/bench/results.txt
+          _output/bench/benchstat.txt hack/bench-policy.tsv
       - name: Upload benchmark results
         # Uploaded even on failure so the partial output shows which benchmark
         # broke.
@@ -157,8 +181,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: benchmark-results
-          path: _output/bench/results.txt
-          retention-days: 5
+          path: _output/bench
+          retention-days: 30
           if-no-files-found: warn
 
   build:

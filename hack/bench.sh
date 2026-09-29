@@ -19,16 +19,17 @@ set -o pipefail
 
 set -x
 
-# Benchmarks run here as a correctness check, not as a timing gate: shared CI
-# runners are too noisy to compare durations between runs. The point is that
-# every benchmark still builds its fixtures and runs to completion, which a
+# This script records raw benchmark output. CI runs it for both the PR base and
+# head, then uses benchstat to report all deltas and the policy file to gate
+# allocation regressions. Shared CI runners remain too noisy for a timing gate.
+# Every benchmark still builds its fixtures and runs to completion, which a
 # plain "go test" never verifies because it skips benchmark bodies.
 #
 # BENCHTIME keeps a CI run short while allowing a meaningful local measurement:
 #   BENCHTIME=1s make bench
 BENCHTIME="${BENCHTIME:-10x}"
 
-output_dir="./_output/bench"
+output_dir="${BENCH_OUTPUT_DIR:-./_output/bench}"
 mkdir -p "${output_dir}"
 result_file="${output_dir}/results.txt"
 
