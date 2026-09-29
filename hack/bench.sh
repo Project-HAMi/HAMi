@@ -19,16 +19,20 @@ set -o pipefail
 
 set -x
 
-# Benchmarks run here as a correctness check, not as a timing gate: shared CI
-# runners are too noisy to compare durations between runs. The point is that
-# every benchmark still builds its fixtures and runs to completion, which a
+# This script records raw benchmark output. CI runs it for both the PR base and
+# head, then uses benchstat to report all deltas and the policy file to gate
+# allocation regressions. Shared CI runners remain too noisy for a timing gate.
+# Every benchmark still builds its fixtures and runs to completion, which a
 # plain "go test" never verifies because it skips benchmark bodies.
 #
-# BENCHTIME keeps a CI run short while allowing a meaningful local measurement:
-#   BENCHTIME=1s make bench
+# BENCHTIME controls work per benchmark invocation. BENCH_COUNT requests
+# independent benchmark samples; CI uses both when producing a benchstat
+# comparison, while local smoke tests keep the historical single result.
+#   BENCHTIME=1s BENCH_COUNT=10 make bench
 BENCHTIME="${BENCHTIME:-10x}"
+BENCH_COUNT="${BENCH_COUNT:-1}"
 
-output_dir="./_output/bench"
+output_dir="${BENCH_OUTPUT_DIR:-./_output/bench}"
 mkdir -p "${output_dir}"
 result_file="${output_dir}/results.txt"
 
@@ -38,5 +42,5 @@ result_file="${output_dir}/results.txt"
 #
 # --race is deliberately omitted. The race detector multiplies the runtime and
 # distorts the allocation figures the benchmarks exist to report.
-go test -run '^$' -bench . -benchmem -benchtime "${BENCHTIME}" \
+go test -run '^$' -bench . -benchmem -benchtime "${BENCHTIME}" -count "${BENCH_COUNT}" \
   $(go list ./pkg/... ./cmd/...) 2>&1 | tee "${result_file}"
