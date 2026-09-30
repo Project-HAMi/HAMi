@@ -60,7 +60,12 @@ data:
       resourceMemoryName: {{ .Values.devices.mthreads.resourceMemoryName }}
       resourceCoreName: {{ .Values.devices.mthreads.resourceCoreName }}
       memoryPerCard:
-{{ toYaml .Values.devices.mthreads.memoryPerCard | indent 8 }}
+{{- $memoryPerCard := .Values.devices.mthreads.memoryPerCard }}
+{{- /* Keep legacy scalar overrides compatible with the list-based runtime field. */}}
+{{- if and (not (kindIs "slice" $memoryPerCard)) (not (kindIs "invalid" $memoryPerCard)) }}
+{{- $memoryPerCard = list $memoryPerCard }}
+{{- end }}
+{{ toYaml $memoryPerCard | indent 8 }}
     iluvatars:
 {{ toYaml .Values.devices.iluvatar.configs | indent 6 }}
     {{- if .Values.devices.remotegpu.enabled }}

@@ -436,7 +436,7 @@ host-installed drivers, or appends the GPU Operator path suffix
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.mthreads.enabled` | Whether to enable | `true` |
-| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]` | `[96]` |
+| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
 | `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
 
 ### NVIDIA
