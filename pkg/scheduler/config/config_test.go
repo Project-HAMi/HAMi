@@ -18,6 +18,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -200,8 +202,10 @@ vnpus:
 }
 
 func Test_LoadConfig(t *testing.T) {
-	var configData Config
-	err := yaml.Unmarshal([]byte(loadTestConfig()), &configData)
+	path := filepath.Join(t.TempDir(), "device-config.yaml")
+	assert.NilError(t, os.WriteFile(path, []byte(loadTestConfig()), 0o600))
+
+	configData, err := LoadConfig(path)
 	assert.NilError(t, err)
 
 	dataDrivenTests := []struct {
@@ -228,6 +232,57 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.VNPUs, expectedVNPUs)
 	expectedIluvatars := createIluvatarConfigs()
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
+}
+
+func TestLoadConfigRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name:   "valid configuration",
+			config: loadTestConfig(),
+		},
+		{
+			name:    "unknown top-level field",
+			config:  "unknown: true\n",
+			wantErr: "field unknown not found",
+		},
+		{
+			name: "unknown nested field",
+			config: "nvidia:\n" +
+				"  resourceCountNmae: nvidia.com/gpu\n",
+			wantErr: "field resourceCountNmae not found",
+		},
+		{
+			name: "duplicate field",
+			config: "nvidia:\n" +
+				"  resourceCountName: nvidia.com/gpu\n" +
+				"  resourceCountName: nvidia.com/gpu2\n",
+			wantErr: "resourceCountName already set",
+		},
+		{
+			name: "invalid value type",
+			config: "nvidia:\n" +
+				"  defaultGPUNum: not-a-number\n",
+			wantErr: "cannot unmarshal",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "device-config.yaml")
+			assert.NilError(t, os.WriteFile(path, []byte(test.config), 0o600))
+
+			_, err := LoadConfig(path)
+			if test.wantErr == "" {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, test.wantErr)
+		})
+	}
 }
 
 func createNvidiaConfig() nvidia.NvidiaConfig {
@@ -591,8 +646,8 @@ func (s stubDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error)
 }
 func (s stubDevices) LockNode(n *corev1.Node, p *corev1.Pod) error        { return nil }
 func (s stubDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error { return nil }
-func (s stubDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	return device.ContainerDeviceRequest{}
+func (s stubDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (s stubDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
@@ -950,8 +1005,52 @@ func Test_Resourcereqs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := device.Resourcereqs(test.args)
+			got, err := device.Resourcereqs(test.args)
+			assert.NilError(t, err)
 			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
+
+// A count the apiserver accepts as an integer can still be too large for
+// int64, which makes Quantity.AsInt64 report failure. Every backend has to
+// fail closed on that rather than report the container as device-less, and
+// every backend has to treat an explicit zero as device-less rather than
+// invalid. Both are easy to regress one backend at a time, so assert them
+// across all of them at once.
+func TestGenerateResourceRequests_CountEdgesAcrossBackends(t *testing.T) {
+	InitDefaultDevices()
+
+	for commonWord, dev := range device.DevicesMap {
+		countName := dev.GetResourceNames().ResourceCountName
+		if countName == "" {
+			continue
+		}
+
+		t.Run(commonWord+"/too large for int64 fails closed", func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(countName): resource.MustParse("1Ei"),
+					},
+				},
+			}
+			got, err := dev.GenerateResourceRequests(ctr)
+			assert.Assert(t, err != nil, "%s accepted a count that does not fit in an int64", commonWord)
+			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
+		})
+
+		t.Run(commonWord+"/zero is device-less", func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(countName): resource.MustParse("0"),
+					},
+				},
+			}
+			got, err := dev.GenerateResourceRequests(ctr)
+			assert.NilError(t, err)
+			assert.Equal(t, got.Nums, int32(0), "%s reported devices for a zero count", commonWord)
 		})
 	}
 }

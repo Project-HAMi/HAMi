@@ -6,7 +6,7 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.12.0
 	github.com/NVIDIA/go-nvml v0.13.4-0
-	github.com/NVIDIA/k8s-device-plugin v0.20.0
+	github.com/NVIDIA/k8s-device-plugin v0.20.1
 	github.com/NVIDIA/nvidia-container-toolkit v1.20.1
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/fsnotify/fsnotify v1.10.1
@@ -14,7 +14,7 @@ require (
 	github.com/imdario/mergo v0.3.16
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/onsi/ginkgo/v2 v2.33.0
-	github.com/onsi/gomega v1.43.1
+	github.com/onsi/gomega v1.44.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
 	github.com/sirupsen/logrus v1.10.2
@@ -30,12 +30,12 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/v3 v3.5.2
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
-	k8s.io/client-go v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
+	k8s.io/client-go v0.37.1
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-scheduler v0.37.0
-	k8s.io/kubelet v0.37.0
+	k8s.io/kube-scheduler v0.37.1
+	k8s.io/kubelet v0.37.1
 	sigs.k8s.io/controller-runtime v0.25.1
 	tags.cncf.io/container-device-interface v1.1.1
 	tags.cncf.io/container-device-interface/specs-go v1.1.1

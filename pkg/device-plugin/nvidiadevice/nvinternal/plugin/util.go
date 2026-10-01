@@ -34,6 +34,7 @@ import (
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -137,7 +138,10 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 	if !ok {
 		return nil
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, err := dev.GenerateResourceRequests(ctr)
+	if err != nil {
+		return err
+	}
 	for _, each := range allocated {
 		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
 		if bounded && each.Usedmem > limit {
@@ -325,6 +329,8 @@ func containsModel(target string, models []string) bool {
 	return false
 }
 
+// GetContainerDeviceStrArray resolves container devices. In MIG mode the caller
+// must hold applyMutex across this call and the runtime annotation update.
 func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevices, pod *corev1.Pod, containerName string) ([]string, error) {
 	if nv.operatingMode != "mig" {
 		out := make([]string, 0, len(c))
@@ -368,9 +374,6 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	if len(containerAllocations) != len(c) {
 		return nil, fmt.Errorf("container %s has %d MIG reservations, requested %d devices", containerName, len(containerAllocations), len(c))
 	}
-	if err := nv.reconcileActiveMigAllocations(); err != nil {
-		return nil, fmt.Errorf("reconcile MIG allocations before allocation: %w", err)
-	}
 	createdMigUUIDs := make([]string, 0, len(c))
 	allocationCompleted := false
 	defer func() {
@@ -380,6 +383,16 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		for i := len(createdMigUUIDs) - 1; i >= 0; i-- {
 			if err := nv.migMgr.Release(createdMigUUIDs[i]); err != nil {
 				klog.ErrorS(err, "failed to roll back partial MIG allocation", "uuid", createdMigUUIDs[i])
+			} else if nv.deviceListStrategies.AnyCDIEnabled() {
+				if handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface); ok {
+					if err := handler.RemoveDynamicMIGDevice(createdMigUUIDs[i]); err != nil {
+						klog.ErrorS(err, "failed to remove rolled-back MIG CDI entry", "uuid", createdMigUUIDs[i])
+						if nv.pendingCDIRemovals == nil {
+							nv.pendingCDIRemovals = make(map[string]struct{})
+						}
+						nv.pendingCDIRemovals[createdMigUUIDs[i]] = struct{}{}
+					}
+				}
 			}
 		}
 	}()
@@ -399,10 +412,43 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if created {
 			createdMigUUIDs = append(createdMigUUIDs, migUUID)
 		}
+		if nv.deviceListStrategies.AnyCDIEnabled() {
+			handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
+			if !ok {
+				return nil, fmt.Errorf("dynamic MIG CDI handler is unavailable")
+			}
+			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile,
+				nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+			if err != nil {
+				return nil, err
+			}
+			if _, err := handler.EnsureDynamicMIGDevice(record); err != nil {
+				return nil, fmt.Errorf("publish CDI entry for MIG device %s: %w", migUUID, err)
+			}
+		}
 		out = append(out, migUUID)
 	}
 	allocationCompleted = true
 	return out, nil
+}
+
+func (nv *NvidiaDevicePlugin) dynamicMIGRecord(gpuIndex int, parentUUID, profile string, placement nvml.GpuInstancePlacement) (cdi.DynamicMIGDevice, error) {
+	info, ok := nv.migMgr.AllocationRuntimeInfo(gpuIndex, profile, placement)
+	if !ok {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("MIG runtime information is missing for GPU %s", parentUUID)
+	}
+	gpu, ret := nv.migMgr.nvmllib.DeviceGetHandleByIndex(gpuIndex)
+	if ret != nvml.SUCCESS {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("get parent GPU %d: %s", gpuIndex, nvml.ErrorString(ret))
+	}
+	minor, ret := gpu.GetMinorNumber()
+	if ret != nvml.SUCCESS {
+		return cdi.DynamicMIGDevice{}, fmt.Errorf("get parent GPU minor: %s", nvml.ErrorString(ret))
+	}
+	return cdi.DynamicMIGDevice{
+		MIGUUID: info.MigUUID, ParentGPUUUID: parentUUID, ParentMinor: minor,
+		GPUInstanceID: info.GIID, ComputeInstanceID: info.CIID,
+	}, nil
 }
 
 var podAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {

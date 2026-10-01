@@ -531,7 +531,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
-			result := dev.GenerateResourceRequests(test.args)
+			result, _ := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -1032,7 +1032,7 @@ func Test_GenerateResourceRequests_MutatedMultiCard(t *testing.T) {
 		if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
 			t.Fatalf("MutateAdmission(count=%d): %v", count, err)
 		}
-		got := dev.GenerateResourceRequests(ctr)
+		got, _ := dev.GenerateResourceRequests(ctr)
 		if got.Nums != int32(count) {
 			t.Errorf("count=%d: Nums = %d, want %d", count, got.Nums, count)
 		}
@@ -1068,7 +1068,7 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := dev.GenerateResourceRequests(iluvatarContainer(test.count, &test.cores))
+			got, _ := dev.GenerateResourceRequests(iluvatarContainer(test.count, &test.cores))
 			if got.Nums != test.wantNums {
 				t.Errorf("Nums = %d, want %d", got.Nums, test.wantNums)
 			}

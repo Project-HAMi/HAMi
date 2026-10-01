@@ -1766,7 +1766,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			}
-			result := dev.GenerateResourceRequests(&test.args)
+			result, _ := dev.GenerateResourceRequests(&test.args)
 
 			assert.Equal(t, result, test.want)
 		})
@@ -1816,7 +1816,7 @@ func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 					},
 				},
 			}
-			result := dev.GenerateResourceRequests(&test.args)
+			result, _ := dev.GenerateResourceRequests(&test.args)
 
 			assert.Equal(t, result, test.want)
 		})
@@ -1961,7 +1961,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := test.dev.GenerateResourceRequests(&req)
+			result, _ := test.dev.GenerateResourceRequests(&req)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -2081,7 +2081,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := test.dev.GenerateResourceRequests(&test.args)
+			result, _ := test.dev.GenerateResourceRequests(&test.args)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -2141,7 +2141,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := test.dev.GenerateResourceRequests(&test.args)
+			result, _ := test.dev.GenerateResourceRequests(&test.args)
 			assert.Equal(t, result, device.ContainerDeviceRequest{})
 		})
 	}
@@ -3708,7 +3708,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 					},
 				},
 			}
-			req := dev.GenerateResourceRequests(ctr)
+			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
 				assert.Equal(t, int32(1), req.Nums)
 				assert.Equal(t, int32(tt.cores), req.Coresreq)
