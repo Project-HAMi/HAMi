@@ -1122,7 +1122,7 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	t.Cleanup(func() { util.NodeName = previousNodeName })
 
 	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
-	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
 	previousFile := ConfigFile
 	ConfigFile = &pluginConfig
 	t.Cleanup(func() { ConfigFile = previousFile })
@@ -1145,7 +1145,7 @@ func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
 	t.Cleanup(func() { util.NodeName = previousNodeName })
 
 	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
-	require.NoError(t, os.WriteFile(pluginConfig, []byte("version: v1\n"), 0o600))
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
 	previousFile := ConfigFile
 	ConfigFile = &pluginConfig
 	t.Cleanup(func() { ConfigFile = previousFile })
