@@ -221,21 +221,22 @@ func TestMigManagerAllocationUsesOneSession(t *testing.T) {
 		t.Fatal("UUID resolution failed")
 	}
 	for i := 0; i < 2; i++ {
-		uuid, created, err := m.EnsureAllocation(0, "1g.5gb", placement)
-		if err != nil || uuid != "MIG-test" || created != (i == 0) {
-			t.Fatalf("EnsureAllocation = %q, %v, %v", uuid, created, err)
+		result, err := m.EnsureAllocation(0, "1g.5gb", placement)
+		if err != nil || result.MigUUID != "MIG-test" || result.Created != (i == 0) {
+			t.Fatalf("EnsureAllocation = %+v, %v", result, err)
 		}
 	}
 	if err := m.AdoptAllocation(0, "1g.5gb", "MIG-test", placement, 1, 2); err != nil {
 		t.Fatal(err)
 	}
-	destroyed, err := m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}})
-	if err != nil || len(destroyed) != 0 {
-		t.Fatalf("active reconciliation destroyed devices: %v, %v", destroyed, err)
+	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{allocationKey(0, "1g.5gb", placement): {}}); err != nil {
+		t.Fatalf("active reconciliation failed: %v", err)
 	}
-	destroyed, err = m.ReconcileActiveAllocationsWithDestroyed(map[migAllocationKey]struct{}{})
-	if err != nil || len(destroyed) != 1 || destroyed[0] != "MIG-test" {
-		t.Fatalf("destroyed MIG identities = %v, %v", destroyed, err)
+	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{}); err != nil {
+		t.Fatalf("idle reconciliation failed: %v", err)
+	}
+	if state := m.byAllocation[allocationKey(0, "1g.5gb", placement)].State; state != migInstanceIdle {
+		t.Fatalf("released allocation state = %s, want %s", state, migInstanceIdle)
 	}
 	if err := m.ReconcileActiveAllocations(map[migAllocationKey]struct{}{}); err != nil {
 		t.Fatal(err)
@@ -250,7 +251,7 @@ func TestMigManagerAllocationUsesOneSession(t *testing.T) {
 		t.Fatal("allocation operations changed session ownership")
 	}
 	// Closing the session must never destroy an active allocation.
-	if _, _, err := m.EnsureAllocation(0, "1g.5gb", placement); err != nil {
+	if _, err := m.EnsureAllocation(0, "1g.5gb", placement); err != nil {
 		t.Fatal(err)
 	}
 	m.Shutdown()
