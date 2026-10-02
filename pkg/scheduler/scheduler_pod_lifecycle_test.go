@@ -17,15 +17,18 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"maps"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
@@ -33,6 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func initReplayDevices(t *testing.T) {
@@ -239,6 +243,46 @@ func Test_onAddPod_ReportsUndecodableBoundAllocation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("expected allocation decode failure event")
 	}
+}
+
+func TestStartReportsUndecodableAllocationDuringInitialReplay(t *testing.T) {
+	initReplayDevices(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "startup-decode-failure",
+			Name:      "startup-decode-failure",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "node1",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node1"},
+	}
+	fakeClient := fake.NewSimpleClientset(pod)
+	previousClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	previousLeaderElect := config.LeaderElect
+	config.LeaderElect = false
+	t.Cleanup(func() { config.LeaderElect = previousLeaderElect })
+
+	s := NewScheduler()
+	require.NoError(t, s.Start())
+	t.Cleanup(s.Stop)
+
+	require.Eventually(t, func() bool {
+		events, err := fakeClient.CoreV1().Events(pod.Namespace).List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return false
+		}
+		for i := range events.Items {
+			if events.Items[i].Reason == EventReasonAllocationDecodeFailed {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 10*time.Millisecond)
 }
 
 func Test_onAddPod_ReportsUndecodableAllocationWithMismatchedAssignment(t *testing.T) {

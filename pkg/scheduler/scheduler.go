@@ -510,6 +510,7 @@ func (s *Scheduler) Start() error {
 		return fmt.Errorf("failed to register resource quota event handler: %w", err)
 	}
 
+	s.addAllEventHandlers()
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
@@ -527,7 +528,6 @@ func (s *Scheduler) Start() error {
 		cache.WaitForCacheSync(s.stopCh, leaseEventHandlerRegistration.HasSynced)
 	}
 
-	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
 }
