@@ -333,6 +333,7 @@ func Test_onUpdatePod_ReportsUndecodableInitShrink(t *testing.T) {
 		{{UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 10000, Usedcores: 5}},
 	}}
 	maps.Copy(pod.Annotations, device.EncodePodDevices(device.SupportDevices, validDevices))
+	t.Cleanup(func() { s.onDelPod(pod) })
 	s.onAddPod(pod)
 
 	updated := pod.DeepCopy()
