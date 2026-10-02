@@ -9,6 +9,7 @@ metadata:
   name: {{ include "hami-vgpu.scheduler.webhook" . }}
 webhooks:
   - admissionReviewVersions:
+    - v1
     - v1beta1
     clientConfig:
       {{- if .Values.scheduler.admissionWebhook.customURL.enabled }}
