@@ -10,7 +10,7 @@ ADD . /k8s-vgpu
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 
 FROM $NVIDIA_IMAGE AS nvbuild
-RUN dnf install -y cmake git && dnf clean all
+RUN dnf --disablerepo=cuda install -y cmake git && dnf clean all
 COPY ./libvgpu /libvgpu
 COPY .git/modules/libvgpu /libvgpu-git
 RUN rm -rf /libvgpu/.git && echo "gitdir: /libvgpu-git" > /libvgpu/.git

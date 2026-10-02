@@ -2,6 +2,118 @@
 
 This document provides detailed descriptions of all configurable values parameters for the HAMi Helm Chart.
 
+Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read. Supplying removed fields fails chart rendering and lists every old field with its replacement path.
+
+## Upgrade to v2.11
+
+Device-specific Helm values use `devices.<vendor>`. Move your existing overrides
+to the paths below before upgrading. The `device-config.yaml` format read by
+HAMi and the device plugins is unchanged.
+
+### Field migration table
+
+The previous fields are no longer read. The chart rejects them even when their
+value is `0`, `false`, or empty. Move each value to its new path and remove the
+old field.
+
+| Old Helm value | New Helm value |
+|----------------|----------------|
+| `resourceName` | `devices.nvidia.resourceCountName` |
+| `resourceMem` | `devices.nvidia.resourceMemoryName` |
+| `resourceMemPercentage` | `devices.nvidia.resourceMemoryPercentageName` |
+| `resourceCores` | `devices.nvidia.resourceCoreName` |
+| `resourcePriority` | `devices.nvidia.resourcePriorityName` |
+| `mluResourceName` | `devices.cambricon.resourceCountName` |
+| `mluResourceMem` | `devices.cambricon.resourceMemoryName` |
+| `mluResourceCores` | `devices.cambricon.resourceCoreName` |
+| `hcuResourceName` | `devices.hygon.resourceCountName` |
+| `hcuResourceMem` | `devices.hygon.resourceMemoryName` |
+| `hcuResourceCores` | `devices.hygon.resourceCoreName` |
+| `metaxResourceName` | `devices.metax.resourceVCountName` |
+| `metaxResourceCore` | `devices.metax.resourceVCoreName` |
+| `metaxResourceMem` | `devices.metax.resourceVMemoryName` |
+| `metaxsGPUTopologyAware` | `devices.metax.sgpuTopologyAware` |
+| `enflameResourceNameDRSGCU` | `devices.enflame.resourceNameDRSGCU` |
+| `enflameResourceNameGCUMemory` | `devices.enflame.resourceNameGCUMemory` |
+| `enflameResourceNameGCUCore` | `devices.enflame.resourceNameGCUCore` |
+| `kunlunResourceName` | `devices.kunlun.resourceCountName` |
+| `kunlunResourceVCountName` | `devices.kunlun.resourceVCountName` |
+| `kunlunResourceVMemoryName` | `devices.kunlun.resourceVMemoryName` |
+| `vastaiResourceName` | `devices.vastai.resourceCountName` |
+| `birenResourceName` | `devices.biren.resourceCountName` |
+| `devicePlugin.deviceSplitCount` | `devices.nvidia.deviceSplitCount` |
+| `devicePlugin.deviceMemoryScaling` | `devices.nvidia.deviceMemoryScaling` |
+| `devicePlugin.deviceCoreScaling` | `devices.nvidia.deviceCoreScaling` |
+| `devicePlugin.preConfiguredDeviceMemory` | `devices.nvidia.preConfiguredDeviceMemory` |
+| `devicePlugin.enableNumaTopology` | `devices.nvidia.enableNumaTopology` |
+| `devicePlugin.runtimeClassName` | `devices.nvidia.runtimeClassName` |
+| `devicePlugin.createRuntimeClass` | `devices.nvidia.createRuntimeClass` |
+
+Keep `scheduler.overwriteEnv` and other `devicePlugin` settings at their existing
+paths, including `enabled`, images, `deviceListStrategy`, `migStrategy`,
+`disablecorelimit`, and `nodeConfiguration`.
+
+### Back up the current configuration
+
+These examples use release `hami` in namespace `kube-system`. Replace the release,
+namespace, and ConfigMap names with those used by your installation.
+
+Export the release's user-supplied values and back up the device ConfigMap:
+
+```bash
+helm get values hami -n kube-system -o yaml > previous-values.yaml
+kubectl get configmap hami-scheduler-device -n kube-system -o yaml > device-config-backup.yaml
+```
+
+If you use node configuration, back up its ConfigMap too. Use the external
+ConfigMap name instead when `devicePlugin.nodeConfiguration.externalConfigName`
+is set:
+
+```bash
+kubectl get configmap hami-device-plugin -n kube-system -o yaml > node-config-backup.yaml
+```
+
+### Prepare the values file
+
+Create `my-values.yaml` from the saved user values. Apply the field migrations
+above and keep all other settings required by your installation.
+
+If you edited a ConfigMap manually, transfer only the settings you need to keep
+into the corresponding Helm values. Store node settings in
+`devicePlugin.nodeConfiguration.config` or your external ConfigMap. Do not
+restore the entire old ConfigMap over the new one, because this can overwrite
+new chart defaults.
+
+### Upgrade with the migrated values
+
+Update the chart repository and upgrade using the new chart defaults and your
+migrated values:
+
+```bash
+helm repo update hami-charts
+helm upgrade hami hami-charts/hami \
+  --namespace kube-system \
+  --version 2.11.0 \
+  --reset-values \
+  --values my-values.yaml
+```
+
+Replace `2.11.0` with the v2.11 patch version you want to install. `--reset-values`
+discards the release's previous values. Include every override you need to keep
+in `my-values.yaml` or the other values files passed to this command.
+
+Avoid `--reuse-values` and `--reset-then-reuse-values` during this migration.
+They can carry removed fields into the new chart and cause rendering to fail.
+
+After upgrading, check the generated ConfigMaps and the scheduler and device
+plugin rollout status. If you changed only the NVIDIA node configuration,
+restart the NVIDIA device plugin to load it:
+
+```bash
+kubectl rollout restart daemonset/hami-device-plugin -n kube-system
+kubectl rollout status daemonset/hami-device-plugin -n kube-system
+```
+
 ## Global Configuration
 
 | Parameter | Description | Default Value |
@@ -29,46 +141,46 @@ This document provides detailed descriptions of all configurable values paramete
 ### NVIDIA GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `resourceName` | GPU resource name | `"nvidia.com/gpu"` |
-| `resourceMem` | GPU memory resource name | `"nvidia.com/gpumem"` |
-| `resourceMemPercentage` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
-| `resourceCores` | GPU core resource name | `"nvidia.com/gpucores"` |
-| `resourcePriority` | GPU priority resource name | `"nvidia.com/priority"` |
+| `devices.nvidia.resourceCountName` | GPU resource name | `"nvidia.com/gpu"` |
+| `devices.nvidia.resourceMemoryName` | GPU memory resource name | `"nvidia.com/gpumem"` |
+| `devices.nvidia.resourceMemoryPercentageName` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
+| `devices.nvidia.resourceCoreName` | GPU core resource name | `"nvidia.com/gpucores"` |
+| `devices.nvidia.resourcePriorityName` | GPU priority resource name | `"nvidia.com/priority"` |
 
 ### Cambricon MLU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `mluResourceName` | MLU resource name | `"cambricon.com/vmlu"` |
-| `mluResourceMem` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
-| `mluResourceCores` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
+| `devices.cambricon.resourceCountName` | MLU resource name | `"cambricon.com/vmlu"` |
+| `devices.cambricon.resourceMemoryName` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
+| `devices.cambricon.resourceCoreName` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
 
 ### Hygon HCU Resources
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `hcuResourceName` | HCU resource name | `"hygon.com/hcunum"` |
-| `hcuResourceMem` | HCU memory resource name | `"hygon.com/hcumem"` |
-| `hcuResourceCores` | HCU core resource name | `"hygon.com/hcucores"` |
+| `devices.hygon.resourceCountName` | HCU resource name | `"hygon.com/hcunum"` |
+| `devices.hygon.resourceMemoryName` | HCU memory resource name | `"hygon.com/hcumem"` |
+| `devices.hygon.resourceCoreName` | HCU core resource name | `"hygon.com/hcucores"` |
 
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `metaxResourceName` | GPU resource name | `"metax-tech.com/sgpu"` |
-| `metaxResourceCore` | GPU core resource name | `"metax-tech.com/vcore"` |
-| `metaxResourceMem` | GPU memory resource name | `"metax-tech.com/vmemory"` |
-| `metaxsGPUTopologyAware` | GPU topology awareness | `"false"` |
+| `devices.metax.resourceVCountName` | GPU resource name | `"metax-tech.com/sgpu"` |
+| `devices.metax.resourceVCoreName` | GPU core resource name | `"metax-tech.com/vcore"` |
+| `devices.metax.resourceVMemoryName` | GPU memory resource name | `"metax-tech.com/vmemory"` |
+| `devices.metax.sgpuTopologyAware` | GPU topology awareness | `false` |
 
 ### Enflame GCU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `enflameResourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
-| `enflameResourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
-| `enflameResourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
+| `devices.enflame.resourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
+| `devices.enflame.resourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
+| `devices.enflame.resourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
 
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `kunlunResourceName` | XPU resource name | `"kunlunxin.com/xpu"` |
+| `devices.kunlun.resourceCountName` | XPU resource name | `"kunlunxin.com/xpu"` |
 
 ## Scheduler Configuration
 
@@ -251,11 +363,11 @@ or the five-failure limit for directory deletion.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devicePlugin.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
-| `devicePlugin.deviceMemoryScaling` | Device memory scaling ratio | `1` |
-| `devicePlugin.deviceCoreScaling` | Device core scaling ratio | `1` |
-| `devicePlugin.runtimeClassName` | Runtime class name | `""` |
-| `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
+| `devices.nvidia.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
+| `devices.nvidia.deviceMemoryScaling` | Device memory scaling ratio | `1` |
+| `devices.nvidia.deviceCoreScaling` | Device core scaling ratio | `1` |
+| `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
+| `devices.nvidia.createRuntimeClass` | Create the NVIDIA RuntimeClass named by `devices.nvidia.runtimeClassName` when the device plugin is enabled | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
