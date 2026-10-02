@@ -58,6 +58,22 @@ var (
 	legacyMetrics      bool
 )
 
+// waitForLockRemoval returns true once the lock clears, false on ctx cancel
+// or channel close. sigChan only wakes the loop; it carries no state.
+func waitForLockRemoval(ctx context.Context, sigChan <-chan struct{}, lockExistFn func() bool) bool {
+	for lockExistFn() {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-sigChan:
+			if !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
@@ -108,11 +124,13 @@ func start() error {
 	// Start the monitoring and feedback service
 	wg.Go(func() {
 		for {
-			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+			if err := watchAndFeedback(ctx, containerLister, lockChannel, plugin.IsMigApplyLockExist); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
-					<-lockChannel
+					if !waitForLockRemoval(ctx, lockChannel, plugin.IsMigApplyLockExist) {
+						return
+					}
 					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
 					continue
 				}
