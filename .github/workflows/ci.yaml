@@ -3,6 +3,9 @@ on:
   # Run this workflow every time a new commit pushed to upstream/fork repository.
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
   pull_request:
+  schedule:
+    # Keep a longer-running benchmark history without making PR feedback slow.
+    - cron: '17 3 * * 1'
   push:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
@@ -138,6 +141,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
+          # On pull_request events, github.sha is GitHub's tested merge commit.
+          # Compare that merge result with the base revision, not the stale PR
+          # head when master has moved since the branch was last rebased.
+          ref: ${{ github.sha }}
           persist-credentials: false
       # The libvgpu submodule holds no Go sources, so unlike the unit test job
       # this one does not need it to build the benchmarks.
@@ -145,11 +153,41 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      - name: Test benchmark comparison script
+        run: make test-bench-compare
+      - name: Install benchstat
+        if: github.event_name == 'pull_request'
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da
+      - name: Run PR base benchmarks
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          mkdir -p _output/bench
+          git worktree add --detach ../hami-bench-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd ../hami-bench-base
+            # The base may predate BENCH_COUNT, so invoke go test directly
+            # instead of relying on the new script interface from this PR.
+            go test -run '^$' -bench . -benchmem -benchtime 100ms -count 10 \
+              $(go list ./pkg/... ./cmd/...)
+          ) 2>&1 | tee _output/bench/base.txt
       - name: Run benchmarks
-        # A low benchtime keeps this a smoke test: the job proves every
-        # benchmark still runs, and deliberately does not compare timings,
-        # which are not reproducible on shared runners.
-        run: BENCHTIME=10x make bench
+        # PR comparisons need independent samples for benchstat, rather than
+        # multiple iterations collapsed into a single Go benchmark result.
+        # The scheduled run is longer and retains samples for trend inspection.
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BENCHTIME=100ms BENCH_COUNT=10 make bench
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            BENCHTIME=1s BENCH_COUNT=10 make bench
+          else
+            BENCHTIME=10x make bench
+          fi
+      - name: Compare PR benchmark results
+        if: github.event_name == 'pull_request'
+        run: >-
+          bash hack/bench-compare.sh _output/bench/base.txt _output/bench/results.txt
+          _output/bench/benchstat.txt hack/bench-policy.tsv
       - name: Upload benchmark results
         # Uploaded even on failure so the partial output shows which benchmark
         # broke.
@@ -157,8 +195,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: benchmark-results
-          path: _output/bench/results.txt
-          retention-days: 5
+          path: _output/bench
+          retention-days: 30
           if-no-files-found: warn
 
   build:
