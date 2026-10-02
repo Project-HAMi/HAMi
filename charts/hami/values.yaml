@@ -408,6 +408,10 @@ devicePlugin:
     # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
+  # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
+  # to Node capacity and allocatable fields. Defaults to false. Not NVIDIA-specific,
+  # so this stays here rather than under devices.<vendor>.
+  reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
