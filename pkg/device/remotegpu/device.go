@@ -423,7 +423,7 @@ func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsa
 // to one pod without giving it to another as well. Naming a second server would
 // only widen what the pod can reach, which is why a request for more cards than
 // any single server has goes unfilled even when the fleet holds enough.
-func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	byServer := map[string][]*device.DeviceUsage{}
 	servers := make([]string, 0, len(devices))
 	for _, d := range devices {
@@ -441,7 +441,15 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	// deterministically across Filter calls.
 	sort.Strings(servers)
 
-	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, pod)
+	// A previous container fixes this pod to one server. HAMi currently
+	// injects one LUPINE_SERVER endpoint into each client container, so a
+	// later container must use cards served by that same endpoint.
+	prior, committed := committedAllocation(allocated)
+	if prior != "" {
+		servers = []string{prior}
+	}
+
+	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, pod, committed)
 	if !fit && reason[common.ExclusiveDeviceAllocateConflict] > 0 {
 		// Only a booking stood in the way, and bookings come from a snapshot
 		// up to poolTTL old: a card freed moments ago still reads as taken.
@@ -454,13 +462,36 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
 		if intact := dev.serversStillWhole(byServer, servers); len(intact) > 0 {
-			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, pod)
+			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, pod, committed)
 		}
 	}
 	if fit {
 		return true, tmpDevs, ""
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// committedAllocation returns the lupine server and cards already owned by a
+// previous container of this pod. Whole-server allocation records every card
+// on the server for each container, so those cards are not conflicts when the
+// next container is fitted.
+func committedAllocation(allocated *device.PodDevices) (string, map[string]struct{}) {
+	if allocated == nil {
+		return "", nil
+	}
+	var server string
+	committed := map[string]struct{}{}
+	for _, ctrList := range (*allocated)[RemoteGPUCommonWord] {
+		for _, d := range ctrList {
+			if s := serverOf(d.UUID); s != "" {
+				if server == "" {
+					server = s
+				}
+				committed[d.UUID] = struct{}{}
+			}
+		}
+	}
+	return server, committed
 }
 
 // serversStillWhole drops the servers the forced refresh changed under us.
@@ -506,7 +537,7 @@ func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.Dev
 // tryFit picks the server the request should come from. It reads pool
 // reservations, so the same call can answer differently before and after a
 // refresh.
-func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, pod *corev1.Pod) (bool, map[string]device.ContainerDevices, map[string]int) {
+func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
 
@@ -525,16 +556,18 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 		c := candidate{server: server}
 		taken := false
 		for _, d := range byServer[server] {
+			_, ownedByPod := committed[d.ID]
 			switch {
 			case !d.Health:
 				// An unhealthy card is still visible to whoever holds the
 				// server, but it is not one this request can count on.
 				reason[common.CardNotHealth]++
-			case d.Used > 0 || dev.pool.reserved(d.ID):
-				// Used covers pods already booked on this client node; reserved
-				// covers pods booked on any other client node, which the
-				// scheduler's per-node usage view cannot see, and clients the
-				// server itself reports.
+			case (d.Used > 0 && !ownedByPod) || dev.pool.reserved(d.ID):
+				// Used covers pods already booked on this client node, except
+				// cards this pod committed while fitting an earlier container.
+				// Reserved covers pods booked on any other client node, which
+				// the scheduler's per-node usage view cannot see, and clients
+				// the server itself reports.
 				reason[common.ExclusiveDeviceAllocateConflict]++
 				taken = true
 			case request.Memreq > 0 && d.Totalmem < request.Memreq:
