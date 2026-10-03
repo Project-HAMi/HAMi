@@ -142,12 +142,18 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan struct{}, lockExistFn func() bool) error {
 	klog.Info("Starting watchAndFeedback")
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
 	}
 	defer nvml.Shutdown()
+
+	// Catches a lock already held on restart, mid-apply.
+	if lockExistFn() {
+		klog.Info("MIG apply lock file already present")
+		return errTemporaryClosed
+	}
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
@@ -157,8 +163,12 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 		case <-ctx.Done():
 			klog.Info("Shutting down watchAndFeedback")
 			return nil
-		case signal := <-migLockSignal:
-			if signal {
+		case _, ok := <-migLockSignal:
+			if !ok {
+				klog.Info("MIG apply lock watcher closed")
+				return nil
+			}
+			if lockExistFn() {
 				klog.Info("Received MIG apply lock file")
 				return errTemporaryClosed
 			}
