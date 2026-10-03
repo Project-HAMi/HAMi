@@ -72,6 +72,10 @@ test:
 bench:
 	bash hack/bench.sh
 
+.PHONY: test-support-bundle
+test-support-bundle:
+	bash hack/test-hami-support-bundle.sh
+
 lint:
 	bash hack/verify-staticcheck.sh
 

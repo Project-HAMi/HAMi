@@ -18,6 +18,16 @@ labels: kind/bug
 
 Please include the following information:
 
+> **Preferred:** create a redacted archive first and inspect it before sharing:
+>
+> ```bash
+> hack/hami-support-bundle.sh --kubeconfig /path/to/config --context my-context \
+>   --namespace hami-system --pod affected-pod --output-dir ./hami-support
+> ```
+>
+> The collector never queries Kubernetes Secrets. Use `--help` for node and
+> cluster-wide options, and attach only artifacts appropriate for the issue.
+
 - The Pod manifest, or at least its accelerator resource requests and limits
 - Pod events and relevant accelerator-related node annotations
 - Output from the vendor's diagnostic tool, when available (for example, `nvidia-smi -a` for NVIDIA devices)
