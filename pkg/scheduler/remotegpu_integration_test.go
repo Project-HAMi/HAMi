@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -115,6 +116,27 @@ func remoteGPUPod(name string, cards, mem int64) *corev1.Pod {
 					},
 				},
 			}},
+		},
+	}
+}
+
+func multiContainerRemoteGPUPod(name string, cardsPerCtr []int64, mem int64) *corev1.Pod {
+	containers := make([]corev1.Container, 0, len(cardsPerCtr))
+	for i, cards := range cardsPerCtr {
+		containers = append(containers, corev1.Container{
+			Name: fmt.Sprintf("app-%d", i),
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/remote-gpu":        *resource.NewQuantity(cards, resource.DecimalSI),
+					"nvidia.com/remote-gpu-memory": *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		})
+	}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: k8stypes.UID("uid-" + name)},
+		Spec: corev1.PodSpec{
+			Containers: containers,
 		},
 	}
 }
@@ -318,5 +340,28 @@ func TestRemoteGPU_MemoryRequestFiltersCards(t *testing.T) {
 	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0)
+	assert.Assert(t, failed["cpu-1"] != "")
+}
+
+// Two containers in a multi-container pod must not be allocated cards across
+// different lupine servers: the client holds a single connection to a single server.
+func TestRemoteGPU_MultiContainerAllocationNeverSpansTwoServers(t *testing.T) {
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-bbb", 40000)}),
+		gpulessNode("cpu-1"),
+	)
+
+	task := multiContainerRemoteGPUPod("client", []int64{1, 1}, 2000)
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	assert.Equal(t, len(nodes["cpu-1"].Devices.DeviceLists), 2, "fleet has two free cards overall")
+
+	s := NewScheduler()
+	failed := map[string]string{}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 0, "two containers must not span across two different lupine servers")
 	assert.Assert(t, failed["cpu-1"] != "")
 }

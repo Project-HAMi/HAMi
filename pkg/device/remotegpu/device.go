@@ -423,7 +423,24 @@ func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsa
 // to one pod without giving it to another as well. Naming a second server would
 // only widen what the pod can reach, which is why a request for more cards than
 // any single server has goes unfilled even when the fleet holds enough.
-func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+// allocatedServer returns the lupine server already assigned to an earlier container of the pod, if any.
+func allocatedServer(pDevs *device.PodDevices) string {
+	if pDevs == nil {
+		return ""
+	}
+	for _, devList := range *pDevs {
+		for _, ctrDevs := range devList {
+			for _, d := range ctrDevs {
+				if server := serverOf(d.UUID); server != "" {
+					return server
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, pDevs *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	byServer := map[string][]*device.DeviceUsage{}
 	servers := make([]string, 0, len(devices))
 	for _, d := range devices {
@@ -440,6 +457,15 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	// Map iteration order is random; sort so equal-fitting servers are picked
 	// deterministically across Filter calls.
 	sort.Strings(servers)
+
+	// All remote GPUs assigned to the same pod must come from the same Lupine server
+	// so that every assigned GPU is reachable via the single Lupine server endpoint.
+	if assignedServer := allocatedServer(pDevs); assignedServer != "" {
+		if _, ok := byServer[assignedServer]; !ok {
+			return false, map[string]device.ContainerDevices{}, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(devices)}, len(devices))
+		}
+		servers = []string{assignedServer}
+	}
 
 	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, pod)
 	if !fit && reason[common.ExclusiveDeviceAllocateConflict] > 0 {

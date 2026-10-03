@@ -551,3 +551,27 @@ func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	assert.Equal(t, fit, false, "only one card is big enough")
 	assert.Assert(t, reason != "")
 }
+
+func TestFit_MultiContainerMustNotSpanMultipleServers(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-1", 40000),
+		card("gpu-b", "GPU-2", 40000),
+	}
+
+	// First container is allocated gpu-a/GPU-1.
+	fit1, allocated1, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit1, true)
+	assert.Equal(t, allocated1[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-1")
+
+	// Pass accumulated allocation to the second container.
+	pDevs := device.PodDevices{
+		RemoteGPUCommonWord: device.PodSingleDevice{allocated1[RemoteGPUCommonWord]},
+	}
+	devices[0].Used++
+
+	// Second container request must not be satisfied by gpu-b.
+	fit2, _, reason := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, &pDevs)
+	assert.Equal(t, fit2, false, "multi-container pod must not span multiple lupine servers")
+	assert.Assert(t, reason != "")
+}
