@@ -53,6 +53,12 @@ Keep `scheduler.overwriteEnv` and other `devicePlugin` settings at their existin
 paths, including `enabled`, images, `deviceListStrategy`, `migStrategy`,
 `disablecorelimit`, and `nodeConfiguration`.
 
+For Enflame, Kunlun, Vastai, and Biren, standard extender resources are now
+added from the named device resource fields. Their `customresources` lists
+contain only additional resources and default to `[]`. Remove any copied
+standard-resource entries from these lists and keep the extra resources you
+need. Standard resources are included even when `customresources` is empty.
+
 ### Back up the current configuration
 
 These examples use release `hami` in namespace `kube-system`. Replace the release,
@@ -419,17 +425,18 @@ host-installed drivers, or appends the GPU Operator path suffix
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
+| `devices.kunlun.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Enflame
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
+| `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.mthreads.enabled` | Whether to enable | `true` |
+| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
 | `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
 
 ### NVIDIA
@@ -454,3 +461,36 @@ host-installed drivers, or appends the GPU Operator path suffix
 |-----------|-------------|---------------|
 | `devices.iluvatar.enabled` | Whether to enable | `false` |
 | `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |
+
+## Device Config Overrides
+
+Device configuration defaults are defined in `values.yaml`. Override individual
+fields under `devices.<vendor>` in your own values file. The chart keeps the
+existing runtime field names: `devices.ascend.configs` renders as `vnpus.configs`,
+and `devices.iluvatar.configs` renders as `iluvatars`.
+
+```yaml
+devices:
+  nvidia:
+    defaultMemory: 4096
+    defaultCores: 50
+  hygon:
+    memoryFactor: 2
+```
+
+Lists such as `migProfileAllowlist`, Ascend `configs`, and Iluvatar `configs`
+replace the corresponding default list in full.
+
+Configuration precedence remains `device-config.content`, then a bundled
+`files/device-config.yaml`, then the configuration generated from values.
+`device-config.content` replaces the complete document; it does not merge with
+`devices.*`.
+
+For Enflame, Kunlun, Vastai, and Biren, the scheduler extender's standard
+resources follow the named device resource fields. Their `customresources`
+lists add extra resource names and default to `[]`. Standard resources are
+always included when the vendor is enabled, and duplicate names within each
+vendor are removed.
+
+For other vendors whose extender resources use `customresources`, update those
+lists when changing resource names or chip definitions.

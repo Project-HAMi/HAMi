@@ -21,37 +21,20 @@ data:
       resourceCoreName: {{ .Values.devices.nvidia.resourceCoreName }}
       resourcePriorityName: {{ .Values.devices.nvidia.resourcePriorityName }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
-      defaultMemory: 0
-      defaultCores: 0
-      defaultGPUNum: 1
-      preConfiguredDeviceMemory: {{ .Values.devices.nvidia.preConfiguredDeviceMemory | default 0 }}
-      memoryFactor: 1
+      defaultMemory: {{ .Values.devices.nvidia.defaultMemory }}
+      defaultCores: {{ .Values.devices.nvidia.defaultCores }}
+      defaultGPUNum: {{ .Values.devices.nvidia.defaultGPUNum }}
+      preConfiguredDeviceMemory: {{ .Values.devices.nvidia.preConfiguredDeviceMemory }}
+      memoryFactor: {{ .Values.devices.nvidia.memoryFactor }}
       deviceSplitCount: {{ .Values.devices.nvidia.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devices.nvidia.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devices.nvidia.deviceCoreScaling }}
-      enableNumaTopology: {{ .Values.devices.nvidia.enableNumaTopology | default false }}
+      enableNumaTopology: {{ .Values.devices.nvidia.enableNumaTopology }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devices.nvidia.runtimeClassName }}"
       migProfileAllowlist:
-      - models: [ "A30" ]
-        profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
-      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
-        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb" ]
-      - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
-        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.79gb" ]
-      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
-        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.80gb" ]
-      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
-        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "4g.47gb", "7g.94gb" ]
-      - models: [ "H20", "H100 on GH200"]
-        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "4g.48gb", "7g.96gb" ]
-      - models: [ "H200 NVL", "H200-SXM5"]
-        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "4g.71gb", "7g.141gb" ]
-      - models: [ "B200" ]
-        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "4g.90gb", "7g.180gb" ]
-      - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
-        profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
+{{ toYaml .Values.devices.nvidia.migProfileAllowlist | indent 8 }}
     cambricon:
       resourceCountName: {{ .Values.devices.cambricon.resourceCountName }}
       resourceMemoryName: {{ .Values.devices.cambricon.resourceMemoryName }}
@@ -60,49 +43,31 @@ data:
       resourceCountName: {{ .Values.devices.hygon.resourceCountName }}
       resourceMemoryName: {{ .Values.devices.hygon.resourceMemoryName }}
       resourceCoreName: {{ .Values.devices.hygon.resourceCoreName }}
-      memoryFactor: 1
+      memoryFactor: {{ .Values.devices.hygon.memoryFactor }}
     metax:
-      resourceCountName: "metax-tech.com/gpu"
+      resourceCountName: {{ .Values.devices.metax.resourceCountName }}
       resourceVCountName: {{ .Values.devices.metax.resourceVCountName }}
       resourceVMemoryName: {{ .Values.devices.metax.resourceVMemoryName }}
       resourceVCoreName: {{ .Values.devices.metax.resourceVCoreName }}
       sgpuTopologyAware: {{ .Values.devices.metax.sgpuTopologyAware }}
     enflame:
-      resourceNameGCU: "enflame.com/gcu"
+      resourceNameGCU: {{ .Values.devices.enflame.resourceNameGCU }}
       resourceNameDRSGCU: {{ .Values.devices.enflame.resourceNameDRSGCU }}
       resourceNameGCUMemory: {{ .Values.devices.enflame.resourceNameGCUMemory }}
       resourceNameGCUCore: {{ .Values.devices.enflame.resourceNameGCUCore }}
     mthreads:
-      resourceCountName: "mthreads.com/vgpu"
-      resourceMemoryName: "mthreads.com/sgpu-memory"
-      resourceCoreName: "mthreads.com/sgpu-core"
+      resourceCountName: {{ .Values.devices.mthreads.resourceCountName }}
+      resourceMemoryName: {{ .Values.devices.mthreads.resourceMemoryName }}
+      resourceCoreName: {{ .Values.devices.mthreads.resourceCoreName }}
       memoryPerCard:
-{{- if kindIs "slice" .Values.devices.mthreads.memoryPerCard }}
-{{ toYaml (.Values.devices.mthreads.memoryPerCard | default (list 96)) | indent 8 }}
-{{- else }}
-        - {{ .Values.devices.mthreads.memoryPerCard | default 96 }}
+{{- $memoryPerCard := .Values.devices.mthreads.memoryPerCard }}
+{{- /* Keep legacy scalar overrides compatible with the list-based runtime field. */}}
+{{- if and (not (kindIs "slice" $memoryPerCard)) (not (kindIs "invalid" $memoryPerCard)) }}
+{{- $memoryPerCard = list $memoryPerCard }}
 {{- end }}
+{{ toYaml $memoryPerCard | indent 8 }}
     iluvatars:
-    - chipName: MR-V100
-      commonWord: MR-V100
-      resourceCountName: iluvatar.ai/MR-V100-vgpu
-      resourceMemoryName: iluvatar.ai/MR-V100.vMem
-      resourceCoreName: iluvatar.ai/MR-V100.vCore
-    - chipName: MR-V50
-      commonWord: MR-V50
-      resourceCountName: iluvatar.ai/MR-V50-vgpu
-      resourceMemoryName: iluvatar.ai/MR-V50.vMem
-      resourceCoreName: iluvatar.ai/MR-V50.vCore
-    - chipName: BI-V150
-      commonWord: BI-V150
-      resourceCountName: iluvatar.ai/BI-V150-vgpu
-      resourceMemoryName: iluvatar.ai/BI-V150.vMem
-      resourceCoreName: iluvatar.ai/BI-V150.vCore
-    - chipName: BI-V100
-      commonWord: BI-V100
-      resourceCountName: iluvatar.ai/BI-V100-vgpu
-      resourceMemoryName: iluvatar.ai/BI-V100.vMem
-      resourceCoreName: iluvatar.ai/BI-V100.vCore
+{{ toYaml .Values.devices.iluvatar.configs | indent 6 }}
     {{- if .Values.devices.remotegpu.enabled }}
     remotegpu:
       resourceCountName: {{ .Values.devices.remotegpu.resourceCountName }}
@@ -122,164 +87,20 @@ data:
       resourceVCountName: {{ .Values.devices.kunlun.resourceVCountName }}
       resourceVMemoryName: {{ .Values.devices.kunlun.resourceVMemoryName }}
     awsneuron:
-      resourceCountName: "aws.amazon.com/neuron"
-      resourceCoreName: "aws.amazon.com/neuroncore"
+      resourceCountName: {{ .Values.devices.awsneuron.resourceCountName }}
+      resourceCoreName: {{ .Values.devices.awsneuron.resourceCoreName }}
     amd:
-      resourceCountName: "amd.com/gpu"
-      resourceCoreName: "amd.com/gpucores"
-      resourceMemoryName: "amd.com/gpumem"
+      resourceCountName: {{ .Values.devices.amd.resourceCountName }}
+      resourceCoreName: {{ .Values.devices.amd.resourceCoreName }}
+      resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
     vastai:
       resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
-      hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
       configs:
-      - chipName: 910A
-        commonWord: Ascend910A
-        resourceName: huawei.com/Ascend910A
-        resourceMemoryName: huawei.com/Ascend910A-memory
-        resourceCoreName: huawei.com/Ascend910A-core
-        memoryAllocatable: 32768
-        memoryCapacity: 32768
-        memoryFactor: 1
-        aiCore: 30
-        templates:
-          - name: vir02
-            memory: 2184
-            aiCore: 2
-          - name: vir04
-            memory: 4369
-            aiCore: 4
-          - name: vir08
-            memory: 8738
-            aiCore: 8
-          - name: vir16
-            memory: 17476
-            aiCore: 16
-      - chipName: 910B2
-        commonWord: Ascend910B2
-        resourceName: huawei.com/Ascend910B2
-        resourceMemoryName: huawei.com/Ascend910B2-memory
-        resourceCoreName: huawei.com/Ascend910B2-core
-        memoryAllocatable: 65536
-        memoryCapacity: 65536
-        memoryFactor: 1
-        aiCore: 24
-        aiCPU: 6
-        templates:
-          - name: vir03_1c_8g
-            memory: 8192
-            aiCore: 3
-            aiCPU: 1
-          - name: vir06_1c_16g
-            memory: 16384
-            aiCore: 6
-            aiCPU: 1
-          - name: vir12_3c_32g
-            memory: 32768
-            aiCore: 12
-            aiCPU: 3
-      - chipName: 910B3
-        commonWord: Ascend910B3
-        resourceName: huawei.com/Ascend910B3
-        resourceMemoryName: huawei.com/Ascend910B3-memory
-        resourceCoreName: huawei.com/Ascend910B3-core
-        memoryAllocatable: 65536
-        memoryCapacity: 65536
-        memoryFactor: 1
-        aiCore: 20
-        aiCPU: 7
-        templates:
-          - name: vir05_1c_16g
-            memory: 16384
-            aiCore: 5
-            aiCPU: 1
-          - name: vir10_3c_32g
-            memory: 32768
-            aiCore: 10
-            aiCPU: 3
-      - chipName: 910B4-1
-        commonWord: Ascend910B4-1
-        resourceName: huawei.com/Ascend910B4-1
-        resourceMemoryName: huawei.com/Ascend910B4-1-memory
-        resourceCoreName: huawei.com/Ascend910B4-1-core
-        memoryAllocatable: 65536
-        memoryCapacity: 65536
-        memoryFactor: 1
-        aiCore: 20
-        aiCPU: 7
-        templates:
-          - name: vir05_1c_16g
-            memory: 16384
-            aiCore: 5
-            aiCPU: 1
-          - name: vir10_3c_32g
-            memory: 32768
-            aiCore: 10
-            aiCPU: 3
-      - chipName: 910B4
-        commonWord: Ascend910B4
-        resourceName: huawei.com/Ascend910B4
-        resourceMemoryName: huawei.com/Ascend910B4-memory
-        resourceCoreName: huawei.com/Ascend910B4-core
-        memoryAllocatable: 32768
-        memoryCapacity: 32768
-        memoryFactor: 1
-        aiCore: 20
-        aiCPU: 7
-        templates:
-          - name: vir05_1c_8g
-            memory: 8192
-            aiCore: 5
-            aiCPU: 1
-          - name: vir10_3c_16g
-            memory: 16384
-            aiCore: 10
-            aiCPU: 3
-      - chipName: 310P3
-        commonWord: Ascend310P
-        resourceName: huawei.com/Ascend310P
-        resourceMemoryName: huawei.com/Ascend310P-memory
-        resourceCoreName: huawei.com/Ascend310P-core
-        memoryAllocatable: 21527
-        memoryCapacity: 24576
-        memoryFactor: 1
-        aiCore: 8
-        aiCPU: 7
-        templates:
-          - name: vir01
-            memory: 3072
-            aiCore: 1
-            aiCPU: 1
-          - name: vir02
-            memory: 6144
-            aiCore: 2
-            aiCPU: 2
-          - name: vir04
-            memory: 12288
-            aiCore: 4
-            aiCPU: 4
-      - chipName: Ascend910
-        commonWord: Ascend910C
-        resourceName: huawei.com/Ascend910C
-        resourceMemoryName: huawei.com/Ascend910C-memory
-        resourceCoreName: huawei.com/Ascend910C-core
-        memoryAllocatable: 65536
-        memoryCapacity: 65536
-        aiCore: 20
-        aiCPU: 7
-        superPod: true
-        templates:
-          - name: vir05_1c_16g
-            memory: 16384
-            aiCore: 5
-            aiCPU: 1
-          - name: vir10_3c_32g
-            memory: 32768
-            aiCore: 10
-            aiCPU: 3
+{{ toYaml .Values.devices.ascend.configs | indent 8 }}
   {{ end }}
-  
