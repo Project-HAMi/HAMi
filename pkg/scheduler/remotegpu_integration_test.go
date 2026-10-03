@@ -201,6 +201,89 @@ func TestRemoteGPU_AllocationNeverSpansTwoServers(t *testing.T) {
 	assert.Assert(t, failed["cpu-1"] != "")
 }
 
+// A multi-container pod owns one whole lupine server. Later containers reuse
+// that ownership rather than moving to another otherwise-free server.
+func TestRemoteGPU_MultiContainerAllocationNeverSpansTwoServers(t *testing.T) {
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-bbb", 40000)}),
+		gpulessNode("cpu-1"),
+	)
+
+	task := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: "default", UID: k8stypes.UID("uid-client")},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "app1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/remote-gpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				{
+					Name: "app2",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/remote-gpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+			},
+		},
+	}
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	assert.Equal(t, len(nodes["cpu-1"].Devices.DeviceLists), 2, "fleet has two free cards overall")
+
+	s := NewScheduler()
+	failed := map[string]string{}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 1)
+	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
+	assert.Equal(t, len(allocated), 2, "two containers")
+	assert.Equal(t, allocated[0][0].UUID, "gpu-a/GPU-aaa")
+	assert.Equal(t, allocated[1][0].UUID, "gpu-a/GPU-aaa")
+}
+
+func TestRemoteGPU_MultiContainerRejectsOtherServerFallback(t *testing.T) {
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-bbb", 80000)}),
+		gpulessNode("cpu-1"),
+	)
+
+	task := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: "default", UID: k8stypes.UID("uid-client")},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{
+				Name: "app1",
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/remote-gpu": *resource.NewQuantity(1, resource.DecimalSI),
+				}},
+			},
+			{
+				Name: "app2",
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/remote-gpu":        *resource.NewQuantity(1, resource.DecimalSI),
+					"nvidia.com/remote-gpu-memory": *resource.NewQuantity(60000, resource.DecimalSI),
+				}},
+			},
+		}},
+	}
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	failed := map[string]string{}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := NewScheduler().calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 0, "later container must not move from gpu-a to gpu-b")
+	assert.Assert(t, failed["cpu-1"] != "")
+}
+
 // The card held by a pod that landed on another client node is invisible to
 // this node's usage view. Without the cluster-wide reservation read, both
 // nodes would hand out the same card.

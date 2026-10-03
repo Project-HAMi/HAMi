@@ -80,6 +80,60 @@ func TestFit_ConfinesAllocationToOneServer(t *testing.T) {
 	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-1")
 }
 
+func TestFit_MultiContainerStaysOnSelectedServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-small", 1000),
+		card("gpu-b", "GPU-1", 40000),
+		card("gpu-b", "GPU-2", 40000),
+	}
+
+	allocated := &device.PodDevices{}
+	// The memory filter makes the first container select gpu-b even though
+	// gpu-a sorts first.
+	fit1, alloc1, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, allocated)
+	assert.Equal(t, fit1, true)
+	assert.Equal(t, alloc1[RemoteGPUCommonWord][0].UUID, "gpu-b/GPU-1")
+	assert.Equal(t, len(alloc1[RemoteGPUCommonWord]), 2, "the pod owns the whole server")
+
+	// Accumulate the first allocation and its usage as fitInDevices does.
+	devices[1].Used = 1
+	devices[2].Used = 1
+	(*allocated)[RemoteGPUCommonWord] = append((*allocated)[RemoteGPUCommonWord], alloc1[RemoteGPUCommonWord])
+
+	// Without the pod-level server constraint, gpu-a now fits while gpu-b reads
+	// as taken. The later container must retain this pod's ownership of gpu-b.
+	fit2, alloc2, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, allocated)
+	assert.Equal(t, fit2, true)
+	assert.Equal(t, len(alloc2[RemoteGPUCommonWord]), 2)
+	for _, d := range alloc2[RemoteGPUCommonWord] {
+		assert.Equal(t, serverOf(d.UUID), "gpu-b")
+	}
+}
+
+func TestFit_MultiContainerRejectsOtherServerFallback(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-1", 40000),
+		card("gpu-b", "GPU-2", 80000),
+	}
+
+	allocated := &device.PodDevices{}
+	fit1, alloc1, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, allocated)
+	assert.Equal(t, fit1, true)
+	assert.Equal(t, alloc1[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-1")
+
+	devices[0].Used = 1
+	(*allocated)[RemoteGPUCommonWord] = append((*allocated)[RemoteGPUCommonWord], alloc1[RemoteGPUCommonWord])
+
+	// gpu-b can meet the second container's memory request, but the committed
+	// gpu-a server cannot. Fit must reject rather than changing endpoints.
+	fit2, alloc2, reason := dev.Fit(devices, request(1, 60000), &corev1.Pod{}, nil, allocated)
+	assert.Equal(t, fit2, false, "multi-container pod must not span multiple lupine servers")
+	assert.Equal(t, len(alloc2[RemoteGPUCommonWord]), 0)
+	assert.Assert(t, reason != "")
+}
+
 func TestFit_AllocatesWholeCard(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}
