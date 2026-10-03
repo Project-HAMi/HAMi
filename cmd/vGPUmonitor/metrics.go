@@ -54,6 +54,13 @@ type ClusterManagerCollector struct {
 // Metric and label names follow Prometheus naming best practices:
 // https://prometheus.io/docs/practices/naming/
 var (
+	// Catches a degraded Collect that still returns HTTP 200.
+	collectSuccessDesc = prometheus.NewDesc(
+		"hami_vgpumonitor_collect_success",
+		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0)",
+		[]string{"node"}, nil,
+	)
+
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
@@ -206,6 +213,7 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 // Describe sends all the metrics descriptors that the collector might use.
 // These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- collectSuccessDesc
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
@@ -239,23 +247,28 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
+	success := 1.0
 
 	// Collect GPU information
 	if err := cc.collectGPUInfo(ch); err != nil {
 		klog.Errorf("Failed to collect GPU info: %v", err)
-		// Decide whether to continue or return based on business requirements
+		success = 0
 	}
 
 	// Collect Pod and Container information
 	if err := cc.collectPodAndContainerInfo(ch); err != nil {
 		klog.Errorf("Failed to collect Pod and Container info: %v", err)
-		// Decide whether to continue or return based on business requirements
+		success = 0
 	}
 
 	// Collect Pod and Container Mig information
 	if err := cc.collectPodAndContainerMigInfo(ch); err != nil {
 		klog.Errorf("Failed to collect Pod and Container Mig info: %v", err)
-		// Decide whether to continue or return based on business requirements
+		success = 0
+	}
+
+	if err := sendMetric(ch, collectSuccessDesc, prometheus.GaugeValue, success, os.Getenv(util.NodeNameEnvName)); err != nil {
+		klog.Errorf("Failed to send collect success metric: %v", err)
 	}
 
 	klog.Info("Finished collecting metrics for vGPUMonitor")

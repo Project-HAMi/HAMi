@@ -69,6 +69,41 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 }
 
+// NVML is unavailable in this test environment, so Collect's GPU step always
+// fails here; the success gauge must report that instead of staying silent.
+func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	ch := make(chan prometheus.Metric, 10)
+	informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
+	c := &ClusterManager{
+		Zone:            "test-zone",
+		PodLister:       informerFactory.Core().V1().Pods().Lister(),
+		containerLister: &nvidia.ContainerLister{},
+	}
+	cc := ClusterManagerCollector{ClusterManager: c}
+
+	cc.Collect(ch)
+	close(ch)
+
+	var found bool
+	for m := range ch {
+		if m.Desc() != collectSuccessDesc {
+			continue
+		}
+		var dm dto.Metric
+		if err := m.Write(&dm); err != nil {
+			t.Fatalf("write metric: %v", err)
+		}
+		if dm.Gauge == nil || dm.Gauge.GetValue() != 0 {
+			t.Fatalf("collect success = %v, want 0", dm.Gauge)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("expected a collect success metric")
+	}
+}
+
 // descVariableLabels extracts the variable label names from a Prometheus
 // Desc's String() representation, e.g. the "node,device_index,..." part of
 // `variableLabels: {node,device_index,...}`. This lets callers check for an

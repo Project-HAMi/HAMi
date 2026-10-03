@@ -282,6 +282,18 @@ spec:
             - name: metrics
               containerPort: 9394
               protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
           resources:
           {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:
