@@ -18,6 +18,7 @@ package remotegpu
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 func testConfig() RemoteGPUConfig {
@@ -81,7 +83,9 @@ func TestFit_ConfinesAllocationToOneServer(t *testing.T) {
 		card("gpu-b", "GPU-2", 40000),
 	}
 
-	fit, _, reason := dev.Fit(devices, request(2, 0), &corev1.Pod{}, nil, nil)
+	// Fit can be called without pod metadata; in that case it falls back to
+	// validating the current container request.
+	fit, _, reason := dev.Fit(devices, request(2, 0), nil, nil, nil)
 	assert.Equal(t, fit, false)
 	assert.Assert(t, reason != "", "expected a rejection reason")
 
@@ -187,6 +191,78 @@ func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
 		t.Fatalf("Fit rejected independently satisfiable requests: %s", reason)
 	}
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
+}
+
+func TestFit_RejectsInvalidRequestInAnyPodContainer(t *testing.T) {
+	valid := requestingContainer("valid", 1, 0)
+	invalid := requestingContainer("invalid", 1<<31, 0)
+	tests := []struct {
+		name string
+		spec corev1.PodSpec
+	}{
+		{
+			name: "init container",
+			spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{invalid},
+				Containers:     []corev1.Container{valid},
+			},
+		},
+		{
+			name: "app container",
+			spec: corev1.PodSpec{
+				Containers: []corev1.Container{valid, invalid},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := InitRemoteGPUDevice(testConfig())
+			fit, allocated, reason := dev.Fit(
+				[]*device.DeviceUsage{card("gpu-a", "GPU-1", 80000)},
+				request(1, 0),
+				&corev1.Pod{Spec: tt.spec},
+				nil,
+				nil,
+			)
+			assert.Equal(t, fit, false)
+			assert.Equal(t, len(allocated), 0)
+			assert.Assert(t, strings.Contains(reason, `container "invalid"`), reason)
+		})
+	}
+}
+
+func TestFit_FailureReasonsCountCardsAndServers(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-a1", 40000),
+		card("gpu-a", "GPU-a2", 40000),
+		card("gpu-b", "GPU-b1", 40000),
+	}
+
+	fit, _, reason := dev.Fit(devices, request(2, 60000), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false)
+	reasons := common.ParseReason(reason)
+	assert.Equal(t, reasons[common.CardInsufficientMemory], 3, "count undersized cards, not servers")
+	assert.Equal(t, reasons[common.NodeInsufficientDevice], 2, "retain one insufficient-device reason per server")
+}
+
+func TestFit_FailureReasonsCountFreeSmallCardsOnTakenServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	occupied := card("gpu-a", "GPU-a1", 80000)
+	occupied.Used = 1
+	devices := []*device.DeviceUsage{
+		occupied,
+		card("gpu-a", "GPU-a2", 40000),
+		card("gpu-b", "GPU-b1", 40000),
+	}
+
+	fit, _, reason := dev.Fit(devices, request(2, 60000), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false)
+	reasons := common.ParseReason(reason)
+	assert.Equal(t, reasons[common.CardInsufficientMemory], 2, "count free undersized cards even when a server is taken")
+	assert.Equal(t, reasons[common.NodeInsufficientDevice], 1, "only the available server fails the count check")
+	assert.Equal(t, reasons[common.ExclusiveDeviceAllocateConflict], 1)
 }
 
 func TestFit_MultiContainerRejectsOtherServerFallback(t *testing.T) {

@@ -589,6 +589,7 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	type candidate struct {
 		server string
 		cards  []*device.DeviceUsage // every healthy card, all of them allocated
+		small  int                   // free cards below the current container's memory request
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
@@ -611,10 +612,14 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 				taken = true
 			default:
 				c.cards = append(c.cards, d)
+				if request.Memreq > 0 && d.Totalmem < request.Memreq {
+					c.small++
+				}
 			}
 		}
 		if taken {
 			// One card in use means the server is, whatever the rest look like.
+			reason[common.CardInsufficientMemory] += c.small
 			continue
 		}
 		candidates = append(candidates, c)
@@ -630,10 +635,14 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	})
 
 	for _, c := range candidates {
-		if failure := firstRequestFailure(c.cards, requirements); failure != "" {
-			reason[failure]++
+		if smallCards, failed := firstRequestFailure(c.cards, requirements); failed {
+			// Count the undersized cards once per server, including those below
+			// the current request when another container is the first to fail.
+			reason[common.NodeInsufficientDevice]++
+			reason[common.CardInsufficientMemory] += max(c.small, smallCards)
 			continue
 		}
+		reason[common.CardInsufficientMemory] += c.small
 		for _, d := range c.cards {
 			tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 				Idx:  int(d.Index),
@@ -651,27 +660,28 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	return false, tmpDevs, reason
 }
 
-// firstRequestFailure returns why one server cannot satisfy the first failing
-// container request. Requests are deliberately not collapsed: a server with
-// one large and one small card can satisfy 1x large-memory and 2x low-memory
-// requests even though it cannot satisfy a synthetic 2x large-memory request.
-func firstRequestFailure(cards []*device.DeviceUsage, requests []device.ContainerDeviceRequest) string {
+// firstRequestFailure reports how many cards are too small for the first
+// container request the server cannot satisfy. Requests are deliberately not
+// collapsed: a server with one large and one small card can satisfy 1x
+// large-memory and 2x low-memory requests even though it cannot satisfy a
+// synthetic 2x large-memory request.
+func firstRequestFailure(cards []*device.DeviceUsage, requests []device.ContainerDeviceRequest) (int, bool) {
 	for _, request := range requests {
 		var usable int32
+		smallCards := 0
 		for _, d := range cards {
 			if request.Memreq <= 0 || d.Totalmem >= request.Memreq {
 				usable++
+			} else {
+				smallCards++
 			}
 		}
 		if usable >= request.Nums {
 			continue
 		}
-		if request.Memreq > 0 && len(cards) >= int(request.Nums) {
-			return common.CardInsufficientMemory
-		}
-		return common.NodeInsufficientDevice
+		return smallCards, true
 	}
-	return ""
+	return 0, false
 }
 
 // resourceValue reads a resource from limits, falling back to requests.
