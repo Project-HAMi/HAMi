@@ -40,7 +40,7 @@ jobs:
 
       - name: Install helm-docs
         run: |
-          GOBIN="$RUNNER_TEMP/helm-docs" go install github.com/norwoodj/helm-docs/cmd/helm-docs@${{ env.HELM_DOCS_VERSION }}
+          GOBIN="$RUNNER_TEMP/helm-docs" go install -ldflags "-X main.version=${HELM_DOCS_VERSION#v}" github.com/norwoodj/helm-docs/cmd/helm-docs@${{ env.HELM_DOCS_VERSION }}
           echo "$RUNNER_TEMP/helm-docs" >> "$GITHUB_PATH"
 
       - name: Add HAMi DRA Helm repository
