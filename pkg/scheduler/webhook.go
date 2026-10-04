@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -135,7 +137,9 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
-	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+	response := admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+	logMutationPatches(req, response)
+	return response
 }
 
 func privilegedContainerName(pod *corev1.Pod) (string, bool) {
@@ -213,4 +217,67 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		}
 	}
 	return true
+}
+
+func getJsonValueFromPath(raw []byte, path string) string {
+	var data interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return ""
+	}
+	
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		p = strings.ReplaceAll(p, "~1", "/")
+		p = strings.ReplaceAll(p, "~0", "~")
+		
+		if m, ok := data.(map[string]interface{}); ok {
+			data = m[p]
+		} else if a, ok := data.([]interface{}); ok {
+			idx, err := strconv.Atoi(p)
+			if err != nil || idx < 0 || idx >= len(a) {
+				return ""
+			}
+			data = a[idx]
+		} else {
+			return ""
+		}
+	}
+	
+	valBytes, _ := json.Marshal(data)
+	return string(valBytes)
+}
+
+func logMutationPatches(req admission.Request, response admission.Response) {
+	if len(response.Patches) == 0 {
+		return 
+	}
+	for _, patch := range response.Patches {
+		afterBytes, _ := json.Marshal(patch.Value)
+		beforeStr := getJsonValueFromPath(req.Object.Raw, patch.Path)
+		
+		klog.InfoS("webhook mutation",
+			"namespace", req.Namespace,
+			"pod", req.Name,
+			"uid", req.UID,
+			"op", patch.Operation,
+			"path", patch.Path,
+			"before", beforeStr,
+			"after", string(afterBytes),
+		)
+	}
+}
+	for _, patch := range response.Patches {
+		
+		klog.InfoS("webhook mutation",
+			"namespace", req.Namespace,
+			"pod", req.Name,
+			"uid", req.UID,
+			"op", patch.Operation,
+			"path", patch.Path,
+			
+		)
+	}
 }
