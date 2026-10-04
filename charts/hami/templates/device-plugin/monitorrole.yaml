@@ -10,10 +10,8 @@ rules:
       - pods
     verbs:
       - get
-      - create
       - watch
       - list
-      - update
       - patch
   - apiGroups:
       - ""
@@ -22,8 +20,6 @@ rules:
       - nodes/status
     verbs:
       - get
-      - update
-      - list
       - patch
   - apiGroups:
       - ""
