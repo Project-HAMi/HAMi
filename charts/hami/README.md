@@ -397,7 +397,7 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 | scheduler.patch.tolerations | list | `[]` | Kubernetes Pod tolerations for node taints. |
 | scheduler.podAnnotations | object | `{}` | Additional annotations on the Pod template. |
 | scheduler.podDisruptionBudget.minAvailable | int | `1` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) |
-| scheduler.profilingBindAddress | string | `"127.0.0.1:6060"` |  |
+| scheduler.profilingBindAddress | string | `"127.0.0.1:6060"` | Dedicated pprof HTTP bind address; only used when profiling is enabled. Keep loopback binding and use kubectl port-forward for access. |
 | scheduler.replicas | int | `1` | Scheduler replica count when leader election is enabled; otherwise the chart uses one replica. |
 | scheduler.service.annotations | object | `{}` | Additional Kubernetes annotations. |
 | scheduler.service.httpPort | int | `443` | HTTP port |

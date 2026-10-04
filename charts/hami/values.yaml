@@ -77,7 +77,7 @@ scheduler:
   # Only used when --profiling is enabled in scheduler.extender.extraArgs.
   # Keep loopback binding and use kubectl port-forward to access pprof.
 
-  # scheduler.profilingBindAddress -- Dedicated pprof HTTP bind address; only used when --profiling is enabled. Keep loopback binding and use kubectl port-forward for access.
+  # scheduler.profilingBindAddress -- Dedicated pprof HTTP bind address; only used when profiling is enabled. Keep loopback binding and use kubectl port-forward for access.
   profilingBindAddress: "127.0.0.1:6060"
   # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
   # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
