@@ -445,11 +445,19 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	// injects one LUPINE_SERVER endpoint into each client container, so a
 	// later container must use cards served by that same endpoint.
 	prior, committed := committedAllocation(allocated)
+	requirements := []device.ContainerDeviceRequest{request}
 	if prior != "" {
 		servers = []string{prior}
+	} else if podRequests, err := dev.podRequests(pod); err != nil {
+		return false, map[string]device.ContainerDevices{}, err.Error()
+	} else if len(podRequests) > 0 {
+		// The first container chooses the endpoint for the whole pod. Qualify
+		// candidates against each container's request independently so a later
+		// init, sidecar, or app container cannot invalidate that choice.
+		requirements = podRequests
 	}
 
-	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, pod, committed)
+	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, requirements, pod, committed)
 	if !fit && reason[common.ExclusiveDeviceAllocateConflict] > 0 {
 		// Only a booking stood in the way, and bookings come from a snapshot
 		// up to poolTTL old: a card freed moments ago still reads as taken.
@@ -462,13 +470,45 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
 		if intact := dev.serversStillWhole(byServer, servers); len(intact) > 0 {
-			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, pod, committed)
+			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, requirements, pod, committed)
 		}
 	}
 	if fit {
 		return true, tmpDevs, ""
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// podRequests returns every RemoteGPU request without merging container
+// boundaries. Native sidecars live in InitContainers, so walking both pod
+// container lists covers ordinary init containers, sidecars, and app
+// containers while preserving each request's count and memory combination.
+func (dev *RemoteGPUDevices) podRequests(pod *corev1.Pod) ([]device.ContainerDeviceRequest, error) {
+	if pod == nil {
+		return nil, nil
+	}
+	requests := make([]device.ContainerDeviceRequest, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+	add := func(ctr *corev1.Container) error {
+		request, err := dev.GenerateResourceRequests(ctr)
+		if err != nil {
+			return err
+		}
+		if request.Nums > 0 {
+			requests = append(requests, request)
+		}
+		return nil
+	}
+	for i := range pod.Spec.InitContainers {
+		if err := add(&pod.Spec.InitContainers[i]); err != nil {
+			return nil, err
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if err := add(&pod.Spec.Containers[i]); err != nil {
+			return nil, err
+		}
+	}
+	return requests, nil
 }
 
 // committedAllocation returns the lupine server and cards already owned by a
@@ -537,7 +577,7 @@ func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.Dev
 // tryFit picks the server the request should come from. It reads pool
 // reservations, so the same call can answer differently before and after a
 // refresh.
-func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
+func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, requirements []device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
 
@@ -549,7 +589,6 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	type candidate struct {
 		server string
 		cards  []*device.DeviceUsage // every healthy card, all of them allocated
-		usable int32                 // how many of them meet the request
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
@@ -570,12 +609,8 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 				// the server itself reports.
 				reason[common.ExclusiveDeviceAllocateConflict]++
 				taken = true
-			case request.Memreq > 0 && d.Totalmem < request.Memreq:
-				reason[common.CardInsufficientMemory]++
-				c.cards = append(c.cards, d)
 			default:
 				c.cards = append(c.cards, d)
-				c.usable++
 			}
 		}
 		if taken {
@@ -595,8 +630,8 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	})
 
 	for _, c := range candidates {
-		if c.usable < request.Nums {
-			reason[common.NodeInsufficientDevice]++
+		if failure := firstRequestFailure(c.cards, requirements); failure != "" {
+			reason[failure]++
 			continue
 		}
 		for _, d := range c.cards {
@@ -614,6 +649,29 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 		return true, tmpDevs, reason
 	}
 	return false, tmpDevs, reason
+}
+
+// firstRequestFailure returns why one server cannot satisfy the first failing
+// container request. Requests are deliberately not collapsed: a server with
+// one large and one small card can satisfy 1x large-memory and 2x low-memory
+// requests even though it cannot satisfy a synthetic 2x large-memory request.
+func firstRequestFailure(cards []*device.DeviceUsage, requests []device.ContainerDeviceRequest) string {
+	for _, request := range requests {
+		var usable int32
+		for _, d := range cards {
+			if request.Memreq <= 0 || d.Totalmem >= request.Memreq {
+				usable++
+			}
+		}
+		if usable >= request.Nums {
+			continue
+		}
+		if request.Memreq > 0 && len(cards) >= int(request.Nums) {
+			return common.CardInsufficientMemory
+		}
+		return common.NodeInsufficientDevice
+	}
+	return ""
 }
 
 // resourceValue reads a resource from limits, falling back to requests.

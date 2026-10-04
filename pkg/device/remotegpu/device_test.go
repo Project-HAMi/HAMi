@@ -59,6 +59,19 @@ func request(nums, mem int32) device.ContainerDeviceRequest {
 	}
 }
 
+func requestingContainer(name string, nums, mem int64) corev1.Container {
+	limits := corev1.ResourceList{
+		"nvidia.com/remote-gpu": *resource.NewQuantity(nums, resource.DecimalSI),
+	}
+	if mem > 0 {
+		limits["nvidia.com/remote-gpu-memory"] = *resource.NewQuantity(mem, resource.DecimalSI)
+	}
+	return corev1.Container{
+		Name:      name,
+		Resources: corev1.ResourceRequirements{Limits: limits},
+	}
+}
+
 func TestFit_ConfinesAllocationToOneServer(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	// Two servers with one free card each: the fleet has two cards free, but a
@@ -109,6 +122,71 @@ func TestFit_MultiContainerStaysOnSelectedServer(t *testing.T) {
 	for _, d := range alloc2[RemoteGPUCommonWord] {
 		assert.Equal(t, serverOf(d.UUID), "gpu-b")
 	}
+}
+
+// The first request fits either server, but only gpu-b can also serve the
+// other container. Reordering the containers must not change the choice.
+func TestFit_SelectsServerForEveryContainerRequest(t *testing.T) {
+	orders := []struct {
+		name       string
+		containers []corev1.Container
+	}{
+		{
+			name: "unconstrained first",
+			containers: []corev1.Container{
+				requestingContainer("small", 1, 0),
+				requestingContainer("large", 1, 60000),
+			},
+		},
+		{
+			name: "memory constrained first",
+			containers: []corev1.Container{
+				requestingContainer("large", 1, 60000),
+				requestingContainer("small", 1, 0),
+			},
+		},
+	}
+
+	for _, tt := range orders {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := InitRemoteGPUDevice(testConfig())
+			devices := []*device.DeviceUsage{
+				card("gpu-a", "GPU-1", 40000),
+				card("gpu-b", "GPU-2", 80000),
+			}
+			pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: tt.containers}}
+			first, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+			assert.NilError(t, err)
+
+			fit, allocated, reason := dev.Fit(devices, first, pod, nil, nil)
+			if !fit {
+				t.Fatalf("Fit rejected a pod with a valid single-server placement: %s", reason)
+			}
+			assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-b/GPU-2")
+		})
+	}
+}
+
+// Combining the largest count and memory into one synthetic request would
+// require two 60000 MB cards and reject this valid per-container placement.
+func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-large", 80000),
+		card("gpu-a", "GPU-small", 40000),
+	}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
+		requestingContainer("memory", 1, 60000),
+		requestingContainer("count", 2, 10000),
+	}}}
+	first, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, allocated, reason := dev.Fit(devices, first, pod, nil, nil)
+	if !fit {
+		t.Fatalf("Fit rejected independently satisfiable requests: %s", reason)
+	}
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
 }
 
 func TestFit_MultiContainerRejectsOtherServerFallback(t *testing.T) {
