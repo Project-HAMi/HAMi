@@ -170,6 +170,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
 {{- end -}}
 
+{{- define "hami.mockDevicePlugin.imagePullSecrets" -}}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.mockDevicePlugin.image) "global" .Values.global) }}
+{{- end -}}
+
 {{- define "hami.scheduler.patch.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.image) "global" .Values.global) }}
 {{- end -}}
