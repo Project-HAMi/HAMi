@@ -2,7 +2,7 @@ name: Chart Lint
 
 env:
   HELM_VERSION: v3.21.4
-  HELM_DOCS_VERSION: v1.14.2
+  README_GENERATOR_VERSION: 3.0.1
 
 on:
   push:
@@ -38,10 +38,13 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Install helm-docs
-        run: |
-          GOBIN="$RUNNER_TEMP/helm-docs" go install -ldflags "-X main.version=${HELM_DOCS_VERSION#v}" github.com/norwoodj/helm-docs/cmd/helm-docs@${{ env.HELM_DOCS_VERSION }}
-          echo "$RUNNER_TEMP/helm-docs" >> "$GITHUB_PATH"
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Install readme-generator-for-helm
+        run: npm install --global --ignore-scripts --no-audit --no-fund https://github.com/bitnami/readme-generator-for-helm/archive/refs/tags/${{ env.README_GENERATOR_VERSION }}.tar.gz
 
       - name: Add HAMi DRA Helm repository
         run: |

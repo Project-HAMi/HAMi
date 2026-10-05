@@ -5,9 +5,9 @@ include  ../Makefile.defs
 VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 CHART_FILE := "./hami/Chart.yaml"
 VALUES_FILE := "./hami/values.yaml"
-HELM_DOCS_VERSION := 1.14.2
+README_GENERATOR_VERSION := 3.0.1
 
-.PHONY: all lint update-versions deps validate clean docs verify-docs check-helm-docs
+.PHONY: all lint update-versions deps validate clean docs verify-docs
 all: update-versions deps lint package
 
 # Validate the committed chart without updating release versions.
@@ -47,13 +47,13 @@ package: lint
 clean:
 	rm -f *.tgz
 
-check-helm-docs:
-	@test "`helm-docs --version`" = "helm-docs version $(HELM_DOCS_VERSION)" || { echo "Use helm-docs $(HELM_DOCS_VERSION) to generate chart documentation"; exit 1; }
+docs:
+	@test "`readme-generator --version`" = "Version: $(README_GENERATOR_VERSION)" || { echo "Use readme-generator-for-helm $(README_GENERATOR_VERSION) to generate chart documentation"; exit 1; }
+	readme-generator --values $(VALUES_FILE) --readme ./hami/README.md
 
-docs: check-helm-docs
-	helm-docs --chart-search-root ./hami
-
-verify-docs: check-helm-docs
+verify-docs:
+	@test "`readme-generator --version`" = "Version: $(README_GENERATOR_VERSION)" || { echo "Use readme-generator-for-helm $(README_GENERATOR_VERSION) to generate chart documentation"; exit 1; }
 	@task_docs_file=$$(mktemp); trap 'rm -f "$$task_docs_file"' EXIT; \
-	helm-docs --chart-search-root ./hami --dry-run > "$$task_docs_file"; \
+	cp ./hami/README.md "$$task_docs_file"; \
+	readme-generator --values $(VALUES_FILE) --readme "$$task_docs_file" > /dev/null || exit $$?; \
 	diff -u ./hami/README.md "$$task_docs_file"
