@@ -30,7 +30,7 @@ Please include the following information:
 
 - The Pod manifest, or at least its accelerator resource requests and limits
 - Pod events and relevant accelerator-related node annotations
-- Output from the vendor's diagnostic tool, when available (for example, `nvidia-smi -a` for NVIDIA devices)
+- Output from the vendor's diagnostic tool, when available (for example, `nvidia-smi -q` for NVIDIA devices). The support-bundle script runs these optional tools only on the machine where the script is invoked; it does not run them on remote Kubernetes nodes.
 - Your container runtime configuration (for example, `/etc/docker/daemon.json` or the relevant containerd configuration)
 - Logs from the device plugin for the affected accelerator
 - The hami-scheduler logs
