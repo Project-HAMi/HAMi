@@ -1054,3 +1054,65 @@ func TestGenerateResourceRequests_CountEdgesAcrossBackends(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "empty config fails",
+			config:  &Config{},
+			wantErr: true,
+			errMsg:  "all configurations are empty",
+		},
+		{
+			name: "nvidia defaultCores > 100 fails",
+			config: &Config{
+				NvidiaConfig: nvidia.NvidiaConfig{DefaultCores: 150},
+			},
+			wantErr: true,
+			errMsg:  "defaultCores is a percentage and must be between 0 and 100",
+		},
+		{
+			name: "nvidia defaultCores negative fails",
+			config: &Config{
+				NvidiaConfig: nvidia.NvidiaConfig{DefaultCores: -1},
+			},
+			wantErr: true,
+			errMsg:  "defaultCores is a percentage and must be between 0 and 100",
+		},
+		{
+			name: "nvidia defaultMemory negative fails",
+			config: &Config{
+				NvidiaConfig: nvidia.NvidiaConfig{DefaultMemory: -100},
+			},
+			wantErr: true,
+			errMsg:  "defaultMemory must not be negative",
+		},
+		{
+			name: "valid nvidia config passes",
+			config: &Config{
+				NvidiaConfig: nvidia.NvidiaConfig{
+					ResourceCountName: "nvidia.com/gpu",
+					DefaultCores:      50,
+					DefaultMemory:     1024,
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateConfig(test.config)
+			if test.wantErr {
+				assert.ErrorContains(t, err, test.errMsg)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
