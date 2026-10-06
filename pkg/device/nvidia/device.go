@@ -30,6 +30,7 @@ import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -142,16 +143,23 @@ type FilterDevice struct {
 	Index []uint `json:"index"`
 }
 
+// NodeConfig is one entry of the device plugin nodeconfig list. An entry sets
+// either Name or NodeLabelSelector; an entry that sets both is ignored.
+type NodeConfig struct {
+	// These configs override those in NvidiaConfig for the nodes this entry applies to.
+	NodeDefaultConfig `json:",inline"`
+	// Name is the node the entry applies to.
+	Name string `json:"name"`
+	// NodeLabelSelector selects nodes by label when no entry names the node.
+	NodeLabelSelector            *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
+	OperatingMode                string                `json:"operatingmode"`
+	Migstrategy                  string                `json:"migstrategy"`
+	FilterDevice                 *FilterDevice         `json:"filterdevices"`
+	EnableGetPreferredAllocation bool                  `json:"enablegetpreferredallocation"`
+}
+
 type DevicePluginConfigs struct {
-	Nodeconfig []struct {
-		// These configs is shared and will overwrite those in NvidiaConfig.
-		NodeDefaultConfig            `json:",inline"`
-		Name                         string        `json:"name"`
-		OperatingMode                string        `json:"operatingmode"`
-		Migstrategy                  string        `json:"migstrategy"`
-		FilterDevice                 *FilterDevice `json:"filterdevices"`
-		EnableGetPreferredAllocation bool          `json:"enablegetpreferredallocation"`
-	} `json:"nodeconfig"`
+	Nodeconfig []NodeConfig `json:"nodeconfig"`
 }
 
 type DeviceConfig struct {

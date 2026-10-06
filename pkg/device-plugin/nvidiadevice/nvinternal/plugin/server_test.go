@@ -526,14 +526,7 @@ func Test_configOverride(t *testing.T) {
 	coreScale2 := 1.4
 
 	config := nvidia.DevicePluginConfigs{
-		Nodeconfig: []struct {
-			nvidia.NodeDefaultConfig     `json:",inline"`
-			Name                         string               `json:"name"`
-			OperatingMode                string               `json:"operatingmode"`
-			Migstrategy                  string               `json:"migstrategy"`
-			FilterDevice                 *nvidia.FilterDevice `json:"filterdevices"`
-			EnableGetPreferredAllocation bool                 `json:"enablegetpreferredallocation"`
-		}{
+		Nodeconfig: []nvidia.NodeConfig{
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
 					DeviceSplitCount:    &split1,
@@ -582,7 +575,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceCoreName:             "nvidia.com/gpucores",
 		DefaultGPUNum:                int32(2),
 	}
-	_, err = readFromConfigFile(&nvconfig, path+"/config.json")
+	_, err = readFromConfigFile(&nvconfig, path+"/config.json", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -601,6 +594,112 @@ func Test_configOverride(t *testing.T) {
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
+	}
+}
+
+// TestSelectNodeConfigs pins the order in which nodeconfig entries apply to a node.
+func TestSelectNodeConfigs(t *testing.T) {
+	mig := &metav1.LabelSelector{MatchLabels: map[string]string{"gpu.example.com/pool": "mig"}}
+	smallCards := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/model", Operator: metav1.LabelSelectorOpIn, Values: []string{"t4", "l4"},
+	}}}
+	notSmallCards := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/model", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"t4", "l4"},
+	}}}
+	invalid := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/pool", Operator: "Like", Values: []string{"mig"},
+	}}}
+	named := nvidia.NodeConfig{Name: "gpu-node-01", OperatingMode: nvidia.HamiCoreMode}
+	byPool := nvidia.NodeConfig{NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}
+	byModel := nvidia.NodeConfig{NodeLabelSelector: smallCards, OperatingMode: nvidia.HamiCoreMode}
+	entries := []nvidia.NodeConfig{named, byPool, byModel}
+
+	for _, tc := range []struct {
+		name    string
+		entries []nvidia.NodeConfig
+		node    string
+		labels  map[string]string
+		want    []nvidia.NodeConfig
+	}{
+		{"an entry naming the node wins over a matching selector", entries,
+			"gpu-node-01", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{named}},
+		{"matchLabels selects a node no entry names", entries,
+			"gpu-node-02", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{byPool}},
+		{"matchExpressions selects a node no entry names", entries,
+			"gpu-node-03", map[string]string{"gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"the first matching selector wins when several match", entries,
+			"gpu-node-04", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byPool}},
+		{"a node matching neither a name nor a selector gets no entry", entries,
+			"gpu-node-05", map[string]string{"gpu.example.com/model": "a100"}, nil},
+		{"a node without labels matches no selector", entries,
+			"gpu-node-06", nil, nil},
+		{"every entry naming the node still applies in list order",
+			[]nvidia.NodeConfig{named, byPool, {Name: "gpu-node-01", OperatingMode: nvidia.MigMode}},
+			"gpu-node-01", nil, []nvidia.NodeConfig{named, {Name: "gpu-node-01", OperatingMode: nvidia.MigMode}}},
+		{"an invalid selector is skipped",
+			[]nvidia.NodeConfig{{NodeLabelSelector: invalid, OperatingMode: nvidia.MigMode}, byModel},
+			"gpu-node-07", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"an empty selector is skipped instead of selecting every node",
+			[]nvidia.NodeConfig{{NodeLabelSelector: &metav1.LabelSelector{}, OperatingMode: nvidia.MigMode}, byModel},
+			"gpu-node-08", map[string]string{"gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"NotIn also selects a node without the label, as in Kubernetes",
+			[]nvidia.NodeConfig{{NodeLabelSelector: notSmallCards, OperatingMode: nvidia.MigMode}},
+			"gpu-node-12", nil, []nvidia.NodeConfig{{NodeLabelSelector: notSmallCards, OperatingMode: nvidia.MigMode}}},
+		{"an entry setting both name and selector is not matched by its name",
+			[]nvidia.NodeConfig{{Name: "gpu-node-13", NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-13", map[string]string{"gpu.example.com/pool": "default"}, nil},
+		{"an entry setting both name and selector is not matched by its selector",
+			[]nvidia.NodeConfig{{Name: "gpu-node-13", NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-14", map[string]string{"gpu.example.com/pool": "mig"}, nil},
+		{"an entry without a name is not matched by an empty node name",
+			[]nvidia.NodeConfig{{OperatingMode: nvidia.MigMode}}, "", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, selectNodeConfigs(tc.entries, tc.node, tc.labels))
+		})
+	}
+}
+
+// The first entry is written like a pod nodeSelector; it decodes to an empty
+// selector, which must not select every node.
+func TestReadFromConfigFileSelectsEntryByNodeLabels(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "gpu-node-02")
+	previous := enableGetPreferredAllocation
+	t.Cleanup(func() { enableGetPreferredAllocation = previous })
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+  "nodeconfig": [
+    { "nodelabelselector": { "gpu.example.com/pool": "mig" },
+      "operatingmode": "mig", "devicesplitcount": 9 },
+    { "name": "gpu-node-01", "operatingmode": "hami-core", "devicesplitcount": 10 },
+    { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+      "operatingmode": "mig", "devicesplitcount": 7, "enablegetpreferredallocation": true },
+    { "nodelabelselector": { "matchExpressions": [
+        { "key": "gpu.example.com/model", "operator": "In", "values": ["t4", "l4"] } ] },
+      "operatingmode": "hami-core", "devicesplitcount": 4 }
+  ]
+}`), 0o600))
+
+	for _, tc := range []struct {
+		name      string
+		labels    map[string]string
+		mode      string
+		split     uint
+		preferred bool
+	}{
+		{"matchLabels", map[string]string{"gpu.example.com/pool": "mig"}, nvidia.MigMode, 7, true},
+		{"matchExpressions", map[string]string{"gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
+		{"no match keeps the defaults", map[string]string{"gpu.example.com/model": "a100"}, nvidia.HamiCoreMode, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableGetPreferredAllocation = false
+			sConfig := nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr(uint(1))}}
+			mode, err := readFromConfigFile(&sConfig, path, tc.labels)
+			require.NoError(t, err)
+			require.Equal(t, tc.mode, mode)
+			require.Equal(t, tc.split, *sConfig.DeviceSplitCount)
+			require.Equal(t, tc.preferred, enableGetPreferredAllocation)
+		})
 	}
 }
 
