@@ -27,6 +27,10 @@ cat >"$tmp/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$KUBECTL_LOG"
 if [[ "${MOCK_MODE:-}" == sleep ]]; then sleep 5; fi
+if [[ "${MOCK_MODE:-}" == large-stderr ]]; then
+  echo 'collector output survived'
+  exec awk 'BEGIN { for (i=0; i<8192; i++) printf "e" > "/dev/stderr" }'
+fi
 if [[ " $* " == *" rollout status "* ]]; then echo 'Authorization: Basic Zm9vOmJhcg==' >&2; exit 1; fi
 if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   if [[ " $* " == *"hami-device-plugin"* ]]; then
@@ -38,6 +42,7 @@ if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   exit 0
 fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
+if [[ " $* " == *" logs pod/device-plugin-3 "* ]]; then echo 'one Pod log failed' >&2; exit 1; fi
 if [[ "${MOCK_MODE:-}" == large ]]; then
   head -c "${MOCK_BYTES:-4096}" /dev/zero | tr '\0' x
   exit 0
@@ -61,6 +66,11 @@ api_key="quoted equals api key"
   value: database-password
 - name: NORMAL_SETTING
   value: keep-this-value
+password: |-
+  multiline-password-first
+  multiline-password-second
+normal_note: |
+  ordinary multiline text
 extra: custom-secret
 OUT
 EOF
@@ -84,23 +94,29 @@ bundle="$tmp/pod-bundle/hami-support-bundle"
 test -f "$bundle/manifest.json"
 assert_contains "$bundle/manifest.json" '"status":"failed"'
 assert_contains "$bundle/manifest.json" '"collector":"node"'
-if grep -R -E 'private\.example|registry\.internal|bearer-value|Zm9vOmJhcg|anNvbi1iYXNpYw|docker-auth-value|json-token|json-api-key|yaml-password|access-token-value|equals-password|quoted equals api key|hf_xxxxx|database-password|custom-secret' "$bundle"; then
+if grep -R -E 'private\.example|registry\.internal|bearer-value|Zm9vOmJhcg|anNvbi1iYXNpYw|docker-auth-value|json-token|json-api-key|yaml-password|access-token-value|equals-password|quoted equals api key|hf_xxxxx|database-password|multiline-password|custom-secret' "$bundle"; then
   fail 'sensitive value survived redaction'
 fi
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'nvidia\.com/gpu: 1'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'hami\.io/vgpu-devices-allocated: GPU-123,1'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: keep-this-value'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'image: <redacted-image>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'imageID: <redacted-image>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: <redacted-credential>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'ordinary multiline text'
 assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
 assert_contains "$KUBECTL_LOG" ' get daemonsets -l app.kubernetes.io/component=hami-device-plugin '
 test "$(grep -c 'logs pod/device-plugin-' "$KUBECTL_LOG")" -eq 7 || fail 'did not collect all seven device-plugin Pod logs'
+device_plugin_log_order=$(sed -n 's/.*logs pod\/device-plugin-\([0-9][0-9]*\).*/\1/p' "$KUBECTL_LOG" | paste -sd ' ' -)
+test "$device_plugin_log_order" = '1 2 3 4 5 6 7' || fail "device-plugin logs were not collected deterministically: $device_plugin_log_order"
 assert_not_contains "$KUBECTL_LOG" 'logs -l '
 assert_not_contains "$KUBECTL_LOG" ' get nodes '
 assert_contains "$KUBECTL_LOG" ' get node gpu-node-a -o yaml'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--tail=3 --since=1h'
+assert_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-logs-device-plugin-3"'
+test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.txt" || fail 'a Pod log failure stopped later Pod collection'
 assert_no_secret_requests "$KUBECTL_LOG" || fail 'collector requested a Secret resource'
 if grep -Eqi '(^|[[:space:]])(exec|debug|apply|create|delete|patch|replace|scale|set|label|annotate|cordon|drain|taint)([[:space:]]|$)' "$KUBECTL_LOG"; then
   fail 'collector issued a mutating or remote-execution kubectl command'
@@ -162,6 +178,17 @@ while IFS= read -r artifact; do
   test "$(stat -c %s "$artifact")" -le 256 || fail "collector artifact exceeds limit: $artifact"
 done < <(find "$limited/artifacts" "$limited/errors" -type f)
 
+# Capped readers must drain oversized streams so the producer exits naturally.
+: >"$KUBECTL_LOG"
+MOCK_MODE=large-stderr HAMI_SUPPORT_MAX_COLLECTOR_BYTES=256 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/drained-out" >/dev/null
+mkdir "$tmp/drained-bundle"
+tar -xzf "$tmp/drained-out/hami-support-bundle.tar.gz" -C "$tmp/drained-bundle"
+drained="$tmp/drained-bundle/hami-support-bundle"
+assert_not_contains "$drained/manifest.json" '"status":"failed"'
+assert_contains "$drained/manifest.json" '"status":"truncated"'
+assert_contains "$drained/manifest.json" 'stderr-truncated-at=256'
+assert_contains "$drained/artifacts/workloads/pods.yaml" '^collector output survived$'
+
 # The overall limit stops later collectors and remains machine-readable.
 : >"$KUBECTL_LOG"
 MOCK_MODE=large MOCK_BYTES=20000 HAMI_SUPPORT_MAX_COLLECTOR_BYTES=16384 HAMI_SUPPORT_MAX_BUNDLE_BYTES=131072 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --cluster-wide --output-dir "$tmp/overall-out" >/dev/null
@@ -176,13 +203,17 @@ mkdir "$tmp/private-staging"
 : >"$KUBECTL_LOG"
 TMPDIR="$tmp/private-staging" MOCK_MODE=sleep "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/interrupted-out" >/dev/null 2>&1 &
 collector_pid=$!
-for _ in 1 2 3 4 5; do
+for _ in {1..50}; do
   staging_path=$(find "$tmp/private-staging" -mindepth 1 -maxdepth 1 -type d -name 'hami-support-bundle.*' -print -quit)
   [[ -n "$staging_path" ]] && break
   sleep 0.1
 done
 [[ -n "${staging_path:-}" ]] || fail 'private staging directory was not created'
 test "$(stat -c %a "$staging_path")" = 700 || fail 'staging directory permissions are not private'
+if TMPDIR="$tmp/private-staging" "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/interrupted-out" >"$tmp/concurrent.out" 2>&1; then
+  fail 'concurrent collector unexpectedly reused the same output destination'
+fi
+assert_contains "$tmp/concurrent.out" 'already reserved by another collector'
 kill -TERM "$collector_pid"
 if wait "$collector_pid"; then fail 'interrupted collector unexpectedly succeeded'; fi
 test -z "$(find "$tmp/private-staging" -mindepth 1 -maxdepth 1 -name 'hami-support-bundle.*' -print -quit)" || fail 'staging data remained after interruption'

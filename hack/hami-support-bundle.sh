@@ -70,11 +70,10 @@ readonly max_collector_bytes max_bundle_bytes
 bundle_name=hami-support-bundle
 archive="$output_dir/$bundle_name.tar.gz"
 bundle_path="$output_dir/$bundle_name"
-[[ ! -e "$bundle_path" && ! -e "$archive" ]] || die 'refusing to overwrite existing bundle output'
 
 umask 077
 mkdir -p "$output_dir"
-staging_dir=''; archive_tmp=''
+staging_dir=''; archive_tmp=''; reservation_dir="$output_dir/.$bundle_name.lock"; reservation_acquired=false
 # Remove only paths created and recorded by this invocation.
 cleanup() {
   if [[ -n "$staging_dir" && -d "$staging_dir" ]]; then
@@ -83,9 +82,18 @@ cleanup() {
   if [[ -n "$archive_tmp" && -e "$archive_tmp" ]]; then
     rm -f -- "$archive_tmp"
   fi
+  if [[ "$reservation_acquired" == true && -d "$reservation_dir" ]]; then
+    rmdir -- "$reservation_dir"
+  fi
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+
+if ! mkdir "$reservation_dir" 2>/dev/null; then
+  die 'support bundle output is already reserved by another collector'
+fi
+reservation_acquired=true
+[[ ! -e "$bundle_path" && ! -e "$archive" ]] || die 'refusing to overwrite existing bundle output'
 
 staging_parent="${TMPDIR:-/tmp}"
 staging_dir=$(mktemp -d "$staging_parent/hami-support-bundle.XXXXXX")
@@ -206,6 +214,10 @@ redact() {
   }
   BEGIN { while ((getline p < pfile) > 0) if (p != "") patterns[++n]=p; close(pfile) }
   {
+    if (sensitive_yaml_block) {
+      if ($0 ~ /^[[:space:]]*$/ || leading_spaces($0) > sensitive_yaml_block_indent) next
+      sensitive_yaml_block=0
+    }
     s=$0
     gsub(/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][[:space:]]*[:=][[:space:]]*[Bb][Aa][Ss][Ii][Cc][[:space:]]+[^[:space:]",}]+/, "Authorization: Basic <redacted>", s)
     gsub(/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][[:space:]]*[:=][[:space:]]*[Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+[^[:space:]",}]+/, "Authorization: Bearer <redacted>", s)
@@ -217,11 +229,13 @@ redact() {
     } else if (env_sensitive && lower_key == "value" && leading_spaces(s) >= env_indent) {
       s=replace_yaml_value(s, "<redacted-credential>"); env_sensitive=0; env_ttl=0
     } else {
-      if (value != "" && sensitive_key(key)) s=replace_yaml_value(s, "<redacted-credential>")
+      if (value != "" && sensitive_key(key)) {
+        if (value ~ /^[|>][0-9+-]*$/) { sensitive_yaml_block=1; sensitive_yaml_block_indent=leading_spaces(s) }
+        s=replace_yaml_value(s, "<redacted-credential>")
+      }
       else if (value != "" && image_key(key)) s=replace_yaml_value(s, "<redacted-image>")
       if (env_sensitive && s !~ /^[[:space:]]*$/) { env_ttl--; if (env_ttl <= 0 || leading_spaces(s) < env_indent) env_sensitive=0 }
     }
-    gsub(/[Ii][Mm][Aa][Gg][Ee]([Ii][Dd])?[[:space:]]*[:=][[:space:]]*"?[^[:space:]",}]+/, "image: <redacted-image>", s)
     gsub(/[Ii][Mm][Aa][Gg][Ee][[:space:]]+"[^"]+"/, "image \"<redacted-image>\"", s)
     for (i=1; i<=n; i++) s=replace_literal(s,patterns[i])
     print s
@@ -234,6 +248,12 @@ cap_file() {
   head -c "$limit" "$source" >"$destination"
 }
 
+# Capture a bounded prefix from a FIFO, then drain the rest without storing it.
+capture_and_drain() {
+  local fifo="$1" destination="$2" limit="$3"
+  { head -c "$limit" >"$destination"; cat >/dev/null; } <"$fifo"
+}
+
 # Install one redacted candidate if the collector and bundle budgets allow it.
 store_candidate() {
   local status="$1" id="$2" relative_path="$3" detail="$4" candidate="$5"
@@ -242,7 +262,8 @@ store_candidate() {
   if (( size > max_collector_bytes )); then
     capped=$(mktemp "$staging_dir/capped.XXXXXX")
     cap_file "$candidate" "$capped" "$max_collector_bytes"
-    candidate="$capped"; size=$max_collector_bytes; status=truncated
+    candidate="$capped"; size=$max_collector_bytes
+    [[ "$status" != success ]] || status=truncated
     detail=$(append_detail "$detail" "collector-byte-limit=$max_collector_bytes")
   fi
   if (( bundle_bytes + size > max_bundle_bytes - MANIFEST_RESERVE_BYTES )); then
@@ -274,13 +295,14 @@ collect() {
   run_dir=$(mktemp -d "$staging_dir/run.XXXXXX")
   raw_out="$run_dir/stdout"; raw_err="$run_dir/stderr"
   mkfifo "$run_dir/stdout.fifo" "$run_dir/stderr.fifo"
-  head -c "$((max_collector_bytes + 1))" <"$run_dir/stdout.fifo" >"$raw_out" & out_reader=$!
-  head -c "$((max_collector_bytes + 1))" <"$run_dir/stderr.fifo" >"$raw_err" & err_reader=$!
-  set +o errexit
-  "$@" >"$run_dir/stdout.fifo" 2>"$run_dir/stderr.fifo"
-  command_status=$?
+  capture_and_drain "$run_dir/stdout.fifo" "$raw_out" "$((max_collector_bytes + 1))" & out_reader=$!
+  capture_and_drain "$run_dir/stderr.fifo" "$raw_err" "$((max_collector_bytes + 1))" & err_reader=$!
+  if "$@" >"$run_dir/stdout.fifo" 2>"$run_dir/stderr.fifo"; then
+    command_status=0
+  else
+    command_status=$?
+  fi
   wait "$out_reader"; wait "$err_reader"
-  set -o errexit
   rm -f "$run_dir/stdout.fifo" "$run_dir/stderr.fifo"
   out_size=$(stat -c %s "$raw_out"); err_size=$(stat -c %s "$raw_err")
   if (( out_size > max_collector_bytes )); then
@@ -292,7 +314,7 @@ collect() {
     detail=$(append_detail "$detail" "stderr-truncated-at=$max_collector_bytes")
   fi
   candidate="$run_dir/redacted"
-  if [[ "$command_status" -eq 0 || ( "$command_status" -eq 141 && "$out_size" -gt "$max_collector_bytes" ) ]]; then
+  if [[ "$command_status" -eq 0 ]]; then
     redact "$raw_out" "$candidate"
     if [[ -n "$detail" ]]; then
       store_candidate truncated "$id" "$artifact_path" "$detail" "$candidate"
@@ -424,4 +446,6 @@ tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C 
 chmod 600 "$archive_tmp"
 mv "$archive_tmp" "$archive"
 archive_tmp=''
+rmdir -- "$reservation_dir"
+reservation_acquired=false
 echo "support bundle written to $archive"
