@@ -424,6 +424,7 @@ devicePlugin:
     # The device plugin reads the node labels each time it starts, so restart it
     # after changing them, and select on labels the node has when it registers
     # (node group or kubelet --node-labels), not on labels a controller adds later.
+    # A node that neither a name nor a selector picks uses the entries named "*".
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json(An example is as follows).
     config: |

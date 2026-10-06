@@ -183,9 +183,9 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels ma
 }
 
 // selectNodeConfigs returns the nodeconfig entries for this node: every entry
-// naming it, else the first entry whose nodelabelselector matches its labels.
-// Entries that set both or neither of name and nodelabelselector, and invalid
-// or empty selectors, are skipped.
+// naming it, else the first entry whose nodelabelselector matches its labels,
+// else the entries named "*". Entries that set both or neither of name and
+// nodelabelselector, and invalid or empty selectors, are skipped.
 func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels map[string]string) []nvidia.NodeConfig {
 	for i, entry := range entries {
 		switch {
@@ -226,7 +226,7 @@ func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels 
 	if selected >= 0 {
 		return entries[selected : selected+1]
 	}
-	return nil
+	return entriesNamed(entries, nvidia.NodeConfigFallbackName)
 }
 
 // entriesNamed returns the entries named name that set no nodelabelselector.

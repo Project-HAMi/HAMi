@@ -612,6 +612,7 @@ func TestSelectNodeConfigs(t *testing.T) {
 	named := nvidia.NodeConfig{Name: "gpu-node-01", OperatingMode: nvidia.HamiCoreMode}
 	byPool := nvidia.NodeConfig{NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}
 	byModel := nvidia.NodeConfig{NodeLabelSelector: smallCards, OperatingMode: nvidia.HamiCoreMode}
+	fallback := nvidia.NodeConfig{Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.HamiCoreMode}
 	entries := []nvidia.NodeConfig{named, byPool, byModel}
 
 	for _, tc := range []struct {
@@ -653,6 +654,21 @@ func TestSelectNodeConfigs(t *testing.T) {
 			"gpu-node-14", map[string]string{"gpu.example.com/pool": "mig"}, nil},
 		{"an entry without a name is not matched by an empty node name",
 			[]nvidia.NodeConfig{{OperatingMode: nvidia.MigMode}}, "", nil, nil},
+		{`a "*" entry applies to a node nothing else selects`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-09", map[string]string{"gpu.example.com/model": "a100"}, []nvidia.NodeConfig{fallback}},
+		{`an entry naming the node wins over "*"`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-01", nil, []nvidia.NodeConfig{named}},
+		{`a matching selector wins over "*" listed before it`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-10", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{byPool}},
+		{`every "*" entry applies in list order`,
+			[]nvidia.NodeConfig{fallback, byPool, {Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.MigMode}},
+			"gpu-node-15", nil, []nvidia.NodeConfig{fallback, {Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.MigMode}}},
+		{`a "*" entry that also sets a selector is skipped`,
+			[]nvidia.NodeConfig{{Name: nvidia.NodeConfigFallbackName, NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-11", map[string]string{"gpu.example.com/pool": "default"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, selectNodeConfigs(tc.entries, tc.node, tc.labels))

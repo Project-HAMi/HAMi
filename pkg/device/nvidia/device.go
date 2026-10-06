@@ -143,12 +143,16 @@ type FilterDevice struct {
 	Index []uint `json:"index"`
 }
 
+// NodeConfigFallbackName names the nodeconfig entries for nodes that no other
+// entry selects.
+const NodeConfigFallbackName = "*"
+
 // NodeConfig is one entry of the device plugin nodeconfig list. An entry sets
 // either Name or NodeLabelSelector; an entry that sets both is ignored.
 type NodeConfig struct {
 	// These configs override those in NvidiaConfig for the nodes this entry applies to.
 	NodeDefaultConfig `json:",inline"`
-	// Name is the node the entry applies to.
+	// Name is the node the entry applies to, or NodeConfigFallbackName.
 	Name string `json:"name"`
 	// NodeLabelSelector selects nodes by label when no entry names the node.
 	NodeLabelSelector            *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
