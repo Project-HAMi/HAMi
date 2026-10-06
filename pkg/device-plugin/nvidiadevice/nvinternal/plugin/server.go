@@ -575,7 +575,7 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		if err != nil {
 			return err
 		}
-		if err := plugin.migMgr.RestoreAllocations(plugin.migResetDeviceCount, inUse); err != nil {
+		if err := plugin.migMgr.RestoreAllocations(plugin.migResetDeviceCount, inUse, plugin.schedulerConfig.AdoptExistingMIGInstances); err != nil {
 			return fmt.Errorf("restore MIG instances during initialization: %w", err)
 		}
 		klog.InfoS("mig init: restored startup layout", "inUseGPUs", sortedIntSetKeys(inUse))
@@ -590,6 +590,9 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		plugin.migPrimed = true
 	}
 	err = plugin.migMgr.ReconcileActiveAllocations(active)
+	reclaimed, retryErr := plugin.migMgr.RetryErrorAllocations(active)
+	err = errors.Join(err, retryErr)
+	plugin.removeReclaimedMIGCDI(reclaimed)
 	// A live reservation omitted by the informer is still unresolved work,
 	// even when the API request and hardware reconciliation both succeeded.
 	complete = err == nil

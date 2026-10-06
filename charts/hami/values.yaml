@@ -348,6 +348,8 @@ scheduler:
     enabled: false
 
 devicePlugin:
+  # Adopt pre-existing GI/CI pairs only when HAMi exclusively owns the node's MIG layout.
+  adoptExistingMIGInstances: false
   enabled: true
   gpuOperatorToolkitReady:
     enabled: false

@@ -6,6 +6,8 @@ HAMi keeps dynamically created NVIDIA MIG instances available after a Pod releas
 
 Dynamic MIG mode requires HAMi to be the only controller that creates or destroys MIG instances on GPUs managed by HAMi. Running another MIG lifecycle controller on the same GPU is unsupported because HAMi cannot safely distinguish or coordinate external layout changes.
 
+By default, startup recovery adopts only instances referenced by live HAMi Pod annotations. Existing unverified GI/CI pairs are preserved but are not reused or reclaimed. Operators may set `devicePlugin.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in allows unannotated GI/CI pairs to be restored as idle.
+
 ## Lifecycle
 
 ```text
@@ -25,7 +27,7 @@ Idle TTL and cache-size limits are optional roadmap extensions. The current life
 
 ## Restart recovery
 
-At device-plugin startup, HAMi first adopts runtime identities referenced by active Pod annotations. It then reads the actual GI/CI layout from NVML and restores remaining HAMi-owned instances as idle. Startup recovery does not destroy unallocated instances.
+At device-plugin startup, HAMi first adopts runtime identities referenced by active Pod annotations. It then reads the actual GI/CI layout from NVML. Unknown instances are preserved unless explicit adoption is enabled. With adoption enabled, complete GI/CI pairs are restored as idle, and orphan GIs without a CI are removed only on GPUs that have no live Pod allocation. Orphan GIs on busy GPUs are always preserved.
 
 If Pod state, MIG identity, or NVML geometry cannot be verified, startup recovery returns an error instead of modifying uncertain hardware state.
 
@@ -37,6 +39,7 @@ The CDI specification belongs to the MIG instance, not to a Pod:
 - Reusing an idle instance reuses and validates its existing CDI entry.
 - The CDI file is removed only after the GI/CI is permanently destroyed.
 - Failed CDI removal is queued and retried by the existing reconciler.
+- A tracked instance left in `Error` after a transient NVML cleanup failure is retried by reconciliation. Its CDI entry is removed only after hardware destruction succeeds.
 
 Legacy non-CDI allocation remains unchanged.
 

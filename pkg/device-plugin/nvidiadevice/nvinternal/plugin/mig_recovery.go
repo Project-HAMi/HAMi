@@ -20,9 +20,10 @@ import (
 var orderedMIGProfiles = []string{"1g", "2g", "3g", "4g", "6g", "7g", "8g"}
 
 // RestoreAllocations rebuilds manager state from the actual NVML GI/CI layout.
-// Active Pod allocations must be adopted before this call; every remaining
-// HAMi-owned instance is restored as idle and can be reused after restart.
-func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]struct{}) error {
+// Active Pod allocations must be adopted before this call. Unknown instances
+// are preserved unless adoptExisting is explicitly enabled for a HAMi-exclusive
+// MIG layout.
+func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]struct{}, adoptExisting bool) error {
 	done, err := m.beginOperation()
 	if err != nil {
 		return err
@@ -32,7 +33,8 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
 		lk := m.gpuLock(gpuIndex)
 		lk.Lock()
-		if _, busy := inUse[gpuIndex]; !busy {
+		_, busy := inUse[gpuIndex]
+		if !busy {
 			if err := m.ensureMigModeEnabled(gpuIndex); err != nil {
 				lk.Unlock()
 				return err
@@ -56,7 +58,7 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 			lk.Unlock()
 			continue
 		}
-		if err := m.restoreGPUAllocationsLocked(gpuIndex, dev); err != nil {
+		if err := m.restoreGPUAllocationsLocked(gpuIndex, dev, adoptExisting, !busy); err != nil {
 			lk.Unlock()
 			return err
 		}
@@ -65,7 +67,7 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 	return nil
 }
 
-func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.Device) error {
+func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.Device, adoptExisting, allowOrphanCleanup bool) error {
 	for _, profile := range orderedMIGProfiles {
 		profileInfo, ret := dev.GetGpuInstanceProfileInfo(profileNameToGIProfileID[profile])
 		if ret == nvml.ERROR_NOT_SUPPORTED || ret == nvml.ERROR_INVALID_ARGUMENT {
@@ -91,6 +93,10 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 				return fmt.Errorf("recover GI %d on gpu %d: %w", giInfo.Id, gpuIndex, err)
 			}
 			if !found {
+				if !adoptExisting || !allowOrphanCleanup {
+					klog.InfoS("preserved unowned or busy MIG GPU instance without compute instance", "gpu", gpuIndex, "gpuInstanceID", giInfo.Id)
+					continue
+				}
 				if ret := gi.Destroy(); ret != nvml.SUCCESS && ret != nvml.ERROR_NOT_FOUND {
 					return fmt.Errorf("destroy orphan GI %d on gpu %d during recovery: %s", giInfo.Id, gpuIndex, nvml.ErrorString(ret))
 				}
@@ -110,6 +116,11 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 				if !valid {
 					return fmt.Errorf("recovered MIG identity %s conflicts with active allocation", migUUID)
 				}
+				continue
+			}
+			if !adoptExisting {
+				m.mu.Unlock()
+				klog.InfoS("preserved unowned MIG allocation during recovery", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", giInfo.Placement.Start)
 				continue
 			}
 			key := allocationKey(gpuIndex, profile, giInfo.Placement)

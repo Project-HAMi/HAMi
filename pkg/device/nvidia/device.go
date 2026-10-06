@@ -112,6 +112,10 @@ type NvidiaConfig struct {
 	// TODO Whether these should be removed
 	DisableCoreLimit    bool                        `yaml:"disableCoreLimit"`
 	MigProfileAllowlist []device.AllowedMigProfiles `yaml:"migProfileAllowlist"`
+	// AdoptExistingMIGInstances allows Dynamic MIG startup recovery to adopt
+	// unannotated GI/CI pairs. It must only be enabled when HAMi exclusively
+	// owns the MIG layout on the node.
+	AdoptExistingMIGInstances bool `yaml:"adoptExistingMIGInstances"`
 	// GPUCorePolicy through webhook automatic injected to container env
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName

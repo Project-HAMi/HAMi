@@ -328,6 +328,7 @@ func TestMigRecoveryRetriesRestoreAfterInformerSync(t *testing.T) {
 	synced := false
 	plugin := &NvidiaDevicePlugin{
 		migMgr: manager, migResetDeviceCount: 1,
+		schedulerConfig: nvidia.NvidiaConfig{AdoptExistingMIGInstances: true},
 		listNodePods: func() ([]*corev1.Pod, error) {
 			if !synced {
 				return nil, nodepodinformer.ErrNotSynced

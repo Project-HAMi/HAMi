@@ -257,6 +257,7 @@ or the five-failure limit for directory deletion.
 | `devicePlugin.runtimeClassName` | Runtime class name | `""` |
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
+| `devicePlugin.adoptExistingMIGInstances` | Adopt pre-existing MIG GI/CI pairs for lazy reuse. Enable only when HAMi exclusively manages the node's MIG layout | `false` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |

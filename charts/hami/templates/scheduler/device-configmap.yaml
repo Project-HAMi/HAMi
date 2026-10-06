@@ -32,6 +32,7 @@ data:
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
+      adoptExistingMIGInstances: {{ .Values.devicePlugin.adoptExistingMIGInstances | default false }}
       migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
@@ -281,4 +282,3 @@ data:
             aiCore: 10
             aiCPU: 3
   {{ end }}
-  

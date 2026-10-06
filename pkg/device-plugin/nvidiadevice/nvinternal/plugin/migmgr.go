@@ -222,46 +222,6 @@ func profileSliceKey(profile string) string {
 	return profile
 }
 
-// ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand instance creation
-// through NVML. Busy GPUs are left untouched; idle GPUs
-// have MIG mode enabled and all existing GI/CI instances destroyed.
-func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
-	done, err := m.beginOperation()
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-
-	reset := []int{}
-	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
-		if _, busy := inUse[gpuIndex]; busy {
-			continue
-		}
-
-		lk := m.gpuLock(gpuIndex)
-		lk.Lock()
-		if err := m.ensureMigModeEnabled(gpuIndex); err != nil {
-			lk.Unlock()
-			return reset, err
-		}
-		dev, err := m.deviceHandleByIndex(gpuIndex)
-		if err != nil {
-			lk.Unlock()
-			return reset, err
-		}
-		if err := destroyAllMigInstances(dev); err != nil {
-			lk.Unlock()
-			return reset, err
-		}
-
-		m.clearAllocationsForGPU(gpuIndex)
-		lk.Unlock()
-		reset = append(reset, gpuIndex)
-	}
-	sort.Ints(reset)
-	return reset, nil
-}
-
 // DisableIdleGPUs turns off MIG on idle GPUs so the node can register as
 // hami-core. GPUs with running work are left unchanged; if those GPUs are
 // still in MIG, the call fails so the plugin does not advertise hami-core
@@ -665,7 +625,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	if !valid {
 		return result, fmt.Errorf("scheduler selected invalid placement %+v for profile %s", placement, profile)
 	}
-	reclaimed, err := m.reclaimBlockingIdleLocked(gpuIndex, placement)
+	reclaimed, err := m.reclaimBlockingIdle(gpuIndex, placement)
 	result.Reclaimed = reclaimed
 	if err != nil {
 		return result, err
@@ -742,7 +702,9 @@ func (m *MigInstanceManager) compatibleIdleAllocationLocked(gpuIndex int, profil
 	return migAllocationKey{}, false
 }
 
-func (m *MigInstanceManager) reclaimBlockingIdleLocked(gpuIndex int, placement nvml.GpuInstancePlacement) ([]string, error) {
+// reclaimBlockingIdle destroys tracked idle or errored instances that overlap
+// placement. The caller holds the per-GPU lock; this helper manages m.mu itself.
+func (m *MigInstanceManager) reclaimBlockingIdle(gpuIndex int, placement nvml.GpuInstancePlacement) ([]string, error) {
 	type candidate struct {
 		key  migAllocationKey
 		inst *migInstance
@@ -788,6 +750,67 @@ func (m *MigInstanceManager) reclaimBlockingIdleLocked(gpuIndex int, placement n
 		klog.InfoS("reclaimed idle MIG allocation under placement pressure", "uuid", candidate.inst.MigUUID, "gpu", gpuIndex, "profile", candidate.key.Profile, "start", candidate.key.Start)
 	}
 	return reclaimed, nil
+}
+
+// RetryErrorAllocations retries destruction of tracked HAMi allocations that
+// previously failed cleanup. Active reservations are always preserved.
+func (m *MigInstanceManager) RetryErrorAllocations(active map[migAllocationKey]struct{}) ([]string, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+
+	m.mu.Lock()
+	keys := make([]migAllocationKey, 0)
+	for key, inst := range m.byAllocation {
+		if _, inUse := active[key]; !inUse && normalizedMIGState(inst) == migInstanceError {
+			keys = append(keys, key)
+		}
+	}
+	m.mu.Unlock()
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].GPUIndex != keys[j].GPUIndex {
+			return keys[i].GPUIndex < keys[j].GPUIndex
+		}
+		return keys[i].Start < keys[j].Start
+	})
+
+	var retryErr error
+	reclaimed := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lk := m.gpuLock(key.GPUIndex)
+		lk.Lock()
+		m.mu.Lock()
+		inst := m.byAllocation[key]
+		_, inUse := active[key]
+		if inst == nil || inUse || normalizedMIGState(inst) != migInstanceError {
+			m.mu.Unlock()
+			lk.Unlock()
+			continue
+		}
+		inst.State = migInstanceReclaiming
+		m.mu.Unlock()
+
+		if err := m.destroyMigInstance(key.GPUIndex, inst); err != nil {
+			m.mu.Lock()
+			inst.State = migInstanceError
+			inst.LastUsed = m.now()
+			m.mu.Unlock()
+			lk.Unlock()
+			retryErr = errors.Join(retryErr, fmt.Errorf("retry cleanup of MIG allocation %s: %w", inst.MigUUID, err))
+			continue
+		}
+
+		m.mu.Lock()
+		delete(m.byAllocation, key)
+		delete(m.byAllocationMigUUID, inst.MigUUID)
+		m.mu.Unlock()
+		lk.Unlock()
+		reclaimed = append(reclaimed, inst.MigUUID)
+		klog.InfoS("reclaimed MIG allocation after cleanup retry", "uuid", inst.MigUUID, "gpu", key.GPUIndex, "profile", key.Profile, "start", key.Start)
+	}
+	return reclaimed, retryErr
 }
 
 func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (migAllocationRuntimeInfo, bool) {
