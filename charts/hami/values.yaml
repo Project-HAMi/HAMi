@@ -414,6 +414,16 @@ devicePlugin:
   reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
+    # Each node uses the nodeconfig entries whose "name" is the node name. A node
+    # that no entry names uses the first entry whose "nodelabelselector" (a
+    # Kubernetes label selector with matchLabels or matchExpressions) matches its
+    # labels. An entry sets either "name" or "nodelabelselector"; an entry that
+    # sets both, or whose selector is empty or invalid, is ignored:
+    #   { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+    #     "operatingmode": "mig", "devicesplitcount": 10 }
+    # The device plugin reads the node labels each time it starts, so restart it
+    # after changing them, and select on labels the node has when it registers
+    # (node group or kubelet --node-labels), not on labels a controller adds later.
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json(An example is as follows).
     config: |
