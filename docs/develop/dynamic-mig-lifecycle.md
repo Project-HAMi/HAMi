@@ -6,7 +6,7 @@ HAMi keeps dynamically created NVIDIA MIG instances available after a Pod releas
 
 Dynamic MIG mode requires HAMi to be the only controller that creates or destroys MIG instances on GPUs managed by HAMi. Running another MIG lifecycle controller on the same GPU is unsupported because HAMi cannot safely distinguish or coordinate external layout changes.
 
-By default, startup recovery adopts only instances referenced by live HAMi Pod annotations. Existing unverified GI/CI pairs are preserved but are not reused or reclaimed. Operators may set `devicePlugin.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in allows unannotated GI/CI pairs to be restored as idle.
+By default, startup recovery adopts only instances referenced by live HAMi Pod annotations. Existing unverified GI/CI pairs are preserved but are not reused or reclaimed. Operators may set `devices.nvidia.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in allows unannotated GI/CI pairs to be restored as idle.
 
 ## Lifecycle
 
