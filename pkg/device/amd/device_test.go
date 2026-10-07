@@ -594,3 +594,88 @@ func TestCheckAMDType(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryPercentage(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName:            "amd.com/gpu",
+		ResourceMemoryName:           "amd.com/gpumem",
+		ResourceMemoryPercentageName: "amd.com/gpumem-percentage",
+	})
+	ctr := func(pct string) *corev1.Container {
+		return &corev1.Container{
+			Name: "c1",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"amd.com/gpu":               *resource.NewQuantity(1, resource.DecimalSI),
+				"amd.com/gpumem-percentage": resource.MustParse(pct),
+			}},
+		}
+	}
+
+	t.Run("mutate admits a percentage-only container", func(t *testing.T) {
+		c := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"amd.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+		}}}
+		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+	})
+
+	for _, bad := range []string{"101", "-1", "1500m"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			_, err := dev.MutateAdmission(ctr(bad), &corev1.Pod{})
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			_, err = dev.GenerateResourceRequests(ctr(bad))
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+		})
+	}
+
+	t.Run("generate carries the percentage and ignores zero", func(t *testing.T) {
+		got, err := dev.GenerateResourceRequests(ctr("40"))
+		assert.NilError(t, err)
+		assert.Equal(t, int32(40), got.MemPercentagereq)
+		got, err = dev.GenerateResourceRequests(ctr("0"))
+		assert.NilError(t, err)
+		assert.Equal(t, int32(0), got.MemPercentagereq)
+	})
+
+	t.Run("fit converts the percentage to memory per card", func(t *testing.T) {
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Count: 4, Totalmem: 16384, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 25, Coresreq: 50}
+		ok, got, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, int32(4096), got[AMDDevice][0].Usedmem)
+
+		// an absolute request wins over the percentage
+		req.Memreq = 1024
+		ok, got, reason = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, int32(1024), got[AMDDevice][0].Usedmem)
+
+		// 100% books the whole card
+		req = device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 100, Coresreq: 50}
+		_, got, _ = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, int32(16384), got[AMDDevice][0].Usedmem)
+
+		// not enough memory left on the only card
+		devices[0].Usedmem = 14000
+		req = device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 25, Coresreq: 50}
+		ok, _, reason = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.CardInsufficientMemory))
+	})
+
+	t.Run("tiny percentage on a small card still books memory", func(t *testing.T) {
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Count: 4, Totalmem: 50, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 1, Coresreq: 50}
+		_, got, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, int32(1), got[AMDDevice][0].Usedmem)
+	})
+}
