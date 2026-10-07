@@ -624,6 +624,19 @@ func TestMemoryPercentage(t *testing.T) {
 		assert.Equal(t, int32(50), got.MemPercentagereq)
 	})
 
+	t.Run("a percentage only in requests still gets one card", func(t *testing.T) {
+		c := &corev1.Container{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			"amd.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+		}}}
+		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		got, err := dev.GenerateResourceRequests(c)
+		assert.NilError(t, err)
+		assert.Equal(t, int32(1), got.Nums)
+		assert.Equal(t, int32(50), got.MemPercentagereq)
+	})
+
 	for _, bad := range []string{"101", "-1", "1500m"} {
 		t.Run("rejects "+bad, func(t *testing.T) {
 			_, err := dev.MutateAdmission(ctr(bad), &corev1.Pod{})

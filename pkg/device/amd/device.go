@@ -96,9 +96,14 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
 	}
 	if !ok && dev.resourceMemoryPercentageName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryPercentageName)]
-		if ok {
+		name := corev1.ResourceName(dev.resourceMemoryPercentageName)
+		_, inLimits := ctr.Resources.Limits[name]
+		_, inRequests := ctr.Resources.Requests[name]
+		if ok = inLimits || inRequests; ok {
 			// A percentage alone still needs a card, like nvidia defaults the count.
+			if ctr.Resources.Limits == nil {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
 			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(1, resource.DecimalSI)
 		}
 	}
