@@ -390,7 +390,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 // cuPerWGP returns how many CUs the device plugin allocates together, as
 // published in the registration custominfo; 1 when absent.
 func cuPerWGP(info map[string]any) int32 {
-	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 {
+	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 && v == math.Trunc(v) {
 		return int32(v)
 	}
 	return 1
