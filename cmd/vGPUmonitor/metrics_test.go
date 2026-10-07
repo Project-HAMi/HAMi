@@ -26,9 +26,12 @@ import (
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
+	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -101,6 +104,51 @@ func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected a collect success metric")
+	}
+}
+
+// A pod whose MIG allocations cannot be decoded or point at a container that
+// does not exist is skipped, but the scrape must report it as degraded.
+func TestCollectPodAndContainerMigInfoReportsSkippedAllocations(t *testing.T) {
+	const valid = `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-1","profile":"1g.10gb","placement":{"start":0,"size":1},"migUUID":"MIG-1","gpuInstanceID":1,"computeInstanceID":0}]`
+	outOfRange := strings.Replace(valid, `"containerIndex":0`, `"containerIndex":5`, 1)
+	for _, tc := range []struct {
+		name       string
+		annotation string
+		wantErr    bool
+		wantSent   bool
+	}{
+		{"valid allocation", valid, false, true},
+		{"undecodable annotation", "not json", true, false},
+		{"container index out of range", outOfRange, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(util.NodeNameEnvName, "test-node")
+			informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "p", Namespace: "ns",
+					Labels:      map[string]string{util.AssignedNodeAnnotations: "test-node"},
+					Annotations: map[string]string{nv.MigAllocationsAnnotation: tc.annotation},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c"}}},
+			}
+			if err := informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			cc := ClusterManagerCollector{ClusterManager: &ClusterManager{PodLister: informerFactory.Core().V1().Pods().Lister()}}
+			ch := make(chan prometheus.Metric, 10)
+
+			err := cc.collectPodAndContainerMigInfo(ch)
+			close(ch)
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if sent := len(ch) > 0; sent != tc.wantSent {
+				t.Fatalf("sent %d metrics, want any: %v", len(ch), tc.wantSent)
+			}
+		})
 	}
 }
 

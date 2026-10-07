@@ -57,7 +57,7 @@ var (
 	// Catches a degraded Collect that still returns HTTP 200.
 	collectSuccessDesc = prometheus.NewDesc(
 		"hami_vgpumonitor_collect_success",
-		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0)",
+		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0); metrics a GPU does not support are not counted as failures",
 		[]string{"node"}, nil,
 	)
 
@@ -520,6 +520,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 	}
 
 	nowSec := time.Now().Unix()
+	failed := 0
 
 	// Iterate through each Pod
 	for _, pod := range pods {
@@ -542,6 +543,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 					klog.V(5).Infof("Processing Container %s in Pod %s/%s", ctr.Name, pod.Namespace, pod.Name)
 					if err := cc.collectContainerMetrics(ch, pod, ctr, c, nowSec); err != nil {
 						klog.Errorf("Failed to collect metrics for container %s in Pod %s/%s: %v", ctr.Name, pod.Namespace, pod.Name, err)
+						failed++
 					}
 					break // Exit the inner loop after finding the matching container
 				}
@@ -550,6 +552,9 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 	}
 
 	klog.V(4).Infof("Finished collecting metrics for %d pods", len(pods))
+	if failed > 0 {
+		return fmt.Errorf("failed to collect metrics for %d containers", failed)
+	}
 	return nil
 }
 
@@ -647,10 +652,12 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 		klog.Errorf("Failed to list pods for node %s: %v", nodeName, err)
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
+	failed := 0
 	for _, pod := range pods {
 		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
 			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			failed++
 			continue
 		}
 		for _, allocation := range allocations {
@@ -660,6 +667,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 			containerName, ok := migAllocationContainerName(pod, allocation.ContainerIndex)
 			if !ok {
 				klog.Errorf("MIG allocation container index %d out of range for Pod %s/%s", allocation.ContainerIndex, pod.Namespace, pod.Name)
+				failed++
 				continue
 			}
 			metricLabels := []string{
@@ -679,6 +687,9 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 			sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1,
 				pod.Namespace, pod.Name, containerName, fmt.Sprint(allocation.DeviceIndex), allocation.GPUUUID, fmt.Sprint(*allocation.GPUInstanceID))
 		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("failed to report MIG allocations of %d pods or containers", failed)
 	}
 	return nil
 }

@@ -250,6 +250,7 @@ spec:
             {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}
+            - --metrics-bind-address={{ .Values.devicePlugin.monitor.metricsBindAddress }}
           {{- with .Values.devicePlugin.monitor.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -280,7 +281,7 @@ spec:
             {{- end }}
           ports:
             - name: metrics
-              containerPort: 9394
+              containerPort: {{ last (splitList ":" .Values.devicePlugin.monitor.metricsBindAddress) | int }}
               protocol: TCP
           livenessProbe:
             httpGet:
