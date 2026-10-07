@@ -332,6 +332,9 @@ listener is started.
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
+| `devices.amd.monitor.enabled` | Run vGPUmonitor with `--vendor=amd` on AMD GPU nodes to report per-container VRAM and host metrics | `false` |
+| `devices.amd.monitor.nodeLabel` | Label the AMD device plugin sets on nodes with a GPU, which selects where the monitor runs | `amd.com/gpu.family` |
+| `devices.amd.monitor.resources` | Resources of the AMD monitor container | `{}` |
 
 ### vGPU Cache Garbage Collection
 

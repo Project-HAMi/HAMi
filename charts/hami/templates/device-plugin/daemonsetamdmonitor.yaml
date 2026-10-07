@@ -1,0 +1,95 @@
+{{- if and .Values.devicePlugin.enabled .Values.devices.amd.monitor.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "hami-vgpu.device-plugin" . }}-amd-monitor
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-amd-monitor
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-amd-monitor
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: hami-amd-monitor
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9394"
+    spec:
+      # It shares the device plugin's service account, whose role already lists
+      # pods and reads the node.
+      serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
+      {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: amd-monitor
+          image: {{ include "hami.devicePlugin.monitor.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
+          command:
+            - vGPUmonitor
+            - --vendor=amd
+            - --metrics-bind-address=:9394
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: metrics
+              containerPort: 9394
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+          {{- toYaml .Values.devices.amd.monitor.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+            - name: drm
+              mountPath: /sys/class/drm
+              readOnly: true
+            - name: devices
+              mountPath: /sys/devices
+              readOnly: true
+      volumes:
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        # card*/device links into /sys/devices, so both have to be mounted.
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+        - name: devices
+          hostPath:
+            path: /sys/devices
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: {{ .Values.devices.amd.monitor.nodeLabel }}
+                    operator: Exists
+      {{- with .Values.devicePlugin.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -540,6 +540,14 @@ devices:
       - amd.com/gpu
       - amd.com/gpumem
       - amd.com/gpucores
+    # Per-container VRAM and host metrics of AMD GPU nodes, served by vGPUmonitor
+    # --vendor=amd. It needs the AMD device plugin, which registers the cards, and
+    # the systemd cgroup driver on a kernel with the dmem controller.
+    monitor:
+      enabled: false
+      # Label the AMD device plugin sets on the nodes that have a GPU.
+      nodeLabel: amd.com/gpu.family
+      resources: {}
   awsneuron:
     resourceCountName: "aws.amazon.com/neuron"
     resourceCoreName: "aws.amazon.com/neuroncore"
