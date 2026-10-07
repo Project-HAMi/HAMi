@@ -540,7 +540,6 @@ devices:
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
-      - amd.com/gpumem-percentage
       - amd.com/gpucores
   awsneuron:
     resourceCountName: "aws.amazon.com/neuron"

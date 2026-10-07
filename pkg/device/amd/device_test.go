@@ -618,6 +618,10 @@ func TestMemoryPercentage(t *testing.T) {
 		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
 		assert.NilError(t, err)
 		assert.Equal(t, true, ok)
+		got, err := dev.GenerateResourceRequests(c)
+		assert.NilError(t, err)
+		assert.Equal(t, int32(1), got.Nums)
+		assert.Equal(t, int32(50), got.MemPercentagereq)
 	})
 
 	for _, bad := range []string{"101", "-1", "1500m"} {
