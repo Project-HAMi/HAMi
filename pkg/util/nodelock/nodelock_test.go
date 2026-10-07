@@ -1353,6 +1353,8 @@ func TestSetNodeLockNilPod(t *testing.T) {
 // learn which pod its Allocate is for. Handing an expired lock to the next pod
 // while the holder is still pending made the holder's Allocate read the new
 // pod's allocation, and the two pods were served each other's devices.
+var allocating = map[string]string{deviceBindPhaseAnnotation: deviceBindAllocating}
+
 func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
 	nodeLocks = newNodeLockManager()
 	client.KubeClient = fake.NewClientset()
@@ -1377,7 +1379,7 @@ func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
 	// The holder is still pending: its Allocate has not run, so it will read
 	// this lock to find out which allocation is its own.
 	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocating},
 		Status:     corev1.PodStatus{Phase: corev1.PodPending},
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("failed to seed the holder: %v", err)
@@ -1475,7 +1477,7 @@ func TestLockNodeExpiredReclaimedByOwnHolder(t *testing.T) {
 	}
 
 	holder := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocating},
 		Status:     corev1.PodStatus{Phase: corev1.PodPending},
 	}
 	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), holder, metav1.CreateOptions{}); err != nil {
@@ -1530,6 +1532,7 @@ func TestLockNodeExpiredTakenWhenHolderNameWasReused(t *testing.T) {
 			Name:              "web-0",
 			Namespace:         "default",
 			CreationTimestamp: metav1.NewTime(lockedAt.Add(30 * time.Minute)),
+			Annotations:       allocating,
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}, metav1.CreateOptions{}); err != nil {
@@ -1547,5 +1550,36 @@ func TestLockNodeExpiredTakenWhenHolderNameWasReused(t *testing.T) {
 	}
 	if !strings.Contains(node.Annotations[NodeLockKey], "next") {
 		t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+	}
+}
+
+// A holder that is still Pending after its allocation finished (image pull,
+// init containers) must not keep the node locked when its lock release failed.
+func TestLockNodeExpiredTakenWhenHolderFinishedAllocating(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-5"
+	staleLock := time.Now().Add(-time.Hour).Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "holder"
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: staleLock}},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default",
+			Annotations: map[string]string{deviceBindPhaseAnnotation: "success"}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	if err := LockNode(nodeName, "", next); err != nil {
+		t.Fatalf("the node stayed locked for a holder that finished allocating: %v", err)
 	}
 }

@@ -252,11 +252,19 @@ func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, sk
 	return nil
 }
 
+// Mirror util.DeviceBindPhase and util.DeviceBindAllocating, which this package
+// cannot import without a cycle.
+const (
+	deviceBindPhaseAnnotation = "hami.io/bind-phase"
+	deviceBindAllocating      = "allocating"
+)
+
 // podAwaitingAllocation reports whether the pod named by a node lock is still
-// pending, which is the window in which the device plugin reads that lock to
-// find out which pod its Allocate belongs to. A pod that is gone, or that has
-// moved past Pending, can no longer be handed an allocation, so its lock is
-// free to take.
+// pending and marked allocating, which is the window in which the device
+// plugin reads that lock to find out which pod its Allocate belongs to. A pod
+// that is gone, has moved past Pending, or has finished allocating (a pod that
+// stays Pending on an image pull after its lock release failed) can no longer
+// be handed an allocation, so its lock is free to take.
 //
 // The lock records only a namespace and a name, so a later pod can carry the
 // same one, as a StatefulSet replacement does. A pod created after the lock was
@@ -277,7 +285,8 @@ func podAwaitingAllocation(ctx context.Context, ns, name string, lockTime time.T
 	if pod.CreationTimestamp.After(lockTime) {
 		return false, nil
 	}
-	return pod.Status.Phase == corev1.PodPending, nil
+	return pod.Status.Phase == corev1.PodPending &&
+		pod.Annotations[deviceBindPhaseAnnotation] == deviceBindAllocating, nil
 }
 
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
