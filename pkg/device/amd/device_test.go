@@ -426,6 +426,7 @@ func TestDevices_Fit(t *testing.T) {
 			{"rdna odd cores", 64, 0, 5, map[string]any{"cuPerWGP": float64(2)}, 4, true},
 			{"cdna keeps single cus", 64, 0, 5, map[string]any{}, 3, true},
 			{"one-wgp apu", 2, 0, 50, map[string]any{"cuPerWGP": float64(2)}, 2, true},
+			{"huge wgp size does not overflow", 4, 0, 75, map[string]any{"cuPerWGP": float64(math.MaxInt32)}, 4, true},
 			{"apu wgp already taken", 2, 2, 50, map[string]any{"cuPerWGP": float64(2)}, 0, false},
 		} {
 			devices := []*device.DeviceUsage{{

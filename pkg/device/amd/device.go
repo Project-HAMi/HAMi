@@ -339,7 +339,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			// RDNA applies the CU mask per WGP, so the device plugin hands out
 			// whole WGPs; account for the same count.
 			if unit := cuPerWGP(dev.CustomInfo); unit > 1 {
-				coreReq = (coreReq + unit - 1) / unit * unit
+				coreReq = int32(min((int64(coreReq)+int64(unit)-1)/int64(unit)*int64(unit), int64(dev.Totalcore)))
 			}
 			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {
@@ -390,7 +390,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 // cuPerWGP returns how many CUs the device plugin allocates together, as
 // published in the registration custominfo; 1 when absent.
 func cuPerWGP(info map[string]any) int32 {
-	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 {
+	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 {
 		return int32(v)
 	}
 	return 1
