@@ -15,7 +15,8 @@ permissions:
   contents: read  # for actions/checkout to fetch code
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A weekly benchmark must not cancel (or be cancelled by) a master push.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -98,7 +99,9 @@ jobs:
     name: Unit test
     needs: [ lint, get_info ] # rely on lint & get_info successful completion
     runs-on: ubuntu-22.04
-    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
+    # The schedule added by this workflow is benchmark-only. Skipping this job
+    # also skips its build, chart, and E2E dependants.
+    if: github.event_name != 'schedule' && (needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master')
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -137,6 +140,12 @@ jobs:
     needs: [ lint, get_info ]
     runs-on: ubuntu-22.04
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
+    # Keep concurrent benchmark allocation samples comparable across runner
+    # generations with different CPU counts. Wall-clock results remain
+    # informational, so two processors preserve concurrency without making
+    # timing a CI gate.
+    env:
+      GOMAXPROCS: '2'
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
