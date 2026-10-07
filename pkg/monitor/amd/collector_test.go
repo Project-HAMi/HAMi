@@ -197,3 +197,29 @@ func successOf(t *testing.T, c *Collector) float64 {
 	t.Fatal("collect_success not emitted")
 	return 0
 }
+
+// A dmem region that is not "drm/<pci address>/<region>" must be skipped, not
+// panic the scrape, and does not make the collection fail.
+func TestCollectSkipsRegionsThatAreNotDRMCards(t *testing.T) {
+	c := fixture(t)
+	scope := filepath.Join(c.CgroupRoot, "kubepods.slice", "kubepods-besteffort.slice",
+		"kubepods-besteffort-pod76ee6770_1f4c_436c_9d68_2c6d515ad8f7.slice", "cri-containerd-abc123.scope")
+	writeFile(t, filepath.Join(scope, "dmem.current"), "noslash 5\ndrm/onlytwo 6\nother/0000:06:00.0/vram 7\n"+region+" 8\n")
+	writeFile(t, filepath.Join(scope, "dmem.max"), region+" max\n")
+
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(c)
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	used := 0
+	for _, mf := range mfs {
+		switch mf.GetName() {
+		case "hami_vgpu_memory_used_bytes":
+			used = len(mf.GetMetric())
+			require.InDelta(t, 8, mf.GetMetric()[0].GetGauge().GetValue(), 0.001)
+		case "hami_vgpumonitor_collect_success":
+			require.InDelta(t, 1, mf.GetMetric()[0].GetGauge().GetValue(), 0.001)
+		}
+	}
+	require.Equal(t, 1, used)
+}

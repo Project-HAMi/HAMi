@@ -208,7 +208,13 @@ func (c *Collector) collectContainers(ch chan<- prometheus.Metric, devices map[s
 		if !ok {
 			continue
 		}
-		bdf := strings.Split(u.Region, "/")[1]
+		// Only "drm/<pci address>/<region>" names a card. Anything else belongs to
+		// another controller user and is not this monitor's to report.
+		parts := strings.Split(u.Region, "/")
+		if len(parts) < 3 || parts[0] != "drm" {
+			continue
+		}
+		bdf := parts[1]
 		info, ok := devices[bdf]
 		if !ok {
 			unknown = append(unknown, bdf)
