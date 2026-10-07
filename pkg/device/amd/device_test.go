@@ -624,6 +624,10 @@ func TestMemoryPercentage(t *testing.T) {
 		t.Run("rejects "+bad, func(t *testing.T) {
 			_, err := dev.MutateAdmission(ctr(bad), &corev1.Pod{})
 			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			c := ctr(bad)
+			delete(c.Resources.Limits, "amd.com/gpu")
+			_, err = dev.MutateAdmission(c, &corev1.Pod{})
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
 			_, err = dev.GenerateResourceRequests(ctr(bad))
 			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
 		})

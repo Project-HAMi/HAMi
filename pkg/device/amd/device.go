@@ -88,9 +88,9 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
 			}
 		}
-		if _, err := dev.memoryPercentage(ctr); err != nil {
-			return false, err
-		}
+	}
+	if _, err := dev.memoryPercentage(ctr); err != nil {
+		return false, err
 	}
 	if !ok && dev.resourceMemoryName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
