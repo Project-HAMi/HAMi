@@ -73,3 +73,30 @@ func TestReadContainerVRAMWithoutKubepodsOrDmem(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
+
+func TestReadContainerVRAMToleratesMalformedFiles(t *testing.T) {
+	root := t.TempDir()
+	// Lines without a value or with a non-number are skipped, and a missing
+	// dmem.max leaves the container uncapped.
+	dir := filepath.Join(root, "kubepods.slice", "kubepods-pod0123abcd_0000_0000_0000_000000000001.slice", "cri-containerd-abc.scope")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dmem.current"),
+		[]byte("novalue\n"+region+" 42\ndrm/0000:0e:00.0/vram notanumber\n"), 0o644))
+
+	got, err := ReadContainerVRAM(root)
+	require.NoError(t, err)
+	require.Equal(t, []ContainerVRAM{{
+		PodUID: "0123abcd-0000-0000-0000-000000000001", ContainerID: "abc", Region: region, Used: 42,
+	}}, got)
+}
+
+func TestReadContainerVRAMReportsAnUnreadableKubepods(t *testing.T) {
+	root := t.TempDir()
+	// A file where the kubepods directory belongs cannot be walked.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kubepods.slice"), []byte("x"), 0o644))
+	got, err := ReadContainerVRAM(root)
+	require.NoError(t, err)
+	require.Empty(t, got)
+
+	require.Error(t, func() error { _, err := ReadContainerVRAM(filepath.Join(root, "kubepods.slice", "x")); return err }())
+}

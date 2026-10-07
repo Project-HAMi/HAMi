@@ -70,7 +70,11 @@ func startAMD() error {
 		return fmt.Errorf("failed to listen on %s: %w", metricsBindAddress, err)
 	}
 	defer listener.Close()
+	return serveAMD(ctx, clientset, nodeName, listener, amd.DefaultCgroupRoot, amd.DefaultDRMRoot)
+}
 
+// serveAMD runs the AMD collector for nodeName until ctx is done.
+func serveAMD(ctx context.Context, clientset kubernetes.Interface, nodeName string, listener net.Listener, cgroupRoot, drmRoot string) error {
 	factory := informers.NewSharedInformerFactoryWithOptions(clientset, 5*time.Minute,
 		informers.WithTweakListOptions(func(o *metav1.ListOptions) { o.FieldSelector = "spec.nodeName=" + nodeName }))
 	podLister := factory.Core().V1().Pods().Lister()
@@ -83,8 +87,8 @@ func startAMD() error {
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 	reg.MustRegister(&amd.Collector{
 		NodeName:   nodeName,
-		CgroupRoot: amd.DefaultCgroupRoot,
-		DRMRoot:    amd.DefaultDRMRoot,
+		CgroupRoot: cgroupRoot,
+		DRMRoot:    drmRoot,
 		Pods: func() ([]*corev1.Pod, error) {
 			return podLister.List(labels.Everything())
 		},
@@ -92,6 +96,6 @@ func startAMD() error {
 			return clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		},
 	})
-	klog.Infof("Serving AMD metrics for node %s on %s", nodeName, metricsBindAddress)
+	klog.Infof("Serving AMD metrics for node %s on %s", nodeName, listener.Addr())
 	return serveMetrics(ctx, listener, reg)
 }

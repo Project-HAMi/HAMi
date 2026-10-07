@@ -21,11 +21,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -85,5 +90,52 @@ func TestServeMetricsServesAndStops(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("serveMetrics did not stop after its context ended")
+	}
+}
+
+// serveAMD must wire the node's pods and registration into the collector: the
+// device memory of a card the node registered shows up on /metrics.
+func TestServeAMDServesTheRegisteredCard(t *testing.T) {
+	const bdf = "0000:06:00.0"
+	drm := t.TempDir()
+	card := filepath.Join(drm, "card1", "device")
+	require.NoError(t, os.MkdirAll(card, 0o755))
+	for name, content := range map[string]string{
+		"uevent":             "DRIVER=amdgpu\nPCI_SLOT_NAME=" + bdf + "\n",
+		"mem_info_vram_used": "1024\n",
+		"gpu_busy_percent":   "5\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(card, name), []byte(content), 0o644))
+	}
+	clientset := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name: "gpu-1",
+		Annotations: map[string]string{
+			"hami.io/node-amd-register": `[{"id":"uuid-1","index":0,"type":"AMD","custominfo":{"pciBDF":"` + bdf + `"}}]`,
+		},
+	}})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	original := metricsBindAddress
+	metricsBindAddress = listener.Addr().String()
+	t.Cleanup(func() { metricsBindAddress = original })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- serveAMD(ctx, clientset, "gpu-1", listener, t.TempDir(), drm) }()
+
+	resp, err := http.Get("http://" + listener.Addr().String() + "/metrics")
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Contains(t, string(body), `hami_host_gpu_memory_used_bytes{device_index="0",device_type="AMD",device_uuid="uuid-1",node="gpu-1"} 1024`)
+	require.Contains(t, string(body), `hami_vgpumonitor_collect_success{node="gpu-1"} 1`)
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveAMD did not stop after its context ended")
 	}
 }
