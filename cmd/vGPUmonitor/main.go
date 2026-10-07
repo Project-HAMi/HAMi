@@ -56,6 +56,7 @@ var (
 	}
 	metricsBindAddress string
 	legacyMetrics      bool
+	vendor             string
 )
 
 func init() {
@@ -64,12 +65,20 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 	rootCmd.Flags().StringVar(&metricsBindAddress, "metrics-bind-address", ":9394", "The TCP address that the vGPUmonitor should bind to for serving prometheus metrics(e.g. 127.0.0.1:9394, :9394)")
 	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
+	rootCmd.Flags().StringVar(&vendor, "vendor", vendorNVIDIA, "GPU vendor of this node: nvidia, or amd for per-container memory from the dmem cgroup controller and host metrics from sysfs")
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
 // start runs monitor feedback and metrics collection and releases mappings when the process
 // exits.
 func start() error {
+	switch vendor {
+	case vendorNVIDIA:
+	case vendorAMD:
+		return startAMD()
+	default:
+		return fmt.Errorf("unsupported --vendor %q, want %q or %q", vendor, vendorNVIDIA, vendorAMD)
+	}
 	if err := ValidateEnvVars(); err != nil {
 		return fmt.Errorf("failed to validate environment variables: %v", err)
 	}
@@ -169,6 +178,11 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	//	prometheus.NewGoCollector(),
 	//)
 
+	return serveMetrics(ctx, listener, reg)
+}
+
+// serveMetrics serves reg on listener until ctx is done or the server fails.
+func serveMetrics(ctx context.Context, listener net.Listener, reg *prometheus.Registry) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	server := &http.Server{Addr: metricsBindAddress, Handler: mux, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 60 * time.Second}
