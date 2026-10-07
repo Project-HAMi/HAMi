@@ -248,7 +248,7 @@ func requestsAMD(ctr corev1.Container) bool {
 }
 
 func ueventValue(uevent, key string) string {
-	for _, line := range strings.Split(uevent, "\n") {
+	for line := range strings.SplitSeq(uevent, "\n") {
 		if v, ok := strings.CutPrefix(line, key+"="); ok {
 			return strings.TrimSpace(v)
 		}

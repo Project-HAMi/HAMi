@@ -21,7 +21,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -78,7 +77,7 @@ func TestServeMetricsServesAndStops(t *testing.T) {
 	require.NoError(t, err)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	require.True(t, strings.Contains(string(body), "amd_test_gauge 7"))
+	require.Contains(t, string(body), "amd_test_gauge 7")
 
 	cancel()
 	select {

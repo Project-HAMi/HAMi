@@ -121,36 +121,36 @@ hami_vgpumonitor_collect_success{node="gpu-1"} 1
 func TestCollectWithoutSensorsStillSucceeds(t *testing.T) {
 	c := fixture(t)
 	require.NoError(t, os.RemoveAll(filepath.Join(c.DRMRoot, "card1", "device", "hwmon")))
-	require.Equal(t, 1.0, successOf(t, c))
+	require.InDelta(t, 1, successOf(t, c), 0.001)
 }
 
 func TestCollectReportsFailures(t *testing.T) {
 	t.Run("node without the registration annotation", func(t *testing.T) {
 		c := fixture(t)
 		c.Node = func() (*corev1.Node, error) { return &corev1.Node{}, nil }
-		require.Equal(t, 0.0, successOf(t, c))
+		require.InDelta(t, 0, successOf(t, c), 0.001)
 	})
 	t.Run("node lookup fails", func(t *testing.T) {
 		c := fixture(t)
 		c.Node = func() (*corev1.Node, error) { return nil, errors.New("boom") }
-		require.Equal(t, 0.0, successOf(t, c))
+		require.InDelta(t, 0, successOf(t, c), 0.001)
 	})
 	t.Run("pod lookup fails", func(t *testing.T) {
 		c := fixture(t)
 		c.Pods = func() ([]*corev1.Pod, error) { return nil, errors.New("boom") }
-		require.Equal(t, 0.0, successOf(t, c))
+		require.InDelta(t, 0, successOf(t, c), 0.001)
 	})
 	t.Run("unreadable device memory", func(t *testing.T) {
 		c := fixture(t)
 		require.NoError(t, os.Remove(filepath.Join(c.DRMRoot, "card1", "device", "mem_info_vram_used")))
-		require.Equal(t, 0.0, successOf(t, c))
+		require.InDelta(t, 0, successOf(t, c), 0.001)
 	})
 	t.Run("container on an unregistered device", func(t *testing.T) {
 		c := fixture(t)
 		scope := filepath.Join(c.CgroupRoot, "kubepods.slice", "kubepods-besteffort.slice",
 			"kubepods-besteffort-pod76ee6770_1f4c_436c_9d68_2c6d515ad8f7.slice", "cri-containerd-abc123.scope")
 		writeFile(t, filepath.Join(scope, "dmem.current"), "drm/0000:0e:00.0/vram 5\n")
-		require.Equal(t, 0.0, successOf(t, c))
+		require.InDelta(t, 0, successOf(t, c), 0.001)
 	})
 }
 
