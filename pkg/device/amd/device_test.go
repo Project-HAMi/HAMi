@@ -1028,7 +1028,7 @@ func TestFitTopologyAware(t *testing.T) {
 		ok, got, reason := dev.Fit(build(sameNuma, true), req(4), pod(nil), &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, true, ok, reason)
 		g := idxs(got[AMDDevice])
-		assert.Assert(t, !(slices.Equal(g, []int{0, 1, 2, 3}) || slices.Equal(g, []int{4, 5, 6, 7})), "%v", g)
+		assert.Assert(t, !slices.Equal(g, []int{0, 1, 2, 3}) && !slices.Equal(g, []int{4, 5, 6, 7}), "%v", g)
 	})
 	t.Run("5 GPUs still fit and contain a whole quad", func(t *testing.T) {
 		ok, got, reason := dev.Fit(build(sameNuma, true), req(5), pod(topo), &device.NodeInfo{}, &device.PodDevices{})

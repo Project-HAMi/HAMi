@@ -588,7 +588,7 @@ func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.Cont
 	walk = func(start int) {
 		if len(pick) == n {
 			score := 0
-			for i := 0; i < n; i++ {
+			for i := range n {
 				a := byID[candidates[pick[i]].UUID]
 				for j := i + 1; j < n; j++ {
 					b := byID[candidates[pick[j]].UUID]
