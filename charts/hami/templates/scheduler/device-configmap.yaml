@@ -94,6 +94,9 @@ data:
       resourceCountName: {{ .Values.devices.amd.resourceCountName }}
       resourceCoreName: {{ .Values.devices.amd.resourceCoreName }}
       resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
+      defaultGPUNum: {{ .Values.devices.amd.defaultGPUNum }}
+      defaultMemory: {{ .Values.devices.amd.defaultMemory }}
+      defaultCores: {{ .Values.devices.amd.defaultCores }}
       resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
       runtimeClassName: "{{ .Values.devices.amd.runtimeClassName }}"
     vastai:

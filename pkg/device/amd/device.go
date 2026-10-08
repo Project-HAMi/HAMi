@@ -40,6 +40,9 @@ type AMDDevices struct {
 	resourceMemoryPercentageName string
 	resourceCoreName             string
 	runtimeClassName             string
+	defaultGPUNum                int32
+	defaultMemory                int32
+	defaultCores                 int32
 }
 
 const (
@@ -66,6 +69,14 @@ type AMDConfig struct {
 	ResourceCoreName             string `yaml:"resourceCoreName"`
 	// RuntimeClassName is set on the Pod when the user left spec.runtimeClassName empty.
 	RuntimeClassName string `yaml:"runtimeClassName"`
+	// DefaultGPUNum is how many GPUs a container gets when it asks for memory or
+	// cores but not a count. 0 means 1.
+	DefaultGPUNum int32 `yaml:"defaultGPUNum"`
+	// DefaultMemory (MiB) is the memory of a container that asks for neither memory nor
+	// a percentage; 0 leaves it the whole GPU.
+	DefaultMemory int32 `yaml:"defaultMemory"`
+	// DefaultCores (percent, 1-100) is the cores of a container that asks for none; 0 leaves it all of them.
+	DefaultCores int32 `yaml:"defaultCores"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -80,6 +91,9 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
 		resourceCoreName:             config.ResourceCoreName,
 		runtimeClassName:             config.RuntimeClassName,
+		defaultGPUNum:                max(config.DefaultGPUNum, 1),
+		defaultMemory:                max(config.DefaultMemory, 0),
+		defaultCores:                 min(max(config.DefaultCores, 0), 100),
 	}
 }
 
@@ -101,23 +115,24 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	if _, err := dev.memoryPercentage(ctr); err != nil {
 		return false, err
 	}
-	if !ok && dev.resourceMemoryName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
-	}
-	if !ok && dev.resourceMemoryPercentageName != "" {
-		name := corev1.ResourceName(dev.resourceMemoryPercentageName)
-		_, inLimits := ctr.Resources.Limits[name]
-		_, inRequests := ctr.Resources.Requests[name]
-		if ok = inLimits || inRequests; ok {
-			// A percentage alone still needs a card, like nvidia defaults the count.
+	if !ok {
+		// Memory, a percentage or cores without a count still need a card: give the default number.
+		asked := false
+		for _, name := range []string{dev.resourceMemoryName, dev.resourceMemoryPercentageName, dev.resourceCoreName} {
+			if name == "" {
+				continue
+			}
+			_, inLimits := ctr.Resources.Limits[corev1.ResourceName(name)]
+			_, inRequests := ctr.Resources.Requests[corev1.ResourceName(name)]
+			asked = asked || inLimits || inRequests
+		}
+		if asked {
 			if ctr.Resources.Limits == nil {
 				ctr.Resources.Limits = corev1.ResourceList{}
 			}
-			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(1, resource.DecimalSI)
+			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(int64(dev.defaultGPUNum), resource.DecimalSI)
+			ok = true
 		}
-	}
-	if !ok && dev.resourceCoreName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
 	}
 	if ok && p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
 		p.Spec.RuntimeClassName = &dev.runtimeClassName
@@ -320,9 +335,17 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: err.Error()}
 			}
 
+			if memnum == 0 && memPercentage == 0 && dev.defaultMemory > 0 {
+				memnum = dev.defaultMemory
+			}
+
 			// An omitted core limit means the container receives all CUs on each
-			// allocated GPU. This also keeps memory-only AMD requests valid.
+			// allocated GPU (or the configured default). This also keeps memory-only
+			// AMD requests valid.
 			corePercentageNum := int32(100)
+			if dev.defaultCores > 0 {
+				corePercentageNum = dev.defaultCores
+			}
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
 			if !corePercentageOK {
 				corePercentage, corePercentageOK = ctr.Resources.Requests[amdResourceCore]
@@ -429,12 +452,21 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 	// topology-aware: collect every GPU that fits and take the best linked combination,
 	// instead of the first ones found. A hard link-bind already demands a clique.
 	topology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology) && originReq > 1 && !linkBind
+	var cordoned map[string]struct{}
+	if nodeinfo != nil && nodeinfo.Node != nil {
+		cordoned = common.CordonedDevices(nodeinfo.Node.Annotations)
+	}
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
