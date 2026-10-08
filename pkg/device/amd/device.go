@@ -39,6 +39,7 @@ type AMDDevices struct {
 	resourceMemoryName           string
 	resourceMemoryPercentageName string
 	resourceCoreName             string
+	runtimeClassName             string
 }
 
 const (
@@ -61,6 +62,8 @@ type AMDConfig struct {
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
 	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
 	ResourceCoreName             string `yaml:"resourceCoreName"`
+	// RuntimeClassName is set on the Pod when the user left spec.runtimeClassName empty.
+	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -74,6 +77,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		resourceMemoryName:           config.ResourceMemoryName,
 		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
 		resourceCoreName:             config.ResourceCoreName,
+		runtimeClassName:             config.RuntimeClassName,
 	}
 }
 
@@ -112,6 +116,9 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	}
 	if !ok && dev.resourceCoreName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+	}
+	if ok && p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
