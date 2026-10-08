@@ -1,0 +1,11 @@
+{{/* Render via the Make targets with --dry-run so reading README.md never truncates it. */}}
+{{- $start := splitList "<!-- BEGIN GENERATED VALUES -->" (.Files.Get "README.md") -}}
+{{- $end := splitList "<!-- END GENERATED VALUES -->" (last $start) -}}
+{{- if or (ne (len $start) 2) (ne (len $end) 2) -}}
+{{- fail "README.md must contain exactly one generated values block" -}}
+{{- end -}}
+{{ index $start 0 }}<!-- BEGIN GENERATED VALUES -->
+
+{{ template "chart.valuesSection" . }}
+
+<!-- END GENERATED VALUES -->{{ index $end 1 -}}
