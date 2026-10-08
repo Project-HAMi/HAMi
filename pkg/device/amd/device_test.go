@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -727,5 +728,73 @@ func TestMemoryPercentage(t *testing.T) {
 		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 1, Coresreq: 50}
 		_, got, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, int32(1), got[AMDDevice][0].Usedmem)
+	})
+}
+
+func TestFitNumaBind(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	gpus := func(numas ...int) []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for i, n := range numas {
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Numa: n, Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+			})
+		}
+		return out
+	}
+	pod := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+	numaOf := func(devices []*device.DeviceUsage, got device.ContainerDevices) []int {
+		byID := map[string]int{}
+		for _, d := range devices {
+			byID[d.ID] = d.Numa
+		}
+		var out []int
+		for _, c := range got {
+			out = append(out, byID[c.UUID])
+		}
+		return out
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+
+	// With numa-bind the scheduler sorts the devices so each NUMA node is one run.
+	t.Run("numa-bind puts both GPUs on one NUMA node", func(t *testing.T) {
+		devices := gpus(0, 0, 1, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Equal(t, 2, len(numas))
+		assert.Equal(t, numas[0], numas[1])
+	})
+	t.Run("without it the GPUs may span NUMA nodes", func(t *testing.T) {
+		devices := gpus(0, 1, 0, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(nil), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Assert(t, numas[0] != numas[1])
+	})
+	t.Run("no NUMA node holds enough GPUs", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(0, 1), req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.NumaNotFit), reason)
+	})
+	t.Run("a single GPU request ignores the bind", func(t *testing.T) {
+		one := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+		ok, got, reason := dev.Fit(gpus(0, 1), one, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 1, len(got[AMDDevice]))
+	})
+	t.Run("unknown NUMA (-1) on every GPU still fits", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(-1, -1), req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("a value that is not true leaves the bind off", func(t *testing.T) {
+		devices := gpus(0, 1, 0, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(map[string]string{AMDNumaBind: "no"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Assert(t, numas[0] != numas[1])
 	})
 }
