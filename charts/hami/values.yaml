@@ -369,6 +369,10 @@ devicePlugin:
     # Address the monitor serves /metrics on. The container port, the Service
     # target port and the probes follow it; set it here, not in extraArgs.
     metricsBindAddress: ":9394"
+    # Liveness and readiness probes of the monitor. Turn them off to debug inside
+    # the container without kubelet restarting it.
+    probes:
+      enabled: true
     # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"

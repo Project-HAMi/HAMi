@@ -286,6 +286,7 @@ spec:
             - name: metrics
               containerPort: {{ last (splitList ":" .Values.devicePlugin.monitor.metricsBindAddress) | int }}
               protocol: TCP
+          {{- if .Values.devicePlugin.monitor.probes.enabled }}
           livenessProbe:
             httpGet:
               path: /metrics
@@ -298,6 +299,7 @@ spec:
               port: metrics
             initialDelaySeconds: 5
             periodSeconds: 15
+          {{- end }}
           resources:
           {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:
