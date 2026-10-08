@@ -454,7 +454,34 @@ host-installed drivers, or appends the GPU Operator path suffix
 | `devices.ascend.extraArgs` | Extra arguments | `[]` |
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
+| `devices.ascend.hamiVnpuMode` | Default VNPU mode: `template`, `hami-core` (alias `hamiCore`), or `enpu`; node capability annotations take precedence | `""` (resolves to `template`) |
+| `devices.ascend.enpuPolicy` | Default ENPU policy: `fixed-share`, `elastic`, or `best-effort`; numeric aliases `"1"`, `"2"`, and `"3"` are also accepted | `elastic` |
 | `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
+
+Set `devices.ascend.hamiVnpuMode` to choose the global default. The chart renders
+it as `vnpus.hamiVnpuMode` in the scheduler configuration. Empty uses `template`,
+or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore: true` is present.
+An explicit mode always takes precedence over that legacy flag. Direct scheduler
+configuration has the same fallback for `vnpus.hamiVnpuCore`. Unknown modes are
+rejected. Replace the former `devices.ascend.enpu: true` with
+`devices.ascend.hamiVnpuMode: enpu`.
+
+The device plugin's `hami-vnpu-core` and `hami.io/enpu` node annotations override
+the corresponding capability with `"true"` or `"false"`; absent annotations use
+the global mode. ENPU requires the companion Ascend device plugin with ENPU
+support. In a mixed cluster, use `devices.ascend.hamiVnpuMode: template` and enable
+ENPU only on the intended nodes through the plugin's `hami.io/enpu: "true"`
+annotation.
+
+Pods select ENPU explicitly with `huawei.com/vnpu-mode: enpu`. The scheduler also
+accepts `ubs-virt` and `vcann-rt`, matching the mode aliases in the companion
+[device plugin's `podUsesENPU`](https://github.com/maverick-woo/ascend-device-plugin/blob/5afdaec52dfd628a05066bfbbf0f39e2c47e3281/internal/server/server.go#L116-L125).
+Use `enpu` for new workloads. All three names use the same single-DIE admission,
+exact memory allocation, and policy-isolation rules.
+
+Set `huawei.com/enpu-policy` on a Pod to override `devices.ascend.enpuPolicy`.
+Admission records the selected policy on the Pod so later changes to the default
+do not change existing tenants' policies. Invalid policies are rejected.
 
 ### Iluvatar
 | Parameter | Description | Default Value |

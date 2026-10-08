@@ -4723,7 +4723,7 @@ func Test_calcScore_AscendHamiCoreOversellConcurrency(t *testing.T) {
 
 	sConfig := &config.Config{
 		VNPUs: ascend.VNPUs{
-			HamiVnpuCore: true,
+			HamiVnpuMode: ascend.VNPUModeHamiCore,
 			Configs: []ascend.VNPUConfig{{
 				CommonWord:         "Ascend910B3",
 				ChipName:           "910B3",
@@ -4925,7 +4925,7 @@ func Test_calcScore_AllocationRowsStayInLockstep(t *testing.T) {
 
 	sConfig := &config.Config{
 		VNPUs: ascend.VNPUs{
-			HamiVnpuCore: true,
+			HamiVnpuMode: ascend.VNPUModeHamiCore,
 			Configs: []ascend.VNPUConfig{
 				{
 					CommonWord:         "Ascend910B3",
