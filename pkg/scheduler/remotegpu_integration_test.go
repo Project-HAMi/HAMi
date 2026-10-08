@@ -86,6 +86,10 @@ func lupineServerNode(name, ip string, gpus []*device.DeviceInfo) *corev1.Node {
 		},
 		Status: corev1.NodeStatus{
 			Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}},
+			Conditions: []corev1.NodeCondition{{
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionTrue,
+			}},
 		},
 	}
 }
