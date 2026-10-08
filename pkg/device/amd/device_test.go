@@ -798,3 +798,77 @@ func TestFitNumaBind(t *testing.T) {
 		assert.Assert(t, numas[0] != numas[1])
 	})
 }
+
+func TestDevices_Fit_ResourceQuota(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName:  "amd.com/gpu",
+		ResourceMemoryName: "amd.com/gpumem",
+		ResourceCoreName:   "amd.com/gpucores",
+	})
+	original := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = original })
+
+	const ns = "amd-quota-test-ns"
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "amd-quota", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			"limits.amd.com/gpumem": resource.MustParse("6000"),
+		}},
+	}
+	qm := device.NewQuotaManager()
+	qm.AddQuota(quota)
+	t.Cleanup(func() { qm.DelQuota(quota) })
+
+	newDevices := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Count: 4, Totalmem: 16000, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Annotations: map[string]string{}}}
+
+	t.Run("a request inside the quota fits", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 5000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("an explicit request over the quota is denied", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 7000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("a whole-card request is charged the whole card", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("a percentage request is charged its resolved memory", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 50, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("memory already used in the namespace counts", func(t *testing.T) {
+		qm.AddUsage(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}, device.PodDevices{
+			AMDDevice: device.PodSingleDevice{{{UUID: "dev-0", Type: AMDDevice, Usedmem: 4000}}},
+		})
+		t.Cleanup(func() {
+			qm.RmUsage(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}, device.PodDevices{
+				AMDDevice: device.PodSingleDevice{{{UUID: "dev-0", Type: AMDDevice, Usedmem: 4000}}},
+			})
+		})
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 3000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("another namespace is not limited", func(t *testing.T) {
+		other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "elsewhere", Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 7000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, other, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+}
