@@ -268,6 +268,7 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- end -}}
 {{/* AMD resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.amd.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.amd.resourcePriorityName "ignoredByScheduler" true) -}}
 {{- range .Values.devices.amd.customresources -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}

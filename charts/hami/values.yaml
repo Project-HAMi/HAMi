@@ -558,6 +558,7 @@ devices:
     resourceCountName: "amd.com/gpu"
     resourceMemoryName: "amd.com/gpumem"
     resourceMemoryPercentageName: "amd.com/gpumem-percentage"
+    resourcePriorityName: "amd.com/priority"
     resourceCoreName: "amd.com/gpucores"
     runtimeClassName: ""  # Name of the runtime class to set on Pods that request an AMD GPU
     customresources:
