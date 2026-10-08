@@ -72,9 +72,13 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 }
 
-// NVML is unavailable in this test environment, so Collect's GPU step always
-// fails here; the success gauge must report that instead of staying silent.
+// Without NVML, Collect's GPU step fails; the success gauge must report that instead of staying silent.
 func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
+	// A developer machine with an NVIDIA driver has NVML, so the step succeeds.
+	if nvml.Init() == nvml.SUCCESS {
+		_ = nvml.Shutdown()
+		t.Skip("NVML is available, so the GPU step does not fail here")
+	}
 	t.Setenv(util.NodeNameEnvName, "test-node")
 	ch := make(chan prometheus.Metric, 10)
 	informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
