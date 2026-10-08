@@ -11,6 +11,10 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: remote-gpu-pod
+  # Optional: choose a Lupine server pool by its Node labels. This does not
+  # affect the client Pod's Kubernetes node placement.
+  # annotations:
+  #   hami.io/remote-gpu-server-selector: gpu-pool=inference
 spec:
   containers:
     - name: cuda-container

@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -90,6 +91,12 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 	if _, err := util.GetNumaAlignmentModeByPod(pod); err != nil {
 		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Denied(err.Error())
+	}
+	if remotegpu.PodRequestsRemoteGPU(pod) {
+		if err := remotegpu.ValidateLupineServerSelector(pod); err != nil {
+			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			return admission.Denied(err.Error())
+		}
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
@@ -168,6 +175,20 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		klog.Errorf("Failed to decode old object: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
+	if remoteGPUSelectorChanged(oldPod, pod) && (remotegpu.PodRequestsRemoteGPU(oldPod) || remotegpu.PodRequestsRemoteGPU(pod)) {
+		if err := remotegpu.ValidateLupineServerSelector(pod); err != nil {
+			return admission.Denied(err.Error())
+		}
+		// Server selection is a scheduling input. Once a Pod is assigned, its
+		// existing allocation remains on that server, so changing the requested
+		// pool would make the Pod metadata disagree with the live allocation.
+		if oldPod.Spec.NodeName != "" {
+			return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after a pod is assigned", remotegpu.LupineServerSelectorAnno))
+		}
+		if oldPod.Annotations[util.AssignedNodeAnnotations] != "" {
+			return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after the scheduler reserves a pod", remotegpu.LupineServerSelectorAnno))
+		}
+	}
 	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)
 	if !changed {
 		return admission.Allowed("no scheduler-owned annotation changed")
@@ -184,6 +205,12 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
 	}
 	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+func remoteGPUSelectorChanged(oldPod, pod *corev1.Pod) bool {
+	oldValue, oldFound := oldPod.Annotations[remotegpu.LupineServerSelectorAnno]
+	value, found := pod.Annotations[remotegpu.LupineServerSelectorAnno]
+	return oldFound != found || oldValue != value
 }
 
 // canWriteNodes asks the API server whether the caller may patch nodes.

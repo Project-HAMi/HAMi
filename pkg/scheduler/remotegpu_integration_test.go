@@ -184,6 +184,32 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 	assert.Assert(t, annos["hami.io/remote-gpu-devices-allocated"] != "")
 }
 
+func TestRemoteGPU_ServerPoolSelectorFiltersLupineServers(t *testing.T) {
+	training := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
+	inference := lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-b", 40000)})
+	training.Labels["gpu-pool"] = "training"
+	inference.Labels["gpu-pool"] = "inference"
+	dev := setupRemoteGPUScheduler(t, training, inference, gpulessNode("cpu-1"))
+
+	task := remoteGPUPod("client", 1, 0)
+	task.Annotations = map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=inference"}
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 1)
+	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
+	assert.Equal(t, allocated[0][0].UUID, "gpu-b/GPU-b")
+
+	task.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=missing"
+	failed := map[string]string{}
+	scores, err = NewScheduler().calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 0)
+	assert.Assert(t, strings.Contains(failed["cpu-1"], "no Lupine server matches"), failed["cpu-1"])
+}
+
 // Two lupine servers with one free card each must not satisfy a two-card
 // request: the client holds a single connection to a single server.
 func TestRemoteGPU_AllocationNeverSpansTwoServers(t *testing.T) {
