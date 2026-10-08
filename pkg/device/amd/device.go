@@ -414,7 +414,11 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
 		return false, tmpDevs, "core limit out of range"
 	}
-	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
+	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
+	// topology-aware: collect every GPU that fits and take the best linked combination,
+	// instead of the first ones found. A hard link-bind already demands a clique.
+	topology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology) && originReq > 1 && !linkBind
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -431,7 +435,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		// numa-bind: a run of GPUs must share one NUMA node, so a new node starts the run over.
-		if numa && prevnuma != dev.Numa {
+		if numa && !topology && prevnuma != dev.Numa {
 			if k.Nums != originReq {
 				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "prevnuma", prevnuma, "device numa", dev.Numa)
@@ -516,7 +520,9 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 
 		if k.Nums > 0 {
-			k.Nums--
+			if !topology {
+				k.Nums--
+			}
 			// Keep the map keyed by the logical AMD device type, but retain the
 			// registered product type in the allocation annotation. Consumers of
 			// the annotation (for example workload GPU reporting) need the latter
@@ -536,16 +542,87 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 				Usedcores: coreReq,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && !topology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
+	}
+	if topology && len(tmpDevs[k.Type]) >= int(originReq) {
+		if best, ok := bestLinkedCombination(devices, tmpDevs[k.Type], int(originReq), assertNuma(pod.GetAnnotations())); ok {
+			tmpDevs[k.Type] = best
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs, ""
+		}
+		reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 	}
 	if len(tmpDevs[k.Type]) > 0 {
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+const (
+	xgmiPairScore = 4 // an XGMI link outweighs sharing a NUMA node
+	numaPairScore = 1
+	// Past this many candidates the number of combinations is no longer small; take the first ones.
+	maxCombinationCandidates = 16
+)
+
+// bestLinkedCombination picks n of the candidate GPUs that are most tightly
+// connected: each XGMI-linked pair counts xgmiPairScore and each pair on one
+// known NUMA node numaPairScore. With numaBind every pick has to share a NUMA
+// node. Ties keep the earliest candidates.
+func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.ContainerDevices, n int, numaBind bool) (device.ContainerDevices, bool) {
+	byID := make(map[string]*device.DeviceUsage, len(devices))
+	for _, d := range devices {
+		byID[d.ID] = d
+	}
+	if len(candidates) > maxCombinationCandidates && !numaBind {
+		return slices.Clone(candidates[:n]), true
+	}
+	var best []int
+	bestScore := -1
+	pick := make([]int, 0, n)
+	var walk func(start int)
+	walk = func(start int) {
+		if len(pick) == n {
+			score := 0
+			for i := 0; i < n; i++ {
+				a := byID[candidates[pick[i]].UUID]
+				for j := i + 1; j < n; j++ {
+					b := byID[candidates[pick[j]].UUID]
+					if numaBind && a.Numa != b.Numa {
+						return
+					}
+					if a != nil && b != nil && xgmiLinked(a, b) {
+						score += xgmiPairScore
+					}
+					if a != nil && b != nil && a.Numa >= 0 && a.Numa == b.Numa {
+						score += numaPairScore
+					}
+				}
+			}
+			if score > bestScore {
+				bestScore, best = score, slices.Clone(pick)
+			}
+			return
+		}
+		for i := start; i <= len(candidates)-(n-len(pick)); i++ {
+			pick = append(pick, i)
+			walk(i + 1)
+			pick = pick[:len(pick)-1]
+		}
+	}
+	walk(0)
+	if best == nil {
+		return nil, false
+	}
+	out := make(device.ContainerDevices, 0, n)
+	for _, i := range best {
+		out = append(out, candidates[i])
+	}
+	return out, true
 }
 
 // cuPerWGP returns how many CUs the device plugin allocates together, as
