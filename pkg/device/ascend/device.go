@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"sort"
@@ -49,6 +50,7 @@ const (
 	VNPUModeTemplate           = "template"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 	VNPUNodeENPUAnnotation     = "hami.io/enpu"
+	effectiveVNPUModeKey       = "hami.io/effective-vnpu-mode"
 )
 
 type Devices struct {
@@ -252,7 +254,10 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		memory, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	}
 	if ok {
-		if isSoftSlice {
+		// An unspecified mode is resolved per candidate node in Fit. Preserve the
+		// exact request here because admission does not know whether the selected
+		// node uses templates or a soft-slice backend.
+		if isSoftSlice || vnpuMode == "" {
 			trimMem = memory.Value()
 		} else {
 			trimMem, _ = dev.trimMemory(memory.Value())
@@ -264,7 +269,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	// count, not reqNum: the 910C SuperPod rewrite to 2 is HAMi's module
 	// packaging rule, not a multi device request, and #2005 added 910C vNPU
 	// templates so a single device fractional request stays schedulable.
-	if count.Value() > 1 && !isSoftSlice {
+	if count.Value() > 1 && vnpuMode == VNPUModeTemplate {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
@@ -340,8 +345,15 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 			for _, val := range dp {
 				info := RuntimeInfo{UUID: val.UUID}
 
-				// If is hami core, populate Memory and Core directly without using Temp
-				if vnpuMode == VNPUModeHamiCore || isENPUMode(vnpuMode) {
+				effectiveMode := vnpuMode
+				if val.CustomInfo != nil {
+					if mode, ok := val.CustomInfo[effectiveVNPUModeKey].(string); ok {
+						effectiveMode = mode
+					}
+				}
+
+				// Soft-slice allocations use their exact memory without a template.
+				if effectiveMode == VNPUModeHamiCore || isENPUMode(effectiveMode) {
 					info.Memory = int64(val.Usedmem)
 					info.Core = val.Usedcores
 				} else {
@@ -893,6 +905,28 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if isENPU && k.Coresreq == 0 {
 		k.Coresreq = hamiCorePercentBase
 	}
+	// Mode-agnostic Pods preserve their requested memory through admission.
+	// Resolve template memory only after the candidate node's mode is known.
+	// k is a per-Fit copy, so evaluating one candidate cannot affect another.
+	if vnpuMode == "" && !nodeSupportHamiCore && npu.config.MemoryAllocatable > 0 && k.Memreq > 0 {
+		trimmedMem, _ := npu.trimMemory(int64(k.Memreq))
+		if trimmedMem <= 0 {
+			reason[common.CardInsufficientMemory] += len(devices)
+			return false, nil, common.GenReason(reason, len(devices))
+		}
+		k.Memreq = int32(trimmedMem)
+	}
+	if vnpuMode == "" && !nodeSupportHamiCore && k.Nums > 1 && k.Memreq > 0 && k.Memreq != int32(npu.config.MemoryAllocatable) {
+		return false, nil, "vNPU not supported for multiple devices"
+	}
+	effectiveMode := vnpuMode
+	if effectiveMode == "" {
+		if nodeSupportHamiCore {
+			effectiveMode = VNPUModeHamiCore
+		} else {
+			effectiveMode = VNPUModeTemplate
+		}
+	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
 
 	needTopology := false
@@ -1022,13 +1056,16 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			if !needTopology && !pair910C {
 				k.Nums--
 			}
+			customInfo := make(map[string]any, len(dev.CustomInfo)+1)
+			maps.Copy(customInfo, dev.CustomInfo)
+			customInfo[effectiveVNPUModeKey] = effectiveMode
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:        int(dev.Index),
 				UUID:       dev.ID,
 				Type:       k.Type,
 				Usedmem:    memreq,
 				Usedcores:  k.Coresreq,
-				CustomInfo: dev.CustomInfo,
+				CustomInfo: customInfo,
 			})
 		}
 		if k.Nums == 0 && !needTopology && !pair910C {

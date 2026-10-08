@@ -145,7 +145,7 @@ func TestENPUAdmissionSingleDieAndLegacySuperPod(t *testing.T) {
 		{name: "ENPU odd count rejected", mode: VNPUModeENPU, count: "3", invalid: true},
 		{name: "hami-core keeps module pair", mode: VNPUModeHamiCore, count: "1", wantCount: 2, wantMemory: 20480},
 		{name: "template keeps module pair and rounding", mode: VNPUModeTemplate, count: "1", wantCount: 2, wantMemory: 32768},
-		{name: "unannotated keeps module pair and rounding", count: "1", wantCount: 2, wantMemory: 32768},
+		{name: "unannotated keeps module pair and preserves memory for filtering", count: "1", wantCount: 2, wantMemory: 20480},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dev := enpuTestDevice()

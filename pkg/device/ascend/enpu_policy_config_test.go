@@ -102,13 +102,14 @@ func TestENPUConfiguredPolicyAdmissionAndFit(t *testing.T) {
 
 func TestENPUInvalidConfiguredPolicyLeavesLegacyModesUnchanged(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode string
-		core       bool
-		wantMemory int64
+		name, mode          string
+		core                bool
+		wantAdmissionMemory int64
+		wantFitMemory       int32
 	}{
-		{name: "hami-core", mode: VNPUModeHamiCore, core: true, wantMemory: 20480},
-		{name: "template", mode: VNPUModeTemplate, wantMemory: 32768},
-		{name: "unannotated template", wantMemory: 32768},
+		{name: "hami-core", mode: VNPUModeHamiCore, core: true, wantAdmissionMemory: 20480, wantFitMemory: 20480},
+		{name: "template", mode: VNPUModeTemplate, wantAdmissionMemory: 32768, wantFitMemory: 32768},
+		{name: "unannotated template", wantAdmissionMemory: 20480, wantFitMemory: 32768},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dev := initENPUPolicyTestDevice(t, "invalid-default")
@@ -119,8 +120,8 @@ func TestENPUInvalidConfiguredPolicyLeavesLegacyModesUnchanged(t *testing.T) {
 				t.Fatalf("legacy admission = %v, error = %v", admitted, err)
 			}
 			memory := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
-			if memory.Value() != tc.wantMemory {
-				t.Fatalf("legacy memory = %d, want %d", memory.Value(), tc.wantMemory)
+			if memory.Value() != tc.wantAdmissionMemory {
+				t.Fatalf("legacy admission memory = %d, want %d", memory.Value(), tc.wantAdmissionMemory)
 			}
 			if got := pod.Annotations["huawei.com/enpu-policy"]; got != "invalid-ENPU-only-override" {
 				t.Fatalf("legacy Pod ENPU-only policy was rewritten: %q", got)
@@ -130,7 +131,7 @@ func TestENPUInvalidConfiguredPolicyLeavesLegacyModesUnchanged(t *testing.T) {
 				t.Fatalf("GenerateResourceRequests: %v", err)
 			}
 			fit, allocation, reason := dev.Fit([]*device.DeviceUsage{enpuTestUsage("free", nil)}, request, pod, enpuTestNode(tc.core, false), nil)
-			if !fit || len(allocation[Ascend910CType]) != 1 || allocation[Ascend910CType][0].Usedmem != int32(tc.wantMemory) {
+			if !fit || len(allocation[Ascend910CType]) != 1 || allocation[Ascend910CType][0].Usedmem != tc.wantFitMemory {
 				t.Fatalf("legacy Fit = %v, allocation = %+v, reason = %q", fit, allocation, reason)
 			}
 		})
