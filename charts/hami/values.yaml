@@ -536,6 +536,7 @@ devices:
     resourceCountName: "amd.com/gpu"
     resourceMemoryName: "amd.com/gpumem"
     resourceMemoryPercentageName: "amd.com/gpumem-percentage"
+    resourcePriorityName: "amd.com/priority"
     resourceCoreName: "amd.com/gpucores"
     customresources:
       - amd.com/gpu

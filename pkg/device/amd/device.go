@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -38,6 +39,7 @@ type AMDDevices struct {
 	resourceMemoryName           string
 	resourceMemoryPercentageName string
 	resourceCoreName             string
+	resourcePriorityName         string
 }
 
 const (
@@ -51,6 +53,9 @@ const (
 	AMDAssignedNode    = "amd.com/predicate-node"
 	NodeLockAMD        = "hami.io/mutex.lock"
 	RegisterAnnos      = "hami.io/node-amd-register"
+	// TaskPriority is the container env the priority resource becomes. amd-hami-core
+	// turns it into the priority of the container's HSA queues.
+	TaskPriority = "AMD_TASK_PRIORITY"
 )
 
 type AMDConfig struct {
@@ -58,6 +63,7 @@ type AMDConfig struct {
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
 	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
 	ResourceCoreName             string `yaml:"resourceCoreName"`
+	ResourcePriorityName         string `yaml:"resourcePriorityName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -71,6 +77,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		resourceMemoryName:           config.ResourceMemoryName,
 		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
 		resourceCoreName:             config.ResourceCoreName,
+		resourcePriorityName:         config.ResourcePriorityName,
 	}
 }
 
@@ -90,6 +97,9 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 		}
 	}
 	if _, err := dev.memoryPercentage(ctr); err != nil {
+		return false, err
+	}
+	if err := dev.injectPriority(ctr); err != nil {
 		return false, err
 	}
 	if !ok && dev.resourceMemoryName != "" {
@@ -112,6 +122,33 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
+}
+
+// injectPriority turns the priority resource into the AMD_TASK_PRIORITY env of
+// the container. 0 is the high class and a higher number a lower one, the order
+// of nvidia.com/priority. An env the container already sets is replaced, so the
+// resource is the one source of the value.
+func (dev *AMDDevices) injectPriority(ctr *corev1.Container) error {
+	if dev.resourcePriorityName == "" {
+		return nil
+	}
+	q, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourcePriorityName)]
+	if !ok {
+		return nil
+	}
+	n, isInt := q.AsInt64()
+	if !isInt || n < 0 || n > math.MaxInt32 {
+		return fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and %d", dev.resourcePriorityName, q.String(), ctr.Name, math.MaxInt32)
+	}
+	value := strconv.FormatInt(n, 10)
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == TaskPriority {
+			ctr.Env[i].Value, ctr.Env[i].ValueFrom = value, nil
+			return nil
+		}
+	}
+	ctr.Env = append(ctr.Env, corev1.EnvVar{Name: TaskPriority, Value: value})
+	return nil
 }
 
 // memoryPercentage returns the requested share of device memory, 0 when unset.
