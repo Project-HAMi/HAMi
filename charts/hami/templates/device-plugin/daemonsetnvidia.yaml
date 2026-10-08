@@ -1,4 +1,4 @@
-{{- if and .Values.devicePlugin.enabled (regexMatch "^(127\\.|localhost|\\[::1\\])" .Values.devicePlugin.monitor.metricsBindAddress) }}
+{{- if and .Values.devicePlugin.enabled (regexMatch "(?i)^(127\\.|localhost|\\[[0:]*:0{0,3}1\\]|\\[::ffff:127\\.)" .Values.devicePlugin.monitor.metricsBindAddress) }}
 {{- fail "devicePlugin.monitor.metricsBindAddress must not be a loopback address, the probes and the Service reach the monitor through the Pod IP" }}
 {{- end }}
 {{- if and .Values.devicePlugin.enabled .Values.devicePlugin.hostPIDBroker.enabled (not .Values.devicePlugin.hostPID) }}
