@@ -19,6 +19,7 @@ package nodelock
 import (
 	"context"
 	"errors"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -1581,5 +1582,33 @@ func TestLockNodeExpiredTakenWhenHolderFinishedAllocating(t *testing.T) {
 	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
 	if err := LockNode(nodeName, "", next); err != nil {
 		t.Fatalf("the node stayed locked for a holder that finished allocating: %v", err)
+	}
+}
+
+func TestGenerateNodeLockKeyByPodKeepsSubSecondPrecision(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web-0"}}
+	fraction := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+`)
+	for _, key := range []string{GenerateNodeLockKeyByPod(pod), GenerateNodeLockKeyByPod(nil)} {
+		// A clock reading with zero nanoseconds prints no fraction, so retry
+		// once before calling it a failure.
+		if !fraction.MatchString(key) {
+			key = GenerateNodeLockKeyByPod(pod)
+		}
+		if !fraction.MatchString(key) {
+			t.Fatalf("lock key %q has no sub-second part", key)
+		}
+	}
+
+	lockTime, ns, name, err := ParseNodeLock(GenerateNodeLockKeyByPod(pod))
+	if err != nil {
+		t.Fatalf("ParseNodeLock: %v", err)
+	}
+	if ns != "default" || name != "web-0" || time.Since(lockTime) > time.Minute || lockTime.After(time.Now()) {
+		t.Fatalf("unexpected parse result %v %q %q", lockTime, ns, name)
+	}
+
+	// A lock written by an older scheduler, in whole seconds, still parses.
+	if _, _, _, err := ParseNodeLock(time.Now().Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "web-0"); err != nil {
+		t.Fatalf("whole-second lock no longer parses: %v", err)
 	}
 }

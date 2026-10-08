@@ -382,10 +382,13 @@ func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error
 }
 
 func GenerateNodeLockKeyByPod(pod *corev1.Pod) string {
+	// Nanoseconds keep a lock taken in the same second as its pod's creation
+	// ordered after it. ParseNodeLock reads both spellings.
+	now := time.Now().Format(time.RFC3339Nano)
 	if pod == nil {
-		return time.Now().Format(time.RFC3339)
+		return now
 	}
-	return fmt.Sprintf("%s%s%s", time.Now().Format(time.RFC3339), NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))
+	return fmt.Sprintf("%s%s%s", now, NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))
 }
 
 func GeneratePodNamespaceName(pod *corev1.Pod, sep string) string {
