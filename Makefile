@@ -99,14 +99,18 @@ lint_chart:
       (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
       echo "chart trivy check: pass"
 
-.PHONY: update-chart-docs
-update-chart-docs:
-	$(MAKE) -C charts docs
+.PHONY: update-helm-chart-docs
+update-helm-chart-docs:
+	$(MAKE) -C charts update-helm-chart-docs
+
+.PHONY: verify-helm-chart-docs
+verify-helm-chart-docs:
+	$(MAKE) -C charts verify-helm-chart-docs
 
 .PHONY: verify_chart
 verify_chart:
 	$(MAKE) -C charts validate
-	$(MAKE) -C charts verify-docs
+	$(MAKE) verify-helm-chart-docs
 	bash ./hack/verify-chart-version.sh
 	$(MAKE) lint_chart
 

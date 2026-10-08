@@ -158,9 +158,13 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make verify_chart`.
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
-and verifies that the chart and application versions match. Install [readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm)
-and run `make update-chart-docs` after changing values or their descriptions;
-`make verify_chart` also checks that the generated chart README is current.
+and verifies that the chart and application versions match.
+
+Install [readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm)
+and run `make update-helm-chart-docs` to regenerate the Chart README after changing
+annotated values or their descriptions. Run `make verify-helm-chart-docs` to check
+that the generated section is current. This check also runs in `make verify_chart`
+and Chart Lint CI.
 
 For changes to a package that has benchmarks, also run `make bench`. CI runs the benchmarks to
 confirm they still execute; it does not compare timings, because shared runners are too noisy for

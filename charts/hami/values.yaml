@@ -58,7 +58,7 @@ podSecurityPolicy:
 ## @section Scheduler configuration
 scheduler:
   ## @param scheduler.nodeName Node name on which to run the scheduler Pod.
-  # if we install the HAMi scheduler as default scheduler, we need to remove the k8s default
+  # if we install the nvidia-vgpu-scheduler-scheduler as default scheduler, we need to remove the k8s default
   # scheduler pod from the cluster first, we must specify node name to skip the schedule workflow.
   nodeName: ""
   #nodeLabelSelector:
@@ -137,7 +137,7 @@ scheduler:
       repository: "google_containers/kube-scheduler"
       tag: ""
       ## Specify a imagePullPolicy
-      ## The Chart default is IfNotPresent, including for the latest tag.
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
       ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
       ##
       pullPolicy: IfNotPresent
@@ -177,7 +177,7 @@ scheduler:
       repository: "projecthami/hami"
       tag: ""
       ## Specify a imagePullPolicy
-      ## The Chart default is IfNotPresent, including for the latest tag.
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
       ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
       ##
       pullPolicy: IfNotPresent
@@ -278,7 +278,7 @@ scheduler:
       repository: "jettech/kube-webhook-certgen"
       tag: "v1.5.2"
       ## Specify a imagePullPolicy
-      ## The Chart default is IfNotPresent, including for the latest tag.
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
       ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
       ##
       pullPolicy: IfNotPresent
@@ -299,7 +299,7 @@ scheduler:
       repository: "liangjw/kube-webhook-certgen"
       tag: "v1.1.1"
       ## Specify a imagePullPolicy
-      ## The Chart default is IfNotPresent, including for the latest tag.
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
       ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
       ##
       pullPolicy: IfNotPresent
@@ -375,7 +375,7 @@ devicePlugin:
     repository: "projecthami/hami"
     tag: ""
     ## Specify a imagePullPolicy
-    ## The Chart default is IfNotPresent, including for the latest tag.
+    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
     ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
     ##
     pullPolicy: IfNotPresent
@@ -403,7 +403,7 @@ devicePlugin:
       repository: "projecthami/hami"
       tag: ""
       ## Specify a imagePullPolicy
-      ## The Chart default is IfNotPresent, including for the latest tag.
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
       ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
       ##
       pullPolicy: IfNotPresent
@@ -587,7 +587,7 @@ mockDevicePlugin:
     repository: "projecthami/mock-device-plugin"
     tag: "1.0.1"
     ## Specify a imagePullPolicy
-    ## The Chart default is IfNotPresent, including for the latest tag.
+    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
     ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
     ##
     pullPolicy: IfNotPresent

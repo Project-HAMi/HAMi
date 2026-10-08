@@ -1,8 +1,8 @@
-# HAMi Helm Chart
+# HAMi Helm Chart Values Documentation
 
-Configure HAMi with a values file. See the user guide for
-[installation](https://project-hami.io/docs/next/installation/online-installation)
-and [configuration](https://project-hami.io/docs/next/userguide/configure).
+This document provides detailed descriptions of all configurable values parameters for the HAMi Helm Chart.
+
+Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read. Supplying removed fields fails chart rendering and lists every old field with its replacement path.
 
 ## Upgrade to v2.11
 
@@ -61,9 +61,15 @@ need. Standard resources are included even when `customresources` is empty.
 
 ### Back up the current configuration
 
-Back up your release values and ConfigMaps before upgrading. See the
-[upgrade guide](https://project-hami.io/docs/next/installation/upgrade) for the
-backup commands.
+These examples use release `hami` in namespace `kube-system`. Replace the release,
+namespace, and ConfigMap names with those used by your installation.
+
+Export the release's user-supplied values and back up the device ConfigMap:
+
+```bash
+helm get values hami -n kube-system -o yaml > previous-values.yaml
+kubectl get configmap hami-scheduler-device -n kube-system -o yaml > device-config-backup.yaml
+```
 
 If you use node configuration, back up its ConfigMap too. Use the external
 ConfigMap name instead when `devicePlugin.nodeConfiguration.externalConfigName`
@@ -184,16 +190,12 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 | `devices.vastai.customresources`  | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
 | `devices.biren.customresources`   | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
 
-
-## Additional configuration
-
-These tables retain settings that do not yet have generator annotations in
-`values.yaml`. The generated Parameters section above covers the annotated settings.
-
 ## Global Configuration
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
+| `global.imageRegistry` | Global Docker image registry | `""` |
+| `global.imagePullSecrets` | Global Docker image pull secrets | `[]` |
 | `global.imageTag` | Image tag | `"v2.10.0"` |
 | `global.gpuHookPath` | GPU Hook path | `/usr/local` |
 | `global.labels` | Global labels | `{}` |
@@ -204,6 +206,8 @@ These tables retain settings that do not yet have generator annotations in
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
 | `platform.openshift` | Enable OpenShift-specific resources and handling | `false` |
+| `openshift.securityContextConstraints.create` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. | `true` |
+| `openshift.securityContextConstraints.name` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. | `"hami-device-plugin"` |
 | `selinux.enabled` | Relabel shared vGPU host directories on SELinux-enabled Kubernetes nodes | `false` |
 | `selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
 | `selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |
@@ -259,6 +263,7 @@ These tables retain settings that do not yet have generator annotations in
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `schedulerName` | Scheduler name | `"hami-scheduler"` |
+| `scheduler.nodeName` | Define node name, scheduler will schedule to this node | `""` |
 | `scheduler.overwriteEnv` | Whether to overwrite environment variables | `"false"` |
 | `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
 | `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
@@ -317,6 +322,12 @@ listener is started.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
+| `scheduler.kubeScheduler.enabled` | Whether to run kube-scheduler container in scheduler pod | `true` |
+| `scheduler.kubeScheduler.image.registry` | Kube scheduler image registry | `"registry.cn-hangzhou.aliyuncs.com"` |
+| `scheduler.kubeScheduler.image.repository` | Kube scheduler image repository | `"google_containers/kube-scheduler"` |
+| `scheduler.kubeScheduler.image.tag` | Kube scheduler image tag | `""` |
+| `scheduler.kubeScheduler.image.pullPolicy` | Kube scheduler image pull policy | `IfNotPresent` |
+| `scheduler.kubeScheduler.image.pullSecrets` | Kube scheduler image pull secrets | `[]` |
 | `scheduler.kubeScheduler.extraNewArgs` | Extra new arguments | `["--config=/config/config.yaml", "-v=4"]` |
 | `scheduler.kubeScheduler.extraArgs` | Extra arguments | `["--policy-config-file=/config/config.json", "-v=4"]` |
 
@@ -324,6 +335,11 @@ listener is started.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
+| `scheduler.extender.image.registry` | Scheduler extender image registry | `"docker.io"` |
+| `scheduler.extender.image.repository` | Scheduler extender image repository | `"projecthami/hami"` |
+| `scheduler.extender.image.tag` | Scheduler extender image tag | `""` |
+| `scheduler.extender.image.pullPolicy` | Scheduler extender image pull policy | `IfNotPresent` |
+| `scheduler.extender.image.pullSecrets` | Scheduler extender image pull secrets | `[]` |
 | `scheduler.extender.extraArgs` | Scheduler extender extra arguments | `["--debug", "-v=4"]` |
 
 ### Admission Webhook Configuration
@@ -345,6 +361,13 @@ listener is started.
 |-----------|-------------|---------------|
 | `scheduler.certManager.enabled` | Whether to use cert-manager to generate self-signed certificates | `false` |
 | `scheduler.patch.enabled` | Whether to use kube-webhook-certgen to generate self-signed certificates | `true` |
+| `scheduler.patch.image.registry` | Certgen image registry | `"docker.io"` |
+| `scheduler.patch.image.repository` | Certgen image repository | `"jettech/kube-webhook-certgen"` |
+| `scheduler.patch.image.tag` | Certgen image tag | `"v1.5.2"` |
+| `scheduler.patch.image.pullPolicy` | Certgen image pull policy | `IfNotPresent` |
+| `scheduler.patch.imageNew.registry` | New certgen image registry | `"docker.io"` |
+| `scheduler.patch.imageNew.repository` | New certgen image repository | `"liangjw/kube-webhook-certgen"` |
+| `scheduler.patch.imageNew.tag` | New certgen image tag | `"v1.1.1"` |
 
 ### Scheduler Service Configuration
 
@@ -356,10 +379,25 @@ listener is started.
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
 | `scheduler.service.monitorTargetPort` | Monitor target port | `metrics` |
 
+## Device Plugin Configuration
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devicePlugin.image.registry` | Device plugin image registry | `"docker.io"` |
+| `devicePlugin.image.repository` | Device plugin image repository | `"projecthami/hami"` |
+| `devicePlugin.image.tag` | Device plugin image tag | `""` |
+| `devicePlugin.image.pullPolicy` | Device plugin image pull policy | `IfNotPresent` |
+| `devicePlugin.image.pullSecrets` | Device plugin image pull secrets | `[]` |
+
 ### Monitor Configuration
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
+| `devicePlugin.monitor.image.registry` | Monitor image registry | `"docker.io"` |
+| `devicePlugin.monitor.image.repository` | Monitor image repository | `"projecthami/hami"` |
+| `devicePlugin.monitor.image.tag` | Monitor image tag | `""` |
+| `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
+| `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
@@ -369,6 +407,7 @@ listener is started.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
+| `devicePlugin.vgpuCache.gracePeriod` | Minimum directory age (based on modification time) before the NVIDIA Device Plugin considers a stale libvgpu cache directory for deletion. Independent of monitor resync. | `"5m"` |
 
 The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
 `HAMI_VGPU_CACHE_GRACE_PERIOD`. Use a Go duration string such as `"30s"`, `"5m"`,
@@ -456,6 +495,12 @@ host-installed drivers, or appends the GPU Operator path suffix
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
+| `devices.kunlun.customresources` | Additional resources; standard resource names are added automatically | `[]` |
+
+### Enflame
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
@@ -504,9 +549,7 @@ devices:
 ```
 
 Lists such as `migProfileAllowlist`, Ascend `configs`, and Iluvatar `configs`
-replace the corresponding default list in full; entries do not merge by model
-or chip name. Maps merge with chart defaults. Explicit `0`, `false`, and `[]`
-are preserved in the rendered device configuration.
+replace the corresponding default list in full.
 
 Configuration precedence remains `device-config.content`, then a bundled
 `files/device-config.yaml`, then the configuration generated from values.
@@ -522,43 +565,15 @@ vendor are removed.
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
 
-Changing the device configuration through Helm updates the scheduler and NVIDIA
-device-plugin checksum annotations.
+## Updating chart documentation
 
-For MIG profile selection and device-specific chip definitions, see:
-
-- [NVIDIA dynamic MIG configuration](https://project-hami.io/docs/next/userguide/nvidia-device/dynamic-mig-support)
-- [Ascend device templates](https://project-hami.io/docs/next/userguide/ascend-device/device-template)
-- [Iluvatar GPU sharing](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing)
-
-## NVIDIA Driver Root
-
-When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads GPU Operator's
-`/run/nvidia/validations/driver-ready` contract. If the file is absent, HAMi uses
-`/` for host-installed drivers. When HAMi starts before GPU Operator validation
-completes, wait for GPU Operator to become ready and restart the device-plugin
-DaemonSet. The chart mounts the host root at `/host` for driver discovery.
-
-## Adding Device Configuration
-
-For a new vendor, define every default under `devices.<vendor>` in values.yaml
-and reference those fields in `templates/scheduler/device-configmap.yaml`.
-Preserve the backend's runtime field names and types. Register its extender
-resources in `hami-vgpu.scheduler.managedResources`.
-Ascend and Iluvatar demonstrate mappings whose runtime section names differ
-from the vendor name.
-
-## Updating this reference
-
-The Parameters section includes settings with `@param` annotations in
-`values.yaml`. Fields marked with `@skip` are omitted from that section. To
-document a skipped field, replace its `@skip` with `@param` and a description.
-Edit other text directly in this README. Install
+The Parameters section is generated from the existing `@param` annotations in
+`values.yaml`. Fields marked with `@skip` are omitted. The other sections are
+maintained manually. Install
 [readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm),
-then run these commands
-from the repository root:
+then run these commands from the repository root:
 
 ```bash
-make update-chart-docs
-make -C charts verify-docs
+make update-helm-chart-docs
+make verify-helm-chart-docs
 ```
