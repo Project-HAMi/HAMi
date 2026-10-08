@@ -98,8 +98,7 @@ data:
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
-      hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore }}
-      enpu: {{ .Values.devices.ascend.enpu | default false }}
+      hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
       enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" | quote }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"

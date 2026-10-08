@@ -43,7 +43,7 @@ func initENPUPolicyTestDevice(t *testing.T, policy string) *Devices {
 			}
 		})
 	}
-	devs := InitDevices(VNPUs{Enpu: true, EnpuPolicy: policy, Configs: []VNPUConfig{config}})
+	devs := InitDevices(VNPUs{HamiVnpuMode: VNPUModeENPU, EnpuPolicy: policy, Configs: []VNPUConfig{config}})
 	if len(devs) != 1 {
 		t.Fatalf("InitDevices returned %d devices, want 1", len(devs))
 	}

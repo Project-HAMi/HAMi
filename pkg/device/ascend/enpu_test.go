@@ -328,14 +328,18 @@ func TestENPUFitPolicyChangeAndLegacyPolicy(t *testing.T) {
 func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode string
-		globalENPU bool
+		globalMode string
 		node       *device.NodeInfo
 		wantFit    bool
 		wantCore   int32
 	}{
 		{name: "node enables ENPU", mode: VNPUModeENPU, node: enpuTestNode(false, true), wantFit: true, wantCore: 100},
-		{name: "node disables global ENPU", mode: VNPUModeENPU, globalENPU: true, node: enpuTestNode(false, false)},
-		{name: "global ENPU default", mode: VNPUModeENPU, globalENPU: true, node: &device.NodeInfo{}, wantFit: true, wantCore: 100},
+		{name: "node disables global ENPU", mode: VNPUModeENPU, globalMode: VNPUModeENPU, node: enpuTestNode(false, false)},
+		{name: "global ENPU default", mode: VNPUModeENPU, globalMode: VNPUModeENPU, node: &device.NodeInfo{}, wantFit: true, wantCore: 100},
+		{name: "global core default", mode: VNPUModeHamiCore, globalMode: VNPUModeHamiCore, node: &device.NodeInfo{}, wantFit: true},
+		{name: "global template default", mode: VNPUModeTemplate, globalMode: VNPUModeTemplate, node: &device.NodeInfo{}, wantFit: true},
+		{name: "global core does not enable ENPU", mode: VNPUModeENPU, globalMode: VNPUModeHamiCore, node: &device.NodeInfo{}},
+		{name: "global ENPU does not enable core", mode: VNPUModeHamiCore, globalMode: VNPUModeENPU, node: &device.NodeInfo{}},
 		{name: "ENPU disabled by default", mode: VNPUModeENPU, node: &device.NodeInfo{}},
 		{name: "implicit core keeps zero reservation", node: enpuTestNode(true, false), wantFit: true},
 		{name: "unannotated rejected on ENPU only", node: enpuTestNode(false, true)},
@@ -352,7 +356,7 @@ func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dev := enpuTestDevice()
-			dev.enpu = tc.globalENPU
+			dev.vnpuMode = tc.globalMode
 			pod := enpuTestPod(tc.mode, "")
 			request := enpuTestRequest("")
 			fit, allocation, reason := dev.Fit([]*device.DeviceUsage{enpuTestUsage("free", nil)}, request, pod, tc.node, nil)

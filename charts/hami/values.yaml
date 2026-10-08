@@ -812,8 +812,9 @@ devices:
           aiCore: 10
           aiCPU: 3
     runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
-    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
-    enpu: false  # Enable ENPU unless overridden by the hami.io/enpu node annotation.
+    # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
+    # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
+    hamiVnpuMode: ""
     enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
     enabled: false
     image: ""

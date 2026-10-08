@@ -462,7 +462,7 @@ awsneuron:
 amd:
   resourceCountName: "amd.com/gpu"
 vnpus:
-  hamiVnpuCore: false
+  hamiVnpuMode: template
   configs:
   - chipName: "910A"
     commonWord: "Ascend910A"

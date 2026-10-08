@@ -244,7 +244,7 @@ func Test_GetNodeDevices(t *testing.T) {
 		},
 		{
 			name: "hami-core node rewrites physical Devcore to 100",
-			dev:  Devices{hamiVnpuCore: true},
+			dev:  Devices{vnpuMode: VNPUModeHamiCore},
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-hami-core",
@@ -269,7 +269,7 @@ func Test_GetNodeDevices(t *testing.T) {
 		},
 		{
 			name: "hami-core node keeps advertised oversell Devcore",
-			dev:  Devices{hamiVnpuCore: true},
+			dev:  Devices{vnpuMode: VNPUModeHamiCore},
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-oversell",
@@ -294,7 +294,7 @@ func Test_GetNodeDevices(t *testing.T) {
 		},
 		{
 			name: "node annotation false keeps physical Devcore",
-			dev:  Devices{hamiVnpuCore: true},
+			dev:  Devices{vnpuMode: VNPUModeHamiCore},
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-template",
@@ -3081,7 +3081,7 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
-func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
+func TestDevices_Fit_TemplateModeGlobalVNPUMode(t *testing.T) {
 	devices := []*device.DeviceUsage{{
 		ID: "dev-0", Index: 0, Used: 0, Count: 100,
 		Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
@@ -3098,20 +3098,20 @@ func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		hamiVnpuCore   bool
+		vnpuMode       string
 		nodeAnnotation map[string]string
 		wantFit        bool
 		wantReason     string
 	}{
 		{
-			name:         "template pod rejected when global hamiVnpuCore is on",
-			hamiVnpuCore: true,
-			wantFit:      false,
-			wantReason:   "1/1 ModeNotFit",
+			name:       "template pod rejected by global core mode",
+			vnpuMode:   VNPUModeHamiCore,
+			wantFit:    false,
+			wantReason: "1/1 ModeNotFit",
 		},
 		{
-			name:           "template pod accepted when node overrides global hamiVnpuCore off",
-			hamiVnpuCore:   true,
+			name:           "template pod accepted when node disables global core mode",
+			vnpuMode:       VNPUModeHamiCore,
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "false"},
 			wantFit:        true,
 		},
@@ -3120,8 +3120,8 @@ func TestDevices_Fit_TemplateModeGlobalHamiVnpuCore(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := &Devices{
-				config:       VNPUConfig{CommonWord: "Ascend910B3"},
-				hamiVnpuCore: test.hamiVnpuCore,
+				config:   VNPUConfig{CommonWord: "Ascend910B3"},
+				vnpuMode: test.vnpuMode,
 			}
 			nodeInfo := &device.NodeInfo{
 				ID: "node1",

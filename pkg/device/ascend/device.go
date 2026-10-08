@@ -57,8 +57,7 @@ type Devices struct {
 	useUUIDAnno            string
 	noUseUUIDAnno          string
 	handshakeAnno          string
-	hamiVnpuCore           bool
-	enpu                   bool
+	vnpuMode               string
 	enpuPolicy             string
 	overwriteEnv           bool
 	runtimeClassName       string
@@ -91,6 +90,11 @@ func InitDevices(vnpus VNPUs) []*Devices {
 	if !enableAscend {
 		return devs
 	}
+	mode, err := vnpus.mode()
+	if err != nil {
+		klog.Errorf("Invalid Ascend VNPU configuration: %v", err)
+		return devs
+	}
 	allAscendResourceNames := make([]corev1.ResourceName, 0, len(vnpus.Configs))
 	for _, vnpu := range vnpus.Configs {
 		allAscendResourceNames = append(allAscendResourceNames, corev1.ResourceName(vnpu.ResourceName))
@@ -103,8 +107,7 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			useUUIDAnno:            fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
 			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
-			hamiVnpuCore:           vnpus.HamiVnpuCore,
-			enpu:                   vnpus.Enpu,
+			vnpuMode:               mode,
 			enpuPolicy:             vnpus.EnpuPolicy,
 			overwriteEnv:           vnpus.OverwriteEnv,
 			runtimeClassName:       vnpus.RuntimeClassName,
@@ -546,7 +549,7 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 const hamiCorePercentBase = 100
 
 func (dev *Devices) nodeSupportsHamiCore(n *corev1.Node) bool {
-	supported := dev.hamiVnpuCore
+	supported := dev.vnpuMode == VNPUModeHamiCore
 	if n != nil && n.Annotations != nil {
 		if val, ok := n.Annotations[VNPUNodeSelectorAnnotation]; ok {
 			supported = val == "true"
@@ -556,7 +559,7 @@ func (dev *Devices) nodeSupportsHamiCore(n *corev1.Node) bool {
 }
 
 func (dev *Devices) nodeSupportsENPU(n *corev1.Node) bool {
-	supported := dev.enpu
+	supported := dev.vnpuMode == VNPUModeENPU
 	if n != nil && n.Annotations != nil {
 		if val, ok := n.Annotations[VNPUNodeENPUAnnotation]; ok {
 			supported = val == "true"
@@ -851,7 +854,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	isTemplate := (vnpuMode == VNPUModeTemplate)
 
 	// Verify whether the Node supports hami vnpu core.
-	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
+	// The global VNPU mode acts as the default; node capability annotations take higher priority.
 	var node *corev1.Node
 	if nodeInfo != nil {
 		node = nodeInfo.Node

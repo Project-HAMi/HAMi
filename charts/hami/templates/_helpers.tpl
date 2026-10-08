@@ -284,7 +284,36 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- toYaml $resources -}}
 {{- end -}}
 
+{{/* Resolve the Ascend default mode while accepting the released legacy core flag. */}}
+{{- define "hami-vgpu.ascendVnpuMode" -}}
+{{- $ascend := .Values.devices.ascend -}}
+{{- if hasKey $ascend "enpu" -}}
+  {{- fail "devices.ascend.enpu has been removed; use devices.ascend.hamiVnpuMode (template, hami-core, or enpu) instead" -}}
+{{- end -}}
+{{- if and (hasKey $ascend "hamiVnpuCore") (not (kindIs "bool" $ascend.hamiVnpuCore)) -}}
+  {{- fail "devices.ascend.hamiVnpuCore must be a boolean; use devices.ascend.hamiVnpuMode instead" -}}
+{{- end -}}
+{{- $mode := "" -}}
+{{- if ne $ascend.hamiVnpuMode nil -}}
+  {{- if not (kindIs "string" $ascend.hamiVnpuMode) -}}
+    {{- fail "devices.ascend.hamiVnpuMode must be a string: template, hami-core (or hamiCore), or enpu" -}}
+  {{- end -}}
+  {{- $mode = lower (trim $ascend.hamiVnpuMode) -}}
+{{- end -}}
+{{- if eq $mode "" -}}
+  {{- $mode = ternary "hami-core" "template" ($ascend.hamiVnpuCore | default false) -}}
+{{- else if eq $mode "hamicore" -}}
+  {{- $mode = "hami-core" -}}
+{{- end -}}
+{{- if not (has $mode (list "template" "hami-core" "enpu")) -}}
+  {{- fail (printf "devices.ascend.hamiVnpuMode must be template, hami-core (or hamiCore), or enpu, got %q" $ascend.hamiVnpuMode) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end -}}
+
 {{- define "hami-vgpu.validateDeviceValues" -}}
+{{/* Validate mode values even when device-config.content overrides the generated config. */}}
+{{- $_ := include "hami-vgpu.ascendVnpuMode" . -}}
 {{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
 {{- $removedRootFields := dict
   "resourceName" "devices.nvidia.resourceCountName"
