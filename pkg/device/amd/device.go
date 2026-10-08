@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -48,9 +49,11 @@ const (
 	AMDNoUse           = "amd.com/nouse-gputype"
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
-	AMDAssignedNode    = "amd.com/predicate-node"
-	NodeLockAMD        = "hami.io/mutex.lock"
-	RegisterAnnos      = "hami.io/node-amd-register"
+	// AMDNumaBind asks for every GPU of a multi-GPU request to sit on one NUMA node.
+	AMDNumaBind     = "amd.com/numa-bind"
+	AMDAssignedNode = "amd.com/predicate-node"
+	NodeLockAMD     = "hami.io/mutex.lock"
+	RegisterAnnos   = "hami.io/node-amd-register"
 )
 
 type AMDConfig struct {
@@ -208,9 +211,14 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 	return true
 }
 
+func assertNuma(annos map[string]string) bool {
+	enforce, err := strconv.ParseBool(annos[AMDNumaBind])
+	return err == nil && enforce
+}
+
 func (dev *AMDDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.EqualFold(n.Type, AMDDevice) {
-		return true, checkAMDType(annos, d.Type), false
+		return true, checkAMDType(annos, d.Type), assertNuma(annos)
 	}
 	return false, false, false
 }
@@ -322,6 +330,7 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
+	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
@@ -339,11 +348,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
-		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, numa := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
+		}
+		// numa-bind: a run of GPUs must share one NUMA node, so a new node starts the run over.
+		if numa && prevnuma != dev.Numa {
+			if k.Nums != originReq {
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "prevnuma", prevnuma, "device numa", dev.Numa)
+			}
+			k.Nums = originReq
+			prevnuma = dev.Numa
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AMDUseUUID, AMDNoUseUUID, amddevice.CommonWord()) {
 			reason[common.CardUUIDMismatch]++

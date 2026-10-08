@@ -45,6 +45,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
@@ -785,12 +786,12 @@ func numaBindingRequested(task *corev1.Pod) bool {
 	if task == nil {
 		return false
 	}
-	v, ok := task.Annotations[nvidia.NumaBind]
-	if !ok {
-		return false
+	for _, key := range []string{nvidia.NumaBind, amd.AMDNumaBind} {
+		if enforce, err := strconv.ParseBool(task.Annotations[key]); err == nil && enforce {
+			return true
+		}
 	}
-	enforce, err := strconv.ParseBool(v)
-	return err == nil && enforce
+	return false
 }
 
 // buildNodeUsage creates the mutable device-usage view used while scoring a task
