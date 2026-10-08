@@ -93,6 +93,7 @@ data:
       resourceCountName: {{ .Values.devices.amd.resourceCountName }}
       resourceCoreName: {{ .Values.devices.amd.resourceCoreName }}
       resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
+      resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
     vastai:
       resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:

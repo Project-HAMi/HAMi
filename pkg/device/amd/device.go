@@ -34,9 +34,10 @@ import (
 )
 
 type AMDDevices struct {
-	resourceCountName  string
-	resourceMemoryName string
-	resourceCoreName   string
+	resourceCountName            string
+	resourceMemoryName           string
+	resourceMemoryPercentageName string
+	resourceCoreName             string
 }
 
 const (
@@ -53,9 +54,10 @@ const (
 )
 
 type AMDConfig struct {
-	ResourceCountName  string `yaml:"resourceCountName"`
-	ResourceMemoryName string `yaml:"resourceMemoryName"`
-	ResourceCoreName   string `yaml:"resourceCoreName"`
+	ResourceCountName            string `yaml:"resourceCountName"`
+	ResourceMemoryName           string `yaml:"resourceMemoryName"`
+	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
+	ResourceCoreName             string `yaml:"resourceCoreName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -65,9 +67,10 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		device.SupportDevices[AMDDevice] = "hami.io/amd-devices-allocated"
 	}
 	return &AMDDevices{
-		resourceCountName:  config.ResourceCountName,
-		resourceMemoryName: config.ResourceMemoryName,
-		resourceCoreName:   config.ResourceCoreName,
+		resourceCountName:            config.ResourceCountName,
+		resourceMemoryName:           config.ResourceMemoryName,
+		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
+		resourceCoreName:             config.ResourceCoreName,
 	}
 }
 
@@ -85,16 +88,50 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
 			}
 		}
-
+	}
+	if _, err := dev.memoryPercentage(ctr); err != nil {
+		return false, err
 	}
 	if !ok && dev.resourceMemoryName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
+	}
+	if !ok && dev.resourceMemoryPercentageName != "" {
+		name := corev1.ResourceName(dev.resourceMemoryPercentageName)
+		_, inLimits := ctr.Resources.Limits[name]
+		_, inRequests := ctr.Resources.Requests[name]
+		if ok = inLimits || inRequests; ok {
+			// A percentage alone still needs a card, like nvidia defaults the count.
+			if ctr.Resources.Limits == nil {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
+			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(1, resource.DecimalSI)
+		}
 	}
 	if !ok && dev.resourceCoreName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
+}
+
+// memoryPercentage returns the requested share of device memory, 0 when unset.
+func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
+	if dev.resourceMemoryPercentageName == "" {
+		return 0, nil
+	}
+	name := corev1.ResourceName(dev.resourceMemoryPercentageName)
+	q, ok := ctr.Resources.Limits[name]
+	if !ok {
+		q, ok = ctr.Resources.Requests[name]
+	}
+	if !ok {
+		return 0, nil
+	}
+	pct, isInt := q.AsInt64()
+	if !isInt || pct < 0 || pct > 100 {
+		return 0, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.resourceMemoryPercentageName, q.String(), ctr.Name)
+	}
+	return int32(pct), nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -228,6 +265,12 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				memnum = int32(memnums)
 			}
 
+			memPercentage, err := dev.memoryPercentage(ctr)
+			if err != nil {
+				klog.ErrorS(err, "amd device memory percentage request is out of range", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: err.Error()}
+			}
+
 			// An omitted core limit means the container receives all CUs on each
 			// allocated GPU. This also keeps memory-only AMD requests valid.
 			corePercentageNum := int32(100)
@@ -251,7 +294,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				Nums:             int32(n),
 				Type:             AMDDevice,
 				Memreq:           memnum,
-				MemPercentagereq: 0,
+				MemPercentagereq: memPercentage,
 				Coresreq:         corePercentageNum,
 			}, nil
 		}
@@ -319,6 +362,9 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		memReq := k.Memreq
+		if memReq <= 0 && k.MemPercentagereq > 0 && dev.Totalmem > 0 {
+			memReq = max(int32(int64(dev.Totalmem)*int64(k.MemPercentagereq)/100), 1)
+		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
 		}
