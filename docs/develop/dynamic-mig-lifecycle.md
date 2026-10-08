@@ -6,7 +6,9 @@ HAMi keeps dynamically created NVIDIA MIG instances available after a Pod releas
 
 Dynamic MIG mode requires HAMi to be the only controller that creates or destroys MIG instances on GPUs managed by HAMi. Running another MIG lifecycle controller on the same GPU is unsupported because HAMi cannot safely distinguish or coordinate external layout changes.
 
-By default, startup recovery adopts only instances referenced by live HAMi Pod annotations. Existing unverified GI/CI pairs are preserved but are not reused or reclaimed. Operators may set `devices.nvidia.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in allows unannotated GI/CI pairs to be restored as idle.
+HAMi writes one ownership record per dynamic MIG instance under `/var/run/cdi/hami-dynamic-mig-state`. The record remains while the instance is active or idle and is removed only after permanent destruction. This record is independent of the container injection strategy, so restart recovery also works in legacy non-CDI mode.
+
+At startup, HAMi validates each ownership record against the live MIG UUID, parent GPU, profile, placement, GI ID, and CI ID before restoring the instance as idle. Existing GI/CI pairs without a valid HAMi ownership record are preserved but are not reused or reclaimed. Operators may set `devices.nvidia.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in claims unmarked GI/CI pairs and creates ownership records for them.
 
 ## Lifecycle
 
@@ -27,7 +29,7 @@ Idle TTL and cache-size limits are optional roadmap extensions. The current life
 
 ## Restart recovery
 
-At device-plugin startup, HAMi first adopts runtime identities referenced by active Pod annotations. It then reads the actual GI/CI layout from NVML. Unknown instances are preserved unless explicit adoption is enabled. With adoption enabled, complete GI/CI pairs are restored as idle, and orphan GIs without a CI are removed only on GPUs that have no live Pod allocation. Orphan GIs on busy GPUs are always preserved.
+At device-plugin startup, HAMi first adopts runtime identities referenced by active Pod annotations. It then loads the durable ownership records and reconciles them with the actual NVML GI/CI layout. Verified HAMi-owned instances without an active Pod are restored as idle. Unknown instances are preserved unless explicit adoption is enabled. With adoption enabled, complete GI/CI pairs are restored as idle, and orphan GIs without a CI are removed only on GPUs that have no live Pod allocation. Orphan GIs on busy GPUs are always preserved.
 
 If Pod state, MIG identity, or NVML geometry cannot be verified, startup recovery returns an error instead of modifying uncertain hardware state.
 

@@ -118,11 +118,13 @@ type NvidiaDevicePlugin struct {
 
 	operatingMode string
 	// Protected by applyMutex; only UUIDs of successfully destroyed instances.
-	pendingCDIRemovals map[string]struct{}
-	deviceCache        string
-	listNodePods       func() ([]*corev1.Pod, error)
-	listLiveNodePods   func() ([]*corev1.Pod, error)
-	prepareCache       func(string, string) (string, error)
+	pendingCDIRemovals          map[string]struct{}
+	pendingMIGOwnershipRemovals map[string]struct{}
+	migOwnership                dynamicMIGOwnershipStore
+	deviceCache                 string
+	listNodePods                func() ([]*corev1.Pod, error)
+	listLiveNodePods            func() ([]*corev1.Pod, error)
+	prepareCache                func(string, string) (string, error)
 
 	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
 	// mutation (enable, allocate, disable). Construction does not initialize
@@ -284,28 +286,30 @@ func (o *options) newNvidiaDevicePlugin(
 	migMgr *MigInstanceManager,
 ) *NvidiaDevicePlugin {
 	return &NvidiaDevicePlugin{
-		ctx:                        ctx,
-		rm:                         resourceManager,
-		config:                     o.config,
-		deviceListEnvvar:           "NVIDIA_VISIBLE_DEVICES",
-		deviceListStrategies:       deviceListStrategies,
-		applyMutex:                 sync.Mutex{},
-		disableHealthChecks:        nil,
-		ackDisableHealthChecks:     nil,
-		disableWatchAndRegister:    nil,
-		ackDisableWatchAndRegister: nil,
-		socket:                     getPluginSocketPath(resourceManager.Resource()),
-		cdiHandler:                 o.cdiHandler,
-		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
-		schedulerConfig:            schedulerConfig,
-		operatingMode:              mode,
-		pendingCDIRemovals:         make(map[string]struct{}),
-		migMgr:                     migMgr,
-		imexChannels:               o.imexChannels,
-		deviceCache:                "",
-		listNodePods:               o.listNodePods,
-		listLiveNodePods:           o.listLiveNodePods,
-		prepareCache:               o.prepareVGPUCache,
+		ctx:                         ctx,
+		rm:                          resourceManager,
+		config:                      o.config,
+		deviceListEnvvar:            "NVIDIA_VISIBLE_DEVICES",
+		deviceListStrategies:        deviceListStrategies,
+		applyMutex:                  sync.Mutex{},
+		disableHealthChecks:         nil,
+		ackDisableHealthChecks:      nil,
+		disableWatchAndRegister:     nil,
+		ackDisableWatchAndRegister:  nil,
+		socket:                      getPluginSocketPath(resourceManager.Resource()),
+		cdiHandler:                  o.cdiHandler,
+		cdiAnnotationPrefix:         *o.config.Flags.Plugin.CDIAnnotationPrefix,
+		schedulerConfig:             schedulerConfig,
+		operatingMode:               mode,
+		pendingCDIRemovals:          make(map[string]struct{}),
+		pendingMIGOwnershipRemovals: make(map[string]struct{}),
+		migOwnership:                newFileMIGOwnershipStore(dynamicMIGOwnershipRoot),
+		migMgr:                      migMgr,
+		imexChannels:                o.imexChannels,
+		deviceCache:                 "",
+		listNodePods:                o.listNodePods,
+		listLiveNodePods:            o.listLiveNodePods,
+		prepareCache:                o.prepareVGPUCache,
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -598,8 +602,18 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 		if err != nil {
 			return err
 		}
-		if err := plugin.migMgr.RestoreAllocations(plugin.migResetDeviceCount, inUse, plugin.schedulerConfig.AdoptExistingMIGInstances); err != nil {
+		owned := map[string]migOwnershipRecord(nil)
+		if plugin.migOwnership != nil {
+			owned, err = plugin.migOwnership.Load()
+			if err != nil {
+				return fmt.Errorf("load dynamic MIG ownership: %w", err)
+			}
+		}
+		if err := plugin.migMgr.RestoreAllocations(plugin.migResetDeviceCount, inUse, owned, plugin.schedulerConfig.AdoptExistingMIGInstances); err != nil {
 			return fmt.Errorf("restore MIG instances during initialization: %w", err)
+		}
+		if err := plugin.persistTrackedMIGOwnership(); err != nil {
+			return err
 		}
 		klog.InfoS("mig init: restored startup layout", "inUseGPUs", sortedIntSetKeys(inUse))
 		if plugin.deviceListStrategies.AnyCDIEnabled() {
@@ -615,7 +629,8 @@ func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocationsLocked() error {
 	err = plugin.migMgr.ReconcileActiveAllocations(active)
 	reclaimed, retryErr := plugin.migMgr.RetryErrorAllocations(active)
 	err = errors.Join(err, retryErr)
-	plugin.removeReclaimedMIGCDI(reclaimed)
+	plugin.removeReclaimedMIGArtifacts(reclaimed)
+	err = errors.Join(err, plugin.retryMIGOwnershipRemovals())
 	// A live reservation omitted by the informer is still unresolved work,
 	// even when the API request and hardware reconciliation both succeeded.
 	complete = err == nil
@@ -1298,17 +1313,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					klog.ErrorS(err, "failed to roll back MIG allocation", "uuid", uuid)
 					continue
 				}
-				if plugin.deviceListStrategies.AnyCDIEnabled() {
-					if handler, ok := plugin.cdiHandler.(cdi.DynamicMIGInterface); ok {
-						if err := handler.RemoveDynamicMIGDevice(uuid); err != nil {
-							klog.ErrorS(err, "failed to remove rolled-back MIG CDI entry", "uuid", uuid)
-							if plugin.pendingCDIRemovals == nil {
-								plugin.pendingCDIRemovals = make(map[string]struct{})
-							}
-							plugin.pendingCDIRemovals[uuid] = struct{}{}
-						}
-					}
-				}
+				plugin.removeReclaimedMIGArtifacts([]string{uuid})
 			}
 			for _, uuid := range reused {
 				plugin.migMgr.MarkIdle(uuid)

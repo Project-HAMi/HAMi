@@ -23,7 +23,7 @@ var orderedMIGProfiles = []string{"1g", "2g", "3g", "4g", "6g", "7g", "8g"}
 // Active Pod allocations must be adopted before this call. Unknown instances
 // are preserved unless adoptExisting is explicitly enabled for a HAMi-exclusive
 // MIG layout.
-func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]struct{}, adoptExisting bool) error {
+func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]struct{}, owned map[string]migOwnershipRecord, adoptExisting bool) error {
 	done, err := m.beginOperation()
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 			lk.Unlock()
 			continue
 		}
-		if err := m.restoreGPUAllocationsLocked(gpuIndex, dev, adoptExisting, !busy); err != nil {
+		if err := m.restoreGPUAllocationsLocked(gpuIndex, dev, owned, adoptExisting, !busy); err != nil {
 			lk.Unlock()
 			return err
 		}
@@ -67,7 +67,7 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 	return nil
 }
 
-func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.Device, adoptExisting, allowOrphanCleanup bool) error {
+func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.Device, owned map[string]migOwnershipRecord, adoptExisting, allowOrphanCleanup bool) error {
 	for _, profile := range orderedMIGProfiles {
 		profileInfo, ret := dev.GetGpuInstanceProfileInfo(profileNameToGIProfileID[profile])
 		if ret == nvml.ERROR_NOT_SUPPORTED || ret == nvml.ERROR_INVALID_ARGUMENT {
@@ -107,6 +107,19 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 			if err != nil {
 				return err
 			}
+			ownership, hamiOwned := owned[migUUID]
+			if hamiOwned {
+				if ownership.MIGUUID != migUUID {
+					return fmt.Errorf("persisted ownership UUID %q does not match live MIG UUID %q", ownership.MIGUUID, migUUID)
+				}
+				parentUUID, ret := dev.GetUUID()
+				if ret != nvml.SUCCESS {
+					return fmt.Errorf("get parent GPU UUID for owned MIG instance %s: %s", migUUID, nvml.ErrorString(ret))
+				}
+				if err := validateRecoveredMIGOwnership(ownership, parentUUID, profile, giInfo, ciInfo); err != nil {
+					return err
+				}
+			}
 
 			m.mu.Lock()
 			if existingKey, ok := m.byAllocationMigUUID[migUUID]; ok {
@@ -118,12 +131,16 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 				}
 				continue
 			}
-			if !adoptExisting {
+			if !hamiOwned && !adoptExisting {
 				m.mu.Unlock()
 				klog.InfoS("preserved unowned MIG allocation during recovery", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", giInfo.Placement.Start)
 				continue
 			}
-			key := allocationKey(gpuIndex, profile, giInfo.Placement)
+			recoveredProfile := profile
+			if hamiOwned {
+				recoveredProfile = ownership.Profile
+			}
+			key := allocationKey(gpuIndex, recoveredProfile, giInfo.Placement)
 			if existing := m.byAllocation[key]; existing != nil {
 				m.mu.Unlock()
 				return fmt.Errorf("recovered MIG allocation conflicts at gpu %d profile=%s placement=%+v", gpuIndex, profile, giInfo.Placement)
@@ -136,6 +153,18 @@ func (m *MigInstanceManager) restoreGPUAllocationsLocked(gpuIndex int, dev nvml.
 			m.mu.Unlock()
 			klog.InfoS("restored idle MIG allocation from NVML", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", giInfo.Placement.Start)
 		}
+	}
+	return nil
+}
+
+func validateRecoveredMIGOwnership(record migOwnershipRecord, parentUUID, profile string, gi nvml.GpuInstanceInfo, ci nvml.ComputeInstanceInfo) error {
+	if err := validateMIGOwnershipRecord(record); err != nil {
+		return fmt.Errorf("validate ownership of MIG instance %s: %w", record.MIGUUID, err)
+	}
+	wantPlacement := migOwnershipPlacement{Start: gi.Placement.Start, Size: gi.Placement.Size}
+	if record.ParentGPUUUID != parentUUID || profileSliceKey(record.Profile) != profile || record.Placement != wantPlacement ||
+		record.GPUInstanceID != gi.Id || record.ComputeInstanceID != ci.Id {
+		return fmt.Errorf("persisted ownership for MIG instance %s does not match the live NVML geometry", record.MIGUUID)
 	}
 	return nil
 }

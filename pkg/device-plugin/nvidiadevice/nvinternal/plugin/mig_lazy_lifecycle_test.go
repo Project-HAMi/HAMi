@@ -80,7 +80,7 @@ func TestMIGRecoveryCleansOrphanGPUInstance(t *testing.T) {
 			}
 			manager := initializedLazyMIGManager(t, dev)
 
-			err := manager.RestoreAllocations(1, nil, true)
+			err := manager.RestoreAllocations(1, nil, nil, true)
 			if tc.wantError {
 				require.ErrorContains(t, err, "destroy orphan GI")
 			} else {
@@ -120,7 +120,7 @@ func TestMIGRecoveryPreservesGPUInstanceWhenComputeInspectionIsUnsupported(t *te
 	}
 	manager := initializedLazyMIGManager(t, dev)
 
-	err := manager.RestoreAllocations(1, nil, true)
+	err := manager.RestoreAllocations(1, nil, nil, true)
 	require.ErrorContains(t, err, "no supported compute instance profile could be inspected")
 	require.Empty(t, gi.DestroyCalls())
 	require.Empty(t, manager.byAllocation)
@@ -170,10 +170,126 @@ func TestMIGRecoveryPreservesUnownedInstanceByDefault(t *testing.T) {
 	}
 	manager := initializedLazyMIGManager(t, dev)
 
-	require.NoError(t, manager.RestoreAllocations(1, nil, false))
+	require.NoError(t, manager.RestoreAllocations(1, nil, nil, false))
 	require.Empty(t, manager.byAllocation)
 	require.Empty(t, gi.DestroyCalls())
 	require.Empty(t, ci.DestroyCalls())
+}
+
+func TestMIGRecoveryRestoresPersistedHAMiInstanceByDefault(t *testing.T) {
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	ci := &nvmlmock.ComputeInstance{GetInfoFunc: func() (nvml.ComputeInstanceInfo, nvml.Return) {
+		return nvml.ComputeInstanceInfo{Id: 2}, nvml.SUCCESS
+	}}
+	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
+		GetComputeInstanceProfileInfoFunc: func(profileID, _ int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			if profileID == 0 {
+				return nvml.ComputeInstanceProfileInfo{Id: 0}, nvml.SUCCESS
+			}
+			return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+			return []nvml.ComputeInstance{ci}, nvml.SUCCESS
+		},
+	}
+	profileID := profileNameToGIProfileID["1g"]
+	dev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS },
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(id int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			if id == profileID {
+				return nvml.GpuInstanceProfileInfo{Id: uint32(id)}, nvml.SUCCESS
+			}
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetGpuInstancesFunc: func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+			return []nvml.GpuInstance{gi}, nvml.SUCCESS
+		},
+		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+		GetMigDeviceHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) {
+			return &nvmlmock.Device{
+				GetGpuInstanceIdFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+				GetUUIDFunc:          func() (string, nvml.Return) { return "MIG-owned", nvml.SUCCESS },
+			}, nvml.SUCCESS
+		},
+	}
+	manager := initializedLazyMIGManager(t, dev)
+	owned := map[string]migOwnershipRecord{
+		"MIG-owned": {
+			Version: dynamicMIGOwnershipVersion, MIGUUID: "MIG-owned", ParentGPUUUID: "GPU-parent", Profile: "1g.5gb",
+			Placement: migOwnershipPlacement{Start: placement.Start, Size: placement.Size}, GPUInstanceID: 1, ComputeInstanceID: 2,
+		},
+	}
+
+	require.NoError(t, manager.RestoreAllocations(1, nil, owned, false))
+	key := allocationKey(0, "1g.5gb", placement)
+	require.Equal(t, migInstanceIdle, manager.byAllocation[key].State)
+
+	result, err := manager.EnsureAllocation(0, "1g.5gb", placement)
+	require.NoError(t, err)
+	require.Equal(t, "MIG-owned", result.MigUUID)
+	require.True(t, result.Reused)
+	require.False(t, result.Created)
+}
+
+func TestMIGRecoveryRejectsOwnershipThatDoesNotMatchNVML(t *testing.T) {
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	ci := &nvmlmock.ComputeInstance{GetInfoFunc: func() (nvml.ComputeInstanceInfo, nvml.Return) {
+		return nvml.ComputeInstanceInfo{Id: 2}, nvml.SUCCESS
+	}}
+	gi := &nvmlmock.GpuInstance{
+		GetInfoFunc: func() (nvml.GpuInstanceInfo, nvml.Return) {
+			return nvml.GpuInstanceInfo{Id: 1, Placement: placement}, nvml.SUCCESS
+		},
+		GetComputeInstanceProfileInfoFunc: func(profileID, _ int) (nvml.ComputeInstanceProfileInfo, nvml.Return) {
+			if profileID == 0 {
+				return nvml.ComputeInstanceProfileInfo{Id: 0}, nvml.SUCCESS
+			}
+			return nvml.ComputeInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetComputeInstancesFunc: func(*nvml.ComputeInstanceProfileInfo) ([]nvml.ComputeInstance, nvml.Return) {
+			return []nvml.ComputeInstance{ci}, nvml.SUCCESS
+		},
+	}
+	profileID := profileNameToGIProfileID["1g"]
+	dev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS },
+		GetMigModeFunc: func() (int, int, nvml.Return) {
+			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
+		},
+		GetGpuInstanceProfileInfoFunc: func(id int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
+			if id == profileID {
+				return nvml.GpuInstanceProfileInfo{Id: uint32(id)}, nvml.SUCCESS
+			}
+			return nvml.GpuInstanceProfileInfo{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetGpuInstancesFunc: func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstance, nvml.Return) {
+			return []nvml.GpuInstance{gi}, nvml.SUCCESS
+		},
+		GetMaxMigDeviceCountFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+		GetMigDeviceHandleByIndexFunc: func(int) (nvml.Device, nvml.Return) {
+			return &nvmlmock.Device{
+				GetGpuInstanceIdFunc: func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+				GetUUIDFunc:          func() (string, nvml.Return) { return "MIG-owned", nvml.SUCCESS },
+			}, nvml.SUCCESS
+		},
+	}
+	manager := initializedLazyMIGManager(t, dev)
+	owned := map[string]migOwnershipRecord{
+		"MIG-owned": {
+			Version: dynamicMIGOwnershipVersion, MIGUUID: "MIG-owned", ParentGPUUUID: "GPU-different", Profile: "1g.5gb",
+			Placement: migOwnershipPlacement{Start: placement.Start, Size: placement.Size}, GPUInstanceID: 1, ComputeInstanceID: 2,
+		},
+	}
+
+	err := manager.RestoreAllocations(1, nil, owned, false)
+	require.ErrorContains(t, err, "does not match the live NVML geometry")
+	require.Empty(t, manager.byAllocation)
 }
 
 func TestMIGRecoveryPreservesOrphanOnBusyGPU(t *testing.T) {
@@ -210,7 +326,7 @@ func TestMIGRecoveryPreservesOrphanOnBusyGPU(t *testing.T) {
 	}
 	manager := initializedLazyMIGManager(t, dev)
 
-	require.NoError(t, manager.RestoreAllocations(1, map[int]struct{}{0: {}}, true))
+	require.NoError(t, manager.RestoreAllocations(1, map[int]struct{}{0: {}}, nil, true))
 	require.Empty(t, manager.byAllocation)
 	require.Empty(t, gi.DestroyCalls())
 }
@@ -571,10 +687,10 @@ func TestReclaimedMIGCDIRemovalRetriesWithoutBlockingAllocation(t *testing.T) {
 	}}
 	plugin := &NvidiaDevicePlugin{deviceListStrategies: strategies, cdiHandler: handler}
 
-	plugin.removeReclaimedMIGCDI([]string{"MIG-old"})
+	plugin.removeReclaimedMIGArtifacts([]string{"MIG-old"})
 	require.Contains(t, plugin.pendingCDIRemovals, "MIG-old")
 	removeErr = false
-	plugin.removeReclaimedMIGCDI([]string{"MIG-old"})
+	plugin.removeReclaimedMIGArtifacts([]string{"MIG-old"})
 	require.NotContains(t, plugin.pendingCDIRemovals, "MIG-old")
 }
 

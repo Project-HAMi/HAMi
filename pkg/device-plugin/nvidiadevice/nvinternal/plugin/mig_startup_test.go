@@ -193,6 +193,7 @@ func mockMigRecoveryDevice(t *testing.T) (*MigInstanceManager, *nvmlmock.Device)
 	t.Helper()
 	dev := &nvmlmock.Device{
 		GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetUUIDFunc:  func() (string, nvml.Return) { return "GPU-test", nvml.SUCCESS },
 		GetMigModeFunc: func() (int, int, nvml.Return) {
 			return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
 		},
@@ -326,9 +327,15 @@ func TestMigRecoveryRetriesRestoreAfterInformerSync(t *testing.T) {
 		return nvml.DEVICE_MIG_ENABLE, nvml.DEVICE_MIG_ENABLE, nvml.SUCCESS
 	}
 	synced := false
+	store := newFileMIGOwnershipStore(t.TempDir())
+	require.NoError(t, store.Save(migOwnershipRecord{
+		MIGUUID: "MIG-idle", ParentGPUUUID: "GPU-test", Profile: "1g.5gb",
+		Placement:     migOwnershipPlacement{Start: placement.Start, Size: placement.Size},
+		GPUInstanceID: 1, ComputeInstanceID: 2,
+	}))
 	plugin := &NvidiaDevicePlugin{
 		migMgr: manager, migResetDeviceCount: 1,
-		schedulerConfig: nvidia.NvidiaConfig{AdoptExistingMIGInstances: true},
+		migOwnership: store,
 		listNodePods: func() ([]*corev1.Pod, error) {
 			if !synced {
 				return nil, nodepodinformer.ErrNotSynced
@@ -356,7 +363,7 @@ func TestMigRecoveryRetriesRestoreAfterInformerSync(t *testing.T) {
 	require.Equal(t, 3, resets)
 	require.Zero(t, destroyedGI)
 	require.Zero(t, destroyedCI)
-	require.Equal(t, migInstanceIdle, manager.byAllocation[allocationKey(0, "1g", placement)].State)
+	require.Equal(t, migInstanceIdle, manager.byAllocation[allocationKey(0, "1g.5gb", placement)].State)
 }
 
 // TestMigReconciliationConfirmsMissingPodBeforeIdle checks that live reservations and API
