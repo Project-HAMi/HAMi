@@ -1,0 +1,71 @@
+name: AMD e2e (no GPU)
+
+env:
+  KIND_VERSION: v0.31.0
+
+on:
+  pull_request:
+    paths:
+      - "pkg/device/amd/**"
+      - "pkg/scheduler/**"
+      - "pkg/device/*.go"
+      - "charts/**"
+      - "test/e2e/amd/**"
+      - "hack/e2e-amd-mock.sh"
+      - ".github/workflows/e2e-amd-mock.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  amd-mock:
+    name: scheduling and webhook with fake AMD GPUs
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: create a kind cluster with a worker
+        run: |
+          go install sigs.k8s.io/kind@${KIND_VERSION}
+          cat <<YAML | "$(go env GOPATH)/bin/kind" create cluster --name hami-amd --config -
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+          YAML
+
+      - name: build the scheduler image from this branch
+        run: |
+          # The scheduler and webhook are plain Go, so the CUDA stages of docker/Dockerfile are not needed.
+          docker build -f docker/Dockerfile.no-core-test --build-arg BASE_IMAGE=ubuntu:22.04 \
+            --build-arg VERSION="$(tr -d '[:space:]' < VERSION)" -t hami:amd-mock-base .
+          printf 'FROM hami:amd-mock-base\nENV PATH=/k8s-vgpu/bin:$PATH\n' | docker build -t hami:amd-mock -
+
+      - name: deploy HAMi from this branch
+        run: |
+          export PATH="$(go env GOPATH)/bin:${PATH}"
+          IMG_NAME=hami IMG_TAG=amd-mock hack/deploy-helm.sh local "${HOME}/.kube/config"
+
+      - name: run the AMD specs against fake GPUs
+        run: |
+          hack/e2e-amd-mock.sh "${HOME}/.kube/config"
+
+      - name: collect logs
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n hami-system logs -l app.kubernetes.io/component=hami-scheduler --all-containers --tail=300 || true

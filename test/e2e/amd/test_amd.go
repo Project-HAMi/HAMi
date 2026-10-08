@@ -45,6 +45,7 @@ type registered struct {
 	Devcore int32  `json:"devcore"`
 	Count   int32  `json:"count"`
 	Type    string `json:"type"`
+	Numa    int    `json:"numa"`
 }
 
 const (
@@ -61,6 +62,8 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 		clientSet *kubernetes.Clientset
 		nodeName  string
 		gpu       registered
+		all       []registered
+		mock      = os.Getenv("AMD_E2E_MOCK") == "true"
 		scheduler = envOr("HAMI_SCHEDULER_NAME", utils.HamiScheduler)
 	)
 
@@ -77,7 +80,7 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 			var devices []registered
 			gomega.Expect(json.Unmarshal([]byte(raw), &devices)).To(gomega.Succeed(), "node %s has an undecodable %s", n.Name, registerAnnotation)
 			if len(devices) > 0 {
-				nodeName, gpu = n.Name, devices[0]
+				nodeName, gpu, all = n.Name, devices[0], devices
 				break
 			}
 		}
@@ -179,6 +182,7 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.It("runs a whole-GPU pod without a CU mask or memory limit", func() {
+		skipWithoutPlugin(mock)
 		create(newPod("amd-whole", gpus(nil), nil))
 		waitFor("amd-whole", corev1.PodSucceeded)
 		out := logs("amd-whole")
@@ -187,6 +191,7 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.It("slices memory and cores", func() {
+		skipWithoutPlugin(mock)
 		create(newPod("amd-slice", gpus(corev1.ResourceList{
 			"amd.com/gpumem":   resource.MustParse("2048"),
 			"amd.com/gpucores": resource.MustParse("25"),
@@ -204,9 +209,78 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.It("books a share of the memory for gpumem-percentage", func() {
+		skipWithoutPlugin(mock)
 		create(newPod("amd-percentage", gpus(corev1.ResourceList{"amd.com/gpumem-percentage": resource.MustParse("25")}), nil))
 		waitFor("amd-percentage", corev1.PodSucceeded)
 		gomega.Expect(logs("amd-percentage")).To(gomega.MatchRegexp(fmt.Sprintf(`HIP_DEVICE_MEMORY_LIMIT(_0)?=%dm`, gpu.Devmem*25/100)))
+	})
+
+	// allocation waits for the scheduler to write the pod's device allocation and returns one entry per device.
+	allocation := func(name string) []allocated {
+		var out []allocated
+		gomega.Eventually(func() string {
+			p, err := clientSet.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return p.Annotations[allocatedAnnotation]
+		}, 2*time.Minute, 2*time.Second).ShouldNot(gomega.BeEmpty(), "pod %s was never allocated", name)
+		p, err := clientSet.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		out, err = parseAllocation(p.Annotations[allocatedAnnotation])
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		return out
+	}
+	numaOf := func(uuid string) int {
+		for _, d := range all {
+			if d.ID == uuid {
+				return d.Numa
+			}
+		}
+		return -2
+	}
+
+	ginkgo.It("records the requested memory and cores in the allocation", func() {
+		create(newPod("amd-alloc", gpus(corev1.ResourceList{
+			"amd.com/gpumem":   resource.MustParse("1000"),
+			"amd.com/gpucores": resource.MustParse("25"),
+		}), nil))
+		got := allocation("amd-alloc")
+		gomega.Expect(got).To(gomega.HaveLen(1))
+		gomega.Expect(got[0].Mem).To(gomega.BeEquivalentTo(1000))
+		// the allocation counts CUs: 25% of the GPU, rounded up to whole WGPs on RDNA
+		want := int64(gpu.Devcore) * 25 / 100
+		gomega.Expect(got[0].Cores).To(gomega.BeNumerically(">=", want))
+		gomega.Expect(got[0].Cores).To(gomega.BeNumerically("<=", want+1))
+	})
+
+	ginkgo.It("converts gpumem-percentage into memory in the allocation", func() {
+		create(newPod("amd-alloc-pct", gpus(corev1.ResourceList{"amd.com/gpumem-percentage": resource.MustParse("50")}), nil))
+		got := allocation("amd-alloc-pct")
+		gomega.Expect(got).To(gomega.HaveLen(1))
+		gomega.Expect(got[0].Mem).To(gomega.BeEquivalentTo(gpu.Devmem * 50 / 100))
+	})
+
+	ginkgo.It("gives a two-GPU request two different GPUs", func() {
+		if len(all) < 2 {
+			ginkgo.Skip("the node registered fewer than two GPUs")
+		}
+		create(newPod("amd-two", corev1.ResourceList{"amd.com/gpu": resource.MustParse("2")}, nil))
+		got := allocation("amd-two")
+		gomega.Expect(got).To(gomega.HaveLen(2))
+		gomega.Expect(got[0].UUID).NotTo(gomega.Equal(got[1].UUID))
+	})
+
+	ginkgo.It("keeps numa-bind GPUs on one NUMA node", func() {
+		perNuma := map[int]int{}
+		for _, d := range all {
+			perNuma[d.Numa]++
+		}
+		if len(perNuma) < 2 {
+			ginkgo.Skip("the node registered GPUs on fewer than two NUMA nodes")
+		}
+		create(newPod("amd-numa", corev1.ResourceList{"amd.com/gpu": resource.MustParse("2")}, map[string]string{"amd.com/numa-bind": "true"}))
+		got := allocation("amd-numa")
+		gomega.Expect(got).To(gomega.HaveLen(2))
+		gomega.Expect(numaOf(got[0].UUID)).To(gomega.Equal(numaOf(got[1].UUID)))
 	})
 
 	ginkgo.It("leaves a pod pending that wants more memory than the GPU has", func() {
@@ -219,11 +293,53 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 		stuckWith("amd-wrong-type", "CardTypeMismatch")
 	})
 
-	ginkgo.It("leaves a pod pending that excludes the only GPU by UUID", func() {
-		create(newPod("amd-no-uuid", gpus(nil), map[string]string{"amd.com/nouse-gpu-uuid": gpu.ID}))
+	ginkgo.It("leaves a pod pending that excludes every GPU by UUID", func() {
+		ids := make([]string, 0, len(all))
+		for _, d := range all {
+			ids = append(ids, d.ID)
+		}
+		create(newPod("amd-no-uuid", gpus(nil), map[string]string{"amd.com/nouse-gpu-uuid": strings.Join(ids, ",")}))
 		stuckWith("amd-no-uuid", "CardUuidMismatch")
 	})
 })
+
+// skipWithoutPlugin skips specs that read what amd-device-plugin injects into a running container.
+func skipWithoutPlugin(mock bool) {
+	if mock {
+		ginkgo.Skip("AMD_E2E_MOCK: no amd-device-plugin to inject the container environment")
+	}
+}
+
+// allocated is one device of a pod's hami.io/amd-devices-allocated annotation.
+type allocated struct {
+	UUID  string
+	Mem   int64
+	Cores int64
+}
+
+// parseAllocation reads the first container of "uuid,type,mem,cores:uuid,...;" annotations.
+func parseAllocation(raw string) ([]allocated, error) {
+	var out []allocated
+	for dev := range strings.SplitSeq(strings.SplitN(raw, ";", 2)[0], ":") {
+		if dev == "" {
+			continue
+		}
+		f := strings.Split(dev, ",")
+		if len(f) < 4 {
+			return nil, fmt.Errorf("device %q in %q has fewer than four fields", dev, raw)
+		}
+		var a allocated
+		a.UUID = f[0]
+		if _, err := fmt.Sscan(f[2], &a.Mem); err != nil {
+			return nil, err
+		}
+		if _, err := fmt.Sscan(f[3], &a.Cores); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
