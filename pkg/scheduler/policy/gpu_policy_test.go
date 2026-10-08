@@ -645,6 +645,36 @@ func TestComputeScore(t *testing.T) {
 			expectedScore: 8.0,
 		},
 		{
+			// Both gpumem and gpumem-percentage are set. Fit sizes the allocation
+			// from Memreq and only falls back to the percentage when Memreq is
+			// unset, so scoring has to resolve it in the same order: an 80GB card
+			// booked at 20000MB must not be scored as if it were handing out 10%
+			// (8192MB) of its memory.
+			name: "Memreq takes precedence over MemPercentagereq when both are set",
+			device: &device.DeviceUsage{
+				ID:           "gpu-0",
+				Type:         "NVIDIA A100-SXM4-80GB",
+				DeviceVendor: "NVIDIA",
+				Totalcore:    100,
+				Totalmem:     81920,
+				Count:        8,
+				Used:         0,
+				Usedcores:    0,
+				Usedmem:      0,
+			},
+			requests: device.ContainerDeviceRequests{
+				"container1": {
+					Nums:             1,
+					Type:             "NVIDIA",
+					Memreq:           20000,
+					MemPercentagereq: 10,
+					Coresreq:         0,
+				},
+			},
+			// slot 1/8 + core 0/100 + mem 20000/81920, weights 1/1/1, times util.Weight (10).
+			expectedScore: 3.69140625,
+		},
+		{
 			// The NVIDIA device plugin registers the card's model name as the
 			// device type, while the request carries the "NVIDIA" common word.
 			name: "Model named device type still counts the request",
