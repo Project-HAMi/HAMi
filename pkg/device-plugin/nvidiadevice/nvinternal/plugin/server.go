@@ -77,7 +77,6 @@ const (
 	deviceListAsVolumeMountsHostPath          = "/dev/null"
 	deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
 	NodeLockNvidia                            = "hami.io/mutex.lock"
-	ConfigFilePath                            = "/config/config.json"
 	deviceListEnvVar                          = "NVIDIA_VISIBLE_DEVICES"
 )
 
@@ -86,6 +85,9 @@ var (
 	ConfigFile                   *string
 	getPendingPod                = util.GetPendingPod
 	enableGetPreferredAllocation bool
+	// ConfigFilePath is the device config the chart mounts. A variable so tests
+	// can point it at a temporary file.
+	ConfigFilePath = "/config/config.json"
 )
 
 func init() {
@@ -183,8 +185,10 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels ma
 }
 
 // selectNodeConfigs returns the nodeconfig entries for this node: every entry
-// naming it, else the first entry whose nodelabelselector matches its labels,
-// else the entries named "*". Entries that set both or neither of name and
+// naming it, else every entry whose nodelabelselector matches its labels, else
+// the entries named "*". Within a tier the entries apply in list order, so a
+// later entry overrides the fields it sets, the same rule name entries have
+// always followed. Entries that set both or neither of name and
 // nodelabelselector, and invalid or empty selectors, are skipped.
 func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels map[string]string) []nvidia.NodeConfig {
 	for i, entry := range entries {
@@ -199,7 +203,8 @@ func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels 
 		return byName
 	}
 
-	selected := -1
+	var selected []nvidia.NodeConfig
+	var indexes []int
 	for i, entry := range entries {
 		if entry.NodeLabelSelector == nil || entry.Name != "" {
 			continue
@@ -216,15 +221,15 @@ func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels 
 		if !selector.Matches(labels.Set(nodeLabels)) {
 			continue
 		}
-		if selected >= 0 {
-			klog.Warningf("nodeconfig entry %d also selects node %s by labels, using the earlier entry %d", i, nodeName, selected)
-			continue
-		}
-		selected = i
+		selected = append(selected, entry)
+		indexes = append(indexes, i)
 		klog.InfoS("nodeconfig entry selected by nodelabelselector", "node", nodeName, "index", i, "selector", selector.String())
 	}
-	if selected >= 0 {
-		return entries[selected : selected+1]
+	if len(indexes) > 1 {
+		klog.Warningf("nodeconfig entries %v all select node %s by labels; they apply in list order and later entries override earlier ones", indexes, nodeName)
+	}
+	if len(selected) > 0 {
+		return selected
 	}
 	return entriesNamed(entries, nvidia.NodeConfigFallbackName)
 }

@@ -628,8 +628,8 @@ func TestSelectNodeConfigs(t *testing.T) {
 			"gpu-node-02", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{byPool}},
 		{"matchExpressions selects a node no entry names", entries,
 			"gpu-node-03", map[string]string{"gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
-		{"the first matching selector wins when several match", entries,
-			"gpu-node-04", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byPool}},
+		{"every matching selector applies in list order, like name entries", entries,
+			"gpu-node-04", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byPool, byModel}},
 		{"a node matching neither a name nor a selector gets no entry", entries,
 			"gpu-node-05", map[string]string{"gpu.example.com/model": "a100"}, nil},
 		{"a node without labels matches no selector", entries,
@@ -706,6 +706,8 @@ func TestReadFromConfigFileSelectsEntryByNodeLabels(t *testing.T) {
 		{"matchLabels", map[string]string{"gpu.example.com/pool": "mig"}, nvidia.MigMode, 7, true},
 		{"matchExpressions", map[string]string{"gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
 		{"no match keeps the defaults", map[string]string{"gpu.example.com/model": "a100"}, nvidia.HamiCoreMode, 1, false},
+		{"several matching selectors apply in list order, the later one overriding",
+			map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			enableGetPreferredAllocation = false
@@ -1327,6 +1329,49 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	_, mode, err := LoadNvidiaDevicePluginConfig()
 	require.ErrorContains(t, err, `read node "absent-node" while resolving the operating mode`)
 	require.Empty(t, mode, "no mode is chosen when the node is unknown")
+}
+
+// TestLoadNvidiaDevicePluginConfigSelectsByTheNodeLabels guards the step that
+// hands the labels of the node read from the API server to the selector.
+// Passing nil there would leave every selector entry unmatched without any
+// other test noticing.
+func TestLoadNvidiaDevicePluginConfigSelectsByTheNodeLabels(t *testing.T) {
+	nodeName := "gpu-node-labels"
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   nodeName,
+		Labels: map[string]string{"gpu.example.com/pool": "mig"},
+	}})
+	t.Cleanup(func() { client.KubeClient = previous })
+	t.Setenv(util.NodeNameEnvName, nodeName)
+	previousNodeName := util.NodeName
+	util.NodeName = nodeName
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+	previousPreferred := enableGetPreferredAllocation
+	t.Cleanup(func() { enableGetPreferredAllocation = previousPreferred })
+
+	dir := t.TempDir()
+	pluginConfig := filepath.Join(dir, "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+	deviceConfig := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(deviceConfig, []byte(`{
+  "nodeconfig": [
+    { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+      "operatingmode": "mig", "devicesplitcount": 7 }
+  ]
+}`), 0o600))
+	previousPath := ConfigFilePath
+	ConfigFilePath = deviceConfig
+	t.Cleanup(func() { ConfigFilePath = previousPath })
+
+	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
+	require.NoError(t, err)
+	require.Equal(t, nvidia.MigMode, mode)
+	require.NotNil(t, sConfig.NvidiaConfig.DeviceSplitCount)
+	require.Equal(t, uint(7), *sConfig.NvidiaConfig.DeviceSplitCount)
 }
 
 // REPORT_NODE_CAPACITY is the env-var escape hatch for enabling node capacity

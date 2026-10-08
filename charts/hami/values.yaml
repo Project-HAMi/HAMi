@@ -415,10 +415,12 @@ devicePlugin:
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # Each node uses the nodeconfig entries whose "name" is the node name. A node
-    # that no entry names uses the first entry whose "nodelabelselector" (a
+    # that no entry names uses the entries whose "nodelabelselector" (a
     # Kubernetes label selector with matchLabels or matchExpressions) matches its
-    # labels. An entry sets either "name" or "nodelabelselector"; an entry that
-    # sets both, or whose selector is empty or invalid, is ignored:
+    # labels. Several matching entries apply in list order, a later one overriding
+    # the fields it sets, as several name entries always have. An entry sets either
+    # "name" or "nodelabelselector"; an entry that sets both, or whose selector is
+    # empty or invalid, is ignored:
     #   { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
     #     "operatingmode": "mig", "devicesplitcount": 10 }
     # The device plugin reads the node labels each time it starts, so restart it
