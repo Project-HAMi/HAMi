@@ -1,4 +1,6 @@
 ## @section Global configuration
+## @param global.imageRegistry Global Docker image registry
+## @param global.imagePullSecrets Global Docker image pull secrets
 global:
   ## @param global.imageRegistry Global Docker image registry
   imageRegistry: ""
@@ -7,88 +9,65 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  ## @skip global.imageTag
   imageTag: "v2.10.0"
-  ## @skip global.gpuHookPath
   gpuHookPath: /usr/local
-  ## @skip global.labels
   labels: {}
-  ## @skip global.annotations
   annotations: {}
-  ## @skip global.managedNodeSelectorEnable
   managedNodeSelectorEnable: false
-  ## @skip global.managedNodeSelector
   managedNodeSelector:
     usage: "gpu"
 
-## @skip nameOverride
 nameOverride: ""
-## @skip fullnameOverride
 fullnameOverride: ""
-## @skip namespaceOverride
 namespaceOverride: ""
 
-## @skip platform
 platform:
   openshift: false
 
-## @section OpenShift configuration
 openshift:
   securityContextConstraints:
-    ## @param openshift.securityContextConstraints.create Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
+    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
     create: true
 
-    ## @param openshift.securityContextConstraints.name SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
+    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
     name: "hami-device-plugin"
 
 # SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
-## @skip selinux
 selinux:
   enabled: false
   type: container_file_t
   level: s0
 
-## @skip schedulerName
 schedulerName: "hami-scheduler"
 
-## @skip podSecurityPolicy
 podSecurityPolicy:
   enabled: false
 
-## @section Scheduler configuration
 scheduler:
-  ## @param scheduler.nodeName Node name on which to run the scheduler Pod.
+  # @param nodeName defines the node name and the nvidia-vgpu-scheduler-scheduler will schedule to the node.
   # if we install the nvidia-vgpu-scheduler-scheduler as default scheduler, we need to remove the k8s default
   # scheduler pod from the cluster first, we must specify node name to skip the schedule workflow.
   nodeName: ""
   #nodeLabelSelector:
   #  "gpu": "on"
-  ## @skip scheduler.overwriteEnv
   overwriteEnv: "false"
-  ## @skip scheduler.defaultSchedulerPolicy
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
-  ## @skip scheduler.metricsBindAddress
   metricsBindAddress: ":9395"
   # Only used when --profiling is enabled in scheduler.extender.extraArgs.
   # Keep loopback binding and use kubectl port-forward to access pprof.
-  ## @skip scheduler.profilingBindAddress
   profilingBindAddress: "127.0.0.1:6060"
   # Client-side rate limiting and timeout for the scheduler's connection to the kube-apiserver.
   # Leave empty to keep the binary defaults (QPS 5, burst 10, no timeout). Raising kubeQPS and
   # kubeBurst helps on large clusters, where node registration patches and per-pod annotation
   # writes can be throttled by the default limits.
-  ## @skip scheduler.kubeQPS
   kubeQPS: ""
-  ## @skip scheduler.kubeBurst
   kubeBurst: ""
   # kubeTimeout is in seconds; 0 means no timeout.
-  ## @skip scheduler.kubeTimeout
   kubeTimeout: ""
   # How long Bind retries LockNode when another PodGroup member holds the node
   # lock. Empty keeps the binary default (28s); 0 disables retry entirely.
-  ## @skip scheduler.nodeLockRetryTimeout
   nodeLockRetryTimeout: ""
   # httpTimeout the generated scheduler configuration gives the HAMi extender, in
   # seconds. It is applied to the KubeSchedulerConfiguration used on Kubernetes
@@ -96,7 +75,6 @@ scheduler:
   # expressed in seconds rather than as a duration: the two formats want
   # different units. Keep it above nodeLockRetryTimeout, otherwise kube-scheduler
   # cuts the bind call off while the extender is still retrying the node lock.
-  ## @skip scheduler.extenderHTTPTimeout
   extenderHTTPTimeout: 30
   # Port the extender serves /filter and /bind on, bound to 127.0.0.1 so only
   # the kube-scheduler container sharing this pod's network namespace can call
@@ -106,32 +84,26 @@ scheduler:
   # this only if 9444 is already taken inside the pod; if you run kube-scheduler
   # outside this pod, override the bind address through
   # scheduler.extender.extraArgs instead.
-  ## @skip scheduler.extenderPort
   extenderPort: 9444
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
-  ## @skip scheduler.forceOverwriteDefaultScheduler
   forceOverwriteDefaultScheduler: true
-  ## @skip scheduler.livenessProbe
   livenessProbe: false
-  ## @skip scheduler.leaderElect
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
-  ## @skip scheduler.replicas
   replicas: 1
   # podDisruptionBudget only renders when leaderElect is true and replicas > 1;
   # with a single replica it would block all voluntary node drains.
-  ## @skip scheduler.podDisruptionBudget
   podDisruptionBudget:
     minAvailable: 1
     # maxUnavailable: 1
   kubeScheduler:
-    ## @param scheduler.kubeScheduler.enabled Run the kube-scheduler container in the scheduler Pod.
+    # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
-    ## @param scheduler.kubeScheduler.image.registry kube scheduler image registry
-    ## @param scheduler.kubeScheduler.image.repository kube scheduler image repository
-    ## @param scheduler.kubeScheduler.image.tag kube scheduler image tag (immutable tags are recommended)
-    ## @param scheduler.kubeScheduler.image.pullPolicy kube scheduler image pull policy
-    ## @param scheduler.kubeScheduler.image.pullSecrets Specify docker-registry secret names as an array
+    ## @param image.registry kube scheduler image registry
+    ## @param image.repository kube scheduler image repository
+    ## @param image.tag kube scheduler image tag (immutable tags are recommended)
+    ## @param image.pullPolicy kube scheduler image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
       registry: "registry.cn-hangzhou.aliyuncs.com"
       repository: "google_containers/kube-scheduler"
@@ -148,7 +120,6 @@ scheduler:
       ##   - myRegistryKeySecretName
       ##
       pullSecrets: []
-    ## @skip scheduler.kubeScheduler.resources
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -158,20 +129,18 @@ scheduler:
 #      requests:
 #        cpu: 100m
 #        memory: 100Mi
-    ## @skip scheduler.kubeScheduler.extraNewArgs
     extraNewArgs:
       - --config=/config/config.yaml
       - -v=4
-    ## @skip scheduler.kubeScheduler.extraArgs
     extraArgs:
       - --policy-config-file=/config/config.json
       - -v=4
   extender:
-    ## @param scheduler.extender.image.registry scheduler extender image registry
-    ## @param scheduler.extender.image.repository scheduler extender image repository
-    ## @param scheduler.extender.image.tag scheduler extender image tag (immutable tags are recommended)
-    ## @param scheduler.extender.image.pullPolicy scheduler extender image pull policy
-    ## @param scheduler.extender.image.pullSecrets Specify docker-registry secret names as an array
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
       registry: "docker.io"
       repository: "projecthami/hami"
@@ -188,7 +157,6 @@ scheduler:
       ##   - myRegistryKeySecretName
       ##
       pullSecrets: []
-    ## @skip scheduler.extender.resources
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary,
       # and remove the curly braces after 'resources:'.
@@ -198,18 +166,13 @@ scheduler:
 #      requests:
 #        cpu: 100m
 #        memory: 100Mi
-    ## @skip scheduler.extender.extraArgs
     extraArgs:
       - --debug
       - -v=4
-  ## @skip scheduler.nodeLockExpire
   nodeLockExpire: "5m"
-  ## @skip scheduler.podAnnotations
   podAnnotations: {}
-  ## @skip scheduler.tolerations
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
-  ## @skip scheduler.admissionWebhook
   admissionWebhook:
     # If set to false, the admission webhook is not installed and any pods that should use HAMi must be
     # configured to use the right 'schedulerName' and other device-specific configurations.
@@ -260,19 +223,17 @@ scheduler:
     failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
   ## If enabled, always takes precedence over options 2.
-  ## @skip scheduler.certManager
   certManager:
     enabled: false
   ## TLS Certificate Option 2: Use kube-webhook-certgen to generate self-signed certificate.
   ## If true and certManager.enabled is false, Helm will automatically create a self-signed cert and secret for you.
   patch:
-    ## @skip scheduler.patch.enabled
     enabled: true
-    ## @param scheduler.patch.image.registry webhook certificate generator image registry
-    ## @param scheduler.patch.image.repository webhook certificate generator image repository
-    ## @param scheduler.patch.image.tag webhook certificate generator image tag (immutable tags are recommended)
-    ## @param scheduler.patch.image.pullPolicy webhook certificate generator image pull policy
-    ## @param scheduler.patch.image.pullSecrets Specify docker-registry secret names as an array
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
       registry: "docker.io"
       repository: "jettech/kube-webhook-certgen"
@@ -289,11 +250,11 @@ scheduler:
       ##   - myRegistryKeySecretName
       ##
       pullSecrets: []
-    ## @param scheduler.patch.imageNew.registry webhook certificate generator image registry
-    ## @param scheduler.patch.imageNew.repository webhook certificate generator image repository
-    ## @param scheduler.patch.imageNew.tag webhook certificate generator image tag (immutable tags are recommended)
-    ## @param scheduler.patch.imageNew.pullPolicy webhook certificate generator image pull policy
-    ## @param scheduler.patch.imageNew.pullSecrets Specify docker-registry secret names as an array
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
     imageNew: 
       registry: "docker.io"
       repository: "liangjw/kube-webhook-certgen"
@@ -310,18 +271,12 @@ scheduler:
       ##   - myRegistryKeySecretName
       ##
       pullSecrets: []
-    ## @skip scheduler.patch.priorityClassName
     priorityClassName: ""
-    ## @skip scheduler.patch.podAnnotations
     podAnnotations: {}
-    ## @skip scheduler.patch.nodeSelector
     nodeSelector: {}
-    ## @skip scheduler.patch.tolerations
     tolerations: []
     # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
-    ## @skip scheduler.patch.runAsUser
     runAsUser: 2000
-  ## @skip scheduler.service
   service:
     type: ClusterIP  # Default type is ClusterIP, can be changed to NodePort
     httpPort: 443   # HTTP port
@@ -331,7 +286,6 @@ scheduler:
     httpTargetPort: 9443
     labels: {}
     annotations: {}
-  ## @skip scheduler.networkPolicy
   networkPolicy:
     # Restrict ingress on the scheduler's HTTP port (refit and webhook share
     # this one port -- NetworkPolicy can't separate them by path; filter and
@@ -354,22 +308,19 @@ scheduler:
     # GPU device allocated and no error surfaced.
     enabled: false
 
-## @section Device plugin configuration
 devicePlugin:
-  ## @skip devicePlugin.enabled
   enabled: true
-  ## @skip devicePlugin.gpuOperatorToolkitReady
   gpuOperatorToolkitReady:
     enabled: false
     hostPath: "/run/nvidia/validations"
     securityContext:
       privileged: true
       runAsUser: 0
-  ## @param devicePlugin.image.registry devicePlugin image registry
-  ## @param devicePlugin.image.repository devicePlugin image repository
-  ## @param devicePlugin.image.tag devicePlugin image tag (immutable tags are recommended)
-  ## @param devicePlugin.image.pullPolicy devicePlugin image pull policy
-  ## @param devicePlugin.image.pullSecrets Specify docker-registry secret names as an array
+  ## @param image.registry devicePlugin image registry
+  ## @param image.repository devicePlugin image repository
+  ## @param image.tag devicePlugin image tag (immutable tags are recommended)
+  ## @param image.pullPolicy devicePlugin image pull policy
+  ## @param image.pullSecrets Specify docker-registry secret names as an array
   image:
     registry: "docker.io"
     repository: "projecthami/hami"
@@ -387,17 +338,17 @@ devicePlugin:
     ##
     pullSecrets: []
   vgpuCache:
-    ## @param devicePlugin.vgpuCache.gracePeriod Minimum directory age before stale cache GC.
+    # @param devicePlugin.vgpuCache.gracePeriod Minimum directory age before stale cache GC.
     # Independent of monitor.resyncInterval. Uses Go duration syntax (e.g. "5m").
     # "0s" removes the grace period, but still requires live Pod confirmation.
     # Negative durations are rejected; invalid duration strings fall back to "5m".
     gracePeriod: "5m"
   monitor:
-    ## @param devicePlugin.monitor.image.registry monitor image registry
-    ## @param devicePlugin.monitor.image.repository monitor image repository
-    ## @param devicePlugin.monitor.image.tag monitor image tag (immutable tags are recommended)
-    ## @param devicePlugin.monitor.image.pullPolicy monitor image pull policy
-    ## @param devicePlugin.monitor.image.pullSecrets Specify docker-registry secret names as an array
+    ## @param image.registry monitor image registry
+    ## @param image.repository monitor image repository
+    ## @param image.tag monitor image tag (immutable tags are recommended)
+    ## @param image.pullPolicy monitor image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
       registry: "docker.io"
       repository: "projecthami/hami"
@@ -414,24 +365,18 @@ devicePlugin:
       ##   - myRegistryKeySecretName
       ##
       pullSecrets: []
-    ## @skip devicePlugin.monitor.ctrPath
     ctrPath: /usr/local/vgpu/containers
     # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
-    ## @skip devicePlugin.monitor.resyncInterval
     resyncInterval: "5m"
-    ## @skip devicePlugin.monitor.extraArgs
     extraArgs:
       - -v=4
-    ## @skip devicePlugin.monitor.extraEnvs
     extraEnvs: {}
-    ## @skip devicePlugin.monitor.securityContext
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
-    ## @skip devicePlugin.monitor.resources
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -448,7 +393,6 @@ devicePlugin:
   # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
   # configuration; pods opt in with the hami.io/numa-alignment annotation
   # (best-effort or strict). Disabled by default: mismatches are only logged.
-  ## @skip devicePlugin.numaRefit
   numaRefit:
     enabled: false
     # Scheduler base URL override. Defaults to the in-cluster scheduler
@@ -467,10 +411,8 @@ devicePlugin:
   # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
   # to Node capacity and allocatable fields. Defaults to false. Not NVIDIA-specific,
   # so this stays here rather than under devices.<vendor>.
-  ## @skip devicePlugin.reportNodeCapacity
   reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
-  ## @skip devicePlugin.nodeConfiguration
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json(An example is as follows).
@@ -496,79 +438,56 @@ devicePlugin:
     # If you want to use an existing ConfigMap, you can set the name here.
     # If this is set, the chart will not create the ConfigMap and will use the existing one.
     externalConfigName: ""
-  ## @skip devicePlugin.migStrategy
   migStrategy: "none"
-  ## @skip devicePlugin.disablecorelimit
   disablecorelimit: "false"
-  ## @skip devicePlugin.passDeviceSpecsEnabled
   passDeviceSpecsEnabled: true
-  ## @skip devicePlugin.deviceListStrategy
   deviceListStrategy: "envvar"
-  ## @skip devicePlugin.nvidiaHookPath
   nvidiaHookPath: null
   # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
   # and device roots from GPU Operator's driver-ready contract. If the
   # contract is absent, both roots default to / for a host-installed driver.
-  ## @skip devicePlugin.nvidiaDriverRoot
   nvidiaDriverRoot: "auto"
-  ## @skip devicePlugin.gdrcopyEnabled
   gdrcopyEnabled: null
-  ## @skip devicePlugin.gdsEnabled
   gdsEnabled: null
-  ## @skip devicePlugin.mofedEnabled
   mofedEnabled: null
 
-  ## @skip devicePlugin.extraArgs
   extraArgs:
     - -v=4
-  ## @skip devicePlugin.extraEnvs
   extraEnvs: {}
-  ## @skip devicePlugin.service
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
     labels: {}
     annotations: {}
 
-  ## @skip devicePlugin.pluginPath
   pluginPath: /var/lib/kubelet/device-plugins
-  ## @skip devicePlugin.libPath
   libPath: /usr/local/vgpu
 
-  ## @skip devicePlugin.podAnnotations
   podAnnotations: {}
-  ## @skip devicePlugin.hostPID
   hostPID: true
   # Let HAMi core ask the device plugin for its host PID.
   # This requires hostPID to be true.
-  ## @skip devicePlugin.hostPIDBroker
   hostPIDBroker:
     enabled: false
-  ## @skip devicePlugin.hostNetwork
   hostNetwork: false
-  ## @skip devicePlugin.securityContext
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true
     capabilities:
       drop: ["ALL"]
       add: ["SYS_ADMIN"]
-  ## @skip devicePlugin.nvidiaNodeSelector
   nvidiaNodeSelector:
     gpu: "on"
   # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
-  ## @skip devicePlugin.tolerations
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists
       effect: NoSchedule
-  ## @skip devicePlugin.updateStrategy
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 1
 
-  ## @skip devicePlugin.resources
   resources: {}
     # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
     # and remove the curly braces after 'resources:'.
@@ -579,7 +498,6 @@ devicePlugin:
 #      cpu: 100m
 #      memory: 100Mi
 
-## @skip mockDevicePlugin
 mockDevicePlugin:
   enabled: false
   image:
@@ -598,27 +516,22 @@ mockDevicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
-## @section Device configuration
 devices:
-  ## @skip devices.metax
   metax:
     resourceCountName: "metax-tech.com/gpu"
     resourceVCountName: "metax-tech.com/sgpu"
     resourceVCoreName: "metax-tech.com/vcore"
     resourceVMemoryName: "metax-tech.com/vmemory"
     sgpuTopologyAware: false
-  ## @skip devices.hygon
   hygon:
     memoryFactor: 1
     resourceCountName: "hygon.com/hcunum"
     resourceMemoryName: "hygon.com/hcumem"
     resourceCoreName: "hygon.com/hcucores"
-  ## @skip devices.cambricon
   cambricon:
     resourceCountName: "cambricon.com/vmlu"
     resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
     resourceCoreName: "cambricon.com/mlu.smlu.vcore"
-  ## @skip devices.amd
   amd:
     resourceCountName: "amd.com/gpu"
     resourceMemoryName: "amd.com/gpumem"
@@ -627,7 +540,6 @@ devices:
       - amd.com/gpu
       - amd.com/gpumem
       - amd.com/gpucores
-  ## @skip devices.awsneuron
   awsneuron:
     resourceCountName: "aws.amazon.com/neuron"
     resourceCoreName: "aws.amazon.com/neuroncore"
@@ -635,30 +547,20 @@ devices:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
   kunlun:
-    ## @skip devices.kunlun.resourceCountName
     resourceCountName: "kunlunxin.com/xpu"
-    ## @skip devices.kunlun.resourceVCountName
     resourceVCountName: "kunlunxin.com/vxpu"
-    ## @skip devices.kunlun.resourceVMemoryName
     resourceVMemoryName: "kunlunxin.com/vxpu-memory"
-    ## @skip devices.kunlun.enabled
     enabled: true
-    ## @param devices.kunlun.customresources Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.kunlun.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
   enflame:
-    ## @skip devices.enflame.resourceNameGCU
     resourceNameGCU: "enflame.com/gcu"
-    ## @skip devices.enflame.resourceNameDRSGCU
     resourceNameDRSGCU: "enflame.com/drs-gcu"
-    ## @skip devices.enflame.resourceNameGCUMemory
     resourceNameGCUMemory: "enflame.com/gcu-memory"
-    ## @skip devices.enflame.resourceNameGCUCore
     resourceNameGCUCore: "enflame.com/gcu-core"
-    ## @skip devices.enflame.enabled
     enabled: true
-    ## @param devices.enflame.customresources Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.enflame.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
-  ## @skip devices.mthreads
   mthreads:
     enabled: true
     customresources:
@@ -674,20 +576,15 @@ devices:
     memoryPerCard:
       - 96
   vastai:
-    ## @skip devices.vastai.resourceCountName
     resourceCountName: "vastaitech.com/va"
-    ## @skip devices.vastai.enabled
     enabled: true
-    ## @param devices.vastai.customresources Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.vastai.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
   biren:
-    ## @skip devices.biren.resourceCountName
     resourceCountName: "birentech.com/gpu"
-    ## @skip devices.biren.enabled
     enabled: true
-    ## @param devices.biren.customresources Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
-  ## @skip devices.nvidia
   nvidia:
     migProfileAllowlist:
       - models: [ "A30" ]
@@ -731,7 +628,6 @@ devices:
     createRuntimeClass: false
     gpuCorePolicy: default
     libCudaLogLevel: 1
-  ## @skip devices.remotegpu
   remotegpu:
     # Schedule pods onto GPUs served over the network by a lupine server.
     # Label each lupine node with hami.io/lupine-server, optionally setting the
@@ -769,7 +665,6 @@ devices:
       runtimeClassName: ""
       tolerations: []
       resources: {}
-  ## @skip devices.ascend
   ascend:
     configs:
     - chipName: 910A
@@ -947,7 +842,6 @@ devices:
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
-  ## @skip devices.iluvatar
   iluvatar:
     configs:
       - chipName: MR-V100
@@ -985,15 +879,12 @@ devices:
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
 
-## @skip legacyMetrics
 legacyMetrics: false
 
-## @skip prometheus
 prometheus:
   enabled: false
 
 # Full replacement of device-config.yaml; takes precedence over a bundled file and values.
 # This is a complete document, not a merge; prefer devices.<vendor> fields for partial overrides.
-## @skip device-config
 device-config:
   content: ""

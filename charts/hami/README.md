@@ -120,76 +120,6 @@ kubectl rollout restart daemonset/hami-device-plugin -n kube-system
 kubectl rollout status daemonset/hami-device-plugin -n kube-system
 ```
 
-<!-- The Parameters section is generated from values.yaml. -->
-
-## Parameters
-
-### Global configuration
-
-| Name                      | Description                      | Value |
-| ------------------------- | -------------------------------- | ----- |
-| `global.imageRegistry`    | Global Docker image registry     | `""`  |
-| `global.imagePullSecrets` | Global Docker image pull secrets | `[]`  |
-
-### OpenShift configuration
-
-| Name                                          | Description                                                                                                                                                                                                                                    | Value                |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `openshift.securityContextConstraints.create` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. | `true`               |
-| `openshift.securityContextConstraints.name`   | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.                                  | `hami-device-plugin` |
-
-### Scheduler configuration
-
-| Name                                        | Description                                                              | Value                               |
-| ------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------- |
-| `scheduler.nodeName`                        | Node name on which to run the scheduler Pod.                             | `""`                                |
-| `scheduler.kubeScheduler.enabled`           | Run the kube-scheduler container in the scheduler Pod.                   | `true`                              |
-| `scheduler.kubeScheduler.image.registry`    | kube scheduler image registry                                            | `registry.cn-hangzhou.aliyuncs.com` |
-| `scheduler.kubeScheduler.image.repository`  | kube scheduler image repository                                          | `google_containers/kube-scheduler`  |
-| `scheduler.kubeScheduler.image.tag`         | kube scheduler image tag (immutable tags are recommended)                | `""`                                |
-| `scheduler.kubeScheduler.image.pullPolicy`  | kube scheduler image pull policy                                         | `IfNotPresent`                      |
-| `scheduler.kubeScheduler.image.pullSecrets` | Specify docker-registry secret names as an array                         | `[]`                                |
-| `scheduler.extender.image.registry`         | scheduler extender image registry                                        | `docker.io`                         |
-| `scheduler.extender.image.repository`       | scheduler extender image repository                                      | `projecthami/hami`                  |
-| `scheduler.extender.image.tag`              | scheduler extender image tag (immutable tags are recommended)            | `""`                                |
-| `scheduler.extender.image.pullPolicy`       | scheduler extender image pull policy                                     | `IfNotPresent`                      |
-| `scheduler.extender.image.pullSecrets`      | Specify docker-registry secret names as an array                         | `[]`                                |
-| `scheduler.patch.image.registry`            | webhook certificate generator image registry                             | `docker.io`                         |
-| `scheduler.patch.image.repository`          | webhook certificate generator image repository                           | `jettech/kube-webhook-certgen`      |
-| `scheduler.patch.image.tag`                 | webhook certificate generator image tag (immutable tags are recommended) | `v1.5.2`                            |
-| `scheduler.patch.image.pullPolicy`          | webhook certificate generator image pull policy                          | `IfNotPresent`                      |
-| `scheduler.patch.image.pullSecrets`         | Specify docker-registry secret names as an array                         | `[]`                                |
-| `scheduler.patch.imageNew.registry`         | webhook certificate generator image registry                             | `docker.io`                         |
-| `scheduler.patch.imageNew.repository`       | webhook certificate generator image repository                           | `liangjw/kube-webhook-certgen`      |
-| `scheduler.patch.imageNew.tag`              | webhook certificate generator image tag (immutable tags are recommended) | `v1.1.1`                            |
-| `scheduler.patch.imageNew.pullPolicy`       | webhook certificate generator image pull policy                          | `IfNotPresent`                      |
-| `scheduler.patch.imageNew.pullSecrets`      | Specify docker-registry secret names as an array                         | `[]`                                |
-
-### Device plugin configuration
-
-| Name                                     | Description                                             | Value              |
-| ---------------------------------------- | ------------------------------------------------------- | ------------------ |
-| `devicePlugin.image.registry`            | devicePlugin image registry                             | `docker.io`        |
-| `devicePlugin.image.repository`          | devicePlugin image repository                           | `projecthami/hami` |
-| `devicePlugin.image.tag`                 | devicePlugin image tag (immutable tags are recommended) | `""`               |
-| `devicePlugin.image.pullPolicy`          | devicePlugin image pull policy                          | `IfNotPresent`     |
-| `devicePlugin.image.pullSecrets`         | Specify docker-registry secret names as an array        | `[]`               |
-| `devicePlugin.vgpuCache.gracePeriod`     | Minimum directory age before stale cache GC.            | `5m`               |
-| `devicePlugin.monitor.image.registry`    | monitor image registry                                  | `docker.io`        |
-| `devicePlugin.monitor.image.repository`  | monitor image repository                                | `projecthami/hami` |
-| `devicePlugin.monitor.image.tag`         | monitor image tag (immutable tags are recommended)      | `""`               |
-| `devicePlugin.monitor.image.pullPolicy`  | monitor image pull policy                               | `IfNotPresent`     |
-| `devicePlugin.monitor.image.pullSecrets` | Specify docker-registry secret names as an array        | `[]`               |
-
-### Device configuration
-
-| Name                              | Description                                                                                                                               | Value |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `devices.kunlun.customresources`  | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
-| `devices.enflame.customresources` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
-| `devices.vastai.customresources`  | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
-| `devices.biren.customresources`   | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. | `[]`  |
-
 ## Global Configuration
 
 | Parameter | Description | Default Value |
@@ -565,12 +495,13 @@ vendor are removed.
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
 
+<!-- Generated parameter tables are inserted in the Parameters section. -->
+
+## Parameters
+
 ## Updating chart documentation
 
-The Parameters section is generated from the existing `@param` annotations in
-`values.yaml`. Fields marked with `@skip` are omitted. The other sections are
-maintained manually. Install
-[readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm),
+Install [readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm),
 then run these commands from the repository root:
 
 ```bash
