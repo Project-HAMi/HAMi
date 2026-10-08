@@ -33,7 +33,7 @@ import (
 // node, because the pair combination selects whole cards and returns more
 // devices than requested.
 func TestAscend910C_FitSplitModeOddRequestSchedulable(t *testing.T) {
-	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}, hamiVnpuCore: true}
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}, vnpuMode: VNPUModeHamiCore}
 	devices := make([]*device.DeviceUsage, 0, 8)
 	for i := range 8 {
 		devices = append(devices, &device.DeviceUsage{

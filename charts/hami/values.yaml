@@ -38,45 +38,6 @@ selinux:
   type: container_file_t
   level: s0
 
-#Nvidia GPU Parameters
-resourceName: "nvidia.com/gpu"
-resourceMem: "nvidia.com/gpumem"
-resourceMemPercentage: "nvidia.com/gpumem-percentage"
-resourceCores: "nvidia.com/gpucores"
-resourcePriority: "nvidia.com/priority"
-
-#MLU Parameters
-mluResourceName: "cambricon.com/vmlu"
-mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
-mluResourceCores: "cambricon.com/mlu.smlu.vcore"
-
-#Hygon HCU Parameters
-hcuResourceName: "hygon.com/hcunum"
-hcuResourceMem: "hygon.com/hcumem"
-hcuResourceCores: "hygon.com/hcucores"
-
-#Metax sGPU Parameters
-metaxResourceName: "metax-tech.com/sgpu"
-metaxResourceCore: "metax-tech.com/vcore"
-metaxResourceMem: "metax-tech.com/vmemory"
-metaxsGPUTopologyAware: "false"
-
-#Enflame DRS Parameters
-enflameResourceNameDRSGCU: "enflame.com/drs-gcu"
-enflameResourceNameGCUMemory: "enflame.com/gcu-memory"
-enflameResourceNameGCUCore: "enflame.com/gcu-core"
-
-#Kunlun XPU Parameters
-kunlunResourceName: "kunlunxin.com/xpu"
-kunlunResourceVCountName: "kunlunxin.com/vxpu"
-kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
-
-#Vastai Parameters
-vastaiResourceName: "vastaitech.com/va"
-
-#Biren Parameters
-birenResourceName: "birentech.com/gpu"
-
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -426,17 +387,10 @@ devicePlugin:
 #        cpu: 100m
 #        memory: 100Mi
 
-  deviceSplitCount: 10
-  deviceMemoryScaling: 1
-  deviceCoreScaling: 1
-  # Advertise the physical GPU's NUMA node on each vGPU replica so kubelet's
-  # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
-  # admission behavior when topologyManagerPolicy is single-numa-node.
-  enableNumaTopology: false
   # NUMA alignment refit (#2080): when enabled, the device plugin asks the
   # scheduler to re-run its fit over the NUMA-restricted device set kubelet
   # allows, keeping scheduler accounting authoritative. Requires
-  # enableNumaTopology plus the per-node enablegetpreferredallocation node
+  # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
   # configuration; pods opt in with the hami.io/numa-alignment annotation
   # (best-effort or strict). Disabled by default: mismatches are only logged.
   numaRefit:
@@ -454,10 +408,10 @@ devicePlugin:
     # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
-  # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
-  # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
-  # Can be overridden per-node via nodeConfiguration.config.
-  preConfiguredDeviceMemory: 0
+  # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
+  # to Node capacity and allocatable fields. Defaults to false. Not NVIDIA-specific,
+  # so this stays here rather than under devices.<vendor>.
+  reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
@@ -484,10 +438,6 @@ devicePlugin:
     # If you want to use an existing ConfigMap, you can set the name here.
     # If this is set, the chart will not create the ConfigMap and will use the existing one.
     externalConfigName: ""
-  # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
-  runtimeClassName: ""
-  # Whether to create runtime class, name comes from runtimeClassName when it is set
-  createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: true
@@ -567,47 +517,116 @@ mockDevicePlugin:
     ##
     pullSecrets: []
 devices:
+  metax:
+    resourceCountName: "metax-tech.com/gpu"
+    resourceVCountName: "metax-tech.com/sgpu"
+    resourceVCoreName: "metax-tech.com/vcore"
+    resourceVMemoryName: "metax-tech.com/vmemory"
+    sgpuTopologyAware: false
+  hygon:
+    memoryFactor: 1
+    resourceCountName: "hygon.com/hcunum"
+    resourceMemoryName: "hygon.com/hcumem"
+    resourceCoreName: "hygon.com/hcucores"
+  cambricon:
+    resourceCountName: "cambricon.com/vmlu"
+    resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
+    resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
+    resourceCountName: "amd.com/gpu"
+    resourceMemoryName: "amd.com/gpumem"
+    resourceMemoryPercentageName: "amd.com/gpumem-percentage"
+    resourceCoreName: "amd.com/gpucores"
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
       - amd.com/gpucores
   awsneuron:
+    resourceCountName: "aws.amazon.com/neuron"
+    resourceCoreName: "aws.amazon.com/neuroncore"
     customresources:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
   kunlun:
+    resourceCountName: "kunlunxin.com/xpu"
+    resourceVCountName: "kunlunxin.com/vxpu"
+    resourceVMemoryName: "kunlunxin.com/vxpu-memory"
     enabled: true
-    customresources:
-      - kunlunxin.com/xpu
-      - kunlunxin.com/vxpu
-      - kunlunxin.com/vxpu-memory
+    # devices.kunlun.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   enflame:
+    resourceNameGCU: "enflame.com/gcu"
+    resourceNameDRSGCU: "enflame.com/drs-gcu"
+    resourceNameGCUMemory: "enflame.com/gcu-memory"
+    resourceNameGCUCore: "enflame.com/gcu-core"
     enabled: true
-    customresources:
-      - enflame.com/drs-gcu
-      - enflame.com/gcu-memory
-      - enflame.com/gcu-core
-      - enflame.com/gcu
+    # devices.enflame.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   mthreads:
     enabled: true
     customresources:
       - mthreads.com/vgpu
+    resourceCountName: "mthreads.com/vgpu"
+    resourceMemoryName: "mthreads.com/sgpu-memory"
+    resourceCoreName: "mthreads.com/sgpu-core"
     # Memory units (512MiB each) provided by one MThreads card model, one entry per
     # model present in the cluster. 96 = MTT S4000 (48GiB, upstream default);
     # 160 = MTT S5000 (80GiB). Mixed fleets list every model, e.g. [96, 160].
+    # List of integer memory units of 512 MiB per card model.
     # Pods that omit mthreads.com/sgpu-memory are sized from the node's real card.
     memoryPerCard:
       - 96
   vastai:
+    resourceCountName: "vastaitech.com/va"
     enabled: true
-    customresources:
-      - vastaitech.com/va
+    # devices.vastai.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   biren:
+    resourceCountName: "birentech.com/gpu"
     enabled: true
-    customresources:
-      - birentech.com/gpu
+    # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   nvidia:
+    migProfileAllowlist:
+      - models: [ "A30" ]
+        profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
+        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb" ]
+      - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.79gb" ]
+      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.80gb" ]
+      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "4g.47gb", "7g.94gb" ]
+      - models: [ "H20", "H100 on GH200"]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "4g.48gb", "7g.96gb" ]
+      - models: [ "H200 NVL", "H200-SXM5"]
+        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "4g.71gb", "7g.141gb" ]
+      - models: [ "B200" ]
+        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "4g.90gb", "7g.180gb" ]
+      - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
+        profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
+    defaultMemory: 0
+    defaultCores: 0
+    defaultGPUNum: 1
+    memoryFactor: 1
+    resourceCountName: "nvidia.com/gpu"
+    resourceMemoryName: "nvidia.com/gpumem"
+    resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
+    resourceCoreName: "nvidia.com/gpucores"
+    resourcePriorityName: "nvidia.com/priority"
+    deviceSplitCount: 10
+    deviceMemoryScaling: 1
+    deviceCoreScaling: 1
+    # Memory in MB for GPUs without memory queries; 0 uses auto-detection.
+    # The node configuration can override this for unified-memory GPUs.
+    preConfiguredDeviceMemory: 0
+    # Advertise the GPU's NUMA node to kubelet's TopologyManager.
+    # Opt-in because single-numa-node policy changes admission behavior.
+    enableNumaTopology: false
+    runtimeClassName: ""
+    # Create the named NVIDIA RuntimeClass when the device plugin is enabled.
+    createRuntimeClass: false
     gpuCorePolicy: default
     libCudaLogLevel: 1
   remotegpu:
@@ -648,6 +667,156 @@ devices:
       tolerations: []
       resources: {}
   ascend:
+    configs:
+    - chipName: 910A
+      commonWord: Ascend910A
+      resourceName: huawei.com/Ascend910A
+      resourceMemoryName: huawei.com/Ascend910A-memory
+      resourceCoreName: huawei.com/Ascend910A-core
+      memoryAllocatable: 32768
+      memoryCapacity: 32768
+      memoryFactor: 1
+      aiCore: 30
+      templates:
+        - name: vir02
+          memory: 2184
+          aiCore: 2
+        - name: vir04
+          memory: 4369
+          aiCore: 4
+        - name: vir08
+          memory: 8738
+          aiCore: 8
+        - name: vir16
+          memory: 17476
+          aiCore: 16
+    - chipName: 910B2
+      commonWord: Ascend910B2
+      resourceName: huawei.com/Ascend910B2
+      resourceMemoryName: huawei.com/Ascend910B2-memory
+      resourceCoreName: huawei.com/Ascend910B2-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 24
+      aiCPU: 6
+      templates:
+        - name: vir03_1c_8g
+          memory: 8192
+          aiCore: 3
+          aiCPU: 1
+        - name: vir06_1c_16g
+          memory: 16384
+          aiCore: 6
+          aiCPU: 1
+        - name: vir12_3c_32g
+          memory: 32768
+          aiCore: 12
+          aiCPU: 3
+    - chipName: 910B3
+      commonWord: Ascend910B3
+      resourceName: huawei.com/Ascend910B3
+      resourceMemoryName: huawei.com/Ascend910B3-memory
+      resourceCoreName: huawei.com/Ascend910B3-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 910B4-1
+      commonWord: Ascend910B4-1
+      resourceName: huawei.com/Ascend910B4-1
+      resourceMemoryName: huawei.com/Ascend910B4-1-memory
+      resourceCoreName: huawei.com/Ascend910B4-1-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 910B4
+      commonWord: Ascend910B4
+      resourceName: huawei.com/Ascend910B4
+      resourceMemoryName: huawei.com/Ascend910B4-memory
+      resourceCoreName: huawei.com/Ascend910B4-core
+      memoryAllocatable: 32768
+      memoryCapacity: 32768
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_8g
+          memory: 8192
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_16g
+          memory: 16384
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 310P3
+      commonWord: Ascend310P
+      resourceName: huawei.com/Ascend310P
+      resourceMemoryName: huawei.com/Ascend310P-memory
+      resourceCoreName: huawei.com/Ascend310P-core
+      memoryAllocatable: 21527
+      memoryCapacity: 24576
+      memoryFactor: 1
+      aiCore: 8
+      aiCPU: 7
+      templates:
+        - name: vir01
+          memory: 3072
+          aiCore: 1
+          aiCPU: 1
+        - name: vir02
+          memory: 6144
+          aiCore: 2
+          aiCPU: 2
+        - name: vir04
+          memory: 12288
+          aiCore: 4
+          aiCPU: 4
+    - chipName: Ascend910
+      commonWord: Ascend910C
+      resourceName: huawei.com/Ascend910C
+      resourceMemoryName: huawei.com/Ascend910C-memory
+      resourceCoreName: huawei.com/Ascend910C-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      aiCore: 20
+      aiCPU: 7
+      superPod: true
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
+    # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
+    hamiVnpuMode: ""
+    enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
     enabled: false
     image: ""
     imagePullPolicy: IfNotPresent
@@ -655,8 +824,6 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
-    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
-    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
@@ -680,6 +847,27 @@ devices:
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
   iluvatar:
+    configs:
+      - chipName: MR-V100
+        commonWord: MR-V100
+        resourceCountName: iluvatar.ai/MR-V100-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V100.vMem
+        resourceCoreName: iluvatar.ai/MR-V100.vCore
+      - chipName: MR-V50
+        commonWord: MR-V50
+        resourceCountName: iluvatar.ai/MR-V50-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V50.vMem
+        resourceCoreName: iluvatar.ai/MR-V50.vCore
+      - chipName: BI-V150
+        commonWord: BI-V150
+        resourceCountName: iluvatar.ai/BI-V150-vgpu
+        resourceMemoryName: iluvatar.ai/BI-V150.vMem
+        resourceCoreName: iluvatar.ai/BI-V150.vCore
+      - chipName: BI-V100
+        commonWord: BI-V100
+        resourceCountName: iluvatar.ai/BI-V100-vgpu
+        resourceMemoryName: iluvatar.ai/BI-V100.vMem
+        resourceCoreName: iluvatar.ai/BI-V100.vCore
     enabled: false
     customresources:
       - iluvatar.ai/BI-V100-vgpu
@@ -700,15 +888,7 @@ legacyMetrics: false
 prometheus:
   enabled: false
 
-# Device config overrides
-# If content is set under device-config.content, it will be used as the device-config.yaml
-# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
-# Example:
-# device-config:
-#   content: |
-#     nvidia:
-#       migProfileAllowlist:
-#         - models: [ "RTX 6000 Ada" ]
-#           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+# Full replacement of device-config.yaml; takes precedence over a bundled file and values.
+# This is a complete document, not a merge; prefer devices.<vendor> fields for partial overrides.
 device-config:
   content: ""
