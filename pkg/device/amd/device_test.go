@@ -415,6 +415,35 @@ func TestDevices_Fit(t *testing.T) {
 		assert.Equal(t, "", reason)
 	})
 
+	t.Run("rounds cores up to whole WGPs on RDNA", func(t *testing.T) {
+		for _, tc := range []struct {
+			name                  string
+			total, used, coresReq int32
+			info                  map[string]any
+			wantCores             int32
+			wantOK                bool
+		}{
+			{"rdna odd cores", 64, 0, 5, map[string]any{"cuPerWGP": float64(2)}, 4, true},
+			{"cdna keeps single cus", 64, 0, 5, map[string]any{}, 3, true},
+			{"one-wgp apu", 2, 0, 50, map[string]any{"cuPerWGP": float64(2)}, 2, true},
+			{"huge wgp size does not overflow", 4, 0, 75, map[string]any{"cuPerWGP": float64(math.MaxInt32)}, 4, true},
+			{"fractional wgp size is ignored", 64, 0, 5, map[string]any{"cuPerWGP": 2.5}, 3, true},
+			{"apu wgp already taken", 2, 2, 50, map[string]any{"cuPerWGP": float64(2)}, 0, false},
+		} {
+			devices := []*device.DeviceUsage{{
+				ID: "dev-0", Count: 10, Totalmem: 1000, Totalcore: tc.total, Usedcores: tc.used,
+				Type: AMDDevice, Health: true, CustomInfo: tc.info,
+			}}
+			req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, Coresreq: tc.coresReq}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+			ok, got, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, tc.wantOK, ok, tc.name)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantCores, got[AMDDevice][0].Usedcores, tc.name)
+			}
+		}
+	})
+
 	t.Run("retains the registered product type in the allocation", func(t *testing.T) {
 		const productType = "AMD_Instinct_MI300X_VF"
 		devices := []*device.DeviceUsage{

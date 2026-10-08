@@ -1,5 +1,5 @@
 ** Please be patient while the chart is being deployed **
-Resource name: {{ .Values.resourceName }}
+Resource name: {{ .Values.devices.nvidia.resourceCountName }}
 {{- if .Values.platform.openshift }}
 {{- $namespace := include "hami-vgpu.namespace" . }}
 

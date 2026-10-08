@@ -197,24 +197,25 @@ Managed resources list for scheduler extender
 Returns a YAML list that can be used directly or converted to JSON via fromYaml | toJson
 */}}
 {{- define "hami-vgpu.scheduler.managedResources" -}}
+{{- include "hami-vgpu.validateDeviceValues" . -}}
 {{- $resources := list -}}
 {{/* Core NVIDIA resources */}}
-{{- $resources = append $resources (dict "name" .Values.resourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceMem "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceCores "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourceMemPercentage "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.resourcePriority "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourcePriorityName "ignoredByScheduler" true) -}}
 {{/* MLU resources */}}
-{{- $resources = append $resources (dict "name" .Values.mluResourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.cambricon.resourceCountName "ignoredByScheduler" true) -}}
 {{/* HCU resources */}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceMem "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.hcuResourceCores "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceMemoryName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCoreName "ignoredByScheduler" true) -}}
 {{/* Metax resources */}}
-{{- $resources = append $resources (dict "name" "metax-tech.com/gpu" "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceCore "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.metaxResourceMem "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCountName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCoreName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVMemoryName "ignoredByScheduler" true) -}}
 {{/* Ascend resources */}}
 {{- if .Values.devices.ascend.enabled -}}
 {{- range .Values.devices.ascend.customresources -}}
@@ -229,13 +230,15 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- end -}}
 {{/* Enflame resources */}}
 {{- if .Values.devices.enflame.enabled -}}
-{{- range .Values.devices.enflame.customresources -}}
+{{- $standardResources := list .Values.devices.enflame.resourceNameDRSGCU .Values.devices.enflame.resourceNameGCUMemory .Values.devices.enflame.resourceNameGCUCore .Values.devices.enflame.resourceNameGCU -}}
+{{- range (concat $standardResources (.Values.devices.enflame.customresources | default (list)) | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
 {{/* Kunlun resources */}}
 {{- if .Values.devices.kunlun.enabled -}}
-{{- range .Values.devices.kunlun.customresources -}}
+{{- $standardResources := list .Values.devices.kunlun.resourceCountName .Values.devices.kunlun.resourceVCountName .Values.devices.kunlun.resourceVMemoryName -}}
+{{- range (concat $standardResources (.Values.devices.kunlun.customresources | default (list)) | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
@@ -251,13 +254,15 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- end -}}
 {{/* Vastai resources */}}
 {{- if .Values.devices.vastai.enabled -}}
-{{- range .Values.devices.vastai.customresources -}}
+{{- $standardResources := list .Values.devices.vastai.resourceCountName -}}
+{{- range (concat $standardResources (.Values.devices.vastai.customresources | default (list)) | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
 {{/* Biren resources */}}
 {{- if .Values.devices.biren.enabled -}}
-{{- range .Values.devices.biren.customresources -}}
+{{- $standardResources := list .Values.devices.biren.resourceCountName -}}
+{{- range (concat $standardResources (.Values.devices.biren.customresources | default (list)) | uniq) -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
@@ -277,4 +282,47 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" .Values.devices.remotegpu.resourceMemoryName "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- toYaml $resources -}}
+{{- end -}}
+
+{{- define "hami-vgpu.validateDeviceValues" -}}
+{{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
+{{- $removedRootFields := dict
+  "resourceName" "devices.nvidia.resourceCountName"
+  "resourceMem" "devices.nvidia.resourceMemoryName"
+  "resourceMemPercentage" "devices.nvidia.resourceMemoryPercentageName"
+  "resourceCores" "devices.nvidia.resourceCoreName"
+  "resourcePriority" "devices.nvidia.resourcePriorityName"
+  "mluResourceName" "devices.cambricon.resourceCountName"
+  "mluResourceMem" "devices.cambricon.resourceMemoryName"
+  "mluResourceCores" "devices.cambricon.resourceCoreName"
+  "hcuResourceName" "devices.hygon.resourceCountName"
+  "hcuResourceMem" "devices.hygon.resourceMemoryName"
+  "hcuResourceCores" "devices.hygon.resourceCoreName"
+  "metaxResourceName" "devices.metax.resourceVCountName"
+  "metaxResourceCore" "devices.metax.resourceVCoreName"
+  "metaxResourceMem" "devices.metax.resourceVMemoryName"
+  "metaxsGPUTopologyAware" "devices.metax.sgpuTopologyAware"
+  "enflameResourceNameDRSGCU" "devices.enflame.resourceNameDRSGCU"
+  "enflameResourceNameGCUMemory" "devices.enflame.resourceNameGCUMemory"
+  "enflameResourceNameGCUCore" "devices.enflame.resourceNameGCUCore"
+  "kunlunResourceName" "devices.kunlun.resourceCountName"
+  "kunlunResourceVCountName" "devices.kunlun.resourceVCountName"
+  "kunlunResourceVMemoryName" "devices.kunlun.resourceVMemoryName"
+  "vastaiResourceName" "devices.vastai.resourceCountName"
+  "birenResourceName" "devices.biren.resourceCountName"
+-}}
+{{- $errors := list -}}
+{{- range $old := keys $removedRootFields | sortAlpha -}}
+  {{- if hasKey $.Values $old -}}
+    {{- $errors = append $errors (printf "%s has been removed; use %s instead" $old (index $removedRootFields $old)) -}}
+  {{- end -}}
+{{- end -}}
+{{- range $field := list "deviceSplitCount" "deviceMemoryScaling" "deviceCoreScaling" "preConfiguredDeviceMemory" "enableNumaTopology" "runtimeClassName" "createRuntimeClass" -}}
+  {{- if hasKey $.Values.devicePlugin $field -}}
+    {{- $errors = append $errors (printf "devicePlugin.%s has been removed; use devices.nvidia.%s instead" $field $field) -}}
+  {{- end -}}
+{{- end -}}
+{{- if $errors -}}
+  {{- fail (printf "Removed device configuration fields:\n%s" (join "\n" $errors)) -}}
+{{- end -}}
 {{- end -}}

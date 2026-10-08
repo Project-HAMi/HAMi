@@ -139,7 +139,9 @@ func TestENPUAdmissionSingleDieAndLegacySuperPod(t *testing.T) {
 	}{
 		{name: "ENPU single DIE", mode: VNPUModeENPU, count: "1", wantCount: 1, wantMemory: 20480},
 		{name: "ENPU alias", mode: "vcann-rt", count: "1", wantCount: 1, wantMemory: 20480},
+		{name: "ubs-virt single DIE", mode: "ubs-virt", count: "1", wantCount: 1, wantMemory: 20480},
 		{name: "ENPU multiple DIEs rejected", mode: VNPUModeENPU, count: "2", invalid: true},
+		{name: "ubs-virt multiple DIEs rejected", mode: "ubs-virt", count: "2", invalid: true},
 		{name: "ENPU odd count rejected", mode: VNPUModeENPU, count: "3", invalid: true},
 		{name: "hami-core keeps module pair", mode: VNPUModeHamiCore, count: "1", wantCount: 2, wantMemory: 20480},
 		{name: "template keeps module pair and rounding", mode: VNPUModeTemplate, count: "1", wantCount: 2, wantMemory: 32768},
@@ -181,6 +183,7 @@ func TestENPUAdmissionRequestsOnly(t *testing.T) {
 	}{
 		{name: "requests only", mode: VNPUModeENPU, count: "1", memory: "20480", wantMemory: 20480, wantMutated: true},
 		{name: "alias requests only", mode: "vcann-rt", count: "1", memory: "20480", wantMemory: 20480, wantMutated: true},
+		{name: "ubs-virt requests only", mode: "ubs-virt", count: "1", memory: "20480", wantMemory: 20480, wantMutated: true},
 		{name: "default memory", mode: VNPUModeENPU, count: "1", wantMemory: 65536, wantMutated: true},
 		{name: "memory limit takes precedence", mode: VNPUModeENPU, count: "1", memory: "16384", limitMemory: "20480", wantMemory: 20480, wantMutated: true},
 		{name: "multiple devices", mode: VNPUModeENPU, count: "2", invalid: true},
@@ -259,6 +262,8 @@ func TestENPUFitBackendIsolation(t *testing.T) {
 		{name: "empty-annotation core rejects ENPU", existingMode: VNPUModeENPU, emptyAnnotations: true},
 		{name: "explicit core rejects ENPU", incomingMode: VNPUModeHamiCore, existingMode: VNPUModeENPU},
 		{name: "ENPU rejects explicit core", incomingMode: VNPUModeENPU, existingMode: VNPUModeHamiCore},
+		{name: "ubs-virt rejects core tenant", incomingMode: "ubs-virt", existingMode: VNPUModeHamiCore},
+		{name: "core rejects ubs-virt tenant", incomingMode: VNPUModeHamiCore, existingMode: "ubs-virt"},
 		{name: "implicit core can use a separate DIE", existingMode: VNPUModeENPU, separateDIE: true, wantFit: true},
 		{name: "ENPU can use a separate DIE", incomingMode: VNPUModeENPU, separateDIE: true, wantFit: true},
 		{name: "legacy implicit core still shares with core", wantFit: true},
@@ -337,6 +342,7 @@ func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 		{name: "unknown mode rejected on ENPU only", mode: "typo", node: enpuTestNode(false, true)},
 		{name: "core rejected on ENPU only", mode: VNPUModeHamiCore, node: enpuTestNode(false, true)},
 		{name: "ENPU alias accepted", mode: "vcann-rt", node: enpuTestNode(false, true), wantFit: true, wantCore: 100},
+		{name: "ubs-virt accepted", mode: "ubs-virt", node: enpuTestNode(false, true), wantFit: true, wantCore: 100},
 		{name: "unknown mode on legacy template node unchanged", mode: "typo", node: enpuTestNode(false, false), wantFit: true},
 		{name: "unknown mode on legacy core node unchanged", mode: "typo", node: enpuTestNode(true, false), wantFit: true},
 		{name: "core accepted on dual backend node", mode: VNPUModeHamiCore, node: enpuTestNode(true, true), wantFit: true},
@@ -385,6 +391,8 @@ func TestENPUFitIgnoresMissingPodInfo(t *testing.T) {
 	}{
 		{name: "same ENPU policy shares", incomingMode: VNPUModeENPU, existingMode: VNPUModeENPU, existingPolicy: "elastic", wantFit: true},
 		{name: "different ENPU policy rejected", incomingMode: VNPUModeENPU, existingMode: VNPUModeENPU, existingPolicy: "fixed-share"},
+		{name: "ubs-virt shares the same ENPU policy", incomingMode: "ubs-virt", existingMode: VNPUModeENPU, existingPolicy: "elastic", wantFit: true},
+		{name: "ENPU rejects a different ubs-virt policy", incomingMode: VNPUModeENPU, existingMode: "ubs-virt", existingPolicy: "fixed-share"},
 		{name: "ENPU rejects core tenant", incomingMode: VNPUModeENPU, existingMode: VNPUModeHamiCore},
 		{name: "core tenants still share", incomingMode: VNPUModeHamiCore, existingMode: VNPUModeHamiCore, wantFit: true},
 		{name: "core rejects ENPU tenant", incomingMode: VNPUModeHamiCore, existingMode: VNPUModeENPU, existingPolicy: "elastic"},

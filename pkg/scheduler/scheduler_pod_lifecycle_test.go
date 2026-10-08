@@ -17,19 +17,26 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"maps"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func initReplayDevices(t *testing.T) {
@@ -208,4 +215,165 @@ func Test_onDelPod_AnnotationlessOldUIDDoesNotDeleteReplacement(t *testing.T) {
 	)
 	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpumem"), int64(20000))
 	assert.Equal(t, replayQuotaUsage(s, oldPod.Namespace, "hami.io/gpucores"), int64(100))
+}
+
+func Test_onAddPod_ReportsUndecodableBoundAllocation(t *testing.T) {
+	initReplayDevices(t)
+	recorder := record.NewFakeRecorder(1)
+	s := NewScheduler()
+	s.eventRecorder = recorder
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bad-allocation",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "node1",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node1"},
+	}
+
+	s.onAddPod(pod)
+
+	select {
+	case event := <-recorder.Events:
+		assert.Assert(t, strings.Contains(event, EventReasonAllocationDecodeFailed), "event: %q", event)
+		assert.Assert(t, strings.Contains(event, "node1"), "event: %q", event)
+	case <-time.After(time.Second):
+		t.Fatal("expected allocation decode failure event")
+	}
+}
+
+func TestStartReportsUndecodableAllocationDuringInitialReplay(t *testing.T) {
+	initReplayDevices(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "startup-decode-failure",
+			Name:      "startup-decode-failure",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "node1",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node1"},
+	}
+	fakeClient := fake.NewSimpleClientset(pod)
+	previousClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	previousLeaderElect := config.LeaderElect
+	config.LeaderElect = false
+	t.Cleanup(func() { config.LeaderElect = previousLeaderElect })
+
+	s := NewScheduler()
+	require.NoError(t, s.Start())
+	t.Cleanup(s.Stop)
+
+	require.Eventually(t, func() bool {
+		events, err := fakeClient.CoreV1().Events(pod.Namespace).List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return false
+		}
+		for i := range events.Items {
+			if events.Items[i].Reason == EventReasonAllocationDecodeFailed {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 10*time.Millisecond)
+}
+
+func Test_onAddPod_ReportsUndecodableAllocationWithMismatchedAssignment(t *testing.T) {
+	initReplayDevices(t)
+	recorder := record.NewFakeRecorder(1)
+	s := NewScheduler()
+	s.eventRecorder = recorder
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mismatched-allocation", Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "annotated-node",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "bound-node"},
+	}
+
+	s.onAddPod(pod)
+	select {
+	case event := <-recorder.Events:
+		assert.Assert(t, strings.Contains(event, EventReasonAllocationDecodeFailed), "event: %q", event)
+		assert.Assert(t, strings.Contains(event, "bound-node"), "event: %q", event)
+	case <-time.After(time.Second):
+		t.Fatal("expected allocation decode failure event")
+	}
+}
+
+func Test_onUpdatePod_ReportsUndecodableInitShrink(t *testing.T) {
+	initReplayDevices(t)
+	recorder := record.NewFakeRecorder(1)
+	s := NewScheduler()
+	s.eventRecorder = recorder
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "shrink-event-uid", Name: "shrink-event", Namespace: "default",
+			Annotations: map[string]string{util.AssignedNodeAnnotations: "node1"},
+		},
+		Spec: corev1.PodSpec{
+			NodeName:       "node1",
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	validDevices := device.PodDevices{nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+		{{UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 10}},
+		{{UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 10000, Usedcores: 5}},
+	}}
+	maps.Copy(pod.Annotations, device.EncodePodDevices(device.SupportDevices, validDevices))
+	t.Cleanup(func() { s.onDelPod(pod) })
+	s.onAddPod(pod)
+
+	updated := pod.DeepCopy()
+	updated.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name: "init", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+	}}
+	updated.Annotations[device.SupportDevices[nvidia.NvidiaGPUDevice]] = "GPU0,NVIDIA,20000:;"
+	s.onUpdatePod(pod, updated)
+
+	select {
+	case event := <-recorder.Events:
+		assert.Assert(t, strings.Contains(event, EventReasonAllocationDecodeFailed), "event: %q", event)
+		assert.Assert(t, strings.Contains(event, "node1"), "event: %q", event)
+	case <-time.After(time.Second):
+		t.Fatal("expected allocation decode failure event")
+	}
+}
+
+func Test_onUpdatePod_TerminatedWithoutAssignmentRemovesCachedUsage(t *testing.T) {
+	initReplayDevices(t)
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "terminal-without-assignment", Name: "terminal", Namespace: "default",
+			Annotations: map[string]string{util.AssignedNodeAnnotations: "node1"},
+		},
+		Spec: corev1.PodSpec{NodeName: "node1"},
+	}
+	devices := device.PodDevices{nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+		{{UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 100}},
+	}}
+	maps.Copy(pod.Annotations, device.EncodePodDevices(device.SupportDevices, devices))
+	s.onAddPod(pod)
+
+	terminated := pod.DeepCopy()
+	terminated.Status.Phase = corev1.PodSucceeded
+	terminated.Annotations = nil
+	s.onUpdatePod(pod, terminated)
+
+	_, cached := s.podManager.GetPod(terminated)
+	assert.Assert(t, !cached)
+	assert.Equal(t, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"), int64(0))
 }
