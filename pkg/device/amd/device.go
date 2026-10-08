@@ -227,7 +227,10 @@ func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) 
 	if dev.resourceCountName == "" {
 		return true, true
 	}
-	gpuCount, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
+	// Allocatable, not capacity: kubelet keeps an unhealthy GPU in capacity and
+	// drops it from allocatable, so only allocatable says whether a pod bound
+	// here can still be admitted.
+	gpuCount, ok := n.Status.Allocatable.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
 	if !ok {
 		return false, false
 	}
