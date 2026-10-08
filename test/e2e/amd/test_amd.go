@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -119,9 +120,7 @@ var _ = ginkgo.Describe("AMD GPU E2E Tests", ginkgo.Ordered, func() {
 	}
 	gpus := func(extra corev1.ResourceList) corev1.ResourceList {
 		limits := corev1.ResourceList{"amd.com/gpu": resource.MustParse("1")}
-		for k, v := range extra {
-			limits[k] = v
-		}
+		maps.Copy(limits, extra)
 		return limits
 	}
 	create := func(pod *corev1.Pod) {
