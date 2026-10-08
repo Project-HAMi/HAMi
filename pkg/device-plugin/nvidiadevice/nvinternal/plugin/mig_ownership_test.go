@@ -11,6 +11,7 @@
 package plugin
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,10 +21,65 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type fakeMIGOwnershipStore struct {
+	records   map[string]migOwnershipRecord
+	saveErr   error
+	removeErr error
+	removed   []string
+}
+
+func (s *fakeMIGOwnershipStore) Load() (map[string]migOwnershipRecord, error) {
+	return s.records, nil
+}
+
+func (s *fakeMIGOwnershipStore) Save(record migOwnershipRecord) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	if s.records == nil {
+		s.records = make(map[string]migOwnershipRecord)
+	}
+	s.records[record.MIGUUID] = record
+	return nil
+}
+
+func (s *fakeMIGOwnershipStore) Remove(uuid string) error {
+	if s.removeErr != nil {
+		return s.removeErr
+	}
+	s.removed = append(s.removed, uuid)
+	delete(s.records, uuid)
+	return nil
+}
+
 func testMIGOwnershipRecord() migOwnershipRecord {
 	return migOwnershipRecord{
 		MIGUUID: "MIG-owned", ParentGPUUUID: "GPU-parent", Profile: "1g.5gb",
 		Placement: migOwnershipPlacement{Start: 1, Size: 1}, GPUInstanceID: 2, ComputeInstanceID: 3,
+	}
+}
+
+func TestValidateMIGOwnershipRecord(t *testing.T) {
+	valid := testMIGOwnershipRecord()
+	valid.Version = dynamicMIGOwnershipVersion
+	require.NoError(t, validateMIGOwnershipRecord(valid))
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*migOwnershipRecord)
+		want   string
+	}{
+		{"version", func(r *migOwnershipRecord) { r.Version++ }, "unsupported dynamic MIG ownership version"},
+		{"MIG UUID", func(r *migOwnershipRecord) { r.MIGUUID = "GPU-not-mig" }, "invalid MIG UUID"},
+		{"parent GPU", func(r *migOwnershipRecord) { r.ParentGPUUUID = "" }, "lacks parent GPU or profile"},
+		{"profile", func(r *migOwnershipRecord) { r.Profile = "" }, "lacks parent GPU or profile"},
+		{"placement", func(r *migOwnershipRecord) { r.Placement.Size = 0 }, "empty placement"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := valid
+			tc.mutate(&record)
+			require.ErrorContains(t, validateMIGOwnershipRecord(record), tc.want)
+		})
 	}
 }
 
@@ -110,4 +166,54 @@ func TestPluginPersistsAndRemovesTrackedMIGOwnership(t *testing.T) {
 	records, err = store.Load()
 	require.NoError(t, err)
 	require.Empty(t, records)
+}
+
+func TestPersistMIGOwnershipRecordsOneAllocation(t *testing.T) {
+	dev := &nvmlmock.Device{GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS }}
+	manager := initializedLazyMIGManager(t, dev)
+	placement := nvml.GpuInstancePlacement{Start: 2, Size: 1}
+	key := allocationKey(0, "1g.5gb", placement)
+	manager.byAllocation[key] = &migInstance{
+		Profile: key.Profile, Placement: placement, GIID: 4, CIID: 5,
+		MigUUID: "MIG-one", State: migInstanceActive,
+	}
+	manager.byAllocationMigUUID["MIG-one"] = key
+	store := &fakeMIGOwnershipStore{}
+	plugin := &NvidiaDevicePlugin{
+		migMgr: manager, migOwnership: store,
+		pendingMIGOwnershipRemovals: map[string]struct{}{"MIG-one": {}},
+	}
+
+	require.NoError(t, plugin.persistMIGOwnership(key))
+	require.Equal(t, "GPU-parent", store.records["MIG-one"].ParentGPUUUID)
+	require.NotContains(t, plugin.pendingMIGOwnershipRemovals, "MIG-one")
+
+	store.saveErr = errors.New("write failed")
+	err := plugin.persistMIGOwnership(key)
+	require.ErrorContains(t, err, "persist ownership of MIG instance MIG-one")
+}
+
+func TestMIGOwnershipRemovalRetriesAndPreservesLiveInstances(t *testing.T) {
+	manager := initializedLazyMIGManager(t, &nvmlmock.Device{})
+	store := &fakeMIGOwnershipStore{removeErr: errors.New("remove failed")}
+	plugin := &NvidiaDevicePlugin{migMgr: manager, migOwnership: store}
+
+	plugin.removeMIGOwnership([]string{"MIG-gone"})
+	require.Contains(t, plugin.pendingMIGOwnershipRemovals, "MIG-gone")
+	require.ErrorContains(t, plugin.retryMIGOwnershipRemovals(), "remove dynamic MIG ownership record MIG-gone")
+	require.Contains(t, plugin.pendingMIGOwnershipRemovals, "MIG-gone")
+
+	store.removeErr = nil
+	require.NoError(t, plugin.retryMIGOwnershipRemovals())
+	require.Equal(t, []string{"MIG-gone"}, store.removed)
+	require.NotContains(t, plugin.pendingMIGOwnershipRemovals, "MIG-gone")
+
+	placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	key := allocationKey(0, "1g.5gb", placement)
+	manager.byAllocation[key] = &migInstance{MigUUID: "MIG-live", State: migInstanceIdle}
+	manager.byAllocationMigUUID["MIG-live"] = key
+	plugin.pendingMIGOwnershipRemovals["MIG-live"] = struct{}{}
+	require.NoError(t, plugin.retryMIGOwnershipRemovals())
+	require.NotContains(t, plugin.pendingMIGOwnershipRemovals, "MIG-live")
+	require.NotContains(t, store.removed, "MIG-live")
 }
