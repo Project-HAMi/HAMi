@@ -1584,3 +1584,55 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		})
 	}
 }
+
+func Test_MutateAdmission_InvalidValues(t *testing.T) {
+	InitHCUDevice(HygonConfig{ResourceMemoryName: "hygon.com/hcumem", ResourceCountName: "hygon.com/hcunum", ResourceCoreName: "hygon.com/hcucores"})
+	ctr := func(limits, requests corev1.ResourceList) *corev1.Container {
+		return &corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: limits, Requests: requests}}
+	}
+	list := func(kv ...string) corev1.ResourceList {
+		l := corev1.ResourceList{}
+		for i := 0; i < len(kv); i += 2 {
+			l[corev1.ResourceName(kv[i])] = resource.MustParse(kv[i+1])
+		}
+		return l
+	}
+	tests := []struct {
+		name    string
+		ctr     *corev1.Container
+		want    bool
+		wantErr bool
+	}{
+		{"valid limits", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "100", "hygon.com/hcumem", "1024"), nil), true, false},
+		{"count only in requests", ctr(nil, list("hygon.com/hcunum", "1")), true, false},
+		{"no hcu resource", ctr(list("cpu", "1"), nil), false, false},
+		{"cores above 100", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "101"), nil), false, true},
+		{"cores wrap int32", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "4294967296"), nil), false, true},
+		{"negative cores", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "-1"), nil), false, true},
+		{"fractional cores", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "50m"), nil), false, true},
+		{"count above int32", ctr(list("hygon.com/hcunum", "2200000000"), nil), false, true},
+		{"negative count", ctr(list("hygon.com/hcunum", "-1"), nil), false, true},
+		{"memory above int32", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcumem", "2200000000"), nil), false, true},
+		{"fractional memory", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcumem", "1500m"), nil), false, true},
+		{"valid limit hides invalid request", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "50"), list("hygon.com/hcucores", "150")), false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (&HCUDevices{}).MutateAdmission(tt.ctr, &corev1.Pod{})
+			assert.Equal(t, got, tt.want)
+			assert.Equal(t, err != nil, tt.wantErr)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_UnparsableMemory(t *testing.T) {
+	InitHCUDevice(HygonConfig{ResourceMemoryName: "hygon.com/hcumem", ResourceCountName: "hygon.com/hcunum", ResourceCoreName: "hygon.com/hcucores"})
+	ctr := &corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+		"hygon.com/hcunum": resource.MustParse("1"),
+		"hygon.com/hcumem": resource.MustParse("1500m"),
+	}}}
+	req, err := (&HCUDevices{}).GenerateResourceRequests(ctr)
+	var invalid *device.ErrInvalidDeviceRequest
+	assert.Assert(t, errors.As(err, &invalid))
+	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}
