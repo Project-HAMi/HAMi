@@ -54,6 +54,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -76,7 +77,6 @@ const (
 	deviceListAsVolumeMountsHostPath          = "/dev/null"
 	deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
 	NodeLockNvidia                            = "hami.io/mutex.lock"
-	ConfigFilePath                            = "/config/config.json"
 	deviceListEnvVar                          = "NVIDIA_VISIBLE_DEVICES"
 )
 
@@ -85,6 +85,9 @@ var (
 	ConfigFile                   *string
 	getPendingPod                = util.GetPendingPod
 	enableGetPreferredAllocation bool
+	// ConfigFilePath is the device config the chart mounts. A variable so tests
+	// can point it at a temporary file.
+	ConfigFilePath = "/config/config.json"
 )
 
 func init() {
@@ -150,7 +153,7 @@ type NvidiaDevicePlugin struct {
 	stop   chan any
 }
 
-func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, error) {
+func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels map[string]string) (string, error) {
 	jsonbyte, err := os.ReadFile(path)
 	mode := "hami-core"
 	if err != nil {
@@ -162,23 +165,87 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 		return "", err
 	}
 	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
-	for _, val := range deviceConfigs.Nodeconfig {
-		if os.Getenv(util.NodeNameEnvName) == val.Name {
+	for _, val := range selectNodeConfigs(deviceConfigs.Nodeconfig, os.Getenv(util.NodeNameEnvName), nodeLabels) {
+		if val.Name != "" {
 			klog.Infof("Reading config from file %s", val.Name)
-			if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
-				return "", err
-			}
-			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
-				nvidia.DevicePluginFilterDevice = val.FilterDevice
-			}
-			if len(val.OperatingMode) > 0 {
-				mode = val.OperatingMode
-			}
-			enableGetPreferredAllocation = val.EnableGetPreferredAllocation
-			klog.Infof("FilterDevice: %v", val.FilterDevice)
 		}
+		if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
+			return "", err
+		}
+		if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
+			nvidia.DevicePluginFilterDevice = val.FilterDevice
+		}
+		if len(val.OperatingMode) > 0 {
+			mode = val.OperatingMode
+		}
+		// Only an entry that sets the field changes it, so a later selector cannot clear an earlier true.
+		if val.EnableGetPreferredAllocation != nil {
+			enableGetPreferredAllocation = *val.EnableGetPreferredAllocation
+		}
+		klog.Infof("FilterDevice: %v", val.FilterDevice)
 	}
 	return mode, nil
+}
+
+// selectNodeConfigs returns the nodeconfig entries for this node: every entry
+// naming it, else every entry whose nodelabelselector matches its labels, else
+// the entries named "*". Within a tier the entries apply in list order, so a
+// later entry overrides the fields it sets, the same rule name entries have
+// always followed. Entries that set both or neither of name and
+// nodelabelselector, and invalid or empty selectors, are skipped.
+func selectNodeConfigs(entries []nvidia.NodeConfig, nodeName string, nodeLabels map[string]string) []nvidia.NodeConfig {
+	for i, entry := range entries {
+		switch {
+		case entry.Name != "" && entry.NodeLabelSelector != nil:
+			klog.ErrorS(nil, "skipping nodeconfig entry that sets both name and nodelabelselector", "index", i, "name", entry.Name)
+		case entry.Name == "" && entry.NodeLabelSelector == nil:
+			klog.ErrorS(nil, "skipping nodeconfig entry that sets neither name nor nodelabelselector", "index", i)
+		}
+	}
+	if byName := entriesNamed(entries, nodeName); len(byName) > 0 {
+		return byName
+	}
+
+	var selected []nvidia.NodeConfig
+	var indexes []int
+	for i, entry := range entries {
+		if entry.NodeLabelSelector == nil || entry.Name != "" {
+			continue
+		}
+		selector, err := metav1.LabelSelectorAsSelector(entry.NodeLabelSelector)
+		if err != nil {
+			klog.ErrorS(err, "skipping nodeconfig entry with an invalid nodelabelselector", "index", i)
+			continue
+		}
+		if selector.Empty() {
+			klog.ErrorS(nil, "skipping nodeconfig entry with an empty nodelabelselector, set matchLabels or matchExpressions", "index", i)
+			continue
+		}
+		if !selector.Matches(labels.Set(nodeLabels)) {
+			continue
+		}
+		selected = append(selected, entry)
+		indexes = append(indexes, i)
+		klog.InfoS("nodeconfig entry selected by nodelabelselector", "node", nodeName, "index", i, "selector", selector.String())
+	}
+	if len(indexes) > 1 {
+		klog.Warningf("nodeconfig entries %v all select node %s by labels; they apply in list order and later entries override earlier ones", indexes, nodeName)
+	}
+	if len(selected) > 0 {
+		return selected
+	}
+	return entriesNamed(entries, nvidia.NodeConfigFallbackName)
+}
+
+// entriesNamed returns the entries named name that set no nodelabelselector.
+func entriesNamed(entries []nvidia.NodeConfig, name string) []nvidia.NodeConfig {
+	var named []nvidia.NodeConfig
+	for _, entry := range entries {
+		if entry.Name != "" && entry.Name == name && entry.NodeLabelSelector == nil {
+			named = append(named, entry)
+		}
+	}
+	return named
 }
 
 func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
@@ -189,20 +256,21 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 		// takes the plugin (and any test binary) down with it.
 		return nil, "", fmt.Errorf("load device config file %s: %w", *ConfigFile, err)
 	}
-	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath)
+	node, err := util.GetNode(util.NodeName)
+	if err != nil {
+		// Without the node there is no way to tell a lupine server from an
+		// ordinary GPU node, and guessing the local mode would advertise to
+		// kubelet the very cards lupine is serving over the network. Its
+		// labels also select which nodeconfig entry applies.
+		return nil, "", fmt.Errorf("read node %q while resolving the operating mode: %w", util.NodeName, err)
+	}
+	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath, node.Labels)
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
 	if os.Getenv("REPORT_NODE_CAPACITY") == "true" || os.Getenv("REPORT_NODE_CAPACITY") == "1" {
 		t := true
 		sConfig.NvidiaConfig.ReportNodeCapacity = &t
-	}
-	node, err := util.GetNode(util.NodeName)
-	if err != nil {
-		// Without the node there is no way to tell a lupine server from an
-		// ordinary GPU node, and guessing the local mode would advertise to
-		// kubelet the very cards lupine is serving over the network.
-		return nil, "", fmt.Errorf("read node %q while resolving the operating mode: %w", util.NodeName, err)
 	}
 	return sConfig, resolveOperatingMode(mode, node), nil
 }
