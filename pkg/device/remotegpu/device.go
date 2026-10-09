@@ -336,10 +336,18 @@ func moveLibDeliveryFirst(pod *corev1.Pod) {
 	}
 }
 
+// requestsRemoteGPU mirrors when armMemoryLimit asks for the library copy: a
+// remote GPU count together with a memory limit.
 func requestsRemoteGPU(pod *corev1.Pod) bool {
+	if RemoteGPULibImage == "" {
+		return false
+	}
 	for _, ctrs := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
 		for i := range ctrs {
-			if _, ok := resourceValue(&ctrs[i], RemoteGPUResourceCount); ok {
+			if _, ok := resourceValue(&ctrs[i], RemoteGPUResourceCount); !ok {
+				continue
+			}
+			if mem, ok := resourceValue(&ctrs[i], RemoteGPUResourceMemory); ok && mem > 0 {
 				return true
 			}
 		}
