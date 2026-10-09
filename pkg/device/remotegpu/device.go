@@ -315,7 +315,13 @@ func addLibDelivery(pod *corev1.Pod) {
 	})
 }
 
+// moveLibDeliveryFirst runs the generated library copy before every other init
+// container. Only a pod that asks for a remote GPU has one, so a user's own
+// container with the same name and command is left where it is.
 func moveLibDeliveryFirst(pod *corev1.Pod) {
+	if !requestsRemoteGPU(pod) {
+		return
+	}
 	for i := range pod.Spec.InitContainers {
 		lib := pod.Spec.InitContainers[i]
 		if lib.Name == libVolumeName && len(lib.Command) == 3 &&
@@ -328,6 +334,17 @@ func moveLibDeliveryFirst(pod *corev1.Pod) {
 			return
 		}
 	}
+}
+
+func requestsRemoteGPU(pod *corev1.Pod) bool {
+	for _, ctrs := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range ctrs {
+			if _, ok := resourceValue(&ctrs[i], RemoteGPUResourceCount); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mountLib(ctr *corev1.Container) {

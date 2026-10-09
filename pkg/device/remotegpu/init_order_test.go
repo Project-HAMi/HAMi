@@ -103,3 +103,20 @@ func TestMutateAdmissionDoesNotMoveUnrelatedNamedInit(t *testing.T) {
 		t.Fatalf("unrelated init container order changed: %q, %q", pod.Spec.InitContainers[0].Name, pod.Spec.InitContainers[1].Name)
 	}
 }
+
+func TestMutateAdmissionKeepsUserInitMatchingLibraryCopy(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	pod := &corev1.Pod{Spec: corev1.PodSpec{
+		InitContainers: []corev1.Container{
+			{Name: "setup"},
+			{Name: libVolumeName, Command: []string{"sh", "-c", "cp " + libSourceGlob + " " + libMountPath + "/libvgpu.so"}},
+		},
+		Containers: []corev1.Container{{Name: "app"}},
+	}}
+	if _, err := dev.MutateAdmission(&pod.Spec.Containers[0], pod); err != nil {
+		t.Fatal(err)
+	}
+	if pod.Spec.InitContainers[0].Name != "setup" || pod.Spec.InitContainers[1].Name != libVolumeName {
+		t.Fatalf("user init order changed: %q, %q", pod.Spec.InitContainers[0].Name, pod.Spec.InitContainers[1].Name)
+	}
+}
