@@ -18,6 +18,7 @@ package remotegpu
 
 import (
 	"context"
+	"maps"
 	"net"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
@@ -124,25 +126,27 @@ type pool struct {
 	mu          sync.Mutex
 	defaultPort int
 
-	fetchedAt  time.Time
-	forcedAt   time.Time
-	refreshing bool              // a refresh is already fetching; do not start a second one
-	refreshed  chan struct{}     // closed when the in-flight refresh installs its result
-	fleetRev   uint64            // bumped whenever a refresh installs a different fleet
-	endpoints  map[string]string // lupine node name -> "host:port"
-	devices    []*device.DeviceInfo
-	inUse      map[string]struct{} // device ID held by a live pod
-	held       map[string]booking  // device ID booked since the last refresh
-	busy       map[string]struct{} // device ID a server reports a client on
+	fetchedAt    time.Time
+	forcedAt     time.Time
+	refreshing   bool                  // a refresh is already fetching; do not start a second one
+	refreshed    chan struct{}         // closed when the in-flight refresh installs its result
+	fleetRev     uint64                // bumped whenever a refresh installs a different fleet
+	endpoints    map[string]string     // lupine node name -> "host:port"
+	serverLabels map[string]labels.Set // lupine node name -> labels from the same pool snapshot
+	devices      []*device.DeviceInfo
+	inUse        map[string]struct{} // device ID held by a live pod
+	held         map[string]booking  // device ID booked since the last refresh
+	busy         map[string]struct{} // device ID a server reports a client on
 }
 
 func newPool(defaultPort int) *pool {
 	return &pool{
-		defaultPort: defaultPort,
-		endpoints:   map[string]string{},
-		inUse:       map[string]struct{}{},
-		held:        map[string]booking{},
-		busy:        map[string]struct{}{},
+		defaultPort:  defaultPort,
+		endpoints:    map[string]string{},
+		serverLabels: map[string]labels.Set{},
+		inUse:        map[string]struct{}{},
+		held:         map[string]booking{},
+		busy:         map[string]struct{}{},
 	}
 }
 
@@ -232,6 +236,7 @@ func (p *pool) refresh(ctx context.Context) {
 	}
 
 	endpoints := make(map[string]string, len(nodes))
+	serverLabels := make(map[string]labels.Set, len(nodes))
 	var devices []*device.DeviceInfo
 	for i := range nodes {
 		n := &nodes[i]
@@ -246,6 +251,7 @@ func (p *pool) refresh(ctx context.Context) {
 			continue
 		}
 		endpoints[n.Name] = endpoint
+		serverLabels[n.Name] = copyLabels(n.Labels)
 		devices = append(devices, gpus...)
 	}
 
@@ -270,6 +276,7 @@ func (p *pool) refresh(ctx context.Context) {
 		p.fleetRev++
 	}
 	p.endpoints = endpoints
+	p.serverLabels = serverLabels
 	p.devices = devices
 	p.inUse = inUse
 	p.busy = busy
@@ -291,6 +298,12 @@ func (p *pool) refresh(ctx context.Context) {
 	klog.V(4).InfoS("remotegpu: pool refreshed",
 		"servers", len(endpoints), "devices", len(devices),
 		"reserved", len(p.inUse), "busyOnServer", len(p.busy))
+}
+
+func copyLabels(in map[string]string) labels.Set {
+	out := make(labels.Set, len(in))
+	maps.Copy(out, in)
+	return out
 }
 
 func (p *pool) endpointOf(n *corev1.Node) (string, bool) {
@@ -575,6 +588,24 @@ func (p *pool) endpoint(nodeName string) (string, bool) {
 	defer p.mu.Unlock()
 	ep, ok := p.endpoints[nodeName]
 	return ep, ok
+}
+
+// matchingServers returns only servers whose labels satisfy selector. Labels
+// are captured with the same Node snapshot as the endpoints and devices, so a
+// server that disappeared from the usable pool cannot match by stale metadata.
+func (p *pool) matchingServers(selector labels.Selector, servers []string) []string {
+	if selector == nil {
+		return servers
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	matched := make([]string, 0, len(servers))
+	for _, server := range servers {
+		if selector.Matches(p.serverLabels[server]) {
+			matched = append(matched, server)
+		}
+	}
+	return matched
 }
 
 // isLupineNode reports whether the node serves the pool rather than consuming

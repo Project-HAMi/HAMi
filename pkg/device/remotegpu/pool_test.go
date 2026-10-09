@@ -28,6 +28,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -118,6 +119,27 @@ func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
 	ep, ok = p.endpoint("gpu-b")
 	assert.Assert(t, ok)
 	assert.Equal(t, ep, "10.0.0.6:24000")
+}
+
+func TestPool_RefreshUpdatesServerLabels(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-a", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-b", 40000)}),
+	}
+	nodes[0].Labels["gpu-pool"] = "training"
+	nodes[1].Labels["gpu-pool"] = "inference"
+	stubFleet(t, nodes, nil, nil)
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	selector := labels.SelectorFromSet(labels.Set{"gpu-pool": "inference"})
+	assert.DeepEqual(t, p.matchingServers(selector, []string{"gpu-a", "gpu-b"}), []string{"gpu-b"})
+
+	nodes[0].Labels["gpu-pool"] = "inference"
+	nodes[1].Labels["gpu-pool"] = "training"
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	assert.DeepEqual(t, p.matchingServers(selector, []string{"gpu-a", "gpu-b"}), []string{"gpu-a"})
 }
 
 func TestPool_SkipsUnusableNodes(t *testing.T) {
