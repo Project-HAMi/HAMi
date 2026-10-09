@@ -179,6 +179,18 @@ func (dev *RemoteGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 // PatchAnnotations. A literal value in the pod spec is replaced: the endpoint
 // is not known until placement.
 func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
+	// The webhook visits every init container before app containers. An init
+	// container may have caused addLibDelivery to append the library copy.
+	// Move it after app mutation, when the copy also exists for a single app,
+	// and after the init loop so its indexes stay valid.
+	if pod != nil {
+		for i := range pod.Spec.Containers {
+			if ctr == &pod.Spec.Containers[i] {
+				defer moveLibDeliveryFirst(pod)
+				break
+			}
+		}
+	}
 	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
 		return false, nil
 	}
@@ -301,6 +313,21 @@ func addLibDelivery(pod *corev1.Pod) {
 		Command:      []string{"sh", "-c", "cp " + libSourceGlob + " " + libMountPath + "/libvgpu.so"},
 		VolumeMounts: []corev1.VolumeMount{{Name: libVolumeName, MountPath: libMountPath}},
 	})
+}
+
+func moveLibDeliveryFirst(pod *corev1.Pod) {
+	for i := range pod.Spec.InitContainers {
+		lib := pod.Spec.InitContainers[i]
+		if lib.Name == libVolumeName && len(lib.Command) == 3 &&
+			lib.Command[0] == "sh" && lib.Command[1] == "-c" &&
+			lib.Command[2] == "cp "+libSourceGlob+" "+libMountPath+"/libvgpu.so" {
+			if i > 0 {
+				copy(pod.Spec.InitContainers[1:i+1], pod.Spec.InitContainers[:i])
+				pod.Spec.InitContainers[0] = lib
+			}
+			return
+		}
+	}
 }
 
 func mountLib(ctr *corev1.Container) {
