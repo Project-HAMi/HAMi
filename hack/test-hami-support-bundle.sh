@@ -60,12 +60,74 @@ password: yaml-password
 access_token: access-token-value
 password=equals-password
 api_key="quoted equals api key"
-- name: HF_TOKEN
-  value: hf_xxxxx
-- name: DATABASE_PASSWORD
-  value: database-password
-- name: NORMAL_SETTING
-  value: keep-this-value
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multiline-redaction-test
+spec:
+  containers:
+    - name: test
+      env:
+        - name: HF_TOKEN
+          value: |
+            hf-multiline-secret-first
+
+            hf-multiline-secret-after-blank
+            nested_key: hf-multiline-secret-nested
+        - name: PASSWORD
+          value: >
+            password-folded-secret-first
+            password-folded-secret-second
+        - name: API_KEY
+          value: |-
+            api-key-block-secret
+        - name: ACCESS_KEY
+          value: |+
+            access-key-block-secret
+        - name: CLIENT_SECRET
+          value: >2
+            client-secret-block-value
+        - name: PRIVATE_KEY
+          value: |2-
+            private-key-block-value
+        - name: DATABASE_PASSWORD
+          value: database-password
+        - name: NORMAL_MULTILINE
+          value: |
+            normal-env-multiline-first
+
+            normal-env-multiline-after-blank
+        - name: NORMAL_SETTING
+          value: keep-this-value
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multiline-redaction-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: test
+          env:
+            - name: DEPLOYMENT_API_KEY
+              value: |2-
+                deployment-api-key-secret
+            - name: DEPLOYMENT_VISIBLE
+              value: |
+                deployment-normal-multiline
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multiline-redaction-test
+data:
+  password: |
+    configmap-password-secret-first
+
+    configmap-password-secret-after-blank
+  normal-config: |
+    configmap-normal-multiline
 password: |-
   multiline-password-first
   multiline-password-second
@@ -88,22 +150,42 @@ export PATH="$tmp/bin:$PATH"
 
 # Pod scope, structured redaction, per-Pod logs, failures, and local vendor tools.
 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --pod target --tail-lines 3 --redact-pattern custom-secret --output-dir "$tmp/pod-out"
+tar -tzf "$tmp/pod-out/hami-support-bundle.tar.gz" >"$tmp/pod-archive-members.txt"
+assert_contains "$tmp/pod-archive-members.txt" '^hami-support-bundle/manifest\.json$'
+assert_contains "$tmp/pod-archive-members.txt" '^hami-support-bundle/artifacts/workloads/pod\.yaml$'
 mkdir "$tmp/pod-bundle"
 tar -xzf "$tmp/pod-out/hami-support-bundle.tar.gz" -C "$tmp/pod-bundle"
 bundle="$tmp/pod-bundle/hami-support-bundle"
 test -f "$bundle/manifest.json"
+assert_contains "$bundle/manifest.json" '"formatVersion":1'
 assert_contains "$bundle/manifest.json" '"status":"failed"'
 assert_contains "$bundle/manifest.json" '"collector":"node"'
-if grep -R -E 'private\.example|registry\.internal|bearer-value|Zm9vOmJhcg|anNvbi1iYXNpYw|docker-auth-value|json-token|json-api-key|yaml-password|access-token-value|equals-password|quoted equals api key|hf_xxxxx|database-password|multiline-password|custom-secret' "$bundle"; then
-  fail 'sensitive value survived redaction'
-fi
+sensitive_fragments=(
+  private.example registry.internal bearer-value Zm9vOmJhcg anNvbi1iYXNpYw
+  docker-auth-value json-token json-api-key yaml-password access-token-value
+  equals-password 'quoted equals api key' hf-multiline-secret password-folded-secret
+  api-key-block-secret access-key-block-secret client-secret-block-value
+  private-key-block-value deployment-api-key-secret configmap-password-secret
+  database-password multiline-password custom-secret
+)
+for fragment in "${sensitive_fragments[@]}"; do
+  if grep -R -F -- "$fragment" "$bundle" >/dev/null; then
+    fail "sensitive value survived redaction: $fragment"
+  fi
+done
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'nvidia\.com/gpu: 1'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'hami\.io/vgpu-devices-allocated: GPU-123,1'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: keep-this-value'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'normal-env-multiline-first'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'normal-env-multiline-after-blank'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'deployment-normal-multiline'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'image: <redacted-image>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'imageID: <redacted-image>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: <redacted-credential>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'ordinary multiline text'
+test "$(grep -c 'value: <redacted-credential>' "$bundle/artifacts/workloads/pod.yaml")" -ge 8 || fail 'multiline environment redaction markers are missing'
+assert_contains "$bundle/artifacts/config/scheduler.yaml" 'password: <redacted-credential>'
+assert_contains "$bundle/artifacts/config/scheduler.yaml" 'configmap-normal-multiline'
 assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '

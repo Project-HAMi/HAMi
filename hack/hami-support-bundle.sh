@@ -141,6 +141,9 @@ redact() {
     v=trim(v); gsub(/^['\''"]|['\''"]$/, "", v); v=toupper(v)
     return v ~ /(^|_)(TOKEN|PASSWORD|PASSWD|SECRET|API_KEY|APIKEY|ACCESS_KEY|ACCESSKEY|PRIVATE_KEY|CLIENT_SECRET|CREDENTIAL|CREDENTIALS)$/
   }
+  function yaml_block_scalar(v) {
+    return v ~ /^[|>]([+-][1-9]?|[1-9][+-]?)?$/
+  }
   function image_key(v) {
     v=normalized_key(v); gsub(/_/, "", v)
     return v == "image" || v == "imageid" || v == "containerimage" || v == "containerimageid"
@@ -227,10 +230,11 @@ redact() {
     if (lower_key == "name") {
       env_sensitive=sensitive_env_name(value); env_indent=leading_spaces(s); env_ttl=6
     } else if (env_sensitive && lower_key == "value" && leading_spaces(s) >= env_indent) {
+      if (yaml_block_scalar(value)) { sensitive_yaml_block=1; sensitive_yaml_block_indent=leading_spaces(s) }
       s=replace_yaml_value(s, "<redacted-credential>"); env_sensitive=0; env_ttl=0
     } else {
       if (value != "" && sensitive_key(key)) {
-        if (value ~ /^[|>][0-9+-]*$/) { sensitive_yaml_block=1; sensitive_yaml_block_indent=leading_spaces(s) }
+        if (yaml_block_scalar(value)) { sensitive_yaml_block=1; sensitive_yaml_block_indent=leading_spaces(s) }
         s=replace_yaml_value(s, "<redacted-credential>")
       }
       else if (value != "" && image_key(key)) s=replace_yaml_value(s, "<redacted-image>")
