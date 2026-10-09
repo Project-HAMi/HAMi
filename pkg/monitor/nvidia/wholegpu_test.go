@@ -17,7 +17,10 @@ limitations under the License.
 package nvidia
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,6 +32,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -400,6 +405,8 @@ func Test_reconcileWholeGPU_prunesOnPodDeletion(t *testing.T) {
 	assert.Equal(t, ok, false)
 	_, cached := l.wholeGPU.verdicts["uid3_ctr"]
 	assert.Equal(t, cached, false)
+	_, owned := l.wholeGPU.ownedContainerKeys["uid3_ctr"]
+	assert.Equal(t, owned, false)
 }
 
 func Test_reconcileWholeGPU_verdictCached_noNodeGet(t *testing.T) {
@@ -691,6 +698,28 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		assert.Equal(t, owned, true)
 	})
 
+	t.Run("enabled: a corrupt cache file keeps the synthesized entry", func(t *testing.T) {
+		wholeGPUSkipHookEnabled = true
+		defer func() { wholeGPUSkipHookEnabled = false }()
+
+		dir := t.TempDir()
+		pod := wholeGPUTestPod("uid14")
+		ctrDir := filepath.Join(dir, "uid14_ctr")
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		// Bad magic makes loadCache fail on this directory; the entry must
+		// stay synthesized rather than be replaced or dropped.
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, 0, 1, 0))
+		l := newWholeGPUTestLister(dir, pod)
+		assert.NilError(t, l.Update())
+
+		got, ok := l.containers["uid14_ctr"]
+		assert.Equal(t, ok, true)
+		_, synthesized := got.Info.(*wholeGPUUsage)
+		assert.Assert(t, synthesized)
+		_, owned := l.wholeGPU.ownedContainerKeys["uid14_ctr"]
+		assert.Equal(t, owned, true)
+	})
+
 	t.Run("enabled: a real cache file hands the entry back to disk monitoring", func(t *testing.T) {
 		wholeGPUSkipHookEnabled = true
 		defer func() { wholeGPUSkipHookEnabled = false }()
@@ -747,5 +776,136 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		assert.Assert(t, synthesized)
 		_, owned := l.wholeGPU.ownedContainerKeys["uid12_ctr"]
 		assert.Equal(t, owned, true)
+	})
+}
+
+// newListerForHTTP points a ContainerLister at a stub apiserver.
+func newListerForHTTP(t *testing.T, handler http.Handler) *ContainerLister {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	clientset, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	assert.NilError(t, err)
+	return &ContainerLister{clientset: clientset, nodeName: "node-a"}
+}
+
+// serveNodeForTest answers node GETs with a Node carrying the given
+// annotations (or the given status code).
+func serveNodeForTest(t *testing.T, status int, annotations map[string]string) *ContainerLister {
+	t.Helper()
+	return newListerForHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(&corev1.Node{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+			ObjectMeta: metav1.ObjectMeta{Name: "node-a", Annotations: annotations},
+		})
+		assert.NilError(t, err)
+		_, _ = w.Write(body)
+	}))
+}
+
+func Test_fetchNodeDevices(t *testing.T) {
+	registered := map[string]string{nv.RegisterAnnos: device.MarshalNodeDevices([]*device.DeviceInfo{
+		{ID: "GPU-1", Devmem: 8000, Devcore: 100},
+	})}
+
+	t.Run("registered devices come back keyed by UUID", func(t *testing.T) {
+		devs, err := serveNodeForTest(t, http.StatusOK, registered).fetchNodeDevices()
+		assert.NilError(t, err)
+		assert.Equal(t, len(devs), 1)
+		assert.Equal(t, devs["GPU-1"].Devmem, int32(8000))
+	})
+
+	t.Run("node without a register annotation yields an empty registry", func(t *testing.T) {
+		devs, err := serveNodeForTest(t, http.StatusOK, nil).fetchNodeDevices()
+		assert.NilError(t, err)
+		assert.Equal(t, len(devs), 0)
+	})
+
+	t.Run("undecodable register annotation is an error", func(t *testing.T) {
+		_, err := serveNodeForTest(t, http.StatusOK, map[string]string{nv.RegisterAnnos: "not-json"}).fetchNodeDevices()
+		assert.ErrorContains(t, err, "failed to unmarshal")
+	})
+
+	t.Run("node get failure is an error", func(t *testing.T) {
+		_, err := serveNodeForTest(t, http.StatusNotFound, nil).fetchNodeDevices()
+		assert.ErrorContains(t, err, "failed to get node")
+	})
+}
+
+func Test_physTotalMiB(t *testing.T) {
+	t.Run("handle lookup failure", func(t *testing.T) {
+		lib := &mock.Interface{DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+			return nil, nvml.ERROR_UNKNOWN
+		}}
+		_, ok := physTotalMiB(lib, "GPU-1")
+		assert.Equal(t, ok, false)
+	})
+
+	t.Run("memory query failure", func(t *testing.T) {
+		lib := &mock.Interface{DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+			return &mock.Device{GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+				return nvml.Memory{}, nvml.ERROR_UNKNOWN
+			}}, nvml.SUCCESS
+		}}
+		_, ok := physTotalMiB(lib, "GPU-1")
+		assert.Equal(t, ok, false)
+	})
+
+	t.Run("physical bytes are converted to MiB", func(t *testing.T) {
+		lib := &mock.Interface{DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+			return &mock.Device{GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+				return nvml.Memory{Total: 8000 * 1024 * 1024}, nvml.SUCCESS
+			}}, nvml.SUCCESS
+		}}
+		got, ok := physTotalMiB(lib, "GPU-1")
+		assert.Equal(t, ok, true)
+		assert.Equal(t, got, int32(8000))
+	})
+}
+
+func Test_reconcileWholeGPU_degradedPaths(t *testing.T) {
+	t.Run("nvml init failure defers everything without caching verdicts", func(t *testing.T) {
+		pod := wholeGPUTestPod("uid-init")
+		initCalls := 0
+		l := newWholeGPUTestLister(t.TempDir(), pod)
+		l.wholeGPU.nvmlInitialized = false
+		l.wholeGPU.nvmllib = &mock.Interface{InitFunc: func() nvml.Return { initCalls++; return nvml.ERROR_UNKNOWN }}
+		l.reconcileWholeGPU([]*corev1.Pod{pod})
+		assert.Equal(t, initCalls, 1)
+		assert.Equal(t, l.wholeGPU.nvmlInitialized, false)
+		assert.Equal(t, len(l.wholeGPU.verdicts), 0)
+		assert.Equal(t, len(l.containers), 0)
+	})
+
+	t.Run("node registry error skips new candidates without caching", func(t *testing.T) {
+		pod := wholeGPUTestPod("uid-reg")
+		l := newWholeGPUTestLister(t.TempDir(), pod)
+		l.wholeGPU.getNodeDevices = func() (map[string]*device.DeviceInfo, error) { return nil, errors.New("boom") }
+		l.reconcileWholeGPU([]*corev1.Pod{pod})
+		assert.Equal(t, len(l.wholeGPU.verdicts), 0)
+		assert.Equal(t, len(l.containers), 0)
+	})
+
+	t.Run("undecodable pod annotation is skipped", func(t *testing.T) {
+		pod := wholeGPUTestPod("uid-bad")
+		pod.Annotations = map[string]string{nv.AllocatedDevicesAnnotation: "not-json"}
+		l := newWholeGPUTestLister(t.TempDir(), pod)
+		l.reconcileWholeGPU([]*corev1.Pod{pod})
+		assert.Equal(t, len(l.wholeGPU.verdicts), 0)
+	})
+
+	t.Run("allocation slots beyond the container list are skipped", func(t *testing.T) {
+		pod := wholeGPUTestPod("uid-idx")
+		full := device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}
+		pod.Annotations = wholeGPUAnnotation(full, full)
+		l := newWholeGPUTestLister(t.TempDir(), pod)
+		l.reconcileWholeGPU([]*corev1.Pod{pod})
+		assert.Equal(t, l.wholeGPU.verdicts["uid-idx_ctr"], confirmedWholeGPU)
+		assert.Equal(t, len(l.wholeGPU.verdicts), 1)
 	})
 }

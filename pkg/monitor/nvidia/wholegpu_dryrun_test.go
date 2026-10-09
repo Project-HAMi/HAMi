@@ -18,6 +18,7 @@ package nvidia
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -211,4 +212,119 @@ func successfulWholeGPUNVML(uuid string) nvml.Interface {
 			}, nvml.SUCCESS
 		},
 	}
+}
+
+func Test_sampleWholeGPUDevice(t *testing.T) {
+	const uuid = "GPU-1"
+	healthyMemory := func() (nvml.Memory, nvml.Return) { return nvml.Memory{Used: 1024, Total: 8000}, nvml.SUCCESS }
+	healthyRates := func() (nvml.Utilization, nvml.Return) { return nvml.Utilization{Gpu: 7}, nvml.SUCCESS }
+	libFor := func(dev nvml.Device, ret nvml.Return) *mock.Interface {
+		return &mock.Interface{DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) { return dev, ret }}
+	}
+
+	t.Run("handle lookup failure is reported", func(t *testing.T) {
+		report := &WholeGPUDeviceReport{UUID: uuid}
+		sampleWholeGPUDevice(libFor(nil, nvml.ERROR_UNKNOWN), report)
+		assert.Assert(t, strings.Contains(report.Error, "DeviceGetHandleByUUID failed"), report.Error)
+	})
+
+	t.Run("memory query failure is reported without samples", func(t *testing.T) {
+		dev := &mock.Device{
+			GetMemoryInfoFunc:       func() (nvml.Memory, nvml.Return) { return nvml.Memory{}, nvml.ERROR_UNKNOWN },
+			GetUtilizationRatesFunc: healthyRates,
+		}
+		report := &WholeGPUDeviceReport{UUID: uuid}
+		sampleWholeGPUDevice(libFor(dev, nvml.SUCCESS), report)
+		assert.Assert(t, strings.Contains(report.Error, "GetMemoryInfo failed"), report.Error)
+		assert.Equal(t, report.MemoryUsed, uint64(0))
+	})
+
+	t.Run("utilization failure keeps the memory samples", func(t *testing.T) {
+		dev := &mock.Device{
+			GetMemoryInfoFunc: healthyMemory,
+			GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) {
+				return nvml.Utilization{}, nvml.ERROR_UNKNOWN
+			},
+		}
+		report := &WholeGPUDeviceReport{UUID: uuid}
+		sampleWholeGPUDevice(libFor(dev, nvml.SUCCESS), report)
+		assert.Assert(t, strings.Contains(report.Error, "GetUtilizationRates failed"), report.Error)
+		assert.Equal(t, report.MemoryUsed, uint64(1024))
+		assert.Equal(t, report.SMUtil, uint32(0))
+	})
+}
+
+func Test_sortWholeGPUReport(t *testing.T) {
+	report := &WholeGPUDryRunReport{
+		Containers: []WholeGPUContainerReport{
+			{Namespace: "b", Pod: "p1", Container: "c1"},
+			{Namespace: "a", Pod: "p2", Container: "c1"},
+			{Namespace: "a", Pod: "p1", Container: "c2"},
+			{Namespace: "a", Pod: "p1", Container: "c1"},
+		},
+		Diagnostics: []WholeGPUDiagnostic{
+			{Namespace: "b", Pod: "p1", Status: "not-whole-gpu"},
+			{Namespace: "a", Pod: "p1", Container: "x", Status: "nvml-unreadable"},
+			{Namespace: "a", Pod: "p1", Container: "x", Status: "not-whole-gpu"},
+			{Namespace: "a", Pod: "p1", Status: "unregistered-device"},
+		},
+	}
+	sortWholeGPUReport(report)
+
+	containers := make([]string, 0, len(report.Containers))
+	for _, c := range report.Containers {
+		containers = append(containers, c.Namespace+"/"+c.Pod+"/"+c.Container)
+	}
+	assert.DeepEqual(t, containers, []string{"a/p1/c1", "a/p1/c2", "a/p2/c1", "b/p1/c1"})
+
+	diagnostics := make([]string, 0, len(report.Diagnostics))
+	for _, d := range report.Diagnostics {
+		diagnostics = append(diagnostics, d.Namespace+"/"+d.Pod+"/"+d.Container+"/"+d.Status)
+	}
+	assert.DeepEqual(t, diagnostics, []string{
+		"a/p1//unregistered-device",
+		"a/p1/x/not-whole-gpu",
+		"a/p1/x/nvml-unreadable",
+		"b/p1//not-whole-gpu",
+	})
+}
+
+func Test_wholeGPUVerdictDiagnostic_messages(t *testing.T) {
+	mkCandidate := func(devs device.ContainerDevices) wholeGPUCandidate {
+		return wholeGPUCandidate{
+			pod:       &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p"}},
+			container: "c",
+			devices:   devs,
+		}
+	}
+	nodeDevs := map[string]*device.DeviceInfo{
+		"GPU-mig":  {ID: "GPU-mig", Devmem: 8000, Devcore: 100, Mode: nv.MigMode},
+		"GPU-full": {ID: "GPU-full", Devmem: 8000, Devcore: 100},
+	}
+
+	t.Run("mig device", func(t *testing.T) {
+		got := wholeGPUVerdictDiagnostic(mkCandidate(device.ContainerDevices{{UUID: "GPU-mig", Usedmem: 8000}}), notWholeGPU, causeNotIndeterminate, nodeDevs)
+		assert.Equal(t, got.Status, "not-whole-gpu")
+		assert.Assert(t, strings.Contains(got.Message, "registered as MIG"), got.Message)
+	})
+
+	t.Run("short memory shows both figures", func(t *testing.T) {
+		got := wholeGPUVerdictDiagnostic(mkCandidate(device.ContainerDevices{{UUID: "GPU-full", Usedmem: 4000}}), notWholeGPU, causeNotIndeterminate, nodeDevs)
+		assert.Assert(t, strings.Contains(got.Message, "below registered memory"), got.Message)
+	})
+
+	t.Run("generic not-whole fallback", func(t *testing.T) {
+		got := wholeGPUVerdictDiagnostic(mkCandidate(device.ContainerDevices{{UUID: "GPU-full", Usedmem: 8000}}), notWholeGPU, causeNotIndeterminate, nodeDevs)
+		assert.Equal(t, got.Message, "allocation does not represent one or more whole GPUs")
+	})
+
+	t.Run("phys unreadable", func(t *testing.T) {
+		got := wholeGPUVerdictDiagnostic(mkCandidate(device.ContainerDevices{{UUID: "GPU-full", Usedmem: 8000}}), indeterminate, causePhysUnreadable, nodeDevs)
+		assert.Equal(t, got.Status, "nvml-unreadable")
+	})
+}
+
+func Test_getWholeGPUNodeDevices_missingNode(t *testing.T) {
+	_, err := getWholeGPUNodeDevices(context.Background(), fake.NewClientset(), "node-a")
+	assert.ErrorContains(t, err, "failed to get node")
 }
