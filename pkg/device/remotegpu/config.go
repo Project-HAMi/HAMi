@@ -18,7 +18,8 @@ package remotegpu
 
 // RemoteGPUConfig describes the resource names a client pod uses to ask for a
 // fraction of the lupine GPU pool, and the port lupine listens on when a
-// server node does not override it through the LupineServerLabel value.
+// server node's LupineServerLabel value (applied by the device plugin for
+// operatingmode: remote) does not override it.
 type RemoteGPUConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
