@@ -327,6 +327,29 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// fitQuota checks the pod's total AMD memory, this candidate card included,
+// against the namespace ResourceQuota. Only memory is checked: the core quota
+// counts the CUs the plugin masks while a request is a percentage.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int32) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
+	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
+	hypo[AMDDevice] = append(hypo[AMDDevice], cur)
+
+	var mem int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
+		for _, val := range ctrDevs {
+			mem += int64(val.Usedmem)
+		}
+	}
+	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
+}
+
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -386,6 +409,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memReq) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memReq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memReq {
 			reason[common.CardInsufficientMemory]++
