@@ -50,7 +50,9 @@ const (
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	// AMDNumaBind asks for every GPU of a multi-GPU request to sit on one NUMA node.
-	AMDNumaBind     = "amd.com/numa-bind"
+	AMDNumaBind = "amd.com/numa-bind"
+	// AMDLinkBind asks for every GPU of a multi-GPU request to be linked to all the others over XGMI.
+	AMDLinkBind     = "amd.com/link-bind"
 	AMDAssignedNode = "amd.com/predicate-node"
 	NodeLockAMD     = "hami.io/mutex.lock"
 	RegisterAnnos   = "hami.io/node-amd-register"
@@ -211,6 +213,35 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 	return true
 }
 
+func assertLinkBind(annos map[string]string) bool {
+	enforce, err := strconv.ParseBool(annos[AMDLinkBind])
+	return err == nil && enforce
+}
+
+// xgmiLinked reports whether two GPUs list each other as XGMI peers in the
+// registration (custominfo.xgmiPeers, published by amd-device-plugin).
+func xgmiLinked(a, b *device.DeviceUsage) bool {
+	return hasPeer(a, b) && hasPeer(b, a)
+}
+
+func hasPeer(from, to *device.DeviceUsage) bool {
+	bdf, _ := to.CustomInfo["pciBDF"].(string)
+	if bdf == "" {
+		return false
+	}
+	switch peers := from.CustomInfo["xgmiPeers"].(type) {
+	case []string:
+		return slices.Contains(peers, bdf)
+	case []any:
+		for _, p := range peers {
+			if s, ok := p.(string); ok && s == bdf {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func assertNuma(annos map[string]string) bool {
 	enforce, err := strconv.ParseBool(annos[AMDNumaBind])
 	return err == nil && enforce
@@ -351,6 +382,28 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 }
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	if !assertLinkBind(pod.GetAnnotations()) || request.Nums < 2 {
+		return amddevice.fit(devices, request, pod, nodeinfo, allocated, false)
+	}
+	// link-bind: the group has to be a clique of XGMI links. A greedy pass can
+	// be led astray by its first pick, so try each GPU as the starting point.
+	// ponytail: greedy per start, fine for 4 or 8 GPU hives; exact clique search if hives grow.
+	var firstReason string
+	var firstDevs map[string]device.ContainerDevices
+	for start := range devices {
+		ordered := append(slices.Clone(devices[start:]), devices[:start]...)
+		ok, devs, reason := amddevice.fit(ordered, request, pod, nodeinfo, allocated, true)
+		if ok {
+			return true, devs, ""
+		}
+		if start == 0 {
+			firstDevs, firstReason = devs, reason
+		}
+	}
+	return false, firstDevs, firstReason
+}
+
+func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices, linkBind bool) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -443,6 +496,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			reason[common.CardInsufficientCore]++
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", coreReq)
 			continue
+		}
+
+		if linkBind {
+			linked := true
+			for _, c := range tmpDevs[k.Type] {
+				if i := slices.IndexFunc(devices, func(d *device.DeviceUsage) bool { return d.ID == c.UUID }); i < 0 || !xgmiLinked(devices[i], dev) {
+					linked = false
+					break
+				}
+			}
+			if !linked {
+				reason[common.GPULinkNotFit]++
+				klog.V(5).InfoS(common.GPULinkNotFit, "pod", klog.KObj(pod), "device", dev.ID)
+				continue
+			}
 		}
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)

@@ -32,6 +32,7 @@ const (
 	CardNotHealth                     = "CardNotHealth"
 	CardCordoned                      = "CardCordoned"
 	NumaNotFit                        = "NumaNotFit"
+	GPULinkNotFit                     = "GPULinkNotFit"
 	ExclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
 	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"

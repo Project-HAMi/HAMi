@@ -872,3 +872,102 @@ func TestDevices_Fit_ResourceQuota(t *testing.T) {
 		assert.Equal(t, true, ok, reason)
 	})
 }
+
+func TestFitLinkBind(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	// Eight GPUs in two XGMI quads, {0,1,2,3} and {4,5,6,7} (the MI210 layout),
+	// listed interleaved so a plain pass takes one GPU from each.
+	bdf := func(i int) string { return fmt.Sprintf("0000:%02x:00.0", i+0x10) }
+	quad := func(i int) []int {
+		if i < 4 {
+			return []int{0, 1, 2, 3}
+		}
+		return []int{4, 5, 6, 7}
+	}
+	gpus := func() []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, i := range []int{0, 4, 1, 5, 2, 6, 3, 7} {
+			var peers []any // what a JSON decode of the node annotation yields
+			for _, j := range quad(i) {
+				if j != i {
+					peers = append(peers, bdf(j))
+				}
+			}
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Type: AMDDevice, Health: true, CustomInfo: map[string]any{"pciBDF": bdf(i), "xgmiPeers": peers},
+			})
+		}
+		return out
+	}
+	pod := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+	req := func(n int32) device.ContainerDeviceRequest {
+		return device.ContainerDeviceRequest{Nums: n, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+	}
+	quadOf := func(got device.ContainerDevices) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "dev-%d", &i)
+			out[fmt.Sprint(i/4)] = true
+		}
+		return out
+	}
+	bind := map[string]string{AMDLinkBind: "true"}
+
+	t.Run("a linked group of 4 stays inside one quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(4), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 4, len(got[AMDDevice]))
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("a linked pair is two GPUs of one quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(2), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("without the bind the same request crosses quads", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(4), pod(nil), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 2, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("5 GPUs cannot be one clique", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(), req(5), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.GPULinkNotFit), reason)
+	})
+	t.Run("a busy GPU in the first quad moves the pod to the other", func(t *testing.T) {
+		devices := gpus()
+		for _, d := range devices {
+			if d.ID == "dev-1" {
+				d.Used = d.Count
+			}
+		}
+		ok, got, reason := dev.Fit(devices, req(4), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, true, quadOf(got[AMDDevice])["1"])
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("GPUs that publish no links cannot satisfy a bind", func(t *testing.T) {
+		bare := []*device.DeviceUsage{}
+		for _, d := range gpus()[:2] {
+			d.CustomInfo = map[string]any{"pciBDF": d.CustomInfo["pciBDF"]}
+			bare = append(bare, d)
+		}
+		ok, _, _ := dev.Fit(bare, req(2), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+	})
+	t.Run("one GPU ignores the bind", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(), req(1), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("peers as a string slice work too", func(t *testing.T) {
+		a := &device.DeviceUsage{CustomInfo: map[string]any{"pciBDF": "a", "xgmiPeers": []string{"b"}}}
+		b := &device.DeviceUsage{CustomInfo: map[string]any{"pciBDF": "b", "xgmiPeers": []string{"a"}}}
+		assert.Equal(t, true, xgmiLinked(a, b))
+		b.CustomInfo["xgmiPeers"] = []string{}
+		assert.Equal(t, false, xgmiLinked(a, b)) // both ends have to agree
+	})
+}
