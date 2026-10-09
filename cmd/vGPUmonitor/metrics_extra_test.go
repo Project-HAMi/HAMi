@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -181,5 +182,39 @@ func TestHostGPUMetrics_SendMetricError(t *testing.T) {
 
 	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Errorf("expected no error from collectGPUUtilizationMetrics even if descriptor is bad")
+	}
+}
+
+// A container whose metrics cannot be built (a label that is not valid UTF-8)
+// must make the pod pass fail, so collect_success reports it.
+func TestCollectPodAndContainerInfoReportsFailedContainers(t *testing.T) {
+	nodeName := "test-node"
+	t.Setenv(util.NodeNameEnvName, nodeName)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bad\xffname",
+			Namespace: "default",
+			UID:       "test-uid",
+			Labels:    map[string]string{util.AssignedNodeAnnotations: nodeName},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c1"}}},
+	}
+	informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
+	if err := informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod); err != nil {
+		t.Fatal(err)
+	}
+	lister := &nvidia.ContainerLister{}
+	lister.SetContainersForTest(map[string]*nvidia.ContainerUsage{
+		"c1": {PodUID: "test-uid", ContainerName: "c1", Info: &mockUsageInfo{}},
+	})
+	cc := ClusterManagerCollector{ClusterManager: &ClusterManager{
+		PodLister:       informerFactory.Core().V1().Pods().Lister(),
+		containerLister: lister,
+	}}
+
+	err := cc.collectPodAndContainerInfo(make(chan prometheus.Metric, 100))
+	if err == nil || !strings.Contains(err.Error(), "failed to collect metrics for 1 containers") {
+		t.Fatalf("err = %v, want the failed container count", err)
 	}
 }
