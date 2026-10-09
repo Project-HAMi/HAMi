@@ -872,3 +872,114 @@ func TestDevices_Fit_ResourceQuota(t *testing.T) {
 		assert.Equal(t, true, ok, reason)
 	})
 }
+
+func TestMutateAdmissionDefaultsTheGPUCount(t *testing.T) {
+	cfg := AMDConfig{
+		ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem",
+		ResourceMemoryPercentageName: "amd.com/gpumem-percentage", ResourceCoreName: "amd.com/gpucores",
+	}
+	ctr := func(limits, requests corev1.ResourceList) *corev1.Container {
+		return &corev1.Container{Resources: corev1.ResourceRequirements{Limits: limits, Requests: requests}}
+	}
+	q := func(n int64) resource.Quantity { return *resource.NewQuantity(n, resource.DecimalSI) }
+	countOf := func(c *corev1.Container) int64 {
+		v, ok := c.Resources.Limits["amd.com/gpu"]
+		if !ok {
+			return -1
+		}
+		return v.Value()
+	}
+
+	for name, tc := range map[string]struct {
+		c    *corev1.Container
+		want int64
+		ok   bool
+	}{
+		"memory alone":              {ctr(corev1.ResourceList{"amd.com/gpumem": q(4096)}, nil), 1, true},
+		"cores alone":               {ctr(corev1.ResourceList{"amd.com/gpucores": q(25)}, nil), 1, true},
+		"percentage alone":          {ctr(corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}, nil), 1, true},
+		"percentage in requests":    {ctr(nil, corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}), 1, true},
+		"an explicit count is kept": {ctr(corev1.ResourceList{"amd.com/gpu": q(3), "amd.com/gpumem": q(4096)}, nil), 3, true},
+		"no AMD resource":           {ctr(corev1.ResourceList{"cpu": q(1)}, nil), -1, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ok, err := InitAMDGPUDevice(cfg).MutateAdmission(tc.c, &corev1.Pod{})
+			assert.NilError(t, err)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, countOf(tc.c))
+		})
+	}
+
+	t.Run("the default count is configurable", func(t *testing.T) {
+		c := ctr(corev1.ResourceList{"amd.com/gpumem": q(4096)}, nil)
+		cfg2 := cfg
+		cfg2.DefaultGPUNum = 2
+		ok, err := InitAMDGPUDevice(cfg2).MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		assert.Equal(t, int64(2), countOf(c))
+	})
+}
+
+func TestGenerateResourceRequestsDefaults(t *testing.T) {
+	q := func(n int64) resource.Quantity { return *resource.NewQuantity(n, resource.DecimalSI) }
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem",
+		ResourceMemoryPercentageName: "amd.com/gpumem-percentage", ResourceCoreName: "amd.com/gpucores",
+		DefaultMemory: 4096, DefaultCores: 40,
+	})
+	req := func(limits corev1.ResourceList) device.ContainerDeviceRequest {
+		got, err := dev.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: limits}})
+		assert.NilError(t, err)
+		return got
+	}
+	got := req(corev1.ResourceList{"amd.com/gpu": q(1)})
+	assert.Equal(t, int32(4096), got.Memreq)
+	assert.Equal(t, int32(40), got.Coresreq)
+
+	got = req(corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem": q(1000), "amd.com/gpucores": q(10)})
+	assert.Equal(t, int32(1000), got.Memreq)
+	assert.Equal(t, int32(10), got.Coresreq)
+
+	// a percentage replaces the default memory
+	got = req(corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem-percentage": q(50)})
+	assert.Equal(t, int32(0), got.Memreq)
+	assert.Equal(t, int32(50), got.MemPercentagereq)
+
+	// no defaults configured: the whole GPU, all cores
+	plain := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem", ResourceCoreName: "amd.com/gpucores"})
+	got, err := plain.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{"amd.com/gpu": q(1)}}})
+	assert.NilError(t, err)
+	assert.Equal(t, int32(0), got.Memreq)
+	assert.Equal(t, int32(100), got.Coresreq)
+}
+
+func TestFitSkipsCordonedDevices(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	devices := func() []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, id := range []string{"dev-0", "dev-1"} {
+			out = append(out, &device.DeviceUsage{ID: id, Count: 2, Totalmem: 16000, Totalcore: 100, Type: AMDDevice, Health: true, CustomInfo: map[string]any{}})
+		}
+		return out
+	}
+	node := func(annos map[string]string) *device.NodeInfo {
+		return &device.NodeInfo{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}}
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+
+	ok, got, reason := dev.Fit(devices(), req, pod, node(map[string]string{common.DeviceCordonAnnotation: "dev-1, other"}), &device.PodDevices{})
+	assert.Equal(t, true, ok, reason)
+	assert.Equal(t, "dev-0", got[AMDDevice][0].UUID)
+
+	ok, _, reason = dev.Fit(devices(), req, pod, node(map[string]string{common.DeviceCordonAnnotation: "dev-0,dev-1"}), &device.PodDevices{})
+	assert.Equal(t, false, ok)
+	assert.Assert(t, strings.Contains(reason, common.CardCordoned), reason)
+
+	// no annotation, an empty one, and no node info at all cordon nothing
+	for _, n := range []*device.NodeInfo{node(nil), node(map[string]string{common.DeviceCordonAnnotation: " , "}), {}, nil} {
+		ok, _, reason = dev.Fit(devices(), req, pod, n, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	}
+}

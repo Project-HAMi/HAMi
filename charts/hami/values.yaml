@@ -557,6 +557,12 @@ devices:
     resourceMemoryName: "amd.com/gpumem"
     resourceMemoryPercentageName: "amd.com/gpumem-percentage"
     resourceCoreName: "amd.com/gpucores"
+    # GPUs a container gets when it asks for memory or cores without amd.com/gpu.
+    defaultGPUNum: 1
+    # MiB of device memory for a container that asks for neither memory nor a percentage; 0 is the whole GPU.
+    defaultMemory: 0
+    # Percent of the cores for a container that asks for none; 0 is all of them.
+    defaultCores: 0
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
