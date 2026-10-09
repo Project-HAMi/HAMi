@@ -3885,3 +3885,26 @@ func TestNormalizeDeviceModel(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryPercentage_InvalidRequestBehindValidLimit(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	})
+	ctr := &corev1.Container{
+		Name: "c",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			},
+			Requests: corev1.ResourceList{"nvidia.com/gpumem-percentage": resource.MustParse("99.1")},
+		},
+	}
+	_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.Assert(t, err != nil)
+	req, err := dev.GenerateResourceRequests(ctr)
+	assert.Assert(t, err != nil)
+	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}

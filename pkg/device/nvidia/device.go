@@ -455,12 +455,18 @@ func hasEnvVarWithValue(env []corev1.EnvVar, name, value string) bool {
 }
 
 func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
-	if qty, ok := resourceQuantity(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
-		if pct, valid := qty.AsInt64(); !valid || pct < 0 || pct > 100 {
-			return fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, qty.String(), ctr.Name)
+	name := corev1.ResourceName(dev.config.ResourceMemoryPercentageName)
+	for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+		if qty, ok := list[name]; ok && !validPercentage(qty) {
+			return fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", name, qty.String(), ctr.Name)
 		}
 	}
 	return nil
+}
+
+func validPercentage(qty resource.Quantity) bool {
+	pct, ok := qty.AsInt64()
+	return ok && pct >= 0 && pct <= 100
 }
 
 func (dev *NvidiaGPUDevices) validateCores(ctr *corev1.Container) error {
@@ -645,16 +651,19 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				memnum = int(memnums)
 			}
 			mempnum := int32(101)
+			// Check both lists so a valid limit cannot hide an invalid request.
+			for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+				if q, found := list[resourceMemPercentage]; found && !validPercentage(q) {
+					klog.ErrorS(nil, "nvidia memory percentage request is not an integer between 0 and 100", "container", ctr.Name, "request", q.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory percentage request %s is not an integer between 0 and 100", q.String())}
+				}
+			}
 			mem, ok = ctr.Resources.Limits[resourceMemPercentage]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[resourceMemPercentage]
 			}
 			if ok {
-				mempnums, parsed := mem.AsInt64()
-				if !parsed || mempnums < 0 || mempnums > 100 {
-					klog.ErrorS(nil, "nvidia memory percentage request is not an integer between 0 and 100", "container", ctr.Name, "request", mem.String())
-					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory percentage request %s is not an integer between 0 and 100", mem.String())}
-				}
+				mempnums, _ := mem.AsInt64()
 				// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
 				if mempnums > 0 {
 					mempnum = int32(mempnums)
