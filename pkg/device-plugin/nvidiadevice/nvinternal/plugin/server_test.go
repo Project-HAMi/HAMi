@@ -538,7 +538,7 @@ func Test_configOverride(t *testing.T) {
 				OperatingMode:                "default",
 				Migstrategy:                  "single",
 				FilterDevice:                 nil,
-				EnableGetPreferredAllocation: true,
+				EnableGetPreferredAllocation: ptr(true),
 			},
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
@@ -551,7 +551,7 @@ func Test_configOverride(t *testing.T) {
 				OperatingMode:                "custom",
 				Migstrategy:                  "mixed",
 				FilterDevice:                 nil,
-				EnableGetPreferredAllocation: true,
+				EnableGetPreferredAllocation: ptr(true),
 			},
 		},
 	}
@@ -706,8 +706,8 @@ func TestReadFromConfigFileSelectsEntryByNodeLabels(t *testing.T) {
 		{"matchLabels", map[string]string{"gpu.example.com/pool": "mig"}, nvidia.MigMode, 7, true},
 		{"matchExpressions", map[string]string{"gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
 		{"no match keeps the defaults", map[string]string{"gpu.example.com/model": "a100"}, nvidia.HamiCoreMode, 1, false},
-		{"several matching selectors apply in list order, the later one overriding",
-			map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
+		{"several matching selectors apply in list order, a later one keeping what it does not set",
+			map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			enableGetPreferredAllocation = false

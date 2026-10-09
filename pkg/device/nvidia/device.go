@@ -159,7 +159,7 @@ type NodeConfig struct {
 	OperatingMode                string                `json:"operatingmode"`
 	Migstrategy                  string                `json:"migstrategy"`
 	FilterDevice                 *FilterDevice         `json:"filterdevices"`
-	EnableGetPreferredAllocation bool                  `json:"enablegetpreferredallocation"`
+	EnableGetPreferredAllocation *bool                 `json:"enablegetpreferredallocation"`
 }
 
 type DevicePluginConfigs struct {

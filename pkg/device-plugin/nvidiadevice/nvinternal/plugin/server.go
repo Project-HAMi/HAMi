@@ -178,7 +178,10 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels ma
 		if len(val.OperatingMode) > 0 {
 			mode = val.OperatingMode
 		}
-		enableGetPreferredAllocation = val.EnableGetPreferredAllocation
+		// Only an entry that sets the field changes it, so a later selector cannot clear an earlier true.
+		if val.EnableGetPreferredAllocation != nil {
+			enableGetPreferredAllocation = *val.EnableGetPreferredAllocation
+		}
 		klog.Infof("FilterDevice: %v", val.FilterDevice)
 	}
 	return mode, nil
