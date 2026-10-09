@@ -6,6 +6,11 @@
 {{- end -}}
 {{ index $start 0 }}<!-- BEGIN GENERATED VALUES -->
 
-{{ template "chart.valuesSection" . }}
+## Generated values (partial)
+
+This table includes only values with helm-docs descriptions.
+More values will be added in follow-up PRs.
+
+{{ template "chart.valuesTable" . }}
 
 <!-- END GENERATED VALUES -->{{ index $end 1 -}}

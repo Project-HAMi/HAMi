@@ -497,7 +497,10 @@ lists when changing resource names or chip definitions.
 
 <!-- BEGIN GENERATED VALUES -->
 
-## Values
+## Generated values (partial)
+
+This table includes only values with helm-docs descriptions.
+More values will be added in follow-up PRs.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
