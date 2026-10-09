@@ -675,6 +675,35 @@ func TestComputeScore(t *testing.T) {
 			expectedScore: 3.69140625,
 		},
 		{
+			// Enflame sends a negative mode code (-1, request by spec) in
+			// MemPercentagereq. A pod that asks only for cores has Memreq 0, and the
+			// code must not be read as a percentage: -1% of a 32GB card would be
+			// counted as -327MB. It scores the same as an unset (101) request.
+			name: "Negative MemPercentagereq mode code counts no memory",
+			device: &device.DeviceUsage{
+				ID:           "gcu-0",
+				Type:         "Enflame",
+				DeviceVendor: "Enflame",
+				Totalcore:    100,
+				Totalmem:     32768,
+				Count:        8,
+				Used:         0,
+				Usedcores:    0,
+				Usedmem:      0,
+			},
+			requests: device.ContainerDeviceRequests{
+				"container1": {
+					Nums:             1,
+					Type:             "Enflame",
+					Memreq:           0,
+					MemPercentagereq: -1,
+					Coresreq:         50,
+				},
+			},
+			// slot 1/8 + core 50/100 + mem 0, weights 1/1/1, times util.Weight (10).
+			expectedScore: 6.25,
+		},
+		{
 			// The NVIDIA device plugin registers the card's model name as the
 			// device type, while the request carries the "NVIDIA" common word.
 			name: "Model named device type still counts the request",
