@@ -793,3 +793,25 @@ func findMigUUIDForGI(dev nvml.Device, giID uint32) (string, error) {
 	}
 	return "", fmt.Errorf("no MIG device found for GI %d", giID)
 }
+
+// needsMigDisable checks current and pending hardware modes without changing
+// them. A non-MIG startup needs Pod confirmation only if MIG may need disabling.
+func (m *MigInstanceManager) needsMigDisable(deviceCount int) (bool, error) {
+	done, err := m.beginOperation()
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	needsDisable := false
+	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
+		lk := m.gpuLock(gpuIndex)
+		lk.Lock()
+		enabled, err := m.migCurrentlyEnabled(gpuIndex)
+		lk.Unlock()
+		if err != nil {
+			return false, err
+		}
+		needsDisable = needsDisable || enabled
+	}
+	return needsDisable, nil
+}

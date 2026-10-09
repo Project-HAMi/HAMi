@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -102,19 +103,24 @@ func fleetGPU(uuid string, mem int32) *device.DeviceInfo {
 	}
 }
 
+func remoteGPUContainer(name string, cards, mem int64) corev1.Container {
+	limits := corev1.ResourceList{
+		"nvidia.com/remote-gpu": *resource.NewQuantity(cards, resource.DecimalSI),
+	}
+	if mem > 0 {
+		limits["nvidia.com/remote-gpu-memory"] = *resource.NewQuantity(mem, resource.DecimalSI)
+	}
+	return corev1.Container{
+		Name:      name,
+		Resources: corev1.ResourceRequirements{Limits: limits},
+	}
+}
+
 func remoteGPUPod(name string, cards, mem int64) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: k8stypes.UID("uid-" + name)},
 		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "app",
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/remote-gpu":        *resource.NewQuantity(cards, resource.DecimalSI),
-						"nvidia.com/remote-gpu-memory": *resource.NewQuantity(mem, resource.DecimalSI),
-					},
-				},
-			}},
+			Containers: []corev1.Container{remoteGPUContainer("app", cards, mem)},
 		},
 	}
 }
@@ -155,7 +161,8 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 	// Both GPU-less nodes see the same fleet.
 	assert.Equal(t, len(nodes["cpu-1"].Devices.DeviceLists), 2)
 
-	reqs := device.Resourcereqs(task)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
 	assert.Equal(t, reqs[0]["RemoteGPU"].Nums, int32(2), "GenerateResourceRequests must reach Resourcereqs")
 
 	s := NewScheduler()
@@ -192,10 +199,161 @@ func TestRemoteGPU_AllocationNeverSpansTwoServers(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0, "two cards on two servers must not be combined")
 	assert.Assert(t, failed["cpu-1"] != "")
+}
+
+// A multi-container pod owns one whole lupine server. Later containers reuse
+// that ownership rather than moving to another otherwise-free server.
+func TestRemoteGPU_MultiContainerAllocationNeverSpansTwoServers(t *testing.T) {
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-bbb", 40000)}),
+		gpulessNode("cpu-1"),
+	)
+
+	task := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: "default", UID: k8stypes.UID("uid-client")},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "app1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/remote-gpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				{
+					Name: "app2",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/remote-gpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+			},
+		},
+	}
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	assert.Equal(t, len(nodes["cpu-1"].Devices.DeviceLists), 2, "fleet has two free cards overall")
+
+	s := NewScheduler()
+	failed := map[string]string{}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 1)
+	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
+	assert.Equal(t, len(allocated), 2, "two containers")
+	assert.Equal(t, allocated[0][0].UUID, "gpu-a/GPU-aaa")
+	assert.Equal(t, allocated[1][0].UUID, "gpu-a/GPU-aaa")
+}
+
+// The first request fits gpu-a, but the pod as a whole only fits gpu-b. Both
+// orders must select gpu-b rather than making placement depend on list order.
+func TestRemoteGPU_ServerSelectionIsContainerOrderIndependent(t *testing.T) {
+	orders := []struct {
+		name       string
+		containers []corev1.Container
+	}{
+		{
+			name: "unconstrained first",
+			containers: []corev1.Container{
+				remoteGPUContainer("small", 1, 0),
+				remoteGPUContainer("large", 1, 60000),
+			},
+		},
+		{
+			name: "memory constrained first",
+			containers: []corev1.Container{
+				remoteGPUContainer("large", 1, 60000),
+				remoteGPUContainer("small", 1, 0),
+			},
+		},
+	}
+
+	for _, tt := range orders {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := setupRemoteGPUScheduler(t,
+				lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+				lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-bbb", 80000)}),
+				gpulessNode("cpu-1"),
+			)
+			task := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: "default", UID: k8stypes.UID("uid-client")},
+				Spec:       corev1.PodSpec{Containers: tt.containers},
+			}
+			nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+			reqs, err := device.Resourcereqs(task)
+			assert.NilError(t, err)
+			scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+			assert.NilError(t, err)
+			if len(scores.NodeList) != 1 {
+				t.Fatalf("got %d fitting nodes, want 1", len(scores.NodeList))
+			}
+			for _, ctrDevices := range scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord] {
+				if len(ctrDevices) == 0 {
+					t.Fatal("requesting container received no RemoteGPU allocation")
+				}
+				assert.Equal(t, ctrDevices[0].UUID, "gpu-b/GPU-bbb")
+			}
+		})
+	}
+}
+
+// An ordinary init container, a native sidecar, and an app container each rule
+// out a different server. Only gpu-d satisfies every request independently.
+func TestRemoteGPU_ServerSelectionIncludesInitSidecarAndAppContainers(t *testing.T) {
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{
+			fleetGPU("GPU-a1", 80000), fleetGPU("GPU-a2", 40000),
+		}),
+		lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{
+			fleetGPU("GPU-b1", 80000), fleetGPU("GPU-b2", 20000), fleetGPU("GPU-b3", 20000),
+		}),
+		lupineServerNode("gpu-c", "10.0.0.7", []*device.DeviceInfo{
+			fleetGPU("GPU-c1", 50000), fleetGPU("GPU-c2", 40000), fleetGPU("GPU-c3", 20000),
+		}),
+		lupineServerNode("gpu-d", "10.0.0.8", []*device.DeviceInfo{
+			fleetGPU("GPU-d1", 80000), fleetGPU("GPU-d2", 40000), fleetGPU("GPU-d3", 20000),
+		}),
+		gpulessNode("cpu-1"),
+	)
+	always := corev1.ContainerRestartPolicyAlways
+	task := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "client", Namespace: "default", UID: k8stypes.UID("uid-client")},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				remoteGPUContainer("first-init", 1, 0),
+				remoteGPUContainer("later-init", 3, 10000),
+				remoteGPUContainer("sidecar", 2, 30000),
+			},
+			Containers: []corev1.Container{remoteGPUContainer("app", 1, 60000)},
+		},
+	}
+	task.Spec.InitContainers[2].RestartPolicy = &always
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+	assert.NilError(t, err)
+	if len(scores.NodeList) != 1 {
+		t.Fatalf("got %d fitting nodes, want 1", len(scores.NodeList))
+	}
+	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
+	assert.Equal(t, len(allocated), 4)
+	for _, ctrDevices := range allocated {
+		assert.Equal(t, len(ctrDevices), 3)
+		for _, d := range ctrDevices {
+			assert.Assert(t, strings.HasPrefix(d.UUID, "gpu-d/"))
+		}
+	}
 }
 
 // The card held by a pod that landed on another client node is invisible to
@@ -228,7 +386,9 @@ func TestRemoteGPU_ReservationBlocksSecondClientNode(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0, "the only card is already held by another pod")
 	assert.Assert(t, failed["cpu-2"] != "", "the holder landed on cpu-1, yet cpu-2 must also be refused")
@@ -255,7 +415,9 @@ func TestRemoteGPU_FinishedPodReleasesCard(t *testing.T) {
 	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
 
 	s := NewScheduler()
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, map[string]string{})
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, map[string]string{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 1)
 }
@@ -306,7 +468,9 @@ func TestRemoteGPU_MemoryRequestFiltersCards(t *testing.T) {
 
 	s := NewScheduler()
 	failed := map[string]string{}
-	scores, err := s.calcScore(&nodes, device.Resourcereqs(task), task, failed)
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := s.calcScore(&nodes, reqs, task, failed)
 	assert.NilError(t, err)
 	assert.Equal(t, len(scores.NodeList), 0)
 	assert.Assert(t, failed["cpu-1"] != "")

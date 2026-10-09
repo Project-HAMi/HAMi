@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -34,9 +35,10 @@ import (
 )
 
 type AMDDevices struct {
-	resourceCountName  string
-	resourceMemoryName string
-	resourceCoreName   string
+	resourceCountName            string
+	resourceMemoryName           string
+	resourceMemoryPercentageName string
+	resourceCoreName             string
 }
 
 const (
@@ -47,15 +49,18 @@ const (
 	AMDNoUse           = "amd.com/nouse-gputype"
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
-	AMDAssignedNode    = "amd.com/predicate-node"
-	NodeLockAMD        = "hami.io/mutex.lock"
-	RegisterAnnos      = "hami.io/node-amd-register"
+	// AMDNumaBind asks for every GPU of a multi-GPU request to sit on one NUMA node.
+	AMDNumaBind     = "amd.com/numa-bind"
+	AMDAssignedNode = "amd.com/predicate-node"
+	NodeLockAMD     = "hami.io/mutex.lock"
+	RegisterAnnos   = "hami.io/node-amd-register"
 )
 
 type AMDConfig struct {
-	ResourceCountName  string `yaml:"resourceCountName"`
-	ResourceMemoryName string `yaml:"resourceMemoryName"`
-	ResourceCoreName   string `yaml:"resourceCoreName"`
+	ResourceCountName            string `yaml:"resourceCountName"`
+	ResourceMemoryName           string `yaml:"resourceMemoryName"`
+	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
+	ResourceCoreName             string `yaml:"resourceCoreName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -65,9 +70,10 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		device.SupportDevices[AMDDevice] = "hami.io/amd-devices-allocated"
 	}
 	return &AMDDevices{
-		resourceCountName:  config.ResourceCountName,
-		resourceMemoryName: config.ResourceMemoryName,
-		resourceCoreName:   config.ResourceCoreName,
+		resourceCountName:            config.ResourceCountName,
+		resourceMemoryName:           config.ResourceMemoryName,
+		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
+		resourceCoreName:             config.ResourceCoreName,
 	}
 }
 
@@ -85,16 +91,50 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
 			}
 		}
-
+	}
+	if _, err := dev.memoryPercentage(ctr); err != nil {
+		return false, err
 	}
 	if !ok && dev.resourceMemoryName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
+	}
+	if !ok && dev.resourceMemoryPercentageName != "" {
+		name := corev1.ResourceName(dev.resourceMemoryPercentageName)
+		_, inLimits := ctr.Resources.Limits[name]
+		_, inRequests := ctr.Resources.Requests[name]
+		if ok = inLimits || inRequests; ok {
+			// A percentage alone still needs a card, like nvidia defaults the count.
+			if ctr.Resources.Limits == nil {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
+			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(1, resource.DecimalSI)
+		}
 	}
 	if !ok && dev.resourceCoreName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
+}
+
+// memoryPercentage returns the requested share of device memory, 0 when unset.
+func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
+	if dev.resourceMemoryPercentageName == "" {
+		return 0, nil
+	}
+	name := corev1.ResourceName(dev.resourceMemoryPercentageName)
+	q, ok := ctr.Resources.Limits[name]
+	if !ok {
+		q, ok = ctr.Resources.Requests[name]
+	}
+	if !ok {
+		return 0, nil
+	}
+	pct, isInt := q.AsInt64()
+	if !isInt || pct < 0 || pct > 100 {
+		return 0, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.resourceMemoryPercentageName, q.String(), ctr.Name)
+	}
+	return int32(pct), nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -171,9 +211,14 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 	return true
 }
 
+func assertNuma(annos map[string]string) bool {
+	enforce, err := strconv.ParseBool(annos[AMDNumaBind])
+	return err == nil && enforce
+}
+
 func (dev *AMDDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.EqualFold(n.Type, AMDDevice) {
-		return true, checkAMDType(annos, d.Type), false
+		return true, checkAMDType(annos, d.Type), assertNuma(annos)
 	}
 	return false, false, false
 }
@@ -200,7 +245,7 @@ func (dev *AMDDevices) GetResourceNames() device.ResourceNames {
 	}
 }
 
-func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	klog.Info("Start to count AMD devices for container ", ctr.Name)
 	amdResourceCount := corev1.ResourceName(dev.resourceCountName)
 	amdResourceMemory := corev1.ResourceName(dev.resourceMemoryName)
@@ -208,9 +253,14 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	count, ok := ctr.Resources.Limits[amdResourceCount]
 	if ok {
 		if n, ok := count.AsInt64(); ok {
-			if n <= 0 || n > math.MaxInt32 {
+			if n == 0 {
+				// An explicit zero count means no device is requested,
+				// not an invalid request. See the nvidia backend.
+				return device.ContainerDeviceRequest{}, nil
+			}
+			if n < 0 || n > math.MaxInt32 {
 				klog.ErrorS(nil, "amd device count request is out of range", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := int32(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
@@ -218,9 +268,15 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				memnums, ok := mem.AsInt64()
 				if !ok || memnums < 0 || memnums > math.MaxInt32 {
 					klog.ErrorS(nil, "amd device memory request is out of range", "container", ctr.Name, "request", mem.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("memory request %s is out of range", mem.String())}
 				}
 				memnum = int32(memnums)
+			}
+
+			memPercentage, err := dev.memoryPercentage(ctr)
+			if err != nil {
+				klog.ErrorS(err, "amd device memory percentage request is out of range", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: err.Error()}
 			}
 
 			// An omitted core limit means the container receives all CUs on each
@@ -234,7 +290,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				corePercentageNums, ok := corePercentage.AsInt64()
 				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
 					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
-					return device.ContainerDeviceRequest{}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("core percentage request %s is out of range (must be an integer between 1 and 100)", corePercentage.String())}
 				}
 				corePercentageNum = int32(corePercentageNums)
 			}
@@ -246,12 +302,18 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				Nums:             int32(n),
 				Type:             AMDDevice,
 				Memreq:           memnum,
-				MemPercentagereq: 0,
+				MemPercentagereq: memPercentage,
 				Coresreq:         corePercentageNum,
-			}
+			}, nil
 		}
+		// A quantity the apiserver accepts as an integer can still be too
+		// large for int64 (1Ei, 1e19). Falling through would report the
+		// container as device-less, which is the fail-open this change
+		// exists to remove.
+		klog.ErrorS(nil, "amd device count request is not a plain integer", "container", ctr.Name, "request", count.String())
+		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %s is not a plain integer", count.String())}
 	}
-	return device.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}, nil
 }
 
 func (dev *AMDDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
@@ -265,9 +327,33 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// fitQuota checks the pod's total AMD memory, this candidate card included,
+// against the namespace ResourceQuota. Only memory is checked: the core quota
+// counts the CUs the plugin masks while a request is a percentage.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int32) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
+	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
+	hypo[AMDDevice] = append(hypo[AMDDevice], cur)
+
+	var mem int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
+		for _, val := range ctrDevs {
+			mem += int64(val.Usedmem)
+		}
+	}
+	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
+}
+
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
+	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
@@ -285,11 +371,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
-		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, numa := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
+		}
+		// numa-bind: a run of GPUs must share one NUMA node, so a new node starts the run over.
+		if numa && prevnuma != dev.Numa {
+			if k.Nums != originReq {
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "prevnuma", prevnuma, "device numa", dev.Numa)
+			}
+			k.Nums = originReq
+			prevnuma = dev.Numa
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AMDUseUUID, AMDNoUseUUID, amddevice.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
@@ -308,8 +404,16 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		memReq := k.Memreq
+		if memReq <= 0 && k.MemPercentagereq > 0 && dev.Totalmem > 0 {
+			memReq = max(int32(int64(dev.Totalmem)*int64(k.MemPercentagereq)/100), 1)
+		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memReq) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memReq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memReq {
 			reason[common.CardInsufficientMemory]++
@@ -325,6 +429,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			}
 			coreReq = dev.Totalcore * k.Coresreq / 100
 			coreReq = max(coreReq, 1)
+			// RDNA applies the CU mask per WGP, so the device plugin hands out
+			// whole WGPs; account for the same count.
+			if unit := cuPerWGP(dev.CustomInfo); unit > 1 {
+				coreReq = int32(min((int64(coreReq)+int64(unit)-1)/int64(unit)*int64(unit), int64(dev.Totalcore)))
+			}
 			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {
 			// Memreq omitted or zero means whole-card memory; treat core request as whole-card as well.
@@ -369,4 +478,13 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// cuPerWGP returns how many CUs the device plugin allocates together, as
+// published in the registration custominfo; 1 when absent.
+func cuPerWGP(info map[string]any) int32 {
+	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 && v == math.Trunc(v) {
+		return int32(v)
+	}
+	return 1
 }

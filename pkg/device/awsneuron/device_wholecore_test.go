@@ -45,7 +45,8 @@ func Test_GenerateResourceRequests_WholeDeviceDefersCoreCountToFit(t *testing.T)
 			},
 		},
 	}
-	req := dev.GenerateResourceRequests(ctr)
+	req, err := dev.GenerateResourceRequests(ctr)
+	assert.NilError(t, err)
 	assert.Equal(t, req.Coresreq, int32(0))
 }
 
@@ -90,12 +91,13 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 		},
 	}
 	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "default", Annotations: map[string]string{}}}
-	wholeDevice := dev.GenerateResourceRequests(&corev1.Container{
+	wholeDevice, err := dev.GenerateResourceRequests(&corev1.Container{
 		Name: "ctr",
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{"aws.amazon.com/neuron": resource.MustParse("1")},
 		},
 	})
+	assert.NilError(t, err)
 	fit, tmp, reason := dev.Fit([]*device.DeviceUsage{du}, wholeDevice, podA, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true, reason)
 	cd := tmp[AWSNeuronDevice][0]
@@ -112,11 +114,12 @@ func Test_Fit_FourCoreRequestNeedsEnoughDeviceCapacity(t *testing.T) {
 		ResourceCountName: "aws.amazon.com/neuron",
 		ResourceCoreName:  "aws.amazon.com/neuroncore",
 	})
-	request := dev.GenerateResourceRequests(&corev1.Container{
+	request, err := dev.GenerateResourceRequests(&corev1.Container{
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
 			"aws.amazon.com/neuroncore": resource.MustParse("4"),
 		}},
 	})
+	assert.NilError(t, err)
 	assert.Equal(t, request.TotalCoresreq, int64(4))
 
 	inf1Devices, err := dev.GetNodeDevices(newNeuronNode("inf1", "inf1.6xlarge", 1, 4))
@@ -161,9 +164,10 @@ func Test_Fit_SharedCoresAreDistinctAndReplayable(t *testing.T) {
 		CustomInfo: maps.Clone(registered[0].CustomInfo),
 	}
 	replayed := usage.DeepCopy()
-	request := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
+	request, err := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{"aws.amazon.com/neuroncore": resource.MustParse("1")},
 	}})
+	assert.NilError(t, err)
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
 	for _, wantMask := range []int32{1, 2, 4, 8} {
 		fit, allocations, reason := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
@@ -193,7 +197,8 @@ func Test_Fit_NeuronCoreRequestRequiresContiguousRange(t *testing.T) {
 			}},
 		}}},
 	}
-	request := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	request, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
 
 	for _, test := range []struct {
 		name     string
@@ -253,9 +258,10 @@ func Test_Fit_MultiDeviceCoreRequestUsesNodeGeometry(t *testing.T) {
 					CustomInfo: maps.Clone(info.CustomInfo),
 				}
 			}
-			request := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
+			request, err := dev.GenerateResourceRequests(&corev1.Container{Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{"aws.amazon.com/neuroncore": resource.MustParse(test.requested)},
 			}})
+			assert.NilError(t, err)
 			assert.Equal(t, request.Nums, int32(1))
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
 			fit, allocations, reason := dev.Fit(usages, request, pod, &device.NodeInfo{}, &device.PodDevices{})

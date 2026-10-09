@@ -78,48 +78,22 @@ func GetNodeWithContext(ctx context.Context, nodename string) (*corev1.Node, err
 	return n, nil
 }
 
+// GetPendingPod returns the pod the node lock names. The kubelet never tells a
+// device plugin which pod an Allocate is for, so the lock is the only record of
+// it the scheduler leaves behind. There is deliberately no fallback to matching
+// pending pods by their own hami.io/ annotations: writing those needs no rbac
+// beyond creating the pod, and when the lock is missing the nearest annotated
+// pod is not the pod being allocated, so that path served one pod's devices to
+// another (issue #3076).
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	pod, err := GetAllocatePodByNode(ctx, node)
 	if err != nil {
 		return nil, err
 	}
-	if pod != nil {
-		return pod, nil
+	if pod == nil {
+		return nil, fmt.Errorf("no node lock naming a pending pod on node %s", node)
 	}
-	// filter pods for this node.
-	selector := fmt.Sprintf("spec.nodeName=%s", node)
-	podListOptions := metav1.ListOptions{
-		FieldSelector: selector,
-	}
-	podlist, err := client.GetClient().CoreV1().Pods("").List(ctx, podListOptions)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range podlist.Items {
-		if p.Status.Phase != corev1.PodPending {
-			continue
-		}
-		if _, ok := p.Annotations[BindTimeAnnotations]; !ok {
-			continue
-		}
-		if phase, ok := p.Annotations[DeviceBindPhase]; !ok {
-			continue
-		} else {
-			// Allow both "allocating" and "success" phases for multi-container pods
-			// where some containers have already been allocated but others are still pending
-			if phase != DeviceBindAllocating && phase != DeviceBindSuccess {
-				continue
-			}
-		}
-		if n, ok := p.Annotations[AssignedNodeAnnotations]; !ok {
-			continue
-		} else {
-			if strings.Compare(n, node) == 0 {
-				return &p, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no binding pod found on node %s", node)
+	return pod, nil
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
@@ -173,6 +147,43 @@ func PatchNodeAnnotationsWithContext(ctx context.Context, node *corev1.Node, ann
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch node %v failed, %v", node.Name, err)
+	}
+	return err
+}
+
+func PatchNodeStatusCapacity(node *corev1.Node, resources corev1.ResourceList) error {
+	if len(resources) == 0 {
+		return nil
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+
+	type patchStatusDetails struct {
+		Capacity    corev1.ResourceList `json:"capacity,omitempty"`
+		Allocatable corev1.ResourceList `json:"allocatable,omitempty"`
+	}
+	type patchStatusNode struct {
+		Status patchStatusDetails `json:"status"`
+	}
+
+	p := patchStatusNode{
+		Status: patchStatusDetails{
+			Capacity:    resources,
+			Allocatable: resources,
+		},
+	}
+
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = c.CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{}, "status")
+	if err != nil {
+		klog.Infoln("resources=", resources)
+		klog.Infof("patch node status capacity %v failed, %v", node.Name, err)
 	}
 	return err
 }
