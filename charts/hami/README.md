@@ -523,3 +523,37 @@ vendor are removed.
 
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
+
+<!-- BEGIN GENERATED VALUES -->
+
+## Generated values (partial)
+
+This table includes only values with helm-docs descriptions.
+More values will be added in follow-up PRs.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
+| openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
+
+<!-- END GENERATED VALUES -->
+
+## Updating chart documentation
+
+Install [helm-docs](https://github.com/norwoodj/helm-docs), then run these commands
+from the repository root:
+
+```bash
+make update-helm-chart-docs
+make verify-helm-chart-docs
+```
+
+Only values with helm-docs descriptions appear in the generated section.
+Add descriptions with `# -- Description` immediately above a value. The commands
+use `--ignore-non-descriptions`; strict documentation checking is disabled until
+the remaining descriptions are complete. Text outside the generated markers
+is maintained directly in this README.
