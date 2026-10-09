@@ -18,6 +18,8 @@ package nvidia
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -560,6 +563,37 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	})
 }
 
+// wholeGPUTestPod returns a pod whose first container claims GPU-1 in full.
+func wholeGPUTestPod(uid string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "p", Namespace: "default", UID: types.UID(uid),
+			Annotations: wholeGPUAnnotation(device.ContainerDevices{{UUID: "GPU-1", Type: nv.NvidiaGPUDevice, Usedmem: 8000, Usedcores: 100}}),
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ctr"}}},
+	}
+}
+
+// newWholeGPUTestLister builds a ContainerLister with whole-GPU stubs that
+// confirm GPU-1 on the first reconcile.
+func newWholeGPUTestLister(dir string, pods ...*corev1.Pod) *ContainerLister {
+	return &ContainerLister{
+		containerPath: dir,
+		containers:    map[string]*ContainerUsage{},
+		podLister:     newTestPodLister(pods...),
+		wholeGPU: &wholeGPUState{
+			nvmllib:         &mock.Interface{},
+			nvmlInitialized: true,
+			verdicts:        make(map[string]wholeGPUVerdict),
+			firstSeenAt:     make(map[string]time.Time),
+			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
+				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
+			},
+		},
+	}
+}
+
 func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	originalEnabled := wholeGPUSkipHookEnabled
 	t.Cleanup(func() { wholeGPUSkipHookEnabled = originalEnabled })
@@ -614,6 +648,104 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 		_, ok := l.containers["uid8_ctr"]
 		assert.Equal(t, ok, true)
 		_, owned := l.wholeGPU.ownedContainerKeys["uid8_ctr"]
+		assert.Equal(t, owned, true)
+	})
+
+	t.Run("enabled: the device plugin's empty cache directory keeps the synthesized entry", func(t *testing.T) {
+		wholeGPUSkipHookEnabled = true
+		defer func() { wholeGPUSkipHookEnabled = false }()
+
+		dir := t.TempDir()
+		pod := wholeGPUTestPod("uid9")
+		// The device plugin creates this directory even for whole-GPU
+		// allocations, where it stays empty.
+		assert.NilError(t, os.Mkdir(filepath.Join(dir, "uid9_ctr"), 0755))
+		l := newWholeGPUTestLister(dir, pod)
+		assert.NilError(t, l.Update())
+
+		got, ok := l.containers["uid9_ctr"]
+		assert.Equal(t, ok, true)
+		_, synthesized := got.Info.(*wholeGPUUsage)
+		assert.Assert(t, synthesized)
+		_, owned := l.wholeGPU.ownedContainerKeys["uid9_ctr"]
+		assert.Equal(t, owned, true)
+	})
+
+	t.Run("enabled: libvgpu.so without a cache file keeps the synthesized entry", func(t *testing.T) {
+		wholeGPUSkipHookEnabled = true
+		defer func() { wholeGPUSkipHookEnabled = false }()
+
+		dir := t.TempDir()
+		pod := wholeGPUTestPod("uid10")
+		ctrDir := filepath.Join(dir, "uid10_ctr")
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "libvgpu.so", []byte("x"))
+		l := newWholeGPUTestLister(dir, pod)
+		assert.NilError(t, l.Update())
+
+		got, ok := l.containers["uid10_ctr"]
+		assert.Equal(t, ok, true)
+		_, synthesized := got.Info.(*wholeGPUUsage)
+		assert.Assert(t, synthesized)
+		_, owned := l.wholeGPU.ownedContainerKeys["uid10_ctr"]
+		assert.Equal(t, owned, true)
+	})
+
+	t.Run("enabled: a real cache file hands the entry back to disk monitoring", func(t *testing.T) {
+		wholeGPUSkipHookEnabled = true
+		defer func() { wholeGPUSkipHookEnabled = false }()
+
+		dir := t.TempDir()
+		pod := wholeGPUTestPod("uid11")
+		ctrDir := filepath.Join(dir, "uid11_ctr")
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		l := newWholeGPUTestLister(dir, pod)
+		assert.NilError(t, l.Update())
+
+		got, ok := l.containers["uid11_ctr"]
+		assert.Equal(t, ok, true)
+		_, synthesized := got.Info.(*wholeGPUUsage)
+		assert.Assert(t, !synthesized)
+		assert.Equal(t, got.PodUID, "uid11")
+		assert.Equal(t, got.ContainerName, "ctr")
+		_, owned := l.wholeGPU.ownedContainerKeys["uid11_ctr"]
+		assert.Equal(t, owned, false)
+
+		// Once handed back, the disk-driven lifecycle owns the entry: losing
+		// the directory releases the mapping like any other cache file.
+		assert.NilError(t, os.RemoveAll(ctrDir))
+		assert.NilError(t, l.Update())
+		_, ok = l.containers["uid11_ctr"]
+		assert.Equal(t, ok, false)
+	})
+
+	t.Run("enabled: shared-pod cache sweep leaves the synthesized whole-GPU entry intact", func(t *testing.T) {
+		wholeGPUSkipHookEnabled = true
+		defer func() { wholeGPUSkipHookEnabled = false }()
+
+		dir := t.TempDir()
+		wholePod := wholeGPUTestPod("uid12")
+		assert.NilError(t, os.Mkdir(filepath.Join(dir, "uid12_ctr"), 0755))
+		sharedPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "q", Namespace: "default", UID: "uid13"}}
+		sharedDir := filepath.Join(dir, "uid13_ctr")
+		assert.NilError(t, os.Mkdir(sharedDir, 0755))
+		writeCacheFile(t, sharedDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+
+		l := newWholeGPUTestLister(dir, wholePod, sharedPod)
+		assert.NilError(t, l.Update())
+		assert.Equal(t, len(l.containers), 2)
+
+		assert.NilError(t, os.RemoveAll(sharedDir))
+		assert.NilError(t, l.Update())
+
+		_, ok := l.containers["uid13_ctr"]
+		assert.Equal(t, ok, false)
+		got, ok := l.containers["uid12_ctr"]
+		assert.Equal(t, ok, true)
+		_, synthesized := got.Info.(*wholeGPUUsage)
+		assert.Assert(t, synthesized)
+		_, owned := l.wholeGPU.ownedContainerKeys["uid12_ctr"]
 		assert.Equal(t, owned, true)
 	})
 }

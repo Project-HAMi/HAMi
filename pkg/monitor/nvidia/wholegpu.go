@@ -231,11 +231,10 @@ func (u *wholeGPUUsage) deviceMemory(idx int) (nvml.Memory, bool) {
 	return mem, true
 }
 
-// reconcileWholeGPU synthesizes NVML-backed ContainerUsage entries for
-// containers that hold one or more whole physical GPUs. It is called once per
-// Update() cycle, inside l.mutex, before the cache-dir
-// scan runs so the scan's "already in l.containers" check skips over
-// synthesized entries and leaves them untouched.
+// reconcileWholeGPU builds NVML-backed ContainerUsage entries for containers that
+// own one or more whole physical GPUs. It runs once per Update() cycle,
+// while l.mutex is held, and before the cache-dir scan starts.
+// The scan and sweep in Update skip any entries recorded in ownedContainerKeys.
 //
 // pods is scoped to this node by the pod informer's field selector.
 func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {

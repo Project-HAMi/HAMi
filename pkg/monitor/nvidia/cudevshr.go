@@ -245,6 +245,29 @@ func (l *ContainerLister) Update() error {
 			continue
 		}
 		if current, ok := l.containers[entry.Name()]; ok {
+			owned := false
+			if l.wholeGPU != nil {
+				_, owned = l.wholeGPU.ownedContainerKeys[entry.Name()]
+			}
+			if owned {
+				// loadCache maps a supported cache file and remembers its
+				// identity so it can detect when the file has been replaced.
+				usage, err := loadCache(dirName)
+				if err != nil {
+					klog.Errorf("Failed to load cache: %s, error: %v", dirName, err)
+					continue
+				}
+				if usage == nil {
+					continue
+				}
+				klog.InfoS("wholegpu: cache file appeared, handing synthesized entry back to disk monitoring", "directory", dirName)
+				delete(l.wholeGPU.ownedContainerKeys, entry.Name())
+				l.unmapContainer(entry.Name())
+				usage.PodUID = podUID
+				usage.ContainerName = parts[1]
+				l.containers[entry.Name()] = usage
+				continue
+			}
 			if cacheMappingIsCurrent(current) {
 				continue
 			}
@@ -269,10 +292,16 @@ func (l *ContainerLister) Update() error {
 	// the old inode alive, so explicitly release mappings whose directory has
 	// disappeared instead of relying on directory traversal to encounter them.
 	for name := range l.containers {
-		if _, ok := present[name]; !ok {
-			klog.InfoS("Releasing mapping for removed vGPU cache directory", "directory", name)
-			l.unmapContainer(name)
+		if _, ok := present[name]; ok {
+			continue
 		}
+		if l.wholeGPU != nil {
+			if _, owned := l.wholeGPU.ownedContainerKeys[name]; owned {
+				continue
+			}
+		}
+		klog.InfoS("Releasing mapping for removed vGPU cache directory", "directory", name)
+		l.unmapContainer(name)
 	}
 	return nil
 }
