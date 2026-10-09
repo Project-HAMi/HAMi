@@ -838,6 +838,8 @@ devices:
     # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
     # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
     hamiVnpuMode: ""
+    # -- Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity.
+    vnpuDeviceSplitCount: 10
     enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
     enabled: false
     image: ""
