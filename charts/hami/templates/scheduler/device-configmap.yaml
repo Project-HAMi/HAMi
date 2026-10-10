@@ -96,6 +96,7 @@ data:
       resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
       resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
       runtimeClassName: "{{ .Values.devices.amd.runtimeClassName }}"
+      resourcePriorityName: {{ .Values.devices.amd.resourcePriorityName }}
     vastai:
       resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:

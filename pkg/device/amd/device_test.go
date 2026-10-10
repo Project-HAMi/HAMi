@@ -949,3 +949,78 @@ func TestMutateAdmissionRuntimeClass(t *testing.T) {
 		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
 	})
 }
+
+func TestPriority(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName:    "amd.com/gpu",
+		ResourcePriorityName: "amd.com/priority",
+	})
+	ctr := func(priority string, env ...corev1.EnvVar) *corev1.Container {
+		limits := corev1.ResourceList{"amd.com/gpu": *resource.NewQuantity(1, resource.DecimalSI)}
+		if priority != "" {
+			limits["amd.com/priority"] = resource.MustParse(priority)
+		}
+		return &corev1.Container{Name: "c1", Env: env, Resources: corev1.ResourceRequirements{Limits: limits}}
+	}
+	envOf := func(c *corev1.Container) []string {
+		var out []string
+		for _, e := range c.Env {
+			out = append(out, e.Name+"="+e.Value)
+		}
+		return out
+	}
+
+	for priority, want := range map[string]string{"0": "AMD_TASK_PRIORITY=0", "1": "AMD_TASK_PRIORITY=1", "7": "AMD_TASK_PRIORITY=7"} {
+		t.Run("priority "+priority+" becomes the env", func(t *testing.T) {
+			c := ctr(priority)
+			ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+			assert.NilError(t, err)
+			assert.Equal(t, true, ok)
+			assert.DeepEqual(t, []string{want}, envOf(c))
+		})
+	}
+
+	t.Run("an env the container sets is replaced, not duplicated", func(t *testing.T) {
+		c := ctr("1",
+			corev1.EnvVar{Name: "KEEP", Value: "x"},
+			corev1.EnvVar{Name: "AMD_TASK_PRIORITY", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+		)
+		_, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.DeepEqual(t, []string{"KEEP=x", "AMD_TASK_PRIORITY=1"}, envOf(c))
+		assert.Assert(t, c.Env[1].ValueFrom == nil)
+	})
+
+	t.Run("no priority resource leaves the env alone", func(t *testing.T) {
+		c := ctr("")
+		_, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, 0, len(c.Env))
+	})
+
+	t.Run("a priority alone does not claim a card", func(t *testing.T) {
+		c := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"amd.com/priority": *resource.NewQuantity(0, resource.DecimalSI),
+		}}}
+		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, false, ok)
+	})
+
+	for _, bad := range []string{"-1", "1500m", "3000000000"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			c := ctr(bad)
+			_, err := dev.MutateAdmission(c, &corev1.Pod{})
+			assert.ErrorContains(t, err, "must be an integer between 0 and")
+			assert.Equal(t, 0, len(c.Env))
+		})
+	}
+
+	t.Run("an unconfigured backend ignores the resource", func(t *testing.T) {
+		plain := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+		c := ctr("1")
+		_, err := plain.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, 0, len(c.Env))
+	})
+}
