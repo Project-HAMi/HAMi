@@ -912,3 +912,40 @@ func TestCheckHealth(t *testing.T) {
 		assert.Equal(t, true, health)
 	})
 }
+
+func TestMutateAdmissionRuntimeClass(t *testing.T) {
+	gpu := func() *corev1.Container {
+		return &corev1.Container{Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{"amd.com/gpu": resource.MustParse("1")},
+		}}
+	}
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", RuntimeClassName: "amd"})
+
+	t.Run("set when a GPU is requested", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		assert.Equal(t, "amd", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("a runtime class chosen by the user is kept", func(t *testing.T) {
+		own := "mine"
+		pod := &corev1.Pod{Spec: corev1.PodSpec{RuntimeClassName: &own}}
+		_, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, "mine", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("untouched without a GPU request", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(&corev1.Container{}, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, false, ok)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+	t.Run("untouched when not configured", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		_, err := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"}).MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+}
