@@ -613,10 +613,8 @@ devices:
   # the scheduler and the device plugin read. When device-config.content is set, it
   # replaces that file and those values no longer reach either component.
   nvidia:
-    # -- In the `mig` operating mode, let the device plugin adopt MIG instances it has no ownership record for when it starts.
-    # When false, such instances are left untouched. When true, each GPU instance with a compute instance becomes an idle HAMi instance
-    # that can be reused for new Pods or destroyed when it blocks a new placement, and on GPUs no Pod is using, GPU instances without a compute instance are destroyed.
-    # Enable it only when HAMi alone manages the MIG layout of the node.
+    # -- In the `mig` operating mode, let the device plugin adopt, when it starts, MIG instances HAMi has no record of creating, so it can reuse or destroy them.
+    # When false, they are left untouched. Enable it only when HAMi alone manages the MIG layout of the node.
     adoptExistingMIGInstances: false
     # -- MIG profiles HAMi may create on nodes whose device plugin runs in the `mig` operating mode.
     # Each entry has `models`, a list of GPU model names matched as substrings of the name NVML reports,
@@ -650,7 +648,7 @@ devices:
     # -- GPU memory in MiB assigned to each requested GPU when a container sets neither the `resourceMemoryName` nor the `resourceMemoryPercentageName` resource, or sets them to `0`.
     # `0` assigns the whole memory of the GPU. `memoryFactor` does not apply to this value. Must not be negative.
     defaultMemory: 0
-    # -- Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container requests GPU memory but not the `resourceCoreName` resource.
+    # -- Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container does not set the `resourceCoreName` resource.
     # `0` reserves no cores and sets no core limit.
     # When the admission webhook is enabled, a container that requests GPUs without a memory amount, or with 100% of the memory, gets 100 instead,
     # which requests each GPU exclusively when `deviceCoreScaling` is 1.
