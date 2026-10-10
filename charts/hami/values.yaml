@@ -378,7 +378,8 @@ devicePlugin:
     resyncInterval: "5m"
     extraArgs:
       - -v=4
-    extraEnvs: {}
+    # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
+    extraEnvs: []
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -473,7 +474,8 @@ devicePlugin:
 
   extraArgs:
     - -v=4
-  extraEnvs: {}
+  # -- Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom.
+  extraEnvs: []
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992

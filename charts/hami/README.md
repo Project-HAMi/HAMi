@@ -333,7 +333,6 @@ listener is started.
 | `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
-| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### vGPU Cache Garbage Collection
 
@@ -383,7 +382,6 @@ or the five-failure limit for directory deletion.
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
-| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
 | `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
@@ -533,6 +531,8 @@ More values will be added in follow-up PRs.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
+| devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
