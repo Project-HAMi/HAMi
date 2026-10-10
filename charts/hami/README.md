@@ -539,6 +539,17 @@ More values will be added in follow-up PRs.
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| fullnameOverride | string | `""` | Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters. |
+| global.annotations | object | `{}` | Annotations added to every resource the chart creates. |
+| global.gpuHookPath | string | `"/usr/local"` | Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin. |
+| global.imagePullSecrets | list | `[]` | Global Docker image pull secrets added to every HAMi pod. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`. |
+| global.imageRegistry | string | `""` | Global Docker image registry prepended to every HAMi image. It overrides the per-component `*.image.registry` settings. Leave empty to keep the per-component registries. |
+| global.imageTag | string | `"v2.10.0"` | Tag applied to every HAMi image when the per-component `*.image.tag` is empty. A non-empty per-component tag takes precedence over this value. |
+| global.labels | object | `{}` | Labels added to every resource the chart creates (Deployments, DaemonSets, Services, etc.). |
+| global.managedNodeSelector | object | `{"usage":"gpu"}` | Node labels the scheduler manages when `global.managedNodeSelectorEnable` is true. Each key/value pair becomes a `NODE_SELECTOR_<KEY>` environment variable on the scheduler pod (key upper-cased, with `-`, `/` and `.` replaced by `_`), e.g. `usage: gpu` becomes `NODE_SELECTOR_USAGE=gpu`. |
+| global.managedNodeSelectorEnable | bool | `false` | When true, pass `global.managedNodeSelector` to the scheduler as `NODE_SELECTOR_*` environment variables so it only manages nodes matching those labels. |
+| nameOverride | string | `""` | Replaces the chart name in resource names (`<release>-<name>`). Ignored when `fullnameOverride` is set. |
+| namespaceOverride | string | `""` | Installs the chart into this namespace instead of the release namespace. Useful for multi-namespace deployments in combined charts. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
 | openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
 
