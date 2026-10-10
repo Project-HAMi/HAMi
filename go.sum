@@ -10,6 +10,8 @@ github.com/NVIDIA/go-nvml v0.13.3-1 h1:P76U2h88OZSiMtdhRsJjSF5DXyXUqHIXKeDicVAaa
 github.com/NVIDIA/go-nvml v0.13.3-1/go.mod h1:ahi2psRYoa+wYUBIrZPRO+wJs9lcvMhxSSkjjvsJJNQ=
 github.com/NVIDIA/go-nvml v0.13.4-0 h1:o3jp9u2x1R9ShFE3v+Aesp55XOSIQFMJz/VGNUcJaNE=
 github.com/NVIDIA/go-nvml v0.13.4-0/go.mod h1:id63qwpoDWpFXwnwM6psDCSqW4BmNu6mWpr4YeQtPGo=
+github.com/NVIDIA/go-nvml v0.13.4-1 h1:2E7RdOLBxHGSXq8sUw+c5Y0aWmFT7Cj+ZdjYulgUH18=
+github.com/NVIDIA/go-nvml v0.13.4-1/go.mod h1:id63qwpoDWpFXwnwM6psDCSqW4BmNu6mWpr4YeQtPGo=
 github.com/NVIDIA/k8s-device-plugin v0.20.0 h1:0Ssf0Rvv8kpLmE4Kf1wxHwhYWXJUo65EdPRSpFvo2X0=
 github.com/NVIDIA/k8s-device-plugin v0.20.0/go.mod h1:70L9RYkLcWG1/IzkA+d3gmRZKw0YljND+/IDMuoJ6BA=
 github.com/NVIDIA/k8s-device-plugin v0.20.1 h1:oDrpF646QFBTQVGLzUtJKC78NTOBE4snmzDJOTY+N6E=
