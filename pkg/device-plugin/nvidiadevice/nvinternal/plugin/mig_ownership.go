@@ -27,7 +27,7 @@ import (
 
 const (
 	dynamicMIGOwnershipVersion    = 1
-	dynamicMIGOwnershipRoot       = "/var/run/cdi/hami-dynamic-mig-state"
+	dynamicMIGOwnershipRoot       = "/var/run/hami/dynamic-mig-state"
 	dynamicMIGOwnershipFilePrefix = "hami-owned-"
 )
 

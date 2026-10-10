@@ -441,7 +441,8 @@ func TestMIGPlacementPressureReclaimsOnlyBlockingIdleInstances(t *testing.T) {
 			return nvml.GpuInstanceProfileInfo{}, nvml.SUCCESS
 		},
 		GetGpuInstancePossiblePlacementsFunc: func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstancePlacement, nvml.Return) {
-			return []nvml.GpuInstancePlacement{target}, nvml.SUCCESS
+			t.Fatal("allocation must not require the requested placement to appear free before reclaiming idle instances")
+			return nil, nvml.ERROR_UNKNOWN
 		},
 		CreateGpuInstanceWithPlacementFunc: func(*nvml.GpuInstanceProfileInfo, *nvml.GpuInstancePlacement) (nvml.GpuInstance, nvml.Return) {
 			return newGI, nvml.SUCCESS
@@ -539,8 +540,7 @@ func TestMIGErrorAtExactKeyRetriesReclamation(t *testing.T) {
 	require.Len(t, ci.DestroyCalls(), 1)
 }
 
-func TestMIGInvalidPlacementDoesNotReclaimIdleInstance(t *testing.T) {
-	valid := nvml.GpuInstancePlacement{Start: 4, Size: 2}
+func TestMIGInvalidPlacementFailsAtNVMLWithoutReclaimingUnrelatedIdle(t *testing.T) {
 	requested := nvml.GpuInstancePlacement{Start: 0, Size: 2}
 	dev := &nvmlmock.Device{
 		GetMigModeFunc: func() (int, int, nvml.Return) {
@@ -549,20 +549,21 @@ func TestMIGInvalidPlacementDoesNotReclaimIdleInstance(t *testing.T) {
 		GetGpuInstanceProfileInfoFunc: func(int) (nvml.GpuInstanceProfileInfo, nvml.Return) {
 			return nvml.GpuInstanceProfileInfo{}, nvml.SUCCESS
 		},
-		GetGpuInstancePossiblePlacementsFunc: func(*nvml.GpuInstanceProfileInfo) ([]nvml.GpuInstancePlacement, nvml.Return) {
-			return []nvml.GpuInstancePlacement{valid}, nvml.SUCCESS
+		CreateGpuInstanceWithPlacementFunc: func(*nvml.GpuInstanceProfileInfo, *nvml.GpuInstancePlacement) (nvml.GpuInstance, nvml.Return) {
+			return nil, nvml.ERROR_INVALID_ARGUMENT
 		},
 	}
 	manager := initializedLazyMIGManager(t, dev)
-	idlePlacement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+	idlePlacement := nvml.GpuInstancePlacement{Start: 4, Size: 1}
 	key := allocationKey(0, "1g.5gb", idlePlacement)
 	manager.byAllocation[key] = &migInstance{Profile: key.Profile, Placement: idlePlacement, MigUUID: "MIG-idle", State: migInstanceIdle}
 	manager.byAllocationMigUUID["MIG-idle"] = key
 
 	_, err := manager.EnsureAllocation(0, "2g.10gb", requested)
-	require.ErrorContains(t, err, "invalid placement")
+	require.ErrorContains(t, err, "create GI")
 	require.Contains(t, manager.byAllocationMigUUID, "MIG-idle")
 	require.Equal(t, migInstanceIdle, manager.byAllocation[key].State)
+	require.Len(t, dev.CreateGpuInstanceWithPlacementCalls(), 1)
 }
 
 func TestMIGPlacementPressureNeverReclaimsActiveInstance(t *testing.T) {

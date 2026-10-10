@@ -611,20 +611,6 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	if ret != nvml.SUCCESS {
 		return result, fmt.Errorf("get GI profile %s: %s", profile, nvml.ErrorString(ret))
 	}
-	possible, ret := dev.GetGpuInstancePossiblePlacements(&giInfo)
-	if ret != nvml.SUCCESS {
-		return result, fmt.Errorf("get placements for %s: %s", profile, nvml.ErrorString(ret))
-	}
-	valid := false
-	for _, candidate := range possible {
-		if candidate == placement {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return result, fmt.Errorf("scheduler selected invalid placement %+v for profile %s", placement, profile)
-	}
 	reclaimed, err := m.reclaimBlockingIdle(gpuIndex, placement)
 	result.Reclaimed = reclaimed
 	if err != nil {

@@ -6,7 +6,7 @@ HAMi keeps dynamically created NVIDIA MIG instances available after a Pod releas
 
 Dynamic MIG mode requires HAMi to be the only controller that creates or destroys MIG instances on GPUs managed by HAMi. Running another MIG lifecycle controller on the same GPU is unsupported because HAMi cannot safely distinguish or coordinate external layout changes.
 
-HAMi writes one ownership record per dynamic MIG instance under `/var/run/cdi/hami-dynamic-mig-state`. The record remains while the instance is active or idle and is removed only after permanent destruction. This record is independent of the container injection strategy, so restart recovery also works in legacy non-CDI mode.
+HAMi writes one ownership record per dynamic MIG instance under `/var/run/hami/dynamic-mig-state`. The chart mounts this directory from the node so records survive device-plugin restarts. The record remains while the instance is active or idle and is removed only after permanent destruction. It is separate from CDI and also works in legacy non-CDI mode.
 
 At startup, HAMi validates each ownership record against the live MIG UUID, parent GPU, profile, placement, GI ID, and CI ID before restoring the instance as idle. Existing GI/CI pairs without a valid HAMi ownership record are preserved but are not reused or reclaimed. Operators may set `devices.nvidia.adoptExistingMIGInstances=true` only when HAMi exclusively owns the complete MIG layout on the node. This explicit opt-in claims unmarked GI/CI pairs and creates ownership records for them.
 
