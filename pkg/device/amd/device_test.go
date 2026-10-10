@@ -872,3 +872,43 @@ func TestDevices_Fit_ResourceQuota(t *testing.T) {
 		assert.Equal(t, true, ok, reason)
 	})
 }
+
+func TestCheckHealth(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	node := func(capacity, allocatable string) *corev1.Node {
+		n := &corev1.Node{}
+		if capacity != "" {
+			n.Status.Capacity = corev1.ResourceList{"amd.com/gpu": resource.MustParse(capacity)}
+		}
+		if allocatable != "" {
+			n.Status.Allocatable = corev1.ResourceList{"amd.com/gpu": resource.MustParse(allocatable)}
+		}
+		return n
+	}
+
+	t.Run("allocatable GPUs are healthy", func(t *testing.T) {
+		health, update := dev.CheckHealth(AMDDevice, node("4", "4"))
+		assert.Equal(t, true, health)
+		assert.Equal(t, true, update)
+	})
+	t.Run("every GPU unhealthy: capacity stays, allocatable drops to zero", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "0"))
+		assert.Equal(t, false, health)
+	})
+	t.Run("allocatable missing is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", ""))
+		assert.Equal(t, false, health)
+	})
+	t.Run("a node without the resource is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, false, health)
+	})
+	t.Run("part of the GPUs unhealthy keeps the node", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "2"))
+		assert.Equal(t, true, health)
+	})
+	t.Run("no resource name configured is always healthy", func(t *testing.T) {
+		health, _ := InitAMDGPUDevice(AMDConfig{}).CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, true, health)
+	})
+}
