@@ -1,24 +1,28 @@
-## @section Global configuration
-## @param global.imageRegistry Global Docker image registry
-## @param global.imagePullSecrets Global Docker image pull secrets
+# Global settings shared by every HAMi component.
 global:
-  ## @param global.imageRegistry Global Docker image registry
+  # -- Global Docker image registry prepended to every HAMi image. It overrides the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
-  ## E.g.
-  ## imagePullSecrets:
-  ##   - myRegistryKeySecretName
-  ## @param global.imagePullSecrets Global Docker image pull secrets
+  # -- Global Docker image pull secrets added to every HAMi pod. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
+  # -- Tag applied to every HAMi image when the per-component `*.image.tag` is empty. A non-empty per-component tag takes precedence over this value.
   imageTag: "v2.10.0"
+  # -- Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin.
   gpuHookPath: /usr/local
+  # -- Labels added to every resource the chart creates (Deployments, DaemonSets, Services, etc.).
   labels: {}
+  # -- Annotations added to every resource the chart creates.
   annotations: {}
+  # -- When true, pass `global.managedNodeSelector` to the scheduler as `NODE_SELECTOR_*` environment variables so it only manages nodes matching those labels.
   managedNodeSelectorEnable: false
+  # -- Node labels the scheduler manages when `global.managedNodeSelectorEnable` is true. Each key/value pair becomes a `NODE_SELECTOR_<KEY>` environment variable on the scheduler pod (key upper-cased, with `-`, `/` and `.` replaced by `_`), e.g. `usage: gpu` becomes `NODE_SELECTOR_USAGE=gpu`.
   managedNodeSelector:
     usage: "gpu"
 
+# -- Replaces the chart name in resource names (`<release>-<name>`). Ignored when `fullnameOverride` is set.
 nameOverride: ""
+# -- Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters.
 fullnameOverride: ""
+# -- Installs the chart into this namespace instead of the release namespace. Useful for multi-namespace deployments in combined charts.
 namespaceOverride: ""
 
 platform:
