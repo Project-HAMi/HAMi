@@ -218,6 +218,8 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            - name: dynamic-mig-state
+              mountPath: /var/run/hami/dynamic-mig-state
             {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
@@ -372,6 +374,10 @@ spec:
         - name: cdi-root
           hostPath:
             path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: dynamic-mig-state
+          hostPath:
+            path: /var/run/hami/dynamic-mig-state
             type: DirectoryOrCreate
         {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
         - name: hostpid-broker

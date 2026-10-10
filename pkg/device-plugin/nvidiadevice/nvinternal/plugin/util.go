@@ -348,6 +348,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		return nil, fmt.Errorf("container %s has %d MIG reservations, requested %d devices", containerName, len(containerAllocations), len(c))
 	}
 	createdMigUUIDs := make([]string, 0, len(c))
+	reusedMigUUIDs := make([]string, 0, len(c))
 	allocationCompleted := false
 	defer func() {
 		if allocationCompleted {
@@ -356,17 +357,12 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		for i := len(createdMigUUIDs) - 1; i >= 0; i-- {
 			if err := nv.migMgr.Release(createdMigUUIDs[i]); err != nil {
 				klog.ErrorS(err, "failed to roll back partial MIG allocation", "uuid", createdMigUUIDs[i])
-			} else if nv.deviceListStrategies.AnyCDIEnabled() {
-				if handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface); ok {
-					if err := handler.RemoveDynamicMIGDevice(createdMigUUIDs[i]); err != nil {
-						klog.ErrorS(err, "failed to remove rolled-back MIG CDI entry", "uuid", createdMigUUIDs[i])
-						if nv.pendingCDIRemovals == nil {
-							nv.pendingCDIRemovals = make(map[string]struct{})
-						}
-						nv.pendingCDIRemovals[createdMigUUIDs[i]] = struct{}{}
-					}
-				}
+			} else {
+				nv.removeReclaimedMIGArtifacts([]string{createdMigUUIDs[i]})
 			}
+		}
+		for _, uuid := range reusedMigUUIDs {
+			nv.migMgr.MarkIdle(uuid)
 		}
 	}()
 	out := make([]string, 0, len(c))
@@ -378,20 +374,27 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if !ok {
 			return nil, fmt.Errorf("resolve parent GPU %s", reservation.GPUUUID)
 		}
-		migUUID, created, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+		placement := nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size}
+		result, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, placement)
+		nv.removeReclaimedMIGArtifacts(result.Reclaimed)
 		if err != nil {
 			return nil, err
 		}
-		if created {
+		migUUID := result.MigUUID
+		if result.Created {
 			createdMigUUIDs = append(createdMigUUIDs, migUUID)
+		} else if result.Reused {
+			reusedMigUUIDs = append(reusedMigUUIDs, migUUID)
+		}
+		if err := nv.persistMIGOwnership(allocationKey(gpuIndex, reservation.Profile, placement)); err != nil {
+			return nil, err
 		}
 		if nv.deviceListStrategies.AnyCDIEnabled() {
 			handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
 			if !ok {
 				return nil, fmt.Errorf("dynamic MIG CDI handler is unavailable")
 			}
-			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile,
-				nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile, placement)
 			if err != nil {
 				return nil, err
 			}
@@ -403,6 +406,35 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	}
 	allocationCompleted = true
 	return out, nil
+}
+
+func (nv *NvidiaDevicePlugin) removeReclaimedMIGArtifacts(uuids []string) {
+	if len(uuids) == 0 {
+		return
+	}
+	nv.removeMIGOwnership(uuids)
+	if !nv.deviceListStrategies.AnyCDIEnabled() {
+		return
+	}
+	if nv.pendingCDIRemovals == nil {
+		nv.pendingCDIRemovals = make(map[string]struct{})
+	}
+	for _, uuid := range uuids {
+		nv.pendingCDIRemovals[uuid] = struct{}{}
+	}
+	handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
+	if !ok {
+		klog.ErrorS(nil, "dynamic MIG CDI handler is unavailable during reclamation")
+		return
+	}
+	for _, uuid := range uuids {
+		if err := handler.RemoveDynamicMIGDevice(uuid); err != nil {
+			klog.ErrorS(err, "failed to remove reclaimed MIG CDI entry", "uuid", uuid)
+			nv.pendingCDIRemovals[uuid] = struct{}{}
+			continue
+		}
+		delete(nv.pendingCDIRemovals, uuid)
+	}
 }
 
 func (nv *NvidiaDevicePlugin) dynamicMIGRecord(gpuIndex int, parentUUID, profile string, placement nvml.GpuInstancePlacement) (cdi.DynamicMIGDevice, error) {

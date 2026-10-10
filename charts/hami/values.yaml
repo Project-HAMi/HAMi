@@ -609,6 +609,8 @@ devices:
     # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
   nvidia:
+    # Adopt pre-existing GI/CI pairs only when HAMi exclusively owns the node's MIG layout.
+    adoptExistingMIGInstances: false
     migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]

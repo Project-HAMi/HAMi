@@ -33,6 +33,7 @@ data:
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devices.nvidia.runtimeClassName }}"
+      adoptExistingMIGInstances: {{ .Values.devices.nvidia.adoptExistingMIGInstances | default false }}
       migProfileAllowlist:
 {{ toYaml .Values.devices.nvidia.migProfileAllowlist | indent 8 }}
     cambricon:
