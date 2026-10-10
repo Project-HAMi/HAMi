@@ -682,11 +682,11 @@ devices:
     # In the `mig` operating mode, the number of MIG instances a GPU can hold limits sharing instead.
     # A device-plugin `nodeconfig` entry can override it per node with `devicesplitcount`.
     deviceSplitCount: 10
-    # -- Factor applied to the memory each GPU reports to the scheduler. Accepts decimals, such as `1.5`.
+    # -- (float) Factor applied to the memory each GPU reports to the scheduler. Accepts decimals, such as `1.5`.
     # A value above `1` lets the memory requests on one GPU add up to more than its physical memory, and the device plugin sets `CUDA_OVERSUBSCRIBE=true` in those containers.
     # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicememoryscaling`.
     deviceMemoryScaling: 1
-    # -- Factor applied to the cores each GPU reports to the scheduler, which is `100` times this value. Accepts decimals, such as `1.5`.
+    # -- (float) Factor applied to the cores each GPU reports to the scheduler, which is `100` times this value. Accepts decimals, such as `1.5`.
     # A value above `1` lets the `resourceCoreName` requests on one GPU add up to more than 100.
     # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicecorescaling`.
     deviceCoreScaling: 1
