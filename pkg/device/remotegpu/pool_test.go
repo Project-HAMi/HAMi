@@ -79,12 +79,20 @@ func lupineNode(name, ip, portLabel string, gpus []*device.DeviceInfo) corev1.No
 		},
 		Status: corev1.NodeStatus{
 			Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}},
+			Conditions: []corev1.NodeCondition{{
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionTrue,
+			}},
 		},
 	}
 	if gpus != nil {
 		n.Annotations[nvidiaRegisterAnnos] = device.MarshalNodeDevices(gpus)
 	}
 	return n
+}
+
+func setNodeReady(n *corev1.Node, status corev1.ConditionStatus) {
+	n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
 }
 
 func gpu(uuid string, mem int32) *device.DeviceInfo {
@@ -133,6 +141,88 @@ func TestPool_SkipsUnusableNodes(t *testing.T) {
 	devices := p.snapshot(context.Background())
 	assert.Equal(t, len(devices), 1)
 	assert.Equal(t, devices[0].ID, "gpu-ok/GPU-9")
+}
+
+func TestPool_ExcludesNotReadyAndUnknownServersFromNewAllocations(t *testing.T) {
+	ready := lupineNode("gpu-ready", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})
+	notReady := lupineNode("gpu-not-ready", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-2", 40000)})
+	unknown := lupineNode("gpu-unknown", "10.0.0.7", "", []*device.DeviceInfo{gpu("GPU-3", 40000)})
+	setNodeReady(&notReady, corev1.ConditionFalse)
+	setNodeReady(&unknown, corev1.ConditionUnknown)
+	stubFleet(t, []corev1.Node{ready, notReady, unknown}, nil, nil)
+
+	p := newPool(DefaultLupinePort)
+	devices := p.snapshot(context.Background())
+	assert.Equal(t, len(devices), 1)
+	assert.Equal(t, devices[0].ID, "gpu-ready/GPU-1")
+	_, ok := p.endpoint("gpu-not-ready")
+	assert.Assert(t, !ok, "a NotReady server must not receive new allocations")
+	_, ok = p.endpoint("gpu-unknown")
+	assert.Assert(t, !ok, "an Unknown server must not receive new allocations")
+}
+
+func TestPool_RecoversAReadyServerWithoutReleasingItsAllocation(t *testing.T) {
+	allocation := device.EncodePodSingleDevice(device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
+	})
+	pods := []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "live", Annotations: map[string]string{AllocatedAnnos: allocation}},
+		Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+	}}
+	notReady := lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})
+	setNodeReady(&notReady, corev1.ConditionFalse)
+	stubFleet(t, []corev1.Node{notReady}, pods, nil)
+
+	p := newPool(DefaultLupinePort)
+	assert.Equal(t, len(p.snapshot(context.Background())), 0)
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "a NotReady server must retain its live allocation")
+
+	recovered := lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})
+	stubFleet(t, []corev1.Node{recovered}, pods, nil)
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	assert.Equal(t, len(p.snapshot(context.Background())), 1)
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "recovery must not free a live allocation")
+}
+
+func TestPool_KeepsServerReportedUsageAcrossNotReadyRecovery(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+	}
+	phase := "reported-busy"
+	prevNodes, prevPods, prevBusy := listLupineNodes, listPods, fetchBusyDevices
+	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nil }
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
+	fetchBusyDevices = func(_ context.Context, _ string) (map[string]struct{}, error) {
+		switch phase {
+		case "reported-busy":
+			return map[string]struct{}{"GPU-1": {}}, nil
+		case "metrics-error":
+			return nil, errNoServerMetrics
+		default:
+			return map[string]struct{}{}, nil
+		}
+	}
+	t.Cleanup(func() { listLupineNodes, listPods, fetchBusyDevices = prevNodes, prevPods, prevBusy })
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "initial server report must reserve the GPU")
+
+	setNodeReady(&nodes[0], corev1.ConditionFalse)
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	assert.Equal(t, len(p.snapshot(context.Background())), 0)
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "NotReady must retain the last server-reported usage")
+
+	setNodeReady(&nodes[0], corev1.ConditionTrue)
+	phase = "metrics-error"
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	assert.Assert(t, p.reserved("gpu-a/GPU-1"), "a metrics failure after recovery must retain usage")
+
+	phase = "reported-free"
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	assert.Assert(t, !p.reserved("gpu-a/GPU-1"), "a successful empty report must release stale usage")
 }
 
 // An invalid port label must not drop the server; it falls back to the default.
