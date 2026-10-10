@@ -100,6 +100,7 @@ data:
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
+      vnpuDeviceSplitCount: {{ .Values.devices.ascend.vnpuDeviceSplitCount | int64 }}
       hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
       enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" | quote }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}

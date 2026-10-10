@@ -534,6 +534,7 @@ More values will be added in follow-up PRs.
 |-----|------|---------|-------------|
 | devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
+| devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
