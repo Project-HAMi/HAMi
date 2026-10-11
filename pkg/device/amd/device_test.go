@@ -1222,7 +1222,7 @@ func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
 	t.Run("numa-bind searches each NUMA node on its own", func(t *testing.T) {
 		var devices []*device.DeviceUsage
 		var candidates device.ContainerDevices
-		for i := 0; i < 40; i++ {
+		for i := range 40 {
 			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("n-%d", i), Numa: i % 2, CustomInfo: map[string]any{"pciBDF": bdf(i)}})
 			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("n-%d", i)})
 		}
@@ -1242,7 +1242,7 @@ func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
 		var devices []*device.DeviceUsage
 		var candidates device.ContainerDevices
 		// NUMA 0 holds 6 unlinked GPUs, NUMA 1 holds an XGMI quad and 4 loose ones
-		for i := 0; i < 14; i++ {
+		for i := range 14 {
 			numa := 0
 			info := map[string]any{"pciBDF": bdf(i)}
 			if i >= 6 {

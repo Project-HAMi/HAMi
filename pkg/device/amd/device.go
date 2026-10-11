@@ -608,7 +608,7 @@ func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.Cont
 		for _, c := range candidates {
 			numa := -1
 			if d := byID[c.UUID]; d != nil {
-				numa = int(d.Numa)
+				numa = d.Numa
 			}
 			g, ok := index[numa]
 			if !ok {
