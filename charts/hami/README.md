@@ -144,15 +144,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 ## Resource Name Configuration
 
-### NVIDIA GPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.nvidia.resourceCountName` | GPU resource name | `"nvidia.com/gpu"` |
-| `devices.nvidia.resourceMemoryName` | GPU memory resource name | `"nvidia.com/gpumem"` |
-| `devices.nvidia.resourceMemoryPercentageName` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
-| `devices.nvidia.resourceCoreName` | GPU core resource name | `"nvidia.com/gpucores"` |
-| `devices.nvidia.resourcePriorityName` | GPU priority resource name | `"nvidia.com/priority"` |
-
 ### Cambricon MLU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -370,13 +361,7 @@ or the five-failure limit for directory deletion.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.nvidia.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
-| `devices.nvidia.deviceMemoryScaling` | Device memory scaling ratio | `1` |
-| `devices.nvidia.deviceCoreScaling` | Device core scaling ratio | `1` |
-| `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
-| `devices.nvidia.createRuntimeClass` | Create the NVIDIA RuntimeClass named by `devices.nvidia.runtimeClassName` when the device plugin is enabled | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
-| `devices.nvidia.adoptExistingMIGInstances` | Adopt pre-existing MIG GI/CI pairs for lazy reuse. Enable only when HAMi exclusively manages the node's MIG layout | `false` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |
@@ -439,12 +424,6 @@ host-installed drivers, or appends the GPU Operator path suffix
 | `devices.mthreads.enabled` | Whether to enable | `true` |
 | `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
 | `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
-
-### NVIDIA
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.nvidia.gpuCorePolicy` | GPU core policy | `default` |
-| `devices.nvidia.libCudaLogLevel` | CUDA library log level | `1` |
 
 ### Huawei Ascend
 | Parameter | Description | Default Value |
