@@ -1343,9 +1343,19 @@ func TestGenerateResourceRequestsDefaults(t *testing.T) {
 	assert.Equal(t, int32(0), got.Memreq)
 	assert.Equal(t, int32(50), got.MemPercentagereq)
 
+	// a memory request without a limit is read, and an explicit 0 keeps the whole GPU
+	r, err := dev.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{"amd.com/gpu": q(1)}, Requests: corev1.ResourceList{"amd.com/gpumem": q(2048)}}})
+	assert.NilError(t, err)
+	assert.Equal(t, int32(2048), r.Memreq)
+	got = req(corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem": q(0)})
+	assert.Equal(t, int32(0), got.Memreq)
+	got = req(corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem-percentage": q(0)})
+	assert.Equal(t, int32(0), got.Memreq)
+
 	// no defaults configured: the whole GPU, all cores
 	plain := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem", ResourceCoreName: "amd.com/gpucores"})
-	got, err := plain.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{"amd.com/gpu": q(1)}}})
+	got, err = plain.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{"amd.com/gpu": q(1)}}})
 	assert.NilError(t, err)
 	assert.Equal(t, int32(0), got.Memreq)
 	assert.Equal(t, int32(100), got.Coresreq)

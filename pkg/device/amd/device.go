@@ -142,6 +142,15 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 // memoryPercentage returns the requested share of device memory, 0 when unset.
+func (dev *AMDDevices) hasResource(ctr *corev1.Container, name string) bool {
+	if name == "" {
+		return false
+	}
+	_, inLimits := ctr.Resources.Limits[corev1.ResourceName(name)]
+	_, inRequests := ctr.Resources.Requests[corev1.ResourceName(name)]
+	return inLimits || inRequests
+}
+
 func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
 	if dev.resourceMemoryPercentageName == "" {
 		return 0, nil
@@ -320,6 +329,9 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			}
 			memnum := int32(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
+			if !memOK {
+				mem, memOK = ctr.Resources.Requests[amdResourceMemory]
+			}
 			if memOK {
 				memnums, ok := mem.AsInt64()
 				if !ok || memnums < 0 || memnums > math.MaxInt32 {
@@ -335,7 +347,8 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: err.Error()}
 			}
 
-			if memnum == 0 && memPercentage == 0 && dev.defaultMemory > 0 {
+			// the default memory applies only when the container names no memory at all, so an explicit 0 stays a whole GPU
+			if !memOK && !dev.hasResource(ctr, dev.resourceMemoryPercentageName) && dev.defaultMemory > 0 {
 				memnum = dev.defaultMemory
 			}
 
