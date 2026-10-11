@@ -10,6 +10,7 @@ spec:
       image: rocm/dev-ubuntu-24.04:7.2.4
       command: ["bash", "-c", "sleep infinity"]
       securityContext:
+        # runs as the image's user (root) on purpose: GPU device access needs the node's video and render group ids, which differ per node. For non-root add runAsUser and supplementalGroups for those groups.
         allowPrivilegeEscalation: false
       resources:
         limits:

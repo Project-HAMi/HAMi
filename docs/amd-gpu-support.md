@@ -21,6 +21,7 @@ Prerequisites and limits of the memory limit:
 - The hook needs glibc 2.34 or newer in the workload image. On musl, statically linked or older-glibc images it is not loaded and the pod runs without the in-process cap; the plugin's `dp.muslFailClosed.enabled` setting (off by default, experimental) refuses such a pod instead.
 - The kernel cap needs cgroup v2 with the `dmem` controller (kernel 6.14 or newer) and the systemd cgroup driver; otherwise only the hook enforces the limit.
 - The hook works inside the process, so a process that drops `LD_AUDIT` can bypass it. A whole-GPU request gets neither the hook nor the `dmem` cap.
+- The example pods run as the image's default user (root) with privilege escalation off. A non-root pod also needs `runAsUser` and `supplementalGroups` for the `video` and `render` groups of the node, whose ids differ per node.
 - Use an amd-device-plugin release from the same chart version as the image; a chart from `main` needs an image built from `main`.
 
 ### Run AMD jobs
