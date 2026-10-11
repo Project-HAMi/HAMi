@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: amd-gpu-cores
+spec:
+  containers:
+    - name: rocm
+      image: rocm/dev-ubuntu-24.04:7.2.4
+      command: ["bash", "-c", "sleep infinity"]
+      resources:
+        limits:
+          amd.com/gpu: 1
+          amd.com/gpumem: 4096
+          amd.com/gpucores: 25 # percent of the GPU's compute units, 1-100; RDNA GPUs round up to whole WGPs (2 CUs)

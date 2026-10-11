@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: amd-gpu-uuid-to-use
+  annotations:
+    amd.com/use-gpu-uuid: "<GPU UUID>" # run only on these GPUs, comma separated; the UUIDs are in the node annotation hami.io/node-amd-register
+spec:
+  containers:
+    - name: rocm
+      image: rocm/dev-ubuntu-24.04:7.2.4
+      command: ["bash", "-c", "sleep infinity"]
+      resources:
+        limits:
+          amd.com/gpu: 1
+          amd.com/gpumem: 4096
