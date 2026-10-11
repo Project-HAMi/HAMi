@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -1155,5 +1156,116 @@ func TestFitTopologyAware(t *testing.T) {
 		ok, got, reason := dev.Fit(build(sameNuma, true), req(1), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, true, ok, reason)
 		assert.Equal(t, 1, len(got[AMDDevice]))
+	})
+}
+
+func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem", ResourceCoreName: "amd.com/gpucores"})
+	original := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = original })
+
+	bdf := func(i int) string { return fmt.Sprintf("0000:%02x:00.0", i+0x10) }
+	// Eight GPUs in two XGMI quads, {0..3} and {4..7}, listed interleaved.
+	gpus := func() []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, i := range []int{0, 4, 1, 5, 2, 6, 3, 7} {
+			var peers []any
+			for j := i / 4 * 4; j < i/4*4+4; j++ {
+				if j != i {
+					peers = append(peers, bdf(j))
+				}
+			}
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Type: AMDDevice, Health: true, CustomInfo: map[string]any{"pciBDF": bdf(i), "xgmiPeers": peers},
+			})
+		}
+		return out
+	}
+	const ns = "amd-topology-quota-ns"
+	setQuota := func(t *testing.T, mem string) {
+		q := &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: "amd-quota", Namespace: ns},
+			Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{"limits.amd.com/gpumem": resource.MustParse(mem)}},
+		}
+		qm := device.NewQuotaManager()
+		qm.AddQuota(q)
+		t.Cleanup(func() { qm.DelQuota(q) })
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Annotations: map[string]string{
+		util.GPUSchedulerPolicyAnnotationKey: string(util.GPUSchedulerPolicyTopology),
+	}}}
+	req := device.ContainerDeviceRequest{Nums: 4, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+
+	t.Run("a quota that covers the request does not cut the candidates", func(t *testing.T) {
+		setQuota(t, "4000")
+		ok, got, reason := dev.Fit(gpus(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		quad := -1
+		for _, c := range got[AMDDevice] {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "dev-%d", &i)
+			if quad < 0 {
+				quad = i / 4
+			}
+			assert.Equal(t, quad, i/4, "the group is one XGMI quad, got %v", got[AMDDevice])
+		}
+	})
+	t.Run("the chosen group as a whole must fit the quota", func(t *testing.T) {
+		setQuota(t, "3000")
+		ok, _, reason := dev.Fit(gpus(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.ResourceQuotaNotFit), reason)
+	})
+
+	t.Run("numa-bind searches each NUMA node on its own", func(t *testing.T) {
+		var devices []*device.DeviceUsage
+		var candidates device.ContainerDevices
+		for i := 0; i < 40; i++ {
+			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("n-%d", i), Numa: i % 2, CustomInfo: map[string]any{"pciBDF": bdf(i)}})
+			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("n-%d", i)})
+		}
+		start := time.Now()
+		got, ok := bestLinkedCombination(devices, candidates, 8, true)
+		assert.Equal(t, true, ok)
+		assert.Assert(t, time.Since(start) < time.Second, "40 candidates must not be searched exhaustively")
+		numa := map[int]bool{}
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "n-%d", &i)
+			numa[i%2] = true
+		}
+		assert.Equal(t, 1, len(numa), "every pick sits on one NUMA node")
+	})
+	t.Run("numa-bind keeps the best linked group inside a NUMA node", func(t *testing.T) {
+		var devices []*device.DeviceUsage
+		var candidates device.ContainerDevices
+		// NUMA 0 holds 6 unlinked GPUs, NUMA 1 holds an XGMI quad and 4 loose ones
+		for i := 0; i < 14; i++ {
+			numa := 0
+			info := map[string]any{"pciBDF": bdf(i)}
+			if i >= 6 {
+				numa = 1
+				if i < 10 {
+					var peers []any
+					for j := 6; j < 10; j++ {
+						if j != i {
+							peers = append(peers, bdf(j))
+						}
+					}
+					info["xgmiPeers"] = peers
+				}
+			}
+			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("g-%d", i), Numa: numa, CustomInfo: info})
+			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("g-%d", i)})
+		}
+		got, ok := bestLinkedCombination(devices, candidates, 4, true)
+		assert.Equal(t, true, ok)
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "g-%d", &i)
+			assert.Assert(t, i >= 6 && i < 10, "picked %v", got)
+		}
 	})
 }
