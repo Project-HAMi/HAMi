@@ -3,12 +3,14 @@ kind: Pod
 metadata:
   name: amd-gpu-uuid-not-use
   annotations:
-    amd.com/nouse-gpu-uuid: "<GPU UUID>" # never run on these GPUs, comma separated
+    amd.com/nouse-gpu-uuid: "<GPU UUID>" # replace with comma-separated UUIDs from the node annotation hami.io/node-amd-register; never run on these GPUs
 spec:
   containers:
     - name: rocm
       image: rocm/dev-ubuntu-24.04:7.2.4
       command: ["bash", "-c", "sleep infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
         limits:
           amd.com/gpu: 1

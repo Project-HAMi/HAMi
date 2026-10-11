@@ -16,6 +16,13 @@ A pod that asks for no memory or cores gets the whole GPU.
 
 Memory limits are enforced by [amd-hami-core](https://github.com/Project-HAMi/amd-hami-core) (`libamvgpu`, injected by the plugin) and, where the node has the `dmem` cgroup controller and the systemd cgroup driver, by the kernel as well.
 
+Prerequisites and limits of the memory limit:
+
+- The hook needs glibc 2.34 or newer in the workload image. On musl, statically linked or older-glibc images it is not loaded and the pod runs without the in-process cap; the plugin's `dp.muslFailClosed.enabled` setting (off by default, experimental) refuses such a pod instead.
+- The kernel cap needs cgroup v2 with the `dmem` controller (kernel 6.14 or newer) and the systemd cgroup driver; otherwise only the hook enforces the limit.
+- The hook works inside the process, so a process that drops `LD_AUDIT` can bypass it. A whole-GPU request gets neither the hook nor the `dmem` cap.
+- Use an amd-device-plugin release from the same chart version as the image; a chart from `main` needs an image built from `main`.
+
 ### Run AMD jobs
 
 ```yaml

@@ -7,6 +7,8 @@ spec:
     - name: rocm
       image: rocm/dev-ubuntu-24.04:7.2.4
       command: ["bash", "-c", "sleep infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
         limits:
           amd.com/gpu: 1 # a whole GPU: all its compute units and all its memory
