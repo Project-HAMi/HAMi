@@ -45,6 +45,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
@@ -239,14 +240,14 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
-	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
 	if util.IsPodInTerminatedState(pod) {
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
+		return
+	}
+	assignedNodeName, ok := pod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -263,13 +264,16 @@ func (s *Scheduler) onAddPod(obj any) {
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
+		if pod.Spec.NodeName != "" {
+			s.recordAllocationDecodeFailureEvent(pod, pod.Spec.NodeName, err)
+		}
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "assignedNode", assignedNodeName, "nodeName", pod.Spec.NodeName)
 		return
 	}
 
 	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 
-	if s.podManager.AddPod(pod, nodeID, effectiveDevices) {
+	if s.podManager.AddPod(pod, assignedNodeName, effectiveDevices) {
 		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
 }
@@ -282,14 +286,17 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
-	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
-		return
-	}
-
 	if util.IsPodInTerminatedState(newPod) {
+		// Terminated update objects can omit annotations, but cached usage must
+		// still be removed to avoid leaving completed Pod allocations accounted.
 		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
 			s.quotaManager.RmUsage(newPod, pi.Devices)
 		}
+		return
+	}
+
+	assignedNodeName, ok := newPod.Annotations[util.AssignedNodeAnnotations]
+	if !ok {
 		return
 	}
 
@@ -322,7 +329,10 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
-			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
+			if newPod.Spec.NodeName != "" {
+				s.recordAllocationDecodeFailureEvent(newPod, newPod.Spec.NodeName, err)
+			}
+			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod), "assignedNode", assignedNodeName, "nodeName", newPod.Spec.NodeName)
 			return
 		}
 
@@ -501,6 +511,7 @@ func (s *Scheduler) Start() error {
 		return fmt.Errorf("failed to register resource quota event handler: %w", err)
 	}
 
+	s.addAllEventHandlers()
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
@@ -518,7 +529,6 @@ func (s *Scheduler) Start() error {
 		cache.WaitForCacheSync(s.stopCh, leaseEventHandlerRegistration.HasSynced)
 	}
 
-	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
 }
@@ -776,12 +786,12 @@ func numaBindingRequested(task *corev1.Pod) bool {
 	if task == nil {
 		return false
 	}
-	v, ok := task.Annotations[nvidia.NumaBind]
-	if !ok {
-		return false
+	for _, key := range []string{nvidia.NumaBind, amd.AMDNumaBind} {
+		if enforce, err := strconv.ParseBool(task.Annotations[key]); err == nil && enforce {
+			return true
+		}
 	}
-	enforce, err := strconv.ParseBool(v)
-	return err == nil && enforce
+	return false
 }
 
 // buildNodeUsage creates the mutable device-usage view used while scoring a task

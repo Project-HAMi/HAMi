@@ -129,7 +129,9 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 }
 
 // validateContainerAllocation rejects an allocation handing the container more
-// than its own resource limits ask for (issue #3041).
+// than its own resource limits ask for (issue #3041). A MIG slice is charged
+// its profile's capacity rather than the raw request, so there is nothing to
+// compare it against here.
 func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
 	if plugin.operatingMode == "mig" {
 		return nil
@@ -142,36 +144,7 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 	if err != nil {
 		return err
 	}
-	for _, each := range allocated {
-		limit, bounded := plugin.memoryLimitMB(req, each.UUID)
-		if bounded && each.Usedmem > limit {
-			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
-				ctr.Name, each.Usedmem, each.UUID, limit)
-		}
-		if req.Coresreq > 0 && each.Usedcores > req.Coresreq {
-			return fmt.Errorf("container %s is allocated %d%% of the cores on device %s but requests %d%%",
-				ctr.Name, each.Usedcores, each.UUID, req.Coresreq)
-		}
-	}
-	return nil
-}
-
-// memoryLimitMB returns the memory the request entitles the container to on the
-// named card, and whether the request bounds it at all.
-func (plugin *NvidiaDevicePlugin) memoryLimitMB(req device.ContainerDeviceRequest, uuid string) (int32, bool) {
-	// A percentage leaves Memreq at 0 unless both were asked for, in which case
-	// the scheduler sized the slice from the percentage as well.
-	if req.MemPercentagereq >= 1 && req.MemPercentagereq <= 100 {
-		total, ok := plugin.registeredMemoryMB(uuid)
-		if !ok {
-			return 0, false
-		}
-		return total * req.MemPercentagereq / 100, true
-	}
-	if req.Memreq > 0 {
-		return req.Memreq, true
-	}
-	return 0, false
+	return device.ValidateContainerAllocation(ctr.Name, req, allocated, plugin.registeredMemoryMB, device.CoresInRequestUnits)
 }
 
 // registeredMemoryMB returns the memory this plugin published for a card, which
@@ -375,6 +348,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		return nil, fmt.Errorf("container %s has %d MIG reservations, requested %d devices", containerName, len(containerAllocations), len(c))
 	}
 	createdMigUUIDs := make([]string, 0, len(c))
+	reusedMigUUIDs := make([]string, 0, len(c))
 	allocationCompleted := false
 	defer func() {
 		if allocationCompleted {
@@ -383,17 +357,12 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		for i := len(createdMigUUIDs) - 1; i >= 0; i-- {
 			if err := nv.migMgr.Release(createdMigUUIDs[i]); err != nil {
 				klog.ErrorS(err, "failed to roll back partial MIG allocation", "uuid", createdMigUUIDs[i])
-			} else if nv.deviceListStrategies.AnyCDIEnabled() {
-				if handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface); ok {
-					if err := handler.RemoveDynamicMIGDevice(createdMigUUIDs[i]); err != nil {
-						klog.ErrorS(err, "failed to remove rolled-back MIG CDI entry", "uuid", createdMigUUIDs[i])
-						if nv.pendingCDIRemovals == nil {
-							nv.pendingCDIRemovals = make(map[string]struct{})
-						}
-						nv.pendingCDIRemovals[createdMigUUIDs[i]] = struct{}{}
-					}
-				}
+			} else {
+				nv.removeReclaimedMIGArtifacts([]string{createdMigUUIDs[i]})
 			}
+		}
+		for _, uuid := range reusedMigUUIDs {
+			nv.migMgr.MarkIdle(uuid)
 		}
 	}()
 	out := make([]string, 0, len(c))
@@ -405,20 +374,27 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if !ok {
 			return nil, fmt.Errorf("resolve parent GPU %s", reservation.GPUUUID)
 		}
-		migUUID, created, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+		placement := nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size}
+		result, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, placement)
+		nv.removeReclaimedMIGArtifacts(result.Reclaimed)
 		if err != nil {
 			return nil, err
 		}
-		if created {
+		migUUID := result.MigUUID
+		if result.Created {
 			createdMigUUIDs = append(createdMigUUIDs, migUUID)
+		} else if result.Reused {
+			reusedMigUUIDs = append(reusedMigUUIDs, migUUID)
+		}
+		if err := nv.persistMIGOwnership(allocationKey(gpuIndex, reservation.Profile, placement)); err != nil {
+			return nil, err
 		}
 		if nv.deviceListStrategies.AnyCDIEnabled() {
 			handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
 			if !ok {
 				return nil, fmt.Errorf("dynamic MIG CDI handler is unavailable")
 			}
-			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile,
-				nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+			record, err := nv.dynamicMIGRecord(gpuIndex, reservation.GPUUUID, reservation.Profile, placement)
 			if err != nil {
 				return nil, err
 			}
@@ -430,6 +406,35 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	}
 	allocationCompleted = true
 	return out, nil
+}
+
+func (nv *NvidiaDevicePlugin) removeReclaimedMIGArtifacts(uuids []string) {
+	if len(uuids) == 0 {
+		return
+	}
+	nv.removeMIGOwnership(uuids)
+	if !nv.deviceListStrategies.AnyCDIEnabled() {
+		return
+	}
+	if nv.pendingCDIRemovals == nil {
+		nv.pendingCDIRemovals = make(map[string]struct{})
+	}
+	for _, uuid := range uuids {
+		nv.pendingCDIRemovals[uuid] = struct{}{}
+	}
+	handler, ok := nv.cdiHandler.(cdi.DynamicMIGInterface)
+	if !ok {
+		klog.ErrorS(nil, "dynamic MIG CDI handler is unavailable during reclamation")
+		return
+	}
+	for _, uuid := range uuids {
+		if err := handler.RemoveDynamicMIGDevice(uuid); err != nil {
+			klog.ErrorS(err, "failed to remove reclaimed MIG CDI entry", "uuid", uuid)
+			nv.pendingCDIRemovals[uuid] = struct{}{}
+			continue
+		}
+		delete(nv.pendingCDIRemovals, uuid)
+	}
 }
 
 func (nv *NvidiaDevicePlugin) dynamicMIGRecord(gpuIndex int, parentUUID, profile string, placement nvml.GpuInstancePlacement) (cdi.DynamicMIGDevice, error) {

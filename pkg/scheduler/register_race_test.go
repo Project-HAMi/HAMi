@@ -18,6 +18,8 @@ package scheduler
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +31,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -61,6 +65,16 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 
 	client.KubeClient = fake.NewClientset()
 	t.Cleanup(func() { client.KubeClient = nil })
+	previousDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = previousDevices })
+	// The test intentionally performs thousands of registrations and deletes.
+	// Keep that race coverage without flooding the unit-test log.
+	klog.LogToStderr(false)
+	klog.SetOutput(io.Discard)
+	t.Cleanup(func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	})
 
 	s := NewScheduler()
 	s.kubeClient = client.KubeClient
@@ -78,6 +92,11 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 			DefaultGPUNum:                1,
 		},
 	}))
+	// This test exercises NVIDIA registration only. Keeping unrelated backends
+	// out of the shared registry prevents them from reconciling the fake node.
+	device.DevicesMap = map[string]device.Devices{
+		nvidia.NvidiaGPUDevice: device.GetDevices()[nvidia.NvidiaGPUDevice],
+	}
 
 	// One GPU node with fixed, realistic hardware (a 40 GiB card). Only the GPU
 	// health flag flips, as it would on a node with an intermittently failing GPU.

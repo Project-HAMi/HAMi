@@ -17,12 +17,16 @@ limitations under the License.
 package amd
 
 import (
+	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -168,6 +172,23 @@ func Test_GetNodeDevices(t *testing.T) {
 
 	_, err = dev.GetNodeDevices(corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}})
 	assert.ErrorContains(t, err, "annos not found")
+}
+
+// The scheduler matches a request to a node's devices by a substring of the
+// registered type, so a registration without a type must read as the AMD type.
+func Test_GetNodeDevicesEmptyTypeReadsAsAMD(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	node := func(registration string) corev1.Node {
+		return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n", Annotations: map[string]string{RegisterAnnos: registration}}}
+	}
+
+	got, err := dev.GetNodeDevices(node(`[{"id":"GPU-0","index":0,"count":1,"devmem":8192,"devcore":100,"numa":0,"health":true}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, AMDDevice, got[0].Type)
+
+	got, err = dev.GetNodeDevices(node(`[{"id":"GPU-0","index":0,"count":1,"devmem":8192,"devcore":100,"type":"AMD Instinct MI325X","numa":0,"health":true}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, "AMD Instinct MI325X", got[0].Type)
 }
 
 func Test_PatchAnnotations(t *testing.T) {
@@ -415,6 +436,35 @@ func TestDevices_Fit(t *testing.T) {
 		assert.Equal(t, "", reason)
 	})
 
+	t.Run("rounds cores up to whole WGPs on RDNA", func(t *testing.T) {
+		for _, tc := range []struct {
+			name                  string
+			total, used, coresReq int32
+			info                  map[string]any
+			wantCores             int32
+			wantOK                bool
+		}{
+			{"rdna odd cores", 64, 0, 5, map[string]any{"cuPerWGP": float64(2)}, 4, true},
+			{"cdna keeps single cus", 64, 0, 5, map[string]any{}, 3, true},
+			{"one-wgp apu", 2, 0, 50, map[string]any{"cuPerWGP": float64(2)}, 2, true},
+			{"huge wgp size does not overflow", 4, 0, 75, map[string]any{"cuPerWGP": float64(math.MaxInt32)}, 4, true},
+			{"fractional wgp size is ignored", 64, 0, 5, map[string]any{"cuPerWGP": 2.5}, 3, true},
+			{"apu wgp already taken", 2, 2, 50, map[string]any{"cuPerWGP": float64(2)}, 0, false},
+		} {
+			devices := []*device.DeviceUsage{{
+				ID: "dev-0", Count: 10, Totalmem: 1000, Totalcore: tc.total, Usedcores: tc.used,
+				Type: AMDDevice, Health: true, CustomInfo: tc.info,
+			}}
+			req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, Coresreq: tc.coresReq}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+			ok, got, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, tc.wantOK, ok, tc.name)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantCores, got[AMDDevice][0].Usedcores, tc.name)
+			}
+		}
+	})
+
 	t.Run("retains the registered product type in the allocation", func(t *testing.T) {
 		const productType = "AMD_Instinct_MI300X_VF"
 		devices := []*device.DeviceUsage{
@@ -593,4 +643,646 @@ func TestCheckAMDType(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestMemoryPercentage(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName:            "amd.com/gpu",
+		ResourceMemoryName:           "amd.com/gpumem",
+		ResourceMemoryPercentageName: "amd.com/gpumem-percentage",
+	})
+	ctr := func(pct string) *corev1.Container {
+		return &corev1.Container{
+			Name: "c1",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"amd.com/gpu":               *resource.NewQuantity(1, resource.DecimalSI),
+				"amd.com/gpumem-percentage": resource.MustParse(pct),
+			}},
+		}
+	}
+
+	t.Run("mutate admits a percentage-only container", func(t *testing.T) {
+		c := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			"amd.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+		}}}
+		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		got, err := dev.GenerateResourceRequests(c)
+		assert.NilError(t, err)
+		assert.Equal(t, int32(1), got.Nums)
+		assert.Equal(t, int32(50), got.MemPercentagereq)
+	})
+
+	t.Run("a percentage only in requests still gets one card", func(t *testing.T) {
+		c := &corev1.Container{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			"amd.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+		}}}
+		ok, err := dev.MutateAdmission(c, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		got, err := dev.GenerateResourceRequests(c)
+		assert.NilError(t, err)
+		assert.Equal(t, int32(1), got.Nums)
+		assert.Equal(t, int32(50), got.MemPercentagereq)
+	})
+
+	for _, bad := range []string{"101", "-1", "1500m"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			_, err := dev.MutateAdmission(ctr(bad), &corev1.Pod{})
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			c := ctr(bad)
+			delete(c.Resources.Limits, "amd.com/gpu")
+			_, err = dev.MutateAdmission(c, &corev1.Pod{})
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			_, err = dev.GenerateResourceRequests(ctr(bad))
+			assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+		})
+	}
+
+	t.Run("generate carries the percentage and ignores zero", func(t *testing.T) {
+		got, err := dev.GenerateResourceRequests(ctr("40"))
+		assert.NilError(t, err)
+		assert.Equal(t, int32(40), got.MemPercentagereq)
+		got, err = dev.GenerateResourceRequests(ctr("0"))
+		assert.NilError(t, err)
+		assert.Equal(t, int32(0), got.MemPercentagereq)
+	})
+
+	t.Run("fit converts the percentage to memory per card", func(t *testing.T) {
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Count: 4, Totalmem: 16384, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 25, Coresreq: 50}
+		ok, got, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, int32(4096), got[AMDDevice][0].Usedmem)
+
+		// an absolute request wins over the percentage
+		req.Memreq = 1024
+		ok, got, reason = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, int32(1024), got[AMDDevice][0].Usedmem)
+
+		// 100% books the whole card
+		req = device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 100, Coresreq: 50}
+		_, got, _ = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, int32(16384), got[AMDDevice][0].Usedmem)
+
+		// not enough memory left on the only card
+		devices[0].Usedmem = 14000
+		req = device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 25, Coresreq: 50}
+		ok, _, reason = dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.CardInsufficientMemory))
+	})
+
+	t.Run("tiny percentage on a small card still books memory", func(t *testing.T) {
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Count: 4, Totalmem: 50, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 1, Coresreq: 50}
+		_, got, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, int32(1), got[AMDDevice][0].Usedmem)
+	})
+}
+
+func TestFitNumaBind(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	gpus := func(numas ...int) []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for i, n := range numas {
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Numa: n, Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+			})
+		}
+		return out
+	}
+	pod := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+	numaOf := func(devices []*device.DeviceUsage, got device.ContainerDevices) []int {
+		byID := map[string]int{}
+		for _, d := range devices {
+			byID[d.ID] = d.Numa
+		}
+		var out []int
+		for _, c := range got {
+			out = append(out, byID[c.UUID])
+		}
+		return out
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+
+	// With numa-bind the scheduler sorts the devices so each NUMA node is one run.
+	t.Run("numa-bind puts both GPUs on one NUMA node", func(t *testing.T) {
+		devices := gpus(0, 0, 1, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Equal(t, 2, len(numas))
+		assert.Equal(t, numas[0], numas[1])
+	})
+	t.Run("without it the GPUs may span NUMA nodes", func(t *testing.T) {
+		devices := gpus(0, 1, 0, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(nil), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Assert(t, numas[0] != numas[1])
+	})
+	t.Run("no NUMA node holds enough GPUs", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(0, 1), req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.NumaNotFit), reason)
+	})
+	t.Run("a single GPU request ignores the bind", func(t *testing.T) {
+		one := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+		ok, got, reason := dev.Fit(gpus(0, 1), one, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 1, len(got[AMDDevice]))
+	})
+	t.Run("unknown NUMA (-1) on every GPU still fits", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(-1, -1), req, pod(map[string]string{AMDNumaBind: "true"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("a value that is not true leaves the bind off", func(t *testing.T) {
+		devices := gpus(0, 1, 0, 1)
+		ok, got, reason := dev.Fit(devices, req, pod(map[string]string{AMDNumaBind: "no"}), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		numas := numaOf(devices, got[AMDDevice])
+		assert.Assert(t, numas[0] != numas[1])
+	})
+}
+
+func TestDevices_Fit_ResourceQuota(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{
+		ResourceCountName:  "amd.com/gpu",
+		ResourceMemoryName: "amd.com/gpumem",
+		ResourceCoreName:   "amd.com/gpucores",
+	})
+	original := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = original })
+
+	const ns = "amd-quota-test-ns"
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "amd-quota", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			"limits.amd.com/gpumem": resource.MustParse("6000"),
+		}},
+	}
+	qm := device.NewQuotaManager()
+	qm.AddQuota(quota)
+	t.Cleanup(func() { qm.DelQuota(quota) })
+
+	newDevices := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Count: 4, Totalmem: 16000, Totalcore: 100,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Annotations: map[string]string{}}}
+
+	t.Run("a request inside the quota fits", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 5000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("an explicit request over the quota is denied", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 7000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("a whole-card request is charged the whole card", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("a percentage request is charged its resolved memory", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, MemPercentagereq: 50, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("memory already used in the namespace counts", func(t *testing.T) {
+		qm.AddUsage(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}, device.PodDevices{
+			AMDDevice: device.PodSingleDevice{{{UUID: "dev-0", Type: AMDDevice, Usedmem: 4000}}},
+		})
+		t.Cleanup(func() {
+			qm.RmUsage(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}, device.PodDevices{
+				AMDDevice: device.PodSingleDevice{{{UUID: "dev-0", Type: AMDDevice, Usedmem: 4000}}},
+			})
+		})
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 3000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "1/1 ResourceQuotaNotFit", reason)
+	})
+	t.Run("another namespace is not limited", func(t *testing.T) {
+		other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "elsewhere", Annotations: map[string]string{}}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 7000, Coresreq: 50}
+		ok, _, reason := dev.Fit(newDevices(), req, other, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+}
+
+func TestCheckHealth(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	node := func(capacity, allocatable string) *corev1.Node {
+		n := &corev1.Node{}
+		if capacity != "" {
+			n.Status.Capacity = corev1.ResourceList{"amd.com/gpu": resource.MustParse(capacity)}
+		}
+		if allocatable != "" {
+			n.Status.Allocatable = corev1.ResourceList{"amd.com/gpu": resource.MustParse(allocatable)}
+		}
+		return n
+	}
+
+	t.Run("allocatable GPUs are healthy", func(t *testing.T) {
+		health, update := dev.CheckHealth(AMDDevice, node("4", "4"))
+		assert.Equal(t, true, health)
+		assert.Equal(t, true, update)
+	})
+	t.Run("every GPU unhealthy: capacity stays, allocatable drops to zero", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "0"))
+		assert.Equal(t, false, health)
+	})
+	t.Run("allocatable missing is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", ""))
+		assert.Equal(t, false, health)
+	})
+	t.Run("a node without the resource is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, false, health)
+	})
+	t.Run("part of the GPUs unhealthy keeps the node", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "2"))
+		assert.Equal(t, true, health)
+	})
+	t.Run("no resource name configured is always healthy", func(t *testing.T) {
+		health, _ := InitAMDGPUDevice(AMDConfig{}).CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, true, health)
+	})
+}
+
+func TestMutateAdmissionRuntimeClass(t *testing.T) {
+	gpu := func() *corev1.Container {
+		return &corev1.Container{Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{"amd.com/gpu": resource.MustParse("1")},
+		}}
+	}
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", RuntimeClassName: "amd"})
+
+	t.Run("set when a GPU is requested", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		assert.Equal(t, "amd", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("a runtime class chosen by the user is kept", func(t *testing.T) {
+		own := "mine"
+		pod := &corev1.Pod{Spec: corev1.PodSpec{RuntimeClassName: &own}}
+		_, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, "mine", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("untouched without a GPU request", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(&corev1.Container{}, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, false, ok)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+	t.Run("untouched when not configured", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		_, err := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"}).MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+}
+
+func TestFitLinkBind(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	// Eight GPUs in two XGMI quads, {0,1,2,3} and {4,5,6,7} (the MI210 layout),
+	// listed interleaved so a plain pass takes one GPU from each.
+	bdf := func(i int) string { return fmt.Sprintf("0000:%02x:00.0", i+0x10) }
+	quad := func(i int) []int {
+		if i < 4 {
+			return []int{0, 1, 2, 3}
+		}
+		return []int{4, 5, 6, 7}
+	}
+	gpus := func() []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, i := range []int{0, 4, 1, 5, 2, 6, 3, 7} {
+			var peers []any // what a JSON decode of the node annotation yields
+			for _, j := range quad(i) {
+				if j != i {
+					peers = append(peers, bdf(j))
+				}
+			}
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Type: AMDDevice, Health: true, CustomInfo: map[string]any{"pciBDF": bdf(i), "xgmiPeers": peers},
+			})
+		}
+		return out
+	}
+	pod := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+	req := func(n int32) device.ContainerDeviceRequest {
+		return device.ContainerDeviceRequest{Nums: n, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+	}
+	quadOf := func(got device.ContainerDevices) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "dev-%d", &i)
+			out[fmt.Sprint(i/4)] = true
+		}
+		return out
+	}
+	bind := map[string]string{AMDLinkBind: "true"}
+
+	t.Run("a linked group of 4 stays inside one quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(4), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 4, len(got[AMDDevice]))
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("a linked pair is two GPUs of one quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(2), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("without the bind the same request crosses quads", func(t *testing.T) {
+		ok, got, reason := dev.Fit(gpus(), req(4), pod(nil), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 2, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("5 GPUs cannot be one clique", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(), req(5), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.GPULinkNotFit), reason)
+	})
+	t.Run("a busy GPU in the first quad moves the pod to the other", func(t *testing.T) {
+		devices := gpus()
+		for _, d := range devices {
+			if d.ID == "dev-1" {
+				d.Used = d.Count
+			}
+		}
+		ok, got, reason := dev.Fit(devices, req(4), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, true, quadOf(got[AMDDevice])["1"])
+		assert.Equal(t, 1, len(quadOf(got[AMDDevice])))
+	})
+	t.Run("GPUs that publish no links cannot satisfy a bind", func(t *testing.T) {
+		bare := []*device.DeviceUsage{}
+		for _, d := range gpus()[:2] {
+			d.CustomInfo = map[string]any{"pciBDF": d.CustomInfo["pciBDF"]}
+			bare = append(bare, d)
+		}
+		ok, _, _ := dev.Fit(bare, req(2), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+	})
+	t.Run("one GPU ignores the bind", func(t *testing.T) {
+		ok, _, reason := dev.Fit(gpus(), req(1), pod(bind), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+	})
+	t.Run("peers as a string slice work too", func(t *testing.T) {
+		a := &device.DeviceUsage{CustomInfo: map[string]any{"pciBDF": "a", "xgmiPeers": []string{"b"}}}
+		b := &device.DeviceUsage{CustomInfo: map[string]any{"pciBDF": "b", "xgmiPeers": []string{"a"}}}
+		assert.Equal(t, true, xgmiLinked(a, b))
+		b.CustomInfo["xgmiPeers"] = []string{}
+		assert.Equal(t, false, xgmiLinked(a, b)) // both ends have to agree
+	})
+}
+
+func TestFitTopologyAware(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	bdf := func(i int) string { return fmt.Sprintf("0000:%02x:00.0", i+0x10) }
+	// Eight GPUs in two XGMI quads, {0..3} and {4..7}, listed interleaved. numaOf
+	// maps a GPU index to its NUMA node.
+	build := func(numaOf func(int) int, linked bool) []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, i := range []int{0, 4, 1, 5, 2, 6, 3, 7} {
+			info := map[string]any{"pciBDF": bdf(i)}
+			if linked {
+				var peers []any
+				for j := i / 4 * 4; j < i/4*4+4; j++ {
+					if j != i {
+						peers = append(peers, bdf(j))
+					}
+				}
+				info["xgmiPeers"] = peers
+			}
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Numa: numaOf(i), Type: AMDDevice, Health: true, CustomInfo: info,
+			})
+		}
+		return out
+	}
+	sameNuma := func(int) int { return 0 }
+	pod := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+	req := func(n int32) device.ContainerDeviceRequest {
+		return device.ContainerDeviceRequest{Nums: n, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+	}
+	topo := map[string]string{util.GPUSchedulerPolicyAnnotationKey: string(util.GPUSchedulerPolicyTopology)}
+	idxs := func(got device.ContainerDevices) []int {
+		var out []int
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "dev-%d", &i)
+			out = append(out, i)
+		}
+		slices.Sort(out)
+		return out
+	}
+
+	t.Run("a group of 4 is one XGMI quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(build(sameNuma, true), req(4), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		g := idxs(got[AMDDevice])
+		assert.Assert(t, slices.Equal(g, []int{0, 1, 2, 3}) || slices.Equal(g, []int{4, 5, 6, 7}), "%v", g)
+	})
+	t.Run("without the policy the first GPUs are taken, across quads", func(t *testing.T) {
+		ok, got, reason := dev.Fit(build(sameNuma, true), req(4), pod(nil), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		g := idxs(got[AMDDevice])
+		assert.Assert(t, !slices.Equal(g, []int{0, 1, 2, 3}) && !slices.Equal(g, []int{4, 5, 6, 7}), "%v", g)
+	})
+	t.Run("5 GPUs still fit and contain a whole quad", func(t *testing.T) {
+		ok, got, reason := dev.Fit(build(sameNuma, true), req(5), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		g := idxs(got[AMDDevice])
+		assert.Equal(t, 5, len(g))
+		inQuad := func(lo int) int {
+			n := 0
+			for _, i := range g {
+				if i >= lo && i < lo+4 {
+					n++
+				}
+			}
+			return n
+		}
+		assert.Assert(t, inQuad(0) == 4 || inQuad(4) == 4, "%v", g)
+	})
+	t.Run("without links the NUMA node decides", func(t *testing.T) {
+		numa := func(i int) int { return i % 2 } // even GPUs on NUMA 0, odd on NUMA 1
+		ok, got, reason := dev.Fit(build(numa, false), req(2), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		g := idxs(got[AMDDevice])
+		assert.Equal(t, g[0]%2, g[1]%2)
+	})
+	t.Run("numa-bind limits the choice to one NUMA node", func(t *testing.T) {
+		numa := func(i int) int { return i % 2 }
+		annos := map[string]string{util.GPUSchedulerPolicyAnnotationKey: string(util.GPUSchedulerPolicyTopology), AMDNumaBind: "true"}
+		ok, got, reason := dev.Fit(build(numa, true), req(2), pod(annos), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		g := idxs(got[AMDDevice])
+		assert.Equal(t, g[0]%2, g[1]%2)
+		ok, _, reason = dev.Fit(build(numa, true), req(5), pod(annos), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.NumaNotFit), reason)
+	})
+	t.Run("link-bind still demands a clique", func(t *testing.T) {
+		annos := map[string]string{util.GPUSchedulerPolicyAnnotationKey: string(util.GPUSchedulerPolicyTopology), AMDLinkBind: "true"}
+		ok, _, reason := dev.Fit(build(sameNuma, true), req(5), pod(annos), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.GPULinkNotFit), reason)
+	})
+	t.Run("not enough free GPUs fails as before", func(t *testing.T) {
+		ok, _, _ := dev.Fit(build(sameNuma, true)[:3], req(4), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+	})
+	t.Run("a single GPU keeps the plain path", func(t *testing.T) {
+		ok, got, reason := dev.Fit(build(sameNuma, true), req(1), pod(topo), &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		assert.Equal(t, 1, len(got[AMDDevice]))
+	})
+}
+
+func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem", ResourceCoreName: "amd.com/gpucores"})
+	original := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = original })
+
+	bdf := func(i int) string { return fmt.Sprintf("0000:%02x:00.0", i+0x10) }
+	// Eight GPUs in two XGMI quads, {0..3} and {4..7}, listed interleaved.
+	gpus := func() []*device.DeviceUsage {
+		var out []*device.DeviceUsage
+		for _, i := range []int{0, 4, 1, 5, 2, 6, 3, 7} {
+			var peers []any
+			for j := i / 4 * 4; j < i/4*4+4; j++ {
+				if j != i {
+					peers = append(peers, bdf(j))
+				}
+			}
+			out = append(out, &device.DeviceUsage{
+				ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 2, Totalmem: 16000, Totalcore: 100,
+				Type: AMDDevice, Health: true, CustomInfo: map[string]any{"pciBDF": bdf(i), "xgmiPeers": peers},
+			})
+		}
+		return out
+	}
+	const ns = "amd-topology-quota-ns"
+	setQuota := func(t *testing.T, mem string) {
+		q := &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: "amd-quota", Namespace: ns},
+			Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{"limits.amd.com/gpumem": resource.MustParse(mem)}},
+		}
+		qm := device.NewQuotaManager()
+		qm.AddQuota(q)
+		t.Cleanup(func() { qm.DelQuota(q) })
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Annotations: map[string]string{
+		util.GPUSchedulerPolicyAnnotationKey: string(util.GPUSchedulerPolicyTopology),
+	}}}
+	req := device.ContainerDeviceRequest{Nums: 4, Type: AMDDevice, Memreq: 1000, Coresreq: 25}
+
+	t.Run("a quota that covers the request does not cut the candidates", func(t *testing.T) {
+		setQuota(t, "4000")
+		ok, got, reason := dev.Fit(gpus(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok, reason)
+		quad := -1
+		for _, c := range got[AMDDevice] {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "dev-%d", &i)
+			if quad < 0 {
+				quad = i / 4
+			}
+			assert.Equal(t, quad, i/4, "the group is one XGMI quad, got %v", got[AMDDevice])
+		}
+	})
+	t.Run("the chosen group as a whole must fit the quota", func(t *testing.T) {
+		setQuota(t, "3000")
+		ok, _, reason := dev.Fit(gpus(), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.ResourceQuotaNotFit), reason)
+	})
+
+	t.Run("numa-bind searches each NUMA node on its own", func(t *testing.T) {
+		var devices []*device.DeviceUsage
+		var candidates device.ContainerDevices
+		for i := range 40 {
+			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("n-%d", i), Numa: i % 2, CustomInfo: map[string]any{"pciBDF": bdf(i)}})
+			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("n-%d", i)})
+		}
+		start := time.Now()
+		got, ok := bestLinkedCombination(devices, candidates, 8, true)
+		assert.Equal(t, true, ok)
+		assert.Assert(t, time.Since(start) < time.Second, "40 candidates must not be searched exhaustively")
+		numa := map[int]bool{}
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "n-%d", &i)
+			numa[i%2] = true
+		}
+		assert.Equal(t, 1, len(numa), "every pick sits on one NUMA node")
+	})
+	t.Run("numa-bind keeps the best linked group inside a NUMA node", func(t *testing.T) {
+		var devices []*device.DeviceUsage
+		var candidates device.ContainerDevices
+		// NUMA 0 holds 6 unlinked GPUs, NUMA 1 holds an XGMI quad and 4 loose ones
+		for i := range 14 {
+			numa := 0
+			info := map[string]any{"pciBDF": bdf(i)}
+			if i >= 6 {
+				numa = 1
+				if i < 10 {
+					var peers []any
+					for j := 6; j < 10; j++ {
+						if j != i {
+							peers = append(peers, bdf(j))
+						}
+					}
+					info["xgmiPeers"] = peers
+				}
+			}
+			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("g-%d", i), Numa: numa, CustomInfo: info})
+			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("g-%d", i)})
+		}
+		got, ok := bestLinkedCombination(devices, candidates, 4, true)
+		assert.Equal(t, true, ok)
+		for _, c := range got {
+			var i int
+			_, _ = fmt.Sscanf(c.UUID, "g-%d", &i)
+			assert.Assert(t, i >= 6 && i < 10, "picked %v", got)
+		}
+	})
 }

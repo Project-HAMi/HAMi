@@ -526,14 +526,7 @@ func Test_configOverride(t *testing.T) {
 	coreScale2 := 1.4
 
 	config := nvidia.DevicePluginConfigs{
-		Nodeconfig: []struct {
-			nvidia.NodeDefaultConfig     `json:",inline"`
-			Name                         string               `json:"name"`
-			OperatingMode                string               `json:"operatingmode"`
-			Migstrategy                  string               `json:"migstrategy"`
-			FilterDevice                 *nvidia.FilterDevice `json:"filterdevices"`
-			EnableGetPreferredAllocation bool                 `json:"enablegetpreferredallocation"`
-		}{
+		Nodeconfig: []nvidia.NodeConfig{
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
 					DeviceSplitCount:    &split1,
@@ -545,7 +538,7 @@ func Test_configOverride(t *testing.T) {
 				OperatingMode:                "default",
 				Migstrategy:                  "single",
 				FilterDevice:                 nil,
-				EnableGetPreferredAllocation: true,
+				EnableGetPreferredAllocation: ptr(true),
 			},
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
@@ -558,7 +551,7 @@ func Test_configOverride(t *testing.T) {
 				OperatingMode:                "custom",
 				Migstrategy:                  "mixed",
 				FilterDevice:                 nil,
-				EnableGetPreferredAllocation: true,
+				EnableGetPreferredAllocation: ptr(true),
 			},
 		},
 	}
@@ -582,7 +575,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceCoreName:             "nvidia.com/gpucores",
 		DefaultGPUNum:                int32(2),
 	}
-	_, err = readFromConfigFile(&nvconfig, path+"/config.json")
+	_, err = readFromConfigFile(&nvconfig, path+"/config.json", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -601,6 +594,130 @@ func Test_configOverride(t *testing.T) {
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
+	}
+}
+
+// TestSelectNodeConfigs pins the order in which nodeconfig entries apply to a node.
+func TestSelectNodeConfigs(t *testing.T) {
+	mig := &metav1.LabelSelector{MatchLabels: map[string]string{"gpu.example.com/pool": "mig"}}
+	smallCards := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/model", Operator: metav1.LabelSelectorOpIn, Values: []string{"t4", "l4"},
+	}}}
+	notSmallCards := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/model", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"t4", "l4"},
+	}}}
+	invalid := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "gpu.example.com/pool", Operator: "Like", Values: []string{"mig"},
+	}}}
+	named := nvidia.NodeConfig{Name: "gpu-node-01", OperatingMode: nvidia.HamiCoreMode}
+	byPool := nvidia.NodeConfig{NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}
+	byModel := nvidia.NodeConfig{NodeLabelSelector: smallCards, OperatingMode: nvidia.HamiCoreMode}
+	fallback := nvidia.NodeConfig{Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.HamiCoreMode}
+	entries := []nvidia.NodeConfig{named, byPool, byModel}
+
+	for _, tc := range []struct {
+		name    string
+		entries []nvidia.NodeConfig
+		node    string
+		labels  map[string]string
+		want    []nvidia.NodeConfig
+	}{
+		{"an entry naming the node wins over a matching selector", entries,
+			"gpu-node-01", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{named}},
+		{"matchLabels selects a node no entry names", entries,
+			"gpu-node-02", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{byPool}},
+		{"matchExpressions selects a node no entry names", entries,
+			"gpu-node-03", map[string]string{"gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"every matching selector applies in list order, like name entries", entries,
+			"gpu-node-04", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byPool, byModel}},
+		{"a node matching neither a name nor a selector gets no entry", entries,
+			"gpu-node-05", map[string]string{"gpu.example.com/model": "a100"}, nil},
+		{"a node without labels matches no selector", entries,
+			"gpu-node-06", nil, nil},
+		{"every entry naming the node still applies in list order",
+			[]nvidia.NodeConfig{named, byPool, {Name: "gpu-node-01", OperatingMode: nvidia.MigMode}},
+			"gpu-node-01", nil, []nvidia.NodeConfig{named, {Name: "gpu-node-01", OperatingMode: nvidia.MigMode}}},
+		{"an invalid selector is skipped",
+			[]nvidia.NodeConfig{{NodeLabelSelector: invalid, OperatingMode: nvidia.MigMode}, byModel},
+			"gpu-node-07", map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"an empty selector is skipped instead of selecting every node",
+			[]nvidia.NodeConfig{{NodeLabelSelector: &metav1.LabelSelector{}, OperatingMode: nvidia.MigMode}, byModel},
+			"gpu-node-08", map[string]string{"gpu.example.com/model": "t4"}, []nvidia.NodeConfig{byModel}},
+		{"NotIn also selects a node without the label, as in Kubernetes",
+			[]nvidia.NodeConfig{{NodeLabelSelector: notSmallCards, OperatingMode: nvidia.MigMode}},
+			"gpu-node-12", nil, []nvidia.NodeConfig{{NodeLabelSelector: notSmallCards, OperatingMode: nvidia.MigMode}}},
+		{"an entry setting both name and selector is not matched by its name",
+			[]nvidia.NodeConfig{{Name: "gpu-node-13", NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-13", map[string]string{"gpu.example.com/pool": "default"}, nil},
+		{"an entry setting both name and selector is not matched by its selector",
+			[]nvidia.NodeConfig{{Name: "gpu-node-13", NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-14", map[string]string{"gpu.example.com/pool": "mig"}, nil},
+		{"an entry without a name is not matched by an empty node name",
+			[]nvidia.NodeConfig{{OperatingMode: nvidia.MigMode}}, "", nil, nil},
+		{`a "*" entry applies to a node nothing else selects`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-09", map[string]string{"gpu.example.com/model": "a100"}, []nvidia.NodeConfig{fallback}},
+		{`an entry naming the node wins over "*"`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-01", nil, []nvidia.NodeConfig{named}},
+		{`a matching selector wins over "*" listed before it`,
+			append([]nvidia.NodeConfig{fallback}, entries...),
+			"gpu-node-10", map[string]string{"gpu.example.com/pool": "mig"}, []nvidia.NodeConfig{byPool}},
+		{`every "*" entry applies in list order`,
+			[]nvidia.NodeConfig{fallback, byPool, {Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.MigMode}},
+			"gpu-node-15", nil, []nvidia.NodeConfig{fallback, {Name: nvidia.NodeConfigFallbackName, OperatingMode: nvidia.MigMode}}},
+		{`a "*" entry that also sets a selector is skipped`,
+			[]nvidia.NodeConfig{{Name: nvidia.NodeConfigFallbackName, NodeLabelSelector: mig, OperatingMode: nvidia.MigMode}},
+			"gpu-node-11", map[string]string{"gpu.example.com/pool": "default"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, selectNodeConfigs(tc.entries, tc.node, tc.labels))
+		})
+	}
+}
+
+// The first entry is written like a pod nodeSelector; it decodes to an empty
+// selector, which must not select every node.
+func TestReadFromConfigFileSelectsEntryByNodeLabels(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "gpu-node-02")
+	previous := enableGetPreferredAllocation
+	t.Cleanup(func() { enableGetPreferredAllocation = previous })
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+  "nodeconfig": [
+    { "nodelabelselector": { "gpu.example.com/pool": "mig" },
+      "operatingmode": "mig", "devicesplitcount": 9 },
+    { "name": "gpu-node-01", "operatingmode": "hami-core", "devicesplitcount": 10 },
+    { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+      "operatingmode": "mig", "devicesplitcount": 7, "enablegetpreferredallocation": true },
+    { "nodelabelselector": { "matchExpressions": [
+        { "key": "gpu.example.com/model", "operator": "In", "values": ["t4", "l4"] } ] },
+      "operatingmode": "hami-core", "devicesplitcount": 4 }
+  ]
+}`), 0o600))
+
+	for _, tc := range []struct {
+		name      string
+		labels    map[string]string
+		mode      string
+		split     uint
+		preferred bool
+	}{
+		{"matchLabels", map[string]string{"gpu.example.com/pool": "mig"}, nvidia.MigMode, 7, true},
+		{"matchExpressions", map[string]string{"gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, false},
+		{"no match keeps the defaults", map[string]string{"gpu.example.com/model": "a100"}, nvidia.HamiCoreMode, 1, false},
+		{"several matching selectors apply in list order, a later one keeping what it does not set",
+			map[string]string{"gpu.example.com/pool": "mig", "gpu.example.com/model": "t4"}, nvidia.HamiCoreMode, 4, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableGetPreferredAllocation = false
+			sConfig := nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr(uint(1))}}
+			mode, err := readFromConfigFile(&sConfig, path, tc.labels)
+			require.NoError(t, err)
+			require.Equal(t, tc.mode, mode)
+			require.Equal(t, tc.split, *sConfig.DeviceSplitCount)
+			require.Equal(t, tc.preferred, enableGetPreferredAllocation)
+		})
 	}
 }
 
@@ -1214,6 +1331,75 @@ func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) 
 	require.Empty(t, mode, "no mode is chosen when the node is unknown")
 }
 
+// TestLoadNvidiaDevicePluginConfigSelectsByTheNodeLabels guards the step that
+// hands the labels of the node read from the API server to the selector.
+// Passing nil there would leave every selector entry unmatched without any
+// other test noticing.
+func TestLoadNvidiaDevicePluginConfigSelectsByTheNodeLabels(t *testing.T) {
+	nodeName := "gpu-node-labels"
+	previous := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:   nodeName,
+		Labels: map[string]string{"gpu.example.com/pool": "mig"},
+	}})
+	t.Cleanup(func() { client.KubeClient = previous })
+	t.Setenv(util.NodeNameEnvName, nodeName)
+	previousNodeName := util.NodeName
+	util.NodeName = nodeName
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+	previousPreferred := enableGetPreferredAllocation
+	t.Cleanup(func() { enableGetPreferredAllocation = previousPreferred })
+
+	dir := t.TempDir()
+	pluginConfig := filepath.Join(dir, "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+	deviceConfig := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(deviceConfig, []byte(`{
+  "nodeconfig": [
+    { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+      "operatingmode": "mig", "devicesplitcount": 7 }
+  ]
+}`), 0o600))
+	previousPath := ConfigFilePath
+	ConfigFilePath = deviceConfig
+	t.Cleanup(func() { ConfigFilePath = previousPath })
+
+	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
+	require.NoError(t, err)
+	require.Equal(t, nvidia.MigMode, mode)
+	require.NotNil(t, sConfig.NvidiaConfig.DeviceSplitCount)
+	require.Equal(t, uint(7), *sConfig.NvidiaConfig.DeviceSplitCount)
+}
+
+// REPORT_NODE_CAPACITY is the env-var escape hatch for enabling node capacity
+// reporting without a config file or CLI flag change.
+func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
+	previous := client.KubeClient
+	nodeName := "node-report-capacity"
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	t.Cleanup(func() { client.KubeClient = previous })
+
+	previousNodeName := util.NodeName
+	util.NodeName = nodeName
+	t.Cleanup(func() { util.NodeName = previousNodeName })
+
+	pluginConfig := filepath.Join(t.TempDir(), "plugin.yaml")
+	require.NoError(t, os.WriteFile(pluginConfig, []byte("{}\n"), 0o600))
+	previousFile := ConfigFile
+	ConfigFile = &pluginConfig
+	t.Cleanup(func() { ConfigFile = previousFile })
+
+	t.Setenv("REPORT_NODE_CAPACITY", "true")
+
+	sConfig, _, err := LoadNvidiaDevicePluginConfig()
+	require.NoError(t, err)
+	require.NotNil(t, sConfig.NvidiaConfig.ReportNodeCapacity)
+	require.True(t, *sConfig.NvidiaConfig.ReportNodeCapacity)
+}
+
 // The lupine label is the operator's one declaration that a node serves its
 // GPUs over the network. Deriving the mode from it keeps the plugin and the
 // scheduler's pool from disagreeing about which fleet a node belongs to.
@@ -1243,6 +1429,199 @@ func TestResolveOperatingMode(t *testing.T) {
 			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
 		})
 	}
+}
+
+// TestIsWholeGPUAllocation covers the byte-vs-MiB unit handling that
+// previously made the function always return false.
+func TestIsWholeGPUAllocation(t *testing.T) {
+	// 8 GiB card: TotalMemory is in bytes, Usedmem in MiB.
+	const (
+		gibInMiB = int32(8 * 1024)
+		uuidA    = "GPU-aaaa"
+		uuidB    = "GPU-bbbb"
+	)
+	totalA := uint64(gibInMiB) * 1024 * 1024
+	totalB := uint64(gibInMiB) * 1024 * 1024
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				uuidA: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidA}, TotalMemory: totalA},
+				uuidB: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidB}, TotalMemory: totalB},
+			}
+		},
+		ResourceFunc: func() v1.ResourceName { return v1.ResourceName("nvidia.com/gpu") },
+	}
+
+	cases := []struct {
+		name   string
+		devreq device.ContainerDevices
+		rm     rm.ResourceManager
+		want   bool
+	}{
+		{
+			name:   "nil ResourceManager falls through to default preload",
+			devreq: device.ContainerDevices{{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores}},
+			rm:     nil,
+			want:   false,
+		},
+		{
+			name:   "empty devreq yields false",
+			devreq: device.ContainerDevices{},
+			rm:     mockRM,
+			want:   false,
+		},
+		{
+			name: "single whole-GPU allocation (MiB == bytes/1Mi)",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "plain nvidia.com/gpu: 1 without core request qualifies",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory without core request is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "unknown UUID fails closed even without core request",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "two whole-GPU allocations",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "regression: pre-fix code rejected this because MiB vs bytes are not equal as raw integers",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "partial cores is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores - 1},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "memory exceeding full card is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB + 1, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "UUID missing from registry falls through",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "any non-whole device in a multi-device request fails the whole",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isWholeGPUAllocation(tc.devreq, tc.rm))
+		})
+	}
+}
+
+// The chart always passes --report-node-capacity explicitly (true or
+// false), so chartDefault is realistically never nil in that deployment.
+// A per-node Nodeconfig override must still survive it.
+func TestResolveReportNodeCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		perNode      *bool
+		chartDefault *bool
+		want         *bool
+	}{
+		{"per-node true wins over chart-wide false", ptr(true), ptr(false), ptr(true)},
+		{"per-node false wins over chart-wide true", ptr(false), ptr(true), ptr(false)},
+		{"no per-node value falls back to the chart-wide default", nil, ptr(true), ptr(true)},
+		{"neither set stays nil", nil, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveReportNodeCapacity(tc.perNode, tc.chartDefault)
+			if tc.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tc.want, *got)
+		})
+	}
+}
+
+// TestWholeGPUDisableHAMiCoreAllowed pins the env gate and the
+// over-subscription guards: scaled devices must keep the interception hook.
+func TestWholeGPUDisableHAMiCoreAllowed(t *testing.T) {
+	original := wholeGPUDisableHAMiCore
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = original })
+
+	one, two := float64(1), float64(2)
+	pluginWith := func(memScale, coreScale *float64) *NvidiaDevicePlugin {
+		return &NvidiaDevicePlugin{
+			schedulerConfig: nvidia.NvidiaConfig{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceMemoryScaling: memScale,
+					DeviceCoreScaling:   coreScale,
+				},
+			},
+		}
+	}
+
+	wholeGPUDisableHAMiCore = false
+	require.False(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
+
+	wholeGPUDisableHAMiCore = true
+	require.True(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&two, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&one, &two).wholeGPUDisableHAMiCoreAllowed())
 }
 
 // TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication checks that deferred MIG recovery

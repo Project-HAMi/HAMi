@@ -887,6 +887,67 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 	}
 }
 
+func TestDevices_AddResourceUsage(t *testing.T) {
+	tests := []struct {
+		name        string
+		deviceUsage *device.DeviceUsage
+		ctr         *device.ContainerDevice
+		wantUsage   *device.DeviceUsage
+	}{
+		{
+			name: "empty device usage",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-0",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "dev-0",
+				Usedcores: 2,
+				Usedmem:   2048,
+			},
+			wantUsage: &device.DeviceUsage{
+				ID:        "dev-0",
+				Used:      1,
+				Usedcores: 2,
+				Usedmem:   2048,
+			},
+		},
+		{
+			name: "device usage with existing usage",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-0",
+				Used:      1,
+				Usedcores: 2,
+				Usedmem:   2048,
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "dev-0",
+				Usedcores: 2,
+				Usedmem:   2048,
+			},
+			wantUsage: &device.DeviceUsage{
+				ID:        "dev-0",
+				Used:      2,
+				Usedcores: 4,
+				Usedmem:   4096,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &IluvatarDevices{}
+			if err := dev.AddResourceUsage(&corev1.Pod{}, tt.deviceUsage, tt.ctr); err != nil {
+				t.Fatalf("AddResourceUsage() error=%v", err)
+			}
+			assert.Equal(t, tt.wantUsage.Usedcores, tt.deviceUsage.Usedcores)
+			assert.Equal(t, tt.wantUsage.Usedmem, tt.deviceUsage.Usedmem)
+			assert.Equal(t, tt.wantUsage.Used, tt.deviceUsage.Used)
+		})
+	}
+}
+
 func TestFit_CoresValidation(t *testing.T) {
 	dev := &IluvatarDevices{
 		config: IluvatarConfig{

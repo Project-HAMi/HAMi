@@ -245,6 +245,20 @@ func TestLoadConfigRejectsInvalidFields(t *testing.T) {
 			config: loadTestConfig(),
 		},
 		{
+			name:   "valid Ascend mode",
+			config: "vnpus:\n  hamiVnpuMode: enpu\n",
+		},
+		{
+			name:    "invalid Ascend mode",
+			config:  "vnpus:\n  hamiVnpuMode: enup\n",
+			wantErr: "vnpus.hamiVnpuMode",
+		},
+		{
+			name:    "removed Ascend ENPU flag",
+			config:  "vnpus:\n  enpu: true\n",
+			wantErr: "field enpu not found",
+		},
+		{
 			name:    "unknown top-level field",
 			config:  "unknown: true\n",
 			wantErr: "field unknown not found",
@@ -346,7 +360,6 @@ func createKunlunConfig() kunlun.KunlunConfig {
 
 func createVNPUConfigs() ascend.VNPUs {
 	return ascend.VNPUs{
-		HamiVnpuCore: false,
 		Configs: []ascend.VNPUConfig{
 			{
 				ChipName:           "910A",

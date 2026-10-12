@@ -27,6 +27,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -205,8 +206,6 @@ func TestGetPendingPod(t *testing.T) {
 	}
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node1, metav1.CreateOptions{})
 
-	pendingPod := podList[0]
-
 	tests := []struct {
 		name    string
 		node    string
@@ -214,10 +213,12 @@ func TestGetPendingPod(t *testing.T) {
 		want    *corev1.Pod
 	}{
 		{
-			name:    "find pending pod",
+			// test-node-0 carries no lock. A pending pod whose own annotations
+			// name the node used to be served from here, which is how one pod's
+			// devices reached another (issue #3076).
+			name:    "node without a lock serves nothing",
 			node:    "test-node-0",
-			wantErr: false,
-			want:    pendingPod,
+			wantErr: true,
 		},
 		{
 			name:    "find allocated pod",
@@ -241,20 +242,14 @@ func TestGetPendingPod(t *testing.T) {
 	}
 }
 
-// TestGetPendingPodTrustsAnnotationsRegardlessOfOrigin documents a known gap
-// rather than guarding a fix (see issue #3041). GetPendingPod, and the device
-// plugin's Allocate downstream of it, select a pod purely from
-// hami.io/bind-time, hami.io/bind-phase and hami.io/vgpu-node. Nothing here
-// checks that the scheduler wrote them: PR #3042 blocks a pod from carrying
-// them at creation, but a pod can still gain them afterward, either through
-// an UPDATE (the admission webhook's rules watch CREATE only, see
-// charts/hami/templates/scheduler/webhook.yaml) or by being labelled
-// hami.io/webhook: ignore, which the API server excludes from admission
-// before HAMi's code ever runs. Neither is reproducible as a Go unit test:
-// both depend on API-server-side dispatch this package does not perform. If
-// this test starts failing, GetPendingPod has grown some form of provenance
-// check and this comment (and the two gaps above) should be revisited.
-func TestGetPendingPodTrustsAnnotationsRegardlessOfOrigin(t *testing.T) {
+// TestGetPendingPodIgnoresHandWrittenAnnotations guards the fix for issue
+// #3076. GetPendingPod used to fall back to picking a pending pod out of the
+// node's list by hami.io/bind-time, hami.io/bind-phase and hami.io/vgpu-node
+// alone, none of which need more rbac than creating the pod. Writing the node
+// lock does. Only the lock now decides, so a pod that carries the annotations
+// without one is no longer served, whether it wrote them itself or gained them
+// through a path admission does not see (issue #3041).
+func TestGetPendingPodIgnoresHandWrittenAnnotations(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 
 	// Nothing about this pod says the scheduler produced it: no NodeName set
@@ -284,11 +279,8 @@ func TestGetPendingPodTrustsAnnotationsRegardlessOfOrigin(t *testing.T) {
 	}
 
 	got, err := GetPendingPod(context.TODO(), "gpu-node-1")
-	if err != nil {
-		t.Fatalf("GetPendingPod() error = %v", err)
-	}
-	if got.Name != handWritten.Name {
-		t.Fatalf("GetPendingPod() returned %s, want %s", got.Name, handWritten.Name)
+	if err == nil {
+		t.Fatalf("GetPendingPod() served %s, which no node lock names", got.Name)
 	}
 }
 
@@ -942,7 +934,7 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
 			context.TODO(), metav1.ListOptions{})
 		assert.NilError(t, err)
-		// Must still be exactly one event — no new object created.
+		// Must still be exactly one event, no new object created.
 		assert.Equal(t, 1, len(events.Items))
 		assert.Equal(t, int32(4), events.Items[0].Count)
 		assert.Equal(t, msg2, events.Items[0].Message)
@@ -1002,7 +994,7 @@ func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
 		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}
 	scRunning := corev1.ContainerStatus{Name: "sc",
 		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}
-	// A crash-looping sidecar momentarily shows Terminated exit 0 — the
+	// A crash-looping sidecar momentarily shows Terminated exit 0, the
 	// exit-0 gap from the design. It must be irrelevant to the gate.
 	scGap := corev1.ContainerStatus{Name: "sc",
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}
@@ -1223,6 +1215,77 @@ func TestGetNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPatchNodeStatusCapacity(t *testing.T) {
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+	nodeName := "capacity-node"
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	resList := corev1.ResourceList{
+		corev1.ResourceName("nvidia.com/gpumem"):   *resource.NewQuantity(65536, resource.DecimalSI),
+		corev1.ResourceName("nvidia.com/gpucores"): *resource.NewQuantity(200, resource.DecimalSI),
+	}
+
+	err = PatchNodeStatusCapacity(node, resList)
+	assert.NilError(t, err)
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	assert.NilError(t, err)
+
+	gpuMem := updatedNode.Status.Capacity["nvidia.com/gpumem"]
+	assert.Equal(t, gpuMem.Value(), int64(65536))
+	gpuCores := updatedNode.Status.Capacity["nvidia.com/gpucores"]
+	assert.Equal(t, gpuCores.Value(), int64(200))
+}
+
+func TestPatchNodeStatusCapacityEmptyResources(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "capacity-node-empty"}}
+	err := PatchNodeStatusCapacity(node, corev1.ResourceList{})
+	assert.NilError(t, err)
+}
+
+func TestPatchNodeStatusCapacityNilClient(t *testing.T) {
+	previousClient := client.KubeClient
+	client.KubeClient = nil
+	t.Cleanup(func() { client.KubeClient = previousClient })
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "capacity-node-nil-client"}}
+	resList := corev1.ResourceList{
+		corev1.ResourceName("nvidia.com/gpumem"): *resource.NewQuantity(1024, resource.DecimalSI),
+	}
+
+	err := PatchNodeStatusCapacity(node, resList)
+	assert.ErrorContains(t, err, "kubernetes client is not initialized")
+}
+
+func TestPatchNodeStatusCapacityPatchError(t *testing.T) {
+	previousClient := client.KubeClient
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = previousClient })
+
+	nodeName := "capacity-node-patch-error"
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	wantErr := fmt.Errorf("patch failed")
+	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		return true, nil, wantErr
+	})
+
+	resList := corev1.ResourceList{
+		corev1.ResourceName("nvidia.com/gpumem"): *resource.NewQuantity(1024, resource.DecimalSI),
+	}
+	err = PatchNodeStatusCapacity(node, resList)
+	assert.ErrorContains(t, err, wantErr.Error())
 }
 
 // A merge patch is addressed by name alone, so a patch computed for one pod

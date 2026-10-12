@@ -215,7 +215,13 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 
 		request += 1
 		core += container.Coresreq
-		if container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
+		// Size the request from Memreq first and fall back to the percentage
+		// only when Memreq is unset, matching how the backends that carry a
+		// real memory percentage resolve it in Fit (nvidia, ascend, cambricon,
+		// hygon, iluvatar, metax, mthreads). Scoring from the percentage while
+		// Fit books Memreq makes the device look emptier than the allocation
+		// it is about to receive.
+		if container.Memreq == 0 && container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
 			mem += int32((int64(ds.Device.Totalmem) * int64(container.MemPercentagereq)) / 100)
 			continue
 		}

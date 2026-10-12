@@ -232,9 +232,15 @@ func (p *pool) refresh(ctx context.Context) {
 	}
 
 	endpoints := make(map[string]string, len(nodes))
+	listedServers := make(map[string]struct{}, len(nodes))
 	var devices []*device.DeviceInfo
 	for i := range nodes {
 		n := &nodes[i]
+		listedServers[n.Name] = struct{}{}
+		if !isReadyLupineNode(n) {
+			klog.V(4).InfoS("remotegpu: skipping unavailable lupine server", "node", n.Name)
+			continue
+		}
 		endpoint, ok := p.endpointOf(n)
 		if !ok {
 			continue
@@ -249,20 +255,22 @@ func (p *pool) refresh(ctx context.Context) {
 		devices = append(devices, gpus...)
 	}
 
-	// Listing every pod is only worth it once a lupine fleet actually exists.
+	// Keep reconstructing reservations while server Nodes still exist, even if
+	// none is currently eligible for new allocations. A NotReady server must
+	// not make the allocations of its running Pods appear released.
 	var inUse map[string]struct{}
 	// listed says the pod list actually ran. A booking is only expired against
 	// a list that happened; expiring it against one that failed would hand a
 	// bound pod's card to a second pod.
 	listed := true
-	if len(endpoints) == 0 {
+	if len(nodes) == 0 {
 		inUse = map[string]struct{}{}
 	} else {
 		inUse, listed = reservations(ctx, previousInUse)
 	}
 	// Ask every server concurrently: one unreachable server pays its own
 	// metricsTimeout instead of adding it to everyone else's.
-	busy := askServers(ctx, endpoints, previousBusy)
+	busy := askServers(ctx, endpoints, previousBusy, listedServers)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -321,6 +329,18 @@ func (p *pool) endpointOf(n *corev1.Node) (string, bool) {
 		}
 	}
 	return net.JoinHostPort(host, strconv.Itoa(port)), true
+}
+
+// isReadyLupineNode reports whether Kubernetes considers a Lupine server
+// available for new allocations. A missing Ready condition is treated the
+// same as Unknown: it does not establish that the server can accept work.
+func isReadyLupineNode(n *corev1.Node) bool {
+	for _, condition := range n.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func decodeNodeGPUs(n *corev1.Node) ([]*device.DeviceInfo, error) {
@@ -536,8 +556,16 @@ func (p *pool) reserved(id string) bool {
 // Every server is asked concurrently: fetchBusyDevices carries its own
 // metricsTimeout, and asking sequentially would make one unreachable server
 // add its timeout to every other server's, one at a time.
-func askServers(ctx context.Context, endpoints map[string]string, previous map[string]struct{}) map[string]struct{} {
+func askServers(ctx context.Context, endpoints map[string]string, previous map[string]struct{}, listedServers map[string]struct{}) map[string]struct{} {
 	busy := map[string]struct{}{}
+	// A server can temporarily disappear from endpoints because it is NotReady.
+	// Its old usage is still safer than assuming its direct clients went away.
+	// Drop only records for Nodes no longer returned by Kubernetes at all.
+	for id := range previous {
+		if _, stillListed := listedServers[serverOf(id)]; stillListed {
+			busy[id] = struct{}{}
+		}
+	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for node, endpoint := range endpoints {
@@ -550,15 +578,13 @@ func askServers(ctx context.Context, endpoints map[string]string, previous map[s
 			if err != nil {
 				klog.V(4).InfoS("remotegpu: no usage from lupine server, keeping what it last reported",
 					"node", node, "endpoint", endpoint, "error", err)
-				// ponytail: a scan of the previous set per unreachable server.
-				// Index it by server if a fleet ever grows large enough for
-				// this to show up.
-				for id := range previous {
-					if serverOf(id) == node {
-						busy[id] = struct{}{}
-					}
-				}
 				return
+			}
+			// A successful response is authoritative, including an empty one.
+			for id := range busy {
+				if serverOf(id) == node {
+					delete(busy, id)
+				}
 			}
 			for uuid := range uuids {
 				busy[deviceID(node, uuid)] = struct{}{}

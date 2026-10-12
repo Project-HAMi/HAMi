@@ -160,6 +160,14 @@ For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make 
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
 and verifies that the chart and application versions match.
 
+Install [helm-docs](https://github.com/norwoodj/helm-docs)
+and run `make update-helm-chart-docs` to regenerate the Chart README after changing
+annotated values or their descriptions. Run `make verify-helm-chart-docs` to check
+that the generated section is current. This check also runs in `make verify_chart`
+and Chart Lint CI. Values without descriptions are omitted for now; strict
+documentation checking is disabled. Add a description with `# -- Description`
+immediately above the value.
+
 For changes to a package that has benchmarks, also run `make bench`. For pull requests, CI compares
 the benchmark output with the PR base and reports the result with `benchstat`. It gates only the
 documented `B/op` and `allocs/op` thresholds in `hack/bench-policy.tsv`; wall-time changes remain

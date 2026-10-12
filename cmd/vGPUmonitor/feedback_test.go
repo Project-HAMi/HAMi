@@ -25,9 +25,19 @@ import (
 	"time"
 
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	corelisters "k8s.io/client-go/listers/core/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
+
+// emptyPodLister satisfies ContainerLister.Update's pod listing for tests that
+// build a zero-value lister.
+type emptyPodLister struct{}
+
+func (emptyPodLister) List(labels.Selector) ([]*corev1.Pod, error) { return nil, nil }
+func (emptyPodLister) Pods(string) corelisters.PodNamespaceLister  { return nil }
 
 // stubDeviceMax mirrors the production Spec.DeviceMax, which reports the constant
 // maxDevices (16) rather than the live device count.
@@ -318,6 +328,7 @@ func TestObserveProtectsUsageUntilReadsAndWritesFinish(t *testing.T) {
 			defer release()
 			lister := &nvidia.ContainerLister{}
 			lister.SetContainersForTest(map[string]*nvidia.ContainerUsage{"pod_gpu": {Info: info}})
+			lister.SetPodListerForTest(emptyPodLister{})
 			observed := make(chan struct{})
 			go func() { Observe(lister); close(observed) }()
 			select {

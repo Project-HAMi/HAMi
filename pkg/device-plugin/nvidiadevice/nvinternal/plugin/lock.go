@@ -83,12 +83,26 @@ func removeMigApplyLock(file string) error {
 	return nil
 }
 
-func WatchLockFile() (chan bool, error) {
+// IsMigApplyLockExist reports whether the lock file is currently present.
+// Callers must re-check this on every WatchLockFile wake-up.
+func IsMigApplyLockExist() bool {
+	return isMigApplyLockExist(MigApplyLockFile)
+}
+
+func isMigApplyLockExist(file string) bool {
+	_, err := os.Stat(file)
+	return err == nil
+}
+
+func WatchLockFile() (chan struct{}, error) {
 	return watchLockFile(MigApplyLockFile)
 }
 
-func watchLockFile(file string) (chan bool, error) {
-	sigChan := make(chan bool, 1)
+// watchLockFile wakes on every create/remove of file and closes the channel
+// when the watcher stops. It carries no payload; call IsMigApplyLockExist to
+// learn the current state after each wake-up.
+func watchLockFile(file string) (chan struct{}, error) {
+	sigChan := make(chan struct{}, 1)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -101,26 +115,18 @@ func watchLockFile(file string) (chan bool, error) {
 
 	go func() {
 		defer watcher.Close()
+		defer close(sigChan)
 		for {
 			select {
 			case event, ok := <-watcher.Events:
 				if !ok {
 					return
 				}
-				if event.Name == file {
-					if event.Has(fsnotify.Create) {
-						select {
-						case sigChan <- true:
-							klog.V(4).Infof("MIG apply lock file detected: %s", event.Name)
-						default:
-						}
-					}
-					if event.Has(fsnotify.Remove) {
-						select {
-						case sigChan <- false:
-							klog.V(4).Infof("MIG apply lock file removed: %s", event.Name)
-						default:
-						}
+				if event.Name == file && (event.Has(fsnotify.Create) || event.Has(fsnotify.Remove)) {
+					klog.V(4).Infof("MIG apply lock file state may have changed: %s", event.Name)
+					select {
+					case sigChan <- struct{}{}:
+					default:
 					}
 				}
 			case err, ok := <-watcher.Errors:

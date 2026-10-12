@@ -19,6 +19,7 @@ package nodelock
 import (
 	"context"
 	"errors"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -1345,5 +1346,269 @@ func TestSetNodeLockNilPod(t *testing.T) {
 	expectedErrMsg := "cannot set node lock: pod is nil"
 	if err.Error() != expectedErrMsg {
 		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+// TestLockNodeExpiredKeepsLockWhileHolderWaits guards issue #3096. The kubelet
+// gives a device plugin no pod identity, so the plugin reads the node lock to
+// learn which pod its Allocate is for. Handing an expired lock to the next pod
+// while the holder is still pending made the holder's Allocate read the new
+// pod's allocation, and the two pods were served each other's devices.
+var allocating = map[string]string{deviceBindPhaseAnnotation: deviceBindAllocating}
+
+func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-1"
+	expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	lockValue := expired + NodeLockSep + "default" + NodeLockSep + "holder"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: lockValue},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	// The holder is still pending: its Allocate has not run, so it will read
+	// this lock to find out which allocation is its own.
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocating},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	err := LockNode(nodeName, "", next)
+	if err == nil {
+		t.Fatal("the expired lock was handed over while its holder was still pending")
+	}
+	if !errors.Is(err, ErrNodeLockContention) {
+		t.Fatalf("want a contention error the scheduler can retry, got %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if node.Annotations[NodeLockKey] != lockValue {
+		t.Fatalf("the lock changed to %q, want it left at %q", node.Annotations[NodeLockKey], lockValue)
+	}
+}
+
+// TestLockNodeExpiredTakenWhenHolderIsDone is the other half of #3096: once the
+// holder can no longer be handed an allocation, the expired lock must still be
+// recoverable, or one stuck pod would keep the node locked for good.
+func TestLockNodeExpiredTakenWhenHolderIsDone(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded, corev1.PodRunning} {
+		t.Run(string(phase), func(t *testing.T) {
+			nodeLocks = newNodeLockManager()
+			client.KubeClient = fake.NewClientset()
+
+			originalTimeout := NodeLockTimeout
+			NodeLockTimeout = time.Minute * 2
+			t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+			const nodeName = "gpu-node-2"
+			expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+
+			if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{NodeLockKey: expired + NodeLockSep + "default" + NodeLockSep + "holder"},
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the node: %v", err)
+			}
+			if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: phase},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the holder: %v", err)
+			}
+
+			next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+			if err := LockNode(nodeName, "", next); err != nil {
+				t.Fatalf("the expired lock was not recoverable: %v", err)
+			}
+
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to read the node back: %v", err)
+			}
+			if !strings.Contains(node.Annotations[NodeLockKey], "next") {
+				t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+			}
+		})
+	}
+}
+
+// TestLockNodeExpiredReclaimedByOwnHolder covers the reentrant case the #3096
+// guard must not catch. A pod whose own lock has expired while it is still
+// pending has to be able to take it back, or it can never be allocated: the
+// guard below only exists to stop another pod's allocation being crossed with
+// this one.
+func TestLockNodeExpiredReclaimedByOwnHolder(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-3"
+	expired := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	staleLock := expired + NodeLockSep + "default" + NodeLockSep + "holder"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: staleLock},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	holder := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocating},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), holder, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	if err := LockNode(nodeName, "", holder); err != nil {
+		t.Fatalf("the holder could not reclaim its own expired lock: %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if node.Annotations[NodeLockKey] == staleLock {
+		t.Fatal("the lock was left at its expired timestamp instead of being re-stamped")
+	}
+	if !strings.Contains(node.Annotations[NodeLockKey], "holder") {
+		t.Fatalf("the lock is %q, want it still held by the holder", node.Annotations[NodeLockKey])
+	}
+}
+
+// TestLockNodeExpiredTakenWhenHolderNameWasReused guards the gap the #3096
+// guard would otherwise open. The lock records only a namespace and a name, so
+// a StatefulSet replacement carries the same one. Treating that newer pod as
+// the holder would keep the node locked for as long as it stays pending, even
+// though the pod the lock was taken for is long gone.
+func TestLockNodeExpiredTakenWhenHolderNameWasReused(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-4"
+	lockedAt := time.Now().Add(-time.Hour)
+	staleLock := lockedAt.Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "web-0"
+
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: staleLock},
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+
+	// The pod the lock was taken for is gone. This one took its name later.
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "web-0",
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(lockedAt.Add(30 * time.Minute)),
+			Annotations:       allocating,
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the replacement: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	if err := LockNode(nodeName, "", next); err != nil {
+		t.Fatalf("the node stayed locked for a pod the lock was never taken for: %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to read the node back: %v", err)
+	}
+	if !strings.Contains(node.Annotations[NodeLockKey], "next") {
+		t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+	}
+}
+
+// A holder that is still Pending after its allocation finished (image pull,
+// init containers) must not keep the node locked when its lock release failed.
+func TestLockNodeExpiredTakenWhenHolderFinishedAllocating(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	client.KubeClient = fake.NewClientset()
+
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+	const nodeName = "gpu-node-5"
+	staleLock := time.Now().Add(-time.Hour).Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "holder"
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: staleLock}},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the node: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default",
+			Annotations: map[string]string{deviceBindPhaseAnnotation: "success"}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to seed the holder: %v", err)
+	}
+
+	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+	if err := LockNode(nodeName, "", next); err != nil {
+		t.Fatalf("the node stayed locked for a holder that finished allocating: %v", err)
+	}
+}
+
+func TestGenerateNodeLockKeyByPodKeepsSubSecondPrecision(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "web-0"}}
+	fraction := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+`)
+	for _, key := range []string{GenerateNodeLockKeyByPod(pod), GenerateNodeLockKeyByPod(nil)} {
+		// A clock reading with zero nanoseconds prints no fraction, so retry
+		// once before calling it a failure.
+		if !fraction.MatchString(key) {
+			key = GenerateNodeLockKeyByPod(pod)
+		}
+		if !fraction.MatchString(key) {
+			t.Fatalf("lock key %q has no sub-second part", key)
+		}
+	}
+
+	lockTime, ns, name, err := ParseNodeLock(GenerateNodeLockKeyByPod(pod))
+	if err != nil {
+		t.Fatalf("ParseNodeLock: %v", err)
+	}
+	if ns != "default" || name != "web-0" || time.Since(lockTime) > time.Minute || lockTime.After(time.Now()) {
+		t.Fatalf("unexpected parse result %v %q %q", lockTime, ns, name)
+	}
+
+	// A lock written by an older scheduler, in whole seconds, still parses.
+	if _, _, _, err := ParseNodeLock(time.Now().Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "web-0"); err != nil {
+		t.Fatalf("whole-second lock no longer parses: %v", err)
 	}
 }

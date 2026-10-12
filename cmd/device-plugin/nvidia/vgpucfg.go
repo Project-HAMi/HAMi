@@ -68,6 +68,12 @@ func addFlags() []cli.Flag {
 			Value: "nvidia.com/gpu",
 			Usage: "the name of field for number GPU visible in container",
 		},
+		&cli.BoolFlag{
+			Name:    "report-node-capacity",
+			Value:   false,
+			Usage:   "If set, memory and core resources will be reported to node capacity and allocatable",
+			EnvVars: []string{"REPORT_NODE_CAPACITY"},
+		},
 	}
 	return addition
 }
@@ -109,6 +115,10 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 	config, err := config.LoadConfig(*plugin.ConfigFile)
 	if err != nil {
 		klog.Fatalf("failed to load ascend vnpu config file %s: %v", *plugin.ConfigFile, err)
+	}
+	if c.IsSet("report-node-capacity") || c.Bool("report-node-capacity") {
+		reportCap := c.Bool("report-node-capacity")
+		devcfg.ReportNodeCapacity = &reportCap
 	}
 	devcfg.ResourceName = &config.NvidiaConfig.ResourceCountName
 	klog.Infoln("reading config=", config.NvidiaConfig.ResourceCountName, "devcfg", *devcfg.ResourceName, "configfile=", *plugin.ConfigFile)

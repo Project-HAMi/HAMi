@@ -1,24 +1,28 @@
-## @section Global configuration
-## @param global.imageRegistry Global Docker image registry
-## @param global.imagePullSecrets Global Docker image pull secrets
+# Chart-wide settings; the description of each one names the components it applies to.
 global:
-  ## @param global.imageRegistry Global Docker image registry
+  # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
-  ## E.g.
-  ## imagePullSecrets:
-  ##   - myRegistryKeySecretName
-  ## @param global.imagePullSecrets Global Docker image pull secrets
+  # -- Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
+  # -- Tag used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty. A non-empty per-component tag takes precedence. The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it.
   imageTag: "v2.10.0"
+  # -- Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin.
   gpuHookPath: /usr/local
+  # -- Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors.
   labels: {}
+  # -- Annotations added to the scheduler Deployment and PodDisruptionBudget and to the NVIDIA and remote-gpu DaemonSets.
   annotations: {}
+  # -- When true, add `global.managedNodeSelector` to the scheduler pod as `NODE_SELECTOR_*` environment variables.
   managedNodeSelectorEnable: false
+  # -- Node labels exposed to the scheduler pod when `global.managedNodeSelectorEnable` is true. Each key/value pair becomes a `NODE_SELECTOR_<KEY>` environment variable on the scheduler pod (key upper-cased, with `-`, `/` and `.` replaced by `_`), e.g. `usage: gpu` becomes `NODE_SELECTOR_USAGE=gpu`.
   managedNodeSelector:
     usage: "gpu"
 
+# -- Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names.
 nameOverride: ""
+# -- Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters.
 fullnameOverride: ""
+# -- Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist.
 namespaceOverride: ""
 
 platform:
@@ -37,45 +41,6 @@ selinux:
   enabled: false
   type: container_file_t
   level: s0
-
-#Nvidia GPU Parameters
-resourceName: "nvidia.com/gpu"
-resourceMem: "nvidia.com/gpumem"
-resourceMemPercentage: "nvidia.com/gpumem-percentage"
-resourceCores: "nvidia.com/gpucores"
-resourcePriority: "nvidia.com/priority"
-
-#MLU Parameters
-mluResourceName: "cambricon.com/vmlu"
-mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
-mluResourceCores: "cambricon.com/mlu.smlu.vcore"
-
-#Hygon HCU Parameters
-hcuResourceName: "hygon.com/hcunum"
-hcuResourceMem: "hygon.com/hcumem"
-hcuResourceCores: "hygon.com/hcucores"
-
-#Metax sGPU Parameters
-metaxResourceName: "metax-tech.com/sgpu"
-metaxResourceCore: "metax-tech.com/vcore"
-metaxResourceMem: "metax-tech.com/vmemory"
-metaxsGPUTopologyAware: "false"
-
-#Enflame DRS Parameters
-enflameResourceNameDRSGCU: "enflame.com/drs-gcu"
-enflameResourceNameGCUMemory: "enflame.com/gcu-memory"
-enflameResourceNameGCUCore: "enflame.com/gcu-core"
-
-#Kunlun XPU Parameters
-kunlunResourceName: "kunlunxin.com/xpu"
-kunlunResourceVCountName: "kunlunxin.com/vxpu"
-kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
-
-#Vastai Parameters
-vastaiResourceName: "vastaitech.com/va"
-
-#Biren Parameters
-birenResourceName: "birentech.com/gpu"
 
 schedulerName: "hami-scheduler"
 
@@ -405,12 +370,22 @@ devicePlugin:
       ##
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
+    # Address the monitor serves /metrics on. The container port, the Service
+    # target port and the probes follow it; set it here, not in extraArgs.
+    metricsBindAddress: ":9394"
+    # Liveness and readiness probes of the monitor. Turn them off to debug inside
+    # the container without kubelet restarting it.
+    probes:
+      enabled: true
     # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
+    ## @param devicePlugin.monitor.disableHAMiCoreForWholeGPU disable the HAMi-core hook for whole-GPU containers; the monitor reads their metrics from NVML instead
+    disableHAMiCoreForWholeGPU: true
     extraArgs:
       - -v=4
-    extraEnvs: {}
+    # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
+    extraEnvs: []
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -426,17 +401,10 @@ devicePlugin:
 #        cpu: 100m
 #        memory: 100Mi
 
-  deviceSplitCount: 10
-  deviceMemoryScaling: 1
-  deviceCoreScaling: 1
-  # Advertise the physical GPU's NUMA node on each vGPU replica so kubelet's
-  # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
-  # admission behavior when topologyManagerPolicy is single-numa-node.
-  enableNumaTopology: false
   # NUMA alignment refit (#2080): when enabled, the device plugin asks the
   # scheduler to re-run its fit over the NUMA-restricted device set kubelet
   # allows, keeping scheduler accounting authoritative. Requires
-  # enableNumaTopology plus the per-node enablegetpreferredallocation node
+  # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
   # configuration; pods opt in with the hami.io/numa-alignment annotation
   # (best-effort or strict). Disabled by default: mismatches are only logged.
   numaRefit:
@@ -454,12 +422,25 @@ devicePlugin:
     # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
-  # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
-  # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
-  # Can be overridden per-node via nodeConfiguration.config.
-  preConfiguredDeviceMemory: 0
+  # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
+  # to Node capacity and allocatable fields. Defaults to false. Not NVIDIA-specific,
+  # so this stays here rather than under devices.<vendor>.
+  reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
+    # Each node uses the nodeconfig entries whose "name" is the node name. A node
+    # that no entry names uses the entries whose "nodelabelselector" (a
+    # Kubernetes label selector with matchLabels or matchExpressions) matches its
+    # labels. Several matching entries apply in list order, a later one overriding
+    # the fields it sets, as several name entries always have. An entry sets either
+    # "name" or "nodelabelselector"; an entry that sets both, or whose selector is
+    # empty or invalid, is ignored:
+    #   { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+    #     "operatingmode": "mig", "devicesplitcount": 10 }
+    # The device plugin reads the node labels each time it starts, so restart it
+    # after changing them, and select on labels the node has when it registers
+    # (node group or kubelet --node-labels), not on labels a controller adds later.
+    # A node that neither a name nor a selector picks uses the entries named "*".
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json(An example is as follows).
     config: |
@@ -484,10 +465,6 @@ devicePlugin:
     # If you want to use an existing ConfigMap, you can set the name here.
     # If this is set, the chart will not create the ConfigMap and will use the existing one.
     externalConfigName: ""
-  # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
-  runtimeClassName: ""
-  # Whether to create runtime class, name comes from runtimeClassName when it is set
-  createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: true
@@ -503,7 +480,8 @@ devicePlugin:
 
   extraArgs:
     - -v=4
-  extraEnvs: {}
+  # -- Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom.
+  extraEnvs: []
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
@@ -567,48 +545,178 @@ mockDevicePlugin:
     ##
     pullSecrets: []
 devices:
+  metax:
+    resourceCountName: "metax-tech.com/gpu"
+    resourceVCountName: "metax-tech.com/sgpu"
+    resourceVCoreName: "metax-tech.com/vcore"
+    resourceVMemoryName: "metax-tech.com/vmemory"
+    sgpuTopologyAware: false
+  hygon:
+    memoryFactor: 1
+    resourceCountName: "hygon.com/hcunum"
+    resourceMemoryName: "hygon.com/hcumem"
+    resourceCoreName: "hygon.com/hcucores"
+  cambricon:
+    resourceCountName: "cambricon.com/vmlu"
+    resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
+    resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
+    resourceCountName: "amd.com/gpu"
+    resourceMemoryName: "amd.com/gpumem"
+    resourceMemoryPercentageName: "amd.com/gpumem-percentage"
+    resourceCoreName: "amd.com/gpucores"
+    runtimeClassName: ""  # Name of the runtime class to set on Pods that request an AMD GPU
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
       - amd.com/gpucores
   awsneuron:
+    resourceCountName: "aws.amazon.com/neuron"
+    resourceCoreName: "aws.amazon.com/neuroncore"
     customresources:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
   kunlun:
+    resourceCountName: "kunlunxin.com/xpu"
+    resourceVCountName: "kunlunxin.com/vxpu"
+    resourceVMemoryName: "kunlunxin.com/vxpu-memory"
     enabled: true
-    customresources:
-      - kunlunxin.com/xpu
-      - kunlunxin.com/vxpu
-      - kunlunxin.com/vxpu-memory
+    # devices.kunlun.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   enflame:
+    resourceNameGCU: "enflame.com/gcu"
+    resourceNameDRSGCU: "enflame.com/drs-gcu"
+    resourceNameGCUMemory: "enflame.com/gcu-memory"
+    resourceNameGCUCore: "enflame.com/gcu-core"
     enabled: true
-    customresources:
-      - enflame.com/drs-gcu
-      - enflame.com/gcu-memory
-      - enflame.com/gcu-core
-      - enflame.com/gcu
+    # devices.enflame.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   mthreads:
+    # -- Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately.
     enabled: true
+    # -- Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically.
     customresources:
       - mthreads.com/vgpu
-    # Memory units (512MiB each) provided by one MThreads card model, one entry per
-    # model present in the cluster. 96 = MTT S4000 (48GiB, upstream default);
-    # 160 = MTT S5000 (80GiB). Mixed fleets list every model, e.g. [96, 160].
-    # Pods that omit mthreads.com/sgpu-memory are sized from the node's real card.
+    # -- Resource name for MThreads GPU count requests. Must match the vendor device plugin and the entry in customresources. Requesting only this resource allocates exclusive GPUs.
+    resourceCountName: "mthreads.com/vgpu"
+    # -- Resource name for sGPU memory requests in integer units of 512 MiB (32 = 16 GiB). When memory is not requested, HAMi uses the selected node's per-card capacity.
+    resourceMemoryName: "mthreads.com/sgpu-memory"
+    # -- Resource name for integer sGPU time-sharing weight requests. HAMi accounts for 16 units per card: a single-card request of 8 consumes 8/16 of its allocatable compute units. Device sharing for multi-cards is not supported. For multi-card requests, HAMi overwrites the compute request with 16 units per card. Actual GPU time depends on the vendor scheduling policy and competing workloads.
+    resourceCoreName: "mthreads.com/sgpu-core"
+    # -- (list) Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. 96 = MTT S4000 (48 GiB); 160 = MTT S5000 (80 GiB). Use [96, 160] for mixed fleets. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list.
     memoryPerCard:
       - 96
   vastai:
+    resourceCountName: "vastaitech.com/va"
     enabled: true
-    customresources:
-      - vastaitech.com/va
+    # devices.vastai.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
   biren:
+    resourceCountName: "birentech.com/gpu"
     enabled: true
-    customresources:
-      - birentech.com/gpu
+    # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    customresources: []
+  # Most devices.nvidia values are written to the generated device-config.yaml that
+  # the scheduler and the device plugin read. When device-config.content is set, it
+  # replaces that file and those values no longer reach either component.
   nvidia:
+    # -- In the `mig` operating mode, let the device plugin adopt, when it starts, MIG instances HAMi has no record of creating, so it can reuse or destroy them.
+    # When false, they are left untouched. Enable it only when HAMi alone manages the MIG layout of the node.
+    adoptExistingMIGInstances: false
+    # -- MIG profiles HAMi may create on nodes whose device plugin runs in the `mig` operating mode.
+    # Each entry has `models`, a list of GPU model names matched as substrings of the name NVML reports,
+    # and `profiles`, a list of MIG profile names such as `1g.10gb`, for example `{models: ["A30"], profiles: ["1g.6gb", "2g.12gb"]}`.
+    # The first entry that matches a GPU's model decides the profiles for that GPU; a GPU that no entry matches is not registered.
+    # The `nvidia.com/mig-profile-preference` Pod annotation accepts only listed profiles or their slice prefix, such as `4g`.
+    # The scheduler and device plugin fail to start if an entry has empty `models` or `profiles`, or if a profile name has no `.`
+    # or its part before the first `.` is not at least two characters ending in `g`. The part after the `.` is not checked.
+    # A profile that passes this check but names a slice count the GPU does not support, such as `5g.20gb`, is skipped on the node.
+    # Setting this value replaces the whole default list.
+    # @default -- Profiles for A30, A100, H100, H20, GH200, H200, B200, and RTX PRO 6000 Blackwell Server Edition
+    migProfileAllowlist:
+      - models: [ "A30" ]
+        profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
+        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb" ]
+      - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.79gb" ]
+      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.80gb" ]
+      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "4g.47gb", "7g.94gb" ]
+      - models: [ "H20", "H100 on GH200"]
+        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "4g.48gb", "7g.96gb" ]
+      - models: [ "H200 NVL", "H200-SXM5"]
+        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "4g.71gb", "7g.141gb" ]
+      - models: [ "B200" ]
+        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "4g.90gb", "7g.180gb" ]
+      - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
+        profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
+    # -- GPU memory in MiB assigned to each requested GPU when a container sets neither the `resourceMemoryName` nor the `resourceMemoryPercentageName` resource, or sets them to `0`.
+    # `0` assigns the whole memory of the GPU. `memoryFactor` does not apply to this value. Must not be negative.
+    defaultMemory: 0
+    # -- Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container does not set the `resourceCoreName` resource.
+    # `0` reserves no cores and sets no core limit.
+    # When the admission webhook is enabled, a container that requests GPUs without a memory amount, or with 100% of the memory, gets 100 instead,
+    # which requests each GPU exclusively when `deviceCoreScaling` is 1.
+    defaultCores: 0
+    # -- Number of GPUs the admission webhook adds to a container that sets a `resourceMemoryName`, `resourceMemoryPercentageName`, or `resourceCoreName` limit but no `resourceCountName` limit.
+    # `0` adds nothing, so such a container is not treated as an NVIDIA GPU request.
+    defaultGPUNum: 1
+    # -- Multiplier applied to the `resourceMemoryName` value a container requests, which is otherwise in MiB.
+    # For example, `1024` makes `nvidia.com/gpumem: 4` request 4 GiB. ResourceQuota limits for that resource are scaled the same way.
+    # `0` and `1` disable scaling. Must not be negative.
+    memoryFactor: 1
+    # -- Extended resource name for the number of NVIDIA GPUs a container requests.
+    # The device plugin registers it with kubelet, advertising each physical GPU `deviceSplitCount` times.
+    resourceCountName: "nvidia.com/gpu"
+    # -- Extended resource name for the GPU memory a container requests on each GPU, in MiB multiplied by `memoryFactor`.
+    resourceMemoryName: "nvidia.com/gpumem"
+    # -- Extended resource name for the GPU memory a container requests on each GPU as a percentage of that GPU's memory, an integer from 0 to 100.
+    # `0` is treated as unset.
+    resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
+    # -- Extended resource name for the GPU cores a container requests on each GPU, as an integer percentage from 0 to 100.
+    # `0` reserves no cores and sets no core limit. With `deviceCoreScaling: 1`, `100` requests each GPU exclusively.
+    resourceCoreName: "nvidia.com/gpucores"
+    # -- Extended resource name for the task priority of a container. The admission webhook passes its limit to HAMi-core as `CUDA_TASK_PRIORITY`.
+    # A lower value is a higher priority, and HAMi-core uses `1` when it is unset.
+    # On a shared GPU, vGPUmonitor pauses kernel launches of lower-priority tasks while higher-priority tasks are active,
+    # but only for tasks with a `resourceCoreName` limit between 1 and 99 whose core limit is being enforced (see `gpuCorePolicy`).
+    resourcePriorityName: "nvidia.com/priority"
+    # -- Number of vGPUs each physical GPU is advertised as, which is the maximum number of containers that can share one GPU.
+    # In the `mig` operating mode, the number of MIG instances a GPU can hold limits sharing instead.
+    # A device-plugin `nodeconfig` entry can override it per node with `devicesplitcount`.
+    deviceSplitCount: 10
+    # -- (float) Factor applied to the memory each GPU reports to the scheduler. Accepts decimals, such as `1.5`.
+    # A value above `1` lets the memory requests on one GPU add up to more than its physical memory, and the device plugin sets `CUDA_OVERSUBSCRIBE=true` in those containers.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicememoryscaling`.
+    deviceMemoryScaling: 1
+    # -- (float) Factor applied to the cores each GPU reports to the scheduler, which is `100` times this value. Accepts decimals, such as `1.5`.
+    # A value above `1` lets the `resourceCoreName` requests on one GPU add up to more than 100.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicecorescaling`.
+    deviceCoreScaling: 1
+    # -- Total memory in MiB registered for a GPU whose memory NVML cannot query, such as a unified-memory GPU like the NVIDIA GB10.
+    # GPUs that report their memory always use the reported value.
+    # `0` skips GPUs whose memory cannot be queried. A device-plugin `nodeconfig` entry can override it per node with `preconfigureddevicememory`.
+    preConfiguredDeviceMemory: 0
+    # -- Advertise each GPU's NUMA node on its vGPUs so kubelet's Topology Manager can align CPUs and GPUs.
+    # Disabled by default because the `single-numa-node` Topology Manager policy then changes which Pods kubelet admits.
+    # A device-plugin `nodeconfig` entry can override it per node with `enablenumatopology`.
+    enableNumaTopology: false
+    # -- RuntimeClass set on the device plugin Pods and, by the admission webhook, on GPU Pods that do not set `runtimeClassName`, commonly `nvidia` when the NVIDIA container runtime is not the default.
+    # The RuntimeClass must exist, either created by `createRuntimeClass` or already present in the cluster. Empty sets no RuntimeClass.
+    runtimeClassName: ""
+    # -- Create the RuntimeClass named by `runtimeClassName`, with the `nvidia` handler, when `devicePlugin.enabled` is true.
+    # Has no effect when `runtimeClassName` is empty. Leave it false if the RuntimeClass already exists, such as one created by the GPU Operator.
+    createRuntimeClass: false
+    # -- How HAMi-core enforces the `resourceCoreName` limit. The admission webhook passes values other than `default` as `GPU_CORE_UTILIZATION_POLICY`.
+    # `default` lets vGPUmonitor turn enforcement on only while it sees other active tasks of the same or higher priority on the GPU.
+    # `force` always enforces it. `disable` never enforces it. HAMi-core treats any other value as `default`. Limits of 0 and 100 are never enforced.
     gpuCorePolicy: default
+    # -- HAMi-core log level, passed to containers as `LIBCUDA_LOG_LEVEL`.
+    # Errors are always logged. `0` and `1` log errors only, `2` adds warnings and messages, `3` adds info, and `4` adds debug logs.
+    # HAMi-core itself defaults to `2` when the variable is unset.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `libcudaloglevel`.
     libCudaLogLevel: 1
   remotegpu:
     # Schedule pods onto GPUs served over the network by a lupine server.
@@ -648,6 +756,158 @@ devices:
       tolerations: []
       resources: {}
   ascend:
+    configs:
+    - chipName: 910A
+      commonWord: Ascend910A
+      resourceName: huawei.com/Ascend910A
+      resourceMemoryName: huawei.com/Ascend910A-memory
+      resourceCoreName: huawei.com/Ascend910A-core
+      memoryAllocatable: 32768
+      memoryCapacity: 32768
+      memoryFactor: 1
+      aiCore: 30
+      templates:
+        - name: vir02
+          memory: 2184
+          aiCore: 2
+        - name: vir04
+          memory: 4369
+          aiCore: 4
+        - name: vir08
+          memory: 8738
+          aiCore: 8
+        - name: vir16
+          memory: 17476
+          aiCore: 16
+    - chipName: 910B2
+      commonWord: Ascend910B2
+      resourceName: huawei.com/Ascend910B2
+      resourceMemoryName: huawei.com/Ascend910B2-memory
+      resourceCoreName: huawei.com/Ascend910B2-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 24
+      aiCPU: 6
+      templates:
+        - name: vir03_1c_8g
+          memory: 8192
+          aiCore: 3
+          aiCPU: 1
+        - name: vir06_1c_16g
+          memory: 16384
+          aiCore: 6
+          aiCPU: 1
+        - name: vir12_3c_32g
+          memory: 32768
+          aiCore: 12
+          aiCPU: 3
+    - chipName: 910B3
+      commonWord: Ascend910B3
+      resourceName: huawei.com/Ascend910B3
+      resourceMemoryName: huawei.com/Ascend910B3-memory
+      resourceCoreName: huawei.com/Ascend910B3-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 910B4-1
+      commonWord: Ascend910B4-1
+      resourceName: huawei.com/Ascend910B4-1
+      resourceMemoryName: huawei.com/Ascend910B4-1-memory
+      resourceCoreName: huawei.com/Ascend910B4-1-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 910B4
+      commonWord: Ascend910B4
+      resourceName: huawei.com/Ascend910B4
+      resourceMemoryName: huawei.com/Ascend910B4-memory
+      resourceCoreName: huawei.com/Ascend910B4-core
+      memoryAllocatable: 32768
+      memoryCapacity: 32768
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_8g
+          memory: 8192
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_16g
+          memory: 16384
+          aiCore: 10
+          aiCPU: 3
+    - chipName: 310P3
+      commonWord: Ascend310P
+      resourceName: huawei.com/Ascend310P
+      resourceMemoryName: huawei.com/Ascend310P-memory
+      resourceCoreName: huawei.com/Ascend310P-core
+      memoryAllocatable: 21527
+      memoryCapacity: 24576
+      memoryFactor: 1
+      aiCore: 8
+      aiCPU: 7
+      templates:
+        - name: vir01
+          memory: 3072
+          aiCore: 1
+          aiCPU: 1
+        - name: vir02
+          memory: 6144
+          aiCore: 2
+          aiCPU: 2
+        - name: vir04
+          memory: 12288
+          aiCore: 4
+          aiCPU: 4
+    - chipName: Ascend910
+      commonWord: Ascend910C
+      resourceName: huawei.com/Ascend910C
+      resourceMemoryName: huawei.com/Ascend910C-memory
+      resourceCoreName: huawei.com/Ascend910C-core
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      aiCore: 20
+      aiCPU: 7
+      superPod: true
+      templates:
+        - name: vir05_1c_16g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_32g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
+    # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
+    hamiVnpuMode: ""
+    # -- Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity.
+    vnpuDeviceSplitCount: 10
+    enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
     enabled: false
     image: ""
     imagePullPolicy: IfNotPresent
@@ -655,8 +915,6 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
-    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
-    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
@@ -680,6 +938,27 @@ devices:
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
   iluvatar:
+    configs:
+      - chipName: MR-V100
+        commonWord: MR-V100
+        resourceCountName: iluvatar.ai/MR-V100-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V100.vMem
+        resourceCoreName: iluvatar.ai/MR-V100.vCore
+      - chipName: MR-V50
+        commonWord: MR-V50
+        resourceCountName: iluvatar.ai/MR-V50-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V50.vMem
+        resourceCoreName: iluvatar.ai/MR-V50.vCore
+      - chipName: BI-V150
+        commonWord: BI-V150
+        resourceCountName: iluvatar.ai/BI-V150-vgpu
+        resourceMemoryName: iluvatar.ai/BI-V150.vMem
+        resourceCoreName: iluvatar.ai/BI-V150.vCore
+      - chipName: BI-V100
+        commonWord: BI-V100
+        resourceCountName: iluvatar.ai/BI-V100-vgpu
+        resourceMemoryName: iluvatar.ai/BI-V100.vMem
+        resourceCoreName: iluvatar.ai/BI-V100.vCore
     enabled: false
     customresources:
       - iluvatar.ai/BI-V100-vgpu
@@ -700,15 +979,7 @@ legacyMetrics: false
 prometheus:
   enabled: false
 
-# Device config overrides
-# If content is set under device-config.content, it will be used as the device-config.yaml
-# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
-# Example:
-# device-config:
-#   content: |
-#     nvidia:
-#       migProfileAllowlist:
-#         - models: [ "RTX 6000 Ada" ]
-#           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+# Full replacement of device-config.yaml; takes precedence over a bundled file and values.
+# This is a complete document, not a merge; prefer devices.<vendor> fields for partial overrides.
 device-config:
   content: ""
