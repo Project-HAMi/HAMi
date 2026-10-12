@@ -87,7 +87,8 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		_ = eventSet.Free()
 	}()
 
-	parentToDeviceMap := make(map[string]*Device)
+	// A parent GPU can back several logical devices (time-sliced replicas or MIG slices).
+	parentToDevicesMap := make(map[string][]*Device)
 	deviceIDToGiMap := make(map[string]uint32)
 	deviceIDToCiMap := make(map[string]uint32)
 
@@ -105,7 +106,7 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 		deviceIDToGiMap[d.ID] = gi
 		deviceIDToCiMap[d.ID] = ci
-		parentToDeviceMap[uuid] = d
+		parentToDevicesMap[uuid] = append(parentToDevicesMap[uuid], d)
 
 		gpu, ret := r.nvml.DeviceGetHandleByUUID(uuid)
 		if ret != nvml.SUCCESS {
@@ -196,26 +197,28 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 			continue
 		}
 
-		d, exists := parentToDeviceMap[eventUUID]
+		parentDevices, exists := parentToDevicesMap[eventUUID]
 		if !exists {
 			klog.Infof("Ignoring event for unexpected device: %v", eventUUID)
 			continue
 		}
 
-		if d.IsMigDevice() && e.GpuInstanceId != 0xFFFFFFFF && e.ComputeInstanceId != 0xFFFFFFFF {
-			gi := deviceIDToGiMap[d.ID]
-			ci := deviceIDToCiMap[d.ID]
-			if gi != e.GpuInstanceId || ci != e.ComputeInstanceId {
-				continue
+		for _, d := range parentDevices {
+			if d.IsMigDevice() && e.GpuInstanceId != 0xFFFFFFFF && e.ComputeInstanceId != 0xFFFFFFFF {
+				gi := deviceIDToGiMap[d.ID]
+				ci := deviceIDToCiMap[d.ID]
+				if gi != e.GpuInstanceId || ci != e.ComputeInstanceId {
+					continue
+				}
+				klog.Infof("Event for mig device %v (gi=%v, ci=%v)", d.ID, gi, ci)
 			}
-			klog.Infof("Event for mig device %v (gi=%v, ci=%v)", d.ID, gi, ci)
-		}
 
-		klog.Infof("XidCriticalError: Xid=%d on Device=%s; marking device as unhealthy.", e.EventData, d.ID)
-		select {
-		case unhealthy <- d:
-		case <-stop:
-			return nil
+			klog.Infof("XidCriticalError: Xid=%d on Device=%s; marking device as unhealthy.", e.EventData, d.ID)
+			select {
+			case unhealthy <- d:
+			case <-stop:
+				return nil
+			}
 		}
 	}
 }
