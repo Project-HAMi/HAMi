@@ -1,4 +1,4 @@
-# Global settings shared by every HAMi component.
+# Chart-wide settings; the description of each one names the components it applies to.
 global:
   # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
