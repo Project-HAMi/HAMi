@@ -144,15 +144,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 ## Resource Name Configuration
 
-### NVIDIA GPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.nvidia.resourceCountName` | GPU resource name | `"nvidia.com/gpu"` |
-| `devices.nvidia.resourceMemoryName` | GPU memory resource name | `"nvidia.com/gpumem"` |
-| `devices.nvidia.resourceMemoryPercentageName` | GPU memory percentage resource name | `"nvidia.com/gpumem-percentage"` |
-| `devices.nvidia.resourceCoreName` | GPU core resource name | `"nvidia.com/gpucores"` |
-| `devices.nvidia.resourcePriorityName` | GPU priority resource name | `"nvidia.com/priority"` |
-
 ### Cambricon MLU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -334,7 +325,6 @@ listener is started.
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Skip the HAMi-core interception for whole-GPU workloads on non-oversubscribed nodes and read their metrics from NVML instead. Whole-GPU means: non-MIG device, full device memory allocated, cores unrequested or `gpucores=100` | `true` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
-| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### vGPU Cache Garbage Collection
 
@@ -372,11 +362,6 @@ or the five-failure limit for directory deletion.
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devices.nvidia.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
-| `devices.nvidia.deviceMemoryScaling` | Device memory scaling ratio | `1` |
-| `devices.nvidia.deviceCoreScaling` | Device core scaling ratio | `1` |
-| `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
-| `devices.nvidia.createRuntimeClass` | Create the NVIDIA RuntimeClass named by `devices.nvidia.runtimeClassName` when the device plugin is enabled | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
@@ -384,7 +369,6 @@ or the five-failure limit for directory deletion.
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
-| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
 | `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
@@ -434,19 +418,6 @@ host-installed drivers, or appends the GPU Operator path suffix
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
-
-### Mthreads
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.mthreads.enabled` | Whether to enable | `true` |
-| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
-| `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
-
-### NVIDIA
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.nvidia.gpuCorePolicy` | GPU core policy | `default` |
-| `devices.nvidia.libCudaLogLevel` | CUDA library log level | `1` |
 
 ### Huawei Ascend
 | Parameter | Description | Default Value |
@@ -524,3 +495,66 @@ vendor are removed.
 
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
+
+<!-- BEGIN GENERATED VALUES -->
+
+## Generated values (partial)
+
+This table includes only values with helm-docs descriptions.
+More values will be added in follow-up PRs.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
+| devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
+| devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
+| devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
+| devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
+| devices.mthreads.memoryPerCard | list | `[96]` | Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. 96 = MTT S4000 (48 GiB); 160 = MTT S5000 (80 GiB). Use [96, 160] for mixed fleets. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list. |
+| devices.mthreads.resourceCoreName | string | `"mthreads.com/sgpu-core"` | Resource name for integer sGPU time-sharing weight requests. HAMi accounts for 16 units per card: a single-card request of 8 consumes 8/16 of its allocatable compute units. Device sharing for multi-cards is not supported. For multi-card requests, HAMi overwrites the compute request with 16 units per card. Actual GPU time depends on the vendor scheduling policy and competing workloads. |
+| devices.mthreads.resourceCountName | string | `"mthreads.com/vgpu"` | Resource name for MThreads GPU count requests. Must match the vendor device plugin and the entry in customresources. Requesting only this resource allocates exclusive GPUs. |
+| devices.mthreads.resourceMemoryName | string | `"mthreads.com/sgpu-memory"` | Resource name for sGPU memory requests in integer units of 512 MiB (32 = 16 GiB). When memory is not requested, HAMi uses the selected node's per-card capacity. |
+| devices.nvidia.adoptExistingMIGInstances | bool | `false` | In the `mig` operating mode, let the device plugin adopt, when it starts, MIG instances HAMi has no record of creating, so it can reuse or destroy them. When false, they are left untouched. Enable it only when HAMi alone manages the MIG layout of the node. |
+| devices.nvidia.createRuntimeClass | bool | `false` | Create the RuntimeClass named by `runtimeClassName`, with the `nvidia` handler, when `devicePlugin.enabled` is true. Has no effect when `runtimeClassName` is empty. Leave it false if the RuntimeClass already exists, such as one created by the GPU Operator. |
+| devices.nvidia.defaultCores | int | `0` | Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container does not set the `resourceCoreName` resource. `0` reserves no cores and sets no core limit. When the admission webhook is enabled, a container that requests GPUs without a memory amount, or with 100% of the memory, gets 100 instead, which requests each GPU exclusively when `deviceCoreScaling` is 1. |
+| devices.nvidia.defaultGPUNum | int | `1` | Number of GPUs the admission webhook adds to a container that sets a `resourceMemoryName`, `resourceMemoryPercentageName`, or `resourceCoreName` limit but no `resourceCountName` limit. `0` adds nothing, so such a container is not treated as an NVIDIA GPU request. |
+| devices.nvidia.defaultMemory | int | `0` | GPU memory in MiB assigned to each requested GPU when a container sets neither the `resourceMemoryName` nor the `resourceMemoryPercentageName` resource, or sets them to `0`. `0` assigns the whole memory of the GPU. `memoryFactor` does not apply to this value. Must not be negative. |
+| devices.nvidia.deviceCoreScaling | float | `1` | Factor applied to the cores each GPU reports to the scheduler, which is `100` times this value. Accepts decimals, such as `1.5`. A value above `1` lets the `resourceCoreName` requests on one GPU add up to more than 100. Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicecorescaling`. |
+| devices.nvidia.deviceMemoryScaling | float | `1` | Factor applied to the memory each GPU reports to the scheduler. Accepts decimals, such as `1.5`. A value above `1` lets the memory requests on one GPU add up to more than its physical memory, and the device plugin sets `CUDA_OVERSUBSCRIBE=true` in those containers. Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicememoryscaling`. |
+| devices.nvidia.deviceSplitCount | int | `10` | Number of vGPUs each physical GPU is advertised as, which is the maximum number of containers that can share one GPU. In the `mig` operating mode, the number of MIG instances a GPU can hold limits sharing instead. A device-plugin `nodeconfig` entry can override it per node with `devicesplitcount`. |
+| devices.nvidia.enableNumaTopology | bool | `false` | Advertise each GPU's NUMA node on its vGPUs so kubelet's Topology Manager can align CPUs and GPUs. Disabled by default because the `single-numa-node` Topology Manager policy then changes which Pods kubelet admits. A device-plugin `nodeconfig` entry can override it per node with `enablenumatopology`. |
+| devices.nvidia.gpuCorePolicy | string | `"default"` | How HAMi-core enforces the `resourceCoreName` limit. The admission webhook passes values other than `default` as `GPU_CORE_UTILIZATION_POLICY`. `default` lets vGPUmonitor turn enforcement on only while it sees other active tasks of the same or higher priority on the GPU. `force` always enforces it. `disable` never enforces it. HAMi-core treats any other value as `default`. Limits of 0 and 100 are never enforced. |
+| devices.nvidia.libCudaLogLevel | int | `1` | HAMi-core log level, passed to containers as `LIBCUDA_LOG_LEVEL`. Errors are always logged. `0` and `1` log errors only, `2` adds warnings and messages, `3` adds info, and `4` adds debug logs. HAMi-core itself defaults to `2` when the variable is unset. Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `libcudaloglevel`. |
+| devices.nvidia.memoryFactor | int | `1` | Multiplier applied to the `resourceMemoryName` value a container requests, which is otherwise in MiB. For example, `1024` makes `nvidia.com/gpumem: 4` request 4 GiB. ResourceQuota limits for that resource are scaled the same way. `0` and `1` disable scaling. Must not be negative. |
+| devices.nvidia.migProfileAllowlist | list | Profiles for A30, A100, H100, H20, GH200, H200, B200, and RTX PRO 6000 Blackwell Server Edition | MIG profiles HAMi may create on nodes whose device plugin runs in the `mig` operating mode. Each entry has `models`, a list of GPU model names matched as substrings of the name NVML reports, and `profiles`, a list of MIG profile names such as `1g.10gb`, for example `{models: ["A30"], profiles: ["1g.6gb", "2g.12gb"]}`. The first entry that matches a GPU's model decides the profiles for that GPU; a GPU that no entry matches is not registered. The `nvidia.com/mig-profile-preference` Pod annotation accepts only listed profiles or their slice prefix, such as `4g`. The scheduler and device plugin fail to start if an entry has empty `models` or `profiles`, or if a profile name has no `.` or its part before the first `.` is not at least two characters ending in `g`. The part after the `.` is not checked. A profile that passes this check but names a slice count the GPU does not support, such as `5g.20gb`, is skipped on the node. Setting this value replaces the whole default list. |
+| devices.nvidia.preConfiguredDeviceMemory | int | `0` | Total memory in MiB registered for a GPU whose memory NVML cannot query, such as a unified-memory GPU like the NVIDIA GB10. GPUs that report their memory always use the reported value. `0` skips GPUs whose memory cannot be queried. A device-plugin `nodeconfig` entry can override it per node with `preconfigureddevicememory`. |
+| devices.nvidia.resourceCoreName | string | `"nvidia.com/gpucores"` | Extended resource name for the GPU cores a container requests on each GPU, as an integer percentage from 0 to 100. `0` reserves no cores and sets no core limit. With `deviceCoreScaling: 1`, `100` requests each GPU exclusively. |
+| devices.nvidia.resourceCountName | string | `"nvidia.com/gpu"` | Extended resource name for the number of NVIDIA GPUs a container requests. The device plugin registers it with kubelet, advertising each physical GPU `deviceSplitCount` times. |
+| devices.nvidia.resourceMemoryName | string | `"nvidia.com/gpumem"` | Extended resource name for the GPU memory a container requests on each GPU, in MiB multiplied by `memoryFactor`. |
+| devices.nvidia.resourceMemoryPercentageName | string | `"nvidia.com/gpumem-percentage"` | Extended resource name for the GPU memory a container requests on each GPU as a percentage of that GPU's memory, an integer from 0 to 100. `0` is treated as unset. |
+| devices.nvidia.resourcePriorityName | string | `"nvidia.com/priority"` | Extended resource name for the task priority of a container. The admission webhook passes its limit to HAMi-core as `CUDA_TASK_PRIORITY`. A lower value is a higher priority, and HAMi-core uses `1` when it is unset. On a shared GPU, vGPUmonitor pauses kernel launches of lower-priority tasks while higher-priority tasks are active, but only for tasks with a `resourceCoreName` limit between 1 and 99 whose core limit is being enforced (see `gpuCorePolicy`). |
+| devices.nvidia.runtimeClassName | string | `""` | RuntimeClass set on the device plugin Pods and, by the admission webhook, on GPU Pods that do not set `runtimeClassName`, commonly `nvidia` when the NVIDIA container runtime is not the default. The RuntimeClass must exist, either created by `createRuntimeClass` or already present in the cluster. Empty sets no RuntimeClass. |
+| devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
+| openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
+
+<!-- END GENERATED VALUES -->
+
+## Updating chart documentation
+
+Install [helm-docs](https://github.com/norwoodj/helm-docs), then run these commands
+from the repository root:
+
+```bash
+make update-helm-chart-docs
+make verify-helm-chart-docs
+```
+
+Only values with helm-docs descriptions appear in the generated section.
+Add descriptions with `# -- Description` immediately above a value. The commands
+use `--ignore-non-descriptions`; strict documentation checking is disabled until
+the remaining descriptions are complete. Text outside the generated markers
+is maintained directly in this README.

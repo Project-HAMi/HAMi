@@ -179,6 +179,18 @@ func (dev *RemoteGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 // PatchAnnotations. A literal value in the pod spec is replaced: the endpoint
 // is not known until placement.
 func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
+	// The webhook visits every init container before app containers. An init
+	// container may have caused addLibDelivery to append the library copy.
+	// Move it after app mutation, when the copy also exists for a single app,
+	// and after the init loop so its indexes stay valid.
+	if pod != nil {
+		for i := range pod.Spec.Containers {
+			if ctr == &pod.Spec.Containers[i] {
+				defer moveLibDeliveryFirst(pod)
+				break
+			}
+		}
+	}
 	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
 		return false, nil
 	}
@@ -301,6 +313,46 @@ func addLibDelivery(pod *corev1.Pod) {
 		Command:      []string{"sh", "-c", "cp " + libSourceGlob + " " + libMountPath + "/libvgpu.so"},
 		VolumeMounts: []corev1.VolumeMount{{Name: libVolumeName, MountPath: libMountPath}},
 	})
+}
+
+// moveLibDeliveryFirst runs the generated library copy before every other init
+// container. Only a pod that asks for a remote GPU has one, so a user's own
+// container with the same name and command is left where it is.
+func moveLibDeliveryFirst(pod *corev1.Pod) {
+	if !requestsRemoteGPU(pod) {
+		return
+	}
+	for i := range pod.Spec.InitContainers {
+		lib := pod.Spec.InitContainers[i]
+		if lib.Name == libVolumeName && len(lib.Command) == 3 &&
+			lib.Command[0] == "sh" && lib.Command[1] == "-c" &&
+			lib.Command[2] == "cp "+libSourceGlob+" "+libMountPath+"/libvgpu.so" {
+			if i > 0 {
+				copy(pod.Spec.InitContainers[1:i+1], pod.Spec.InitContainers[:i])
+				pod.Spec.InitContainers[0] = lib
+			}
+			return
+		}
+	}
+}
+
+// requestsRemoteGPU mirrors when armMemoryLimit asks for the library copy: a
+// remote GPU count together with a memory limit.
+func requestsRemoteGPU(pod *corev1.Pod) bool {
+	if RemoteGPULibImage == "" {
+		return false
+	}
+	for _, ctrs := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range ctrs {
+			if _, ok := resourceValue(&ctrs[i], RemoteGPUResourceCount); !ok {
+				continue
+			}
+			if mem, ok := resourceValue(&ctrs[i], RemoteGPUResourceMemory); ok && mem > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mountLib(ctr *corev1.Container) {

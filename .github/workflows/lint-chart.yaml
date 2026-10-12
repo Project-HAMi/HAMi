@@ -2,6 +2,7 @@ name: Chart Lint
 
 env:
   HELM_VERSION: v3.21.4
+  HELM_DOCS_VERSION: v1.14.2
 
 on:
   push:
@@ -36,6 +37,16 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: ${{ env.HELM_VERSION }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.2'
+
+      - name: Install helm-docs
+        run: |
+          GOBIN="$RUNNER_TEMP/helm-docs" go install -ldflags "-X main.version=${HELM_DOCS_VERSION#v}" github.com/norwoodj/helm-docs/cmd/helm-docs@${{ env.HELM_DOCS_VERSION }}
+          echo "$RUNNER_TEMP/helm-docs" >> "$GITHUB_PATH"
 
       - name: Add HAMi DRA Helm repository
         run: |

@@ -33,6 +33,7 @@ data:
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devices.nvidia.runtimeClassName }}"
+      adoptExistingMIGInstances: {{ .Values.devices.nvidia.adoptExistingMIGInstances | default false }}
       migProfileAllowlist:
 {{ toYaml .Values.devices.nvidia.migProfileAllowlist | indent 8 }}
     cambricon:
@@ -94,11 +95,13 @@ data:
       resourceCoreName: {{ .Values.devices.amd.resourceCoreName }}
       resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
       resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
+      runtimeClassName: "{{ .Values.devices.amd.runtimeClassName }}"
     vastai:
       resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
+      vnpuDeviceSplitCount: {{ .Values.devices.ascend.vnpuDeviceSplitCount | int64 }}
       hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
       enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" | quote }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}

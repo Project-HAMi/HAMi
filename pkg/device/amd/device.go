@@ -39,6 +39,7 @@ type AMDDevices struct {
 	resourceMemoryName           string
 	resourceMemoryPercentageName string
 	resourceCoreName             string
+	runtimeClassName             string
 }
 
 const (
@@ -61,6 +62,8 @@ type AMDConfig struct {
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
 	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
 	ResourceCoreName             string `yaml:"resourceCoreName"`
+	// RuntimeClassName is set on the Pod when the user left spec.runtimeClassName empty.
+	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -74,6 +77,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		resourceMemoryName:           config.ResourceMemoryName,
 		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
 		resourceCoreName:             config.ResourceCoreName,
+		runtimeClassName:             config.RuntimeClassName,
 	}
 }
 
@@ -112,6 +116,9 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	}
 	if !ok && dev.resourceCoreName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+	}
+	if ok && p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
@@ -227,7 +234,10 @@ func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) 
 	if dev.resourceCountName == "" {
 		return true, true
 	}
-	gpuCount, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
+	// Allocatable, not capacity: kubelet keeps an unhealthy GPU in capacity and
+	// drops it from allocatable, so only allocatable says whether a pod bound
+	// here can still be admitted.
+	gpuCount, ok := n.Status.Allocatable.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
 	if !ok {
 		return false, false
 	}

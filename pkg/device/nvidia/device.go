@@ -30,6 +30,7 @@ import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -122,6 +123,10 @@ type NvidiaConfig struct {
 	// TODO Whether these should be removed
 	DisableCoreLimit    bool                        `yaml:"disableCoreLimit"`
 	MigProfileAllowlist []device.AllowedMigProfiles `yaml:"migProfileAllowlist"`
+	// AdoptExistingMIGInstances allows Dynamic MIG startup recovery to adopt
+	// unannotated GI/CI pairs. It must only be enabled when HAMi exclusively
+	// owns the MIG layout on the node.
+	AdoptExistingMIGInstances bool `yaml:"adoptExistingMIGInstances"`
 	// GPUCorePolicy through webhook automatic injected to container env
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
@@ -152,16 +157,27 @@ type FilterDevice struct {
 	Index []uint `json:"index"`
 }
 
+// NodeConfigFallbackName names the nodeconfig entries for nodes that no other
+// entry selects.
+const NodeConfigFallbackName = "*"
+
+// NodeConfig is one entry of the device plugin nodeconfig list. An entry sets
+// either Name or NodeLabelSelector; an entry that sets both is ignored.
+type NodeConfig struct {
+	// These configs override those in NvidiaConfig for the nodes this entry applies to.
+	NodeDefaultConfig `json:",inline"`
+	// Name is the node the entry applies to, or NodeConfigFallbackName.
+	Name string `json:"name"`
+	// NodeLabelSelector selects nodes by label when no entry names the node.
+	NodeLabelSelector            *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
+	OperatingMode                string                `json:"operatingmode"`
+	Migstrategy                  string                `json:"migstrategy"`
+	FilterDevice                 *FilterDevice         `json:"filterdevices"`
+	EnableGetPreferredAllocation *bool                 `json:"enablegetpreferredallocation"`
+}
+
 type DevicePluginConfigs struct {
-	Nodeconfig []struct {
-		// These configs is shared and will overwrite those in NvidiaConfig.
-		NodeDefaultConfig            `json:",inline"`
-		Name                         string        `json:"name"`
-		OperatingMode                string        `json:"operatingmode"`
-		Migstrategy                  string        `json:"migstrategy"`
-		FilterDevice                 *FilterDevice `json:"filterdevices"`
-		EnableGetPreferredAllocation bool          `json:"enablegetpreferredallocation"`
-	} `json:"nodeconfig"`
+	Nodeconfig []NodeConfig `json:"nodeconfig"`
 }
 
 type DeviceConfig struct {
@@ -465,12 +481,18 @@ func hasEnvVarWithValue(env []corev1.EnvVar, name, value string) bool {
 }
 
 func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
-	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
-		if pct < 0 || pct > 100 {
-			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, pct, ctr.Name)
+	name := corev1.ResourceName(dev.config.ResourceMemoryPercentageName)
+	for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+		if qty, ok := list[name]; ok && !validPercentage(qty) {
+			return fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", name, qty.String(), ctr.Name)
 		}
 	}
 	return nil
+}
+
+func validPercentage(qty resource.Quantity) bool {
+	pct, ok := qty.AsInt64()
+	return ok && pct >= 0 && pct <= 100
 }
 
 func (dev *NvidiaGPUDevices) validateCores(ctr *corev1.Container) error {
@@ -526,11 +548,12 @@ func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container)
 	}
 
 	exclusive := false
-	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
-		exclusive = pct == 100
+	if qty, ok := resourceQuantity(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		pct, valid := qty.AsInt64()
+		exclusive = valid && pct == 100
 	} else if dev.config.ResourceMemoryName == "" {
 		exclusive = true
-	} else if _, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryName)); !ok {
+	} else if _, ok := resourceQuantity(ctr, corev1.ResourceName(dev.config.ResourceMemoryName)); !ok {
 		exclusive = true
 	}
 
@@ -545,17 +568,15 @@ func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container)
 	return true
 }
 
-func resourceValue(ctr *corev1.Container, name corev1.ResourceName) (int64, bool) {
+func resourceQuantity(ctr *corev1.Container, name corev1.ResourceName) (resource.Quantity, bool) {
 	if name == "" || ctr == nil {
-		return 0, false
+		return resource.Quantity{}, false
 	}
 	if qty, ok := ctr.Resources.Limits[name]; ok {
-		return qty.Value(), true
+		return qty, true
 	}
-	if qty, ok := ctr.Resources.Requests[name]; ok {
-		return qty.Value(), true
-	}
-	return 0, false
+	qty, ok := ctr.Resources.Requests[name]
+	return qty, ok
 }
 
 func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
@@ -656,24 +677,22 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				memnum = int(memnums)
 			}
 			mempnum := int32(101)
+			// Check both lists so a valid limit cannot hide an invalid request.
+			for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
+				if q, found := list[resourceMemPercentage]; found && !validPercentage(q) {
+					klog.ErrorS(nil, "nvidia memory percentage request is not an integer between 0 and 100", "container", ctr.Name, "request", q.String())
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory percentage request %s is not an integer between 0 and 100", q.String())}
+				}
+			}
 			mem, ok = ctr.Resources.Limits[resourceMemPercentage]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[resourceMemPercentage]
 			}
 			if ok {
-				mempnums, ok := mem.AsInt64()
-				if ok {
-					if mempnums > 100 {
-						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
-						mempnums = 100
-					}
-					if mempnums > 0 {
-						mempnum = int32(mempnums)
-					} else {
-						// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
-						klog.ErrorS(nil, "memory percentage request is not positive, ignoring it", "container", ctr.Name, "requested", mempnums)
-						mempnum = 101
-					}
+				mempnums, _ := mem.AsInt64()
+				// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
+				if mempnums > 0 {
+					mempnum = int32(mempnums)
 				}
 			}
 			if mempnum == 101 && memnum == 0 {

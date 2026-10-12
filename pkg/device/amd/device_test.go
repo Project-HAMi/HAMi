@@ -872,3 +872,80 @@ func TestDevices_Fit_ResourceQuota(t *testing.T) {
 		assert.Equal(t, true, ok, reason)
 	})
 }
+
+func TestCheckHealth(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	node := func(capacity, allocatable string) *corev1.Node {
+		n := &corev1.Node{}
+		if capacity != "" {
+			n.Status.Capacity = corev1.ResourceList{"amd.com/gpu": resource.MustParse(capacity)}
+		}
+		if allocatable != "" {
+			n.Status.Allocatable = corev1.ResourceList{"amd.com/gpu": resource.MustParse(allocatable)}
+		}
+		return n
+	}
+
+	t.Run("allocatable GPUs are healthy", func(t *testing.T) {
+		health, update := dev.CheckHealth(AMDDevice, node("4", "4"))
+		assert.Equal(t, true, health)
+		assert.Equal(t, true, update)
+	})
+	t.Run("every GPU unhealthy: capacity stays, allocatable drops to zero", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "0"))
+		assert.Equal(t, false, health)
+	})
+	t.Run("allocatable missing is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", ""))
+		assert.Equal(t, false, health)
+	})
+	t.Run("a node without the resource is unhealthy", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, false, health)
+	})
+	t.Run("part of the GPUs unhealthy keeps the node", func(t *testing.T) {
+		health, _ := dev.CheckHealth(AMDDevice, node("4", "2"))
+		assert.Equal(t, true, health)
+	})
+	t.Run("no resource name configured is always healthy", func(t *testing.T) {
+		health, _ := InitAMDGPUDevice(AMDConfig{}).CheckHealth(AMDDevice, &corev1.Node{})
+		assert.Equal(t, true, health)
+	})
+}
+
+func TestMutateAdmissionRuntimeClass(t *testing.T) {
+	gpu := func() *corev1.Container {
+		return &corev1.Container{Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{"amd.com/gpu": resource.MustParse("1")},
+		}}
+	}
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu", RuntimeClassName: "amd"})
+
+	t.Run("set when a GPU is requested", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, true, ok)
+		assert.Equal(t, "amd", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("a runtime class chosen by the user is kept", func(t *testing.T) {
+		own := "mine"
+		pod := &corev1.Pod{Spec: corev1.PodSpec{RuntimeClassName: &own}}
+		_, err := dev.MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Equal(t, "mine", *pod.Spec.RuntimeClassName)
+	})
+	t.Run("untouched without a GPU request", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		ok, err := dev.MutateAdmission(&corev1.Container{}, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, false, ok)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+	t.Run("untouched when not configured", func(t *testing.T) {
+		pod := &corev1.Pod{}
+		_, err := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"}).MutateAdmission(gpu(), pod)
+		assert.NilError(t, err)
+		assert.Assert(t, pod.Spec.RuntimeClassName == nil)
+	})
+}
