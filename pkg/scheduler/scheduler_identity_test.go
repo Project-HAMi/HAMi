@@ -34,6 +34,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -113,6 +114,32 @@ func TestBindRejectsNodeDifferentFromScheduledNode(t *testing.T) {
 	pi, ok := s.podManager.GetPod(pod)
 	assert.Equal(t, true, ok, "the reservation was dropped by a rejected bind")
 	assert.Equal(t, "node-1", pi.NodeID)
+}
+
+func TestBindRejectsRemoteGPUReservationOutsideSelector(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+	pod := remoteGPUWebhookPod(resourceName, map[string]string{
+		remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+	})
+	pod.UID = "remote-gpu-uid"
+	s := schedulerWithPods(t, pod)
+	reserved := device.PodDevices{remotegpu.RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: remotegpu.RemoteGPUCommonWord}},
+	}}
+	s.podManager.AddPod(pod, "client-node", reserved)
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       pod.UID,
+		Node:         "client-node",
+	})
+
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(res.Error, "reserved Lupine server"), "bind result: %q", res.Error)
+	pi, ok := s.podManager.GetPod(pod)
+	assert.Equal(t, true, ok, "rejected bind must preserve the reservation")
+	assert.Equal(t, "client-node", pi.NodeID)
 }
 
 // The reported attack: a bind request pairs a running pod's UID with a pod

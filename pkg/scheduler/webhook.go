@@ -175,18 +175,12 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		klog.Errorf("Failed to decode old object: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
-	if remoteGPUSelectorChanged(oldPod, pod) && (remotegpu.PodRequestsRemoteGPU(oldPod) || remotegpu.PodRequestsRemoteGPU(pod)) {
+	if remoteGPUSelectorChanged(oldPod, pod) {
+		return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after a pod is created", remotegpu.LupineServerSelectorAnno))
+	}
+	if remotegpu.PodRequestsRemoteGPU(pod) {
 		if err := remotegpu.ValidateLupineServerSelector(pod); err != nil {
 			return admission.Denied(err.Error())
-		}
-		// Server selection is a scheduling input. Once a Pod is assigned, its
-		// existing allocation remains on that server, so changing the requested
-		// pool would make the Pod metadata disagree with the live allocation.
-		if oldPod.Spec.NodeName != "" {
-			return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after a pod is assigned", remotegpu.LupineServerSelectorAnno))
-		}
-		if oldPod.Annotations[util.AssignedNodeAnnotations] != "" {
-			return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after the scheduler reserves a pod", remotegpu.LupineServerSelectorAnno))
 		}
 	}
 	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)

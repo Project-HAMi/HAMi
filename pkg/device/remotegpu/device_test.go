@@ -593,26 +593,36 @@ func TestMutateAdmission_ReplacesLiteralServerEnv(t *testing.T) {
 	assert.Equal(t, workload, 1)
 }
 
-func TestMutateAdmission_ValidatesServerPoolSelector(t *testing.T) {
+func TestMutateAdmission_LeavesSelectorValidationToWebhook(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
 		corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1"),
 	}}}
-	invalidPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 		LupineServerSelectorAnno: "gpu-pool in (inference)",
 	}}}
 
-	found, err := dev.MutateAdmission(ctr, invalidPod)
-	assert.Equal(t, found, false)
-	assert.ErrorContains(t, err, "must be one equality selector")
-	assert.Equal(t, len(ctr.Env), 0, "invalid input must not partially mutate the container")
-
-	validPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-		LupineServerSelectorAnno: "gpu-pool=inference",
-	}}}
-	found, err = dev.MutateAdmission(ctr, validPod)
+	found, err := dev.MutateAdmission(ctr, pod)
 	assert.NilError(t, err)
 	assert.Equal(t, found, true)
+}
+
+func TestValidateReservedServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	setServerLabels(dev, map[string]map[string]string{
+		"gpu-a": {"gpu-pool": "inference"},
+	})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		LupineServerSelectorAnno: "gpu-pool=inference",
+	}}}
+	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: deviceID("gpu-a", "GPU-1"), Type: RemoteGPUCommonWord}},
+	}}
+
+	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
+
+	pod.Annotations[LupineServerSelectorAnno] = "gpu-pool=training"
+	assert.ErrorContains(t, dev.ValidateReservedServer(pod, allocated), "reserved Lupine server \"gpu-a\"")
 }
 
 func TestMutateAdmission_IgnoresContainerWithoutRequest(t *testing.T) {

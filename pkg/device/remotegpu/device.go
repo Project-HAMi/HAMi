@@ -204,9 +204,6 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 	if !ok || count <= 0 {
 		return false, nil
 	}
-	if err := ValidateLupineServerSelector(pod); err != nil {
-		return false, err
-	}
 	needsLib, err := armMemoryLimit(ctr, pod)
 	if err != nil {
 		return false, err
@@ -553,6 +550,31 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		return true, tmpDevs, ""
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// ValidateReservedServer verifies that a reserved RemoteGPU allocation still
+// belongs to a server selected by the Pod. Bind calls this after Filter has
+// recorded the allocation, before Kubernetes commits the Pod to its node.
+func (dev *RemoteGPUDevices) ValidateReservedServer(pod *corev1.Pod, allocated device.PodDevices) error {
+	selector, err := lupineServerSelector(pod)
+	if err != nil {
+		return err
+	}
+	if selector == nil {
+		return nil
+	}
+
+	server, _ := committedAllocation(&allocated)
+	if server == "" {
+		if PodRequestsRemoteGPU(pod) {
+			return fmt.Errorf("no Lupine server is reserved for RemoteGPU pod")
+		}
+		return nil
+	}
+	if len(dev.pool.matchingServers(selector, []string{server})) == 0 {
+		return fmt.Errorf("reserved Lupine server %q no longer matches %s", server, LupineServerSelectorAnno)
+	}
+	return nil
 }
 
 // lupineServerSelector parses the optional pod-level server selector. The

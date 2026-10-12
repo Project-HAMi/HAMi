@@ -1787,24 +1787,31 @@ func TestRemoteGPUInvalidServerSelectorDeniedAtAdmission(t *testing.T) {
 func TestRemoteGPUServerSelectorUpdateValidation(t *testing.T) {
 	resourceName := initRemoteGPUWebhookDevice(t)
 
-	t.Run("valid selector can change before placement", func(t *testing.T) {
+	t.Run("selector is immutable", func(t *testing.T) {
 		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
 			remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
 		})
 		newPod := oldPod.DeepCopy()
 		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=training"
 
-		if resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder"); !resp.Allowed {
-			t.Fatalf("valid pre-placement selector update was denied: %v", resp.Result)
+		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
+		if resp.Allowed {
+			t.Fatal("RemoteGPU selector changed after pod creation")
+		}
+		if !strings.Contains(resp.Result.Message, "cannot be changed after a pod is created") {
+			t.Fatalf("unexpected denial %q", resp.Result.Message)
 		}
 	})
 
-	t.Run("invalid selector is denied before placement", func(t *testing.T) {
+	t.Run("invalid existing selector is denied when RemoteGPU is added", func(t *testing.T) {
 		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
-			remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+			remotegpu.LupineServerSelectorAnno: "gpu-pool in (inference)",
 		})
+		oldPod.Spec.Containers[0].Resources.Limits = nil
 		newPod := oldPod.DeepCopy()
-		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool in (inference)"
+		newPod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{
+			corev1.ResourceName(resourceName): resource.MustParse("1"),
+		}
 
 		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
 		if resp.Allowed {
@@ -1815,39 +1822,6 @@ func TestRemoteGPUServerSelectorUpdateValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("selector is immutable after placement", func(t *testing.T) {
-		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
-			remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
-		})
-		oldPod.Spec.NodeName = "client-node"
-		newPod := oldPod.DeepCopy()
-		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=training"
-
-		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
-		if resp.Allowed {
-			t.Fatal("RemoteGPU selector changed after placement")
-		}
-		if !strings.Contains(resp.Result.Message, "cannot be changed after a pod is assigned") {
-			t.Fatalf("unexpected denial %q", resp.Result.Message)
-		}
-	})
-
-	t.Run("selector is immutable after scheduler reservation", func(t *testing.T) {
-		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
-			remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
-			util.AssignedNodeAnnotations:       "client-node",
-		})
-		newPod := oldPod.DeepCopy()
-		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=training"
-
-		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
-		if resp.Allowed {
-			t.Fatal("RemoteGPU selector changed after scheduler reservation")
-		}
-		if !strings.Contains(resp.Result.Message, "cannot be changed after the scheduler reserves a pod") {
-			t.Fatalf("unexpected denial %q", resp.Result.Message)
-		}
-	})
 }
 
 func initRemoteGPUWebhookDevice(t *testing.T) string {
