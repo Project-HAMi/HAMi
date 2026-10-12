@@ -108,11 +108,11 @@ type wholeGPUState struct {
 	firstSeenAt map[string]time.Time
 
 	// ownedContainerKeys tracks keys in ContainerLister.containers that were
-	// installed by reconcileWholeGPU. Only these keys are garbage-collected
+	// installed by reconcileWholeGPULocked. Only these keys are garbage-collected
 	// when the pod's NVIDIA allocation annotation disappears; cache-file-backed
 	// entries remain owned by Update's cache-dir scan.
 	//
-	// Guarded by ContainerLister.mutex: reconcileWholeGPU runs inside Update().
+	// Guarded by ContainerLister.mutex: reconcileWholeGPULocked runs inside Update().
 	ownedContainerKeys map[string]struct{}
 
 	// physTotalMiB resolves a device's physical memory in MiB via NVML;
@@ -229,13 +229,87 @@ func (u *wholeGPUUsage) deviceMemory(idx int) (nvml.Memory, bool) {
 	return mem, true
 }
 
-// reconcileWholeGPU builds NVML-backed ContainerUsage entries for containers that
-// own one or more whole physical GPUs. It runs once per Update() cycle,
-// while l.mutex is held, and before the cache-dir scan starts.
-// The scan and sweep in Update skip any entries recorded in ownedContainerKeys.
-//
-// pods is scoped to this node by the pod informer's field selector.
+// wholeGPUInputs carries one reconcile cycle's inputs across the l.mutex
+// boundary: prefetchWholeGPUInputs gathers them with the registry GET (network
+// IO) outside the lock; reconcileWholeGPULocked consumes them under it.
+type wholeGPUInputs struct {
+	stillAnnotated map[string]bool
+	candidates     []wholeGPUCandidate
+	nodeDevs       map[string]*device.DeviceInfo
+	nodeDevsErr    error
+}
+
+// reconcileWholeGPU composes prefetchWholeGPUInputs+reconcileWholeGPULocked
+// for tests; Update calls the pair around its own locked section. pods is
+// node-scoped by the pod informer.
 func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
+	inputs := l.prefetchWholeGPUInputs(pods)
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	l.reconcileWholeGPULocked(inputs)
+}
+
+// prefetchWholeGPUInputs gathers the current cycle's still-annotated containers and
+// unresolved candidates. Verdicts are read in a short critical section; the
+// registry GET runs unlocked and only while some verdict is still uncached.
+func (l *ContainerLister) prefetchWholeGPUInputs(pods []*corev1.Pod) *wholeGPUInputs {
+	inputs := &wholeGPUInputs{stillAnnotated: make(map[string]bool)}
+	var annotated []wholeGPUCandidate
+	for _, pod := range pods {
+		if len(pod.Annotations) == 0 {
+			continue
+		}
+		podDevices, err := device.DecodePodDevices(nvidiaDeviceChecklist, pod.Annotations)
+		if err != nil {
+			klog.Warningf("wholegpu: failed to decode device annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			continue
+		}
+		for ctrIdx, ctrDevs := range podDevices[nv.NvidiaGPUDevice] {
+			if len(ctrDevs) == 0 {
+				continue
+			}
+			ctrName, ok := containerNameByIndex(pod, ctrIdx)
+			if !ok {
+				klog.Warningf("wholegpu: container index %d out of range for pod %s/%s", ctrIdx, pod.Namespace, pod.Name)
+				continue
+			}
+			inputs.stillAnnotated[string(pod.UID)+"_"+ctrName] = true
+			annotated = append(annotated, wholeGPUCandidate{pod: pod, container: ctrName, devices: ctrDevs})
+		}
+	}
+	if len(annotated) == 0 {
+		return inputs
+	}
+
+	getNodeDevices := l.fetchNodeDevices
+	l.mutex.Lock()
+	if state := l.wholeGPU; state != nil {
+		if state.getNodeDevices != nil {
+			getNodeDevices = state.getNodeDevices
+		}
+		// While NVML stays down (reconcileWholeGPULocked retries init), defer
+		// evaluation entirely, sparing the registry GET.
+		if state.nvmlInitialized {
+			for _, cand := range annotated {
+				if _, cached := state.verdicts[string(cand.pod.UID)+"_"+cand.container]; !cached {
+					inputs.candidates = append(inputs.candidates, cand)
+				}
+			}
+		}
+	} else {
+		inputs.candidates = annotated
+	}
+	l.mutex.Unlock()
+
+	if len(inputs.candidates) > 0 {
+		inputs.nodeDevs, inputs.nodeDevsErr = getNodeDevices()
+	}
+	return inputs
+}
+
+// reconcileWholeGPULocked consumes prefetched inputs, mutating
+// containers/verdicts; the caller holds l.mutex. No network IO.
+func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 	if l.wholeGPU == nil {
 		l.wholeGPU = &wholeGPUState{
 			nvmllib:            nvml.New(),
@@ -263,97 +337,61 @@ func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
 		state.nvmlInitialized = true
 	}
 
-	type candidate struct {
-		key     string
-		podUID  string
-		ctrName string
-		devs    device.ContainerDevices
-	}
-
-	stillAnnotated := make(map[string]bool)
-	var candidates []candidate
-
-	for _, pod := range pods {
-		if len(pod.Annotations) == 0 {
-			continue
-		}
-		podDevices, err := device.DecodePodDevices(nvidiaDeviceChecklist, pod.Annotations)
-		if err != nil {
-			klog.Warningf("wholegpu: failed to decode device annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-			continue
-		}
-		for ctrIdx, ctrDevs := range podDevices[nv.NvidiaGPUDevice] {
-			if len(ctrDevs) == 0 {
-				continue
-			}
-			ctrName, ok := containerNameByIndex(pod, ctrIdx)
-			if !ok {
-				klog.Warningf("wholegpu: container index %d out of range for pod %s/%s", ctrIdx, pod.Namespace, pod.Name)
-				continue
-			}
-			key := string(pod.UID) + "_" + ctrName
-			stillAnnotated[key] = true
-
-			// The verdicts map only ever holds terminal verdicts, so a hit
-			// always means the container's classification is final.
-			if _, cached := state.verdicts[key]; cached {
-				continue
-			}
-			candidates = append(candidates, candidate{key: key, podUID: string(pod.UID), ctrName: ctrName, devs: ctrDevs})
-		}
-	}
-
-	if len(candidates) > 0 {
-		nodeDevs, err := state.getNodeDevices()
-		if err != nil {
-			klog.Warningf("wholegpu: failed to fetch node device registry, skipping new candidates this cycle: %v", err)
+	if len(inputs.candidates) > 0 {
+		if inputs.nodeDevsErr != nil {
+			klog.Warningf("wholegpu: failed to fetch node device registry, skipping new candidates this cycle: %v", inputs.nodeDevsErr)
 		} else {
-			for _, cand := range candidates {
-				verdict, cause := evaluateContainerWholeGPU(cand.devs, nodeDevs, state.physTotalMiB)
+			for _, cand := range inputs.candidates {
+				key := string(cand.pod.UID) + "_" + cand.container
+				// Another reconcile cycle may have resolved the verdict since prefetch.
+				if _, cached := state.verdicts[key]; cached {
+					continue
+				}
+				verdict, cause := evaluateContainerWholeGPU(cand.devices, inputs.nodeDevs, state.physTotalMiB)
 				if verdict == indeterminate && cause == causeRegistryMiss {
 					// Registry misses are forgery-sensitive, so their wait
 					// is capped: past the window the verdict locks to
 					// notWholeGPU for the rest of the container's lifetime.
-					if first, seen := state.firstSeenAt[cand.key]; !seen {
-						state.firstSeenAt[cand.key] = now
+					if first, seen := state.firstSeenAt[key]; !seen {
+						state.firstSeenAt[key] = now
 					} else if now.Sub(first) > indeterminateRetryWindow {
 						verdict = notWholeGPU
 					}
 				}
 				if verdict != indeterminate {
-					state.verdicts[cand.key] = verdict
-					delete(state.firstSeenAt, cand.key)
+					state.verdicts[key] = verdict
+					delete(state.firstSeenAt, key)
 				}
 				if verdict != confirmedWholeGPU {
 					continue
 				}
 
-				uuids := make([]string, len(cand.devs))
-				for i, cd := range cand.devs {
+				uuids := make([]string, len(cand.devices))
+				for i, cd := range cand.devices {
 					uuids[i] = cd.UUID
 				}
-				if existing, ok := l.containers[cand.key]; ok && existing.data != nil {
+				if existing, ok := l.containers[key]; ok && existing.data != nil {
 					_ = syscall.Munmap(existing.data)
 				}
-				l.containers[cand.key] = &ContainerUsage{
-					PodUID:        cand.podUID,
-					ContainerName: cand.ctrName,
+				l.containers[key] = &ContainerUsage{
+					PodUID:        string(cand.pod.UID),
+					ContainerName: cand.container,
 					Info:          &wholeGPUUsage{nvmllib: state.nvmllib, uuids: uuids},
 				}
-				state.ownedContainerKeys[cand.key] = struct{}{}
-				klog.Infof("wholegpu: synthesized whole-GPU usage for %s (%d device(s))", cand.key, len(uuids))
+				state.ownedContainerKeys[key] = struct{}{}
+				klog.Infof("wholegpu: synthesized whole-GPU usage for %s (%d device(s))", key, len(uuids))
 			}
 		}
 	}
 
 	for key := range state.ownedContainerKeys {
-		if !stillAnnotated[key] {
+		if !inputs.stillAnnotated[key] {
 			delete(l.containers, key)
 			delete(state.ownedContainerKeys, key)
 		}
 	}
 	for key := range state.verdicts {
-		if !stillAnnotated[key] {
+		if !inputs.stillAnnotated[key] {
 			delete(state.verdicts, key)
 			delete(state.firstSeenAt, key)
 		}

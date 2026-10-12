@@ -195,9 +195,28 @@ func (l *ContainerLister) SetContainersForTest(m map[string]*ContainerUsage) {
 	l.containers = m
 }
 
+// SetPodListerForTest installs a pod lister; use only in tests that skip
+// NewContainerLister (e.g. zero-value listers).
+func (l *ContainerLister) SetPodListerForTest(pl corelisters.PodLister) {
+	l.podLister = pl
+}
+
 // Update refreshes cache mappings under the lister lock without deleting files owned by the
 // device plugin.
 func (l *ContainerLister) Update() error {
+	// The pod lister reads an informer cache and needs no lister lock.
+	pods, err := l.podLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	// Prefetch before locking: prefetchWholeGPUInputs may run the
+	// node-registry GET, which must not happen while the lock is held.
+	var inputs *wholeGPUInputs
+	if wholeGPUDisableHAMiCore {
+		inputs = l.prefetchWholeGPUInputs(pods)
+	}
+
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
@@ -209,18 +228,13 @@ func (l *ContainerLister) Update() error {
 		return err
 	}
 
-	pods, err := l.podLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
 	podUIDs := make(map[string]bool, len(pods))
 	for _, pod := range pods {
 		podUIDs[string(pod.UID)] = true
 	}
 
-	if wholeGPUDisableHAMiCore {
-		l.reconcileWholeGPU(pods)
+	if inputs != nil {
+		l.reconcileWholeGPULocked(inputs)
 	}
 
 	present := make(map[string]struct{}, len(entries))
