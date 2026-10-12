@@ -1109,6 +1109,10 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 	return options, nil
 }
 
+// healthBatchWindow is how long ListAndWatch waits for more unhealthy devices
+// before sending the updated device list to kubelet.
+const healthBatchWindow = 50 * time.Millisecond
+
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
 	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
@@ -1123,14 +1127,37 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			return nil
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
-			d.Health = kubeletdevicepluginv1beta1.Unhealthy
-			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
+			plugin.markUnhealthy(d)
+
+			// A single event can make many devices unhealthy at once (every replica
+			// of a GPU), so collect the devices that arrive shortly after this one
+			// and send the updated device list once instead of once per device.
+			timer := time.NewTimer(healthBatchWindow)
+		collect:
+			for {
+				select {
+				case d := <-plugin.health:
+					plugin.markUnhealthy(d)
+				case <-timer.C:
+					break collect
+				case <-plugin.stop:
+					timer.Stop()
+					return nil
+				}
+			}
+
 			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
 				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
 				return nil
 			}
 		}
 	}
+}
+
+// markUnhealthy marks d as unhealthy.
+func (plugin *NvidiaDevicePlugin) markUnhealthy(d *rm.Device) {
+	d.Health = kubeletdevicepluginv1beta1.Unhealthy
+	klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
 }
 
 // GetPreferredAllocation returns the preferred allocation from the set of devices specified in the request

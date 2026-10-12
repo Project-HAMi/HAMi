@@ -40,6 +40,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -1244,6 +1245,70 @@ func TestListAndWatchSendError(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, server.sent, 2)
 	})
+}
+
+// lockedListAndWatchServer records the responses sent from the ListAndWatch
+// goroutine so that a test can read them while it is still running.
+type lockedListAndWatchServer struct {
+	grpc.ServerStream
+	mu   sync.Mutex
+	sent []*kubeletdevicepluginv1beta1.ListAndWatchResponse
+}
+
+func (m *lockedListAndWatchServer) Send(response *kubeletdevicepluginv1beta1.ListAndWatchResponse) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, response)
+	return nil
+}
+
+func (m *lockedListAndWatchServer) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sent)
+}
+
+// Several devices made unhealthy by the same event must result in a single
+// device list update to kubelet, not one full update per device.
+func TestListAndWatchBatchesUnhealthyDevices(t *testing.T) {
+	devices := rm.Devices{}
+	for _, id := range []string{"GPU-a::0", "GPU-a::1", "GPU-a::2", "GPU-a::3"} {
+		devices[id] = &rm.Device{
+			Device: kubeletdevicepluginv1beta1.Device{ID: id, Health: kubeletdevicepluginv1beta1.Healthy},
+			Index:  "0",
+		}
+	}
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc:  func() rm.Devices { return devices },
+		ResourceFunc: func() v1.ResourceName { return v1.ResourceName("nvidia.com/gpu") },
+	}
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM, stop: make(chan any), health: make(chan *rm.Device),
+		schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr[uint](1)}},
+	}
+	server := &lockedListAndWatchServer{}
+
+	done := make(chan error, 1)
+	go func() { done <- plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server) }()
+	require.Eventually(t, func() bool { return server.count() == 1 }, time.Second, time.Millisecond)
+
+	for _, d := range devices {
+		plugin.health <- d
+	}
+
+	// The initial list plus one batched update, and nothing more.
+	require.Eventually(t, func() bool { return server.count() == 2 }, time.Second, time.Millisecond)
+	require.Never(t, func() bool { return server.count() > 2 }, 10*healthBatchWindow, 10*time.Millisecond)
+
+	close(plugin.stop)
+	require.NoError(t, <-done)
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	require.Len(t, server.sent[1].Devices, len(devices))
+	for _, d := range server.sent[1].Devices {
+		require.Equal(t, kubeletdevicepluginv1beta1.Unhealthy, d.Health, d.ID)
+	}
 }
 
 // TestAllocateRejectsEmptyDeviceIDs guards against a regression of the
