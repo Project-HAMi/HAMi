@@ -1,24 +1,28 @@
-## @section Global configuration
-## @param global.imageRegistry Global Docker image registry
-## @param global.imagePullSecrets Global Docker image pull secrets
+# Global settings shared by every HAMi component.
 global:
-  ## @param global.imageRegistry Global Docker image registry
+  # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
-  ## E.g.
-  ## imagePullSecrets:
-  ##   - myRegistryKeySecretName
-  ## @param global.imagePullSecrets Global Docker image pull secrets
+  # -- Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
+  # -- Tag used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty. A non-empty per-component tag takes precedence. The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it.
   imageTag: "v2.10.0"
+  # -- Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin.
   gpuHookPath: /usr/local
+  # -- Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors.
   labels: {}
+  # -- Annotations added to the scheduler Deployment and PodDisruptionBudget and to the NVIDIA and remote-gpu DaemonSets.
   annotations: {}
+  # -- When true, add `global.managedNodeSelector` to the scheduler pod as `NODE_SELECTOR_*` environment variables.
   managedNodeSelectorEnable: false
+  # -- Node labels exposed to the scheduler pod when `global.managedNodeSelectorEnable` is true. Each key/value pair becomes a `NODE_SELECTOR_<KEY>` environment variable on the scheduler pod (key upper-cased, with `-`, `/` and `.` replaced by `_`), e.g. `usage: gpu` becomes `NODE_SELECTOR_USAGE=gpu`.
   managedNodeSelector:
     usage: "gpu"
 
+# -- Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names.
 nameOverride: ""
+# -- Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters.
 fullnameOverride: ""
+# -- Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist.
 namespaceOverride: ""
 
 platform:
