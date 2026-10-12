@@ -70,6 +70,7 @@ func TestLimitsFileValues(t *testing.T) {
 		{Name: util.TaskPriority, ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
 		}},
+		{Name: "LIBCUDA_LOG_LEVEL", Value: "4"},
 		{Name: "UNRELATED", Value: "x"},
 	}}
 
@@ -79,7 +80,7 @@ func TestLimitsFileValues(t *testing.T) {
 		"CUDA_DEVICE_SM_LIMIT":            "50",
 		"CUDA_DEVICE_MEMORY_SHARED_CACHE": "/usr/local/vgpu/abc.cache",
 		"CUDA_OVERSUBSCRIBE":              "true",
-		"LIBCUDA_LOG_LEVEL":               "0",
+		"LIBCUDA_LOG_LEVEL":               "4",
 		util.CoreLimitSwitch:              "force",
 		hostpid.EnvironmentVariable:       "1",
 		limitsFormatKey:                   limitsFormatVersion,

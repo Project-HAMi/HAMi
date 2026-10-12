@@ -60,11 +60,12 @@ var limitsResponseEnvs = []string{
 	hostpid.EnvironmentVariable,
 }
 
-// limitsContainerEnvs are the HAMi-core variables the webhook sets on the
-// container spec instead of the allocate response.
+// limitsContainerEnvs are the HAMi-core variables the container spec may set;
+// its value wins over the allocate response, as it does in the environment.
 var limitsContainerEnvs = []string{
 	util.TaskPriority,
 	util.CoreLimitSwitch,
+	"LIBCUDA_LOG_LEVEL",
 }
 
 // writeContainerLimits writes the limits file of one container beside its
@@ -78,7 +79,7 @@ func writeContainerLimits(cacheDirectory string, responseEnvs map[string]string,
 }
 
 // limitsFileValues returns what the limits file holds for a container: the
-// HAMi-core variables of the allocate response, then those the webhook set on
+// HAMi-core variables of the allocate response, then limitsContainerEnvs from
 // the container spec. kubelet passes the spec's variables after the device
 // plugin's, so the container sees the spec value when both set one. Only
 // literal values are taken, because a valueFrom reference is not resolved here.
