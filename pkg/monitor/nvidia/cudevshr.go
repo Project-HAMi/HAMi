@@ -90,7 +90,7 @@ type ContainerLister struct {
 	nodeName      string
 
 	// wholeGPU holds the whole-GPU reconciliation state; nil unless
-	// HAMI_WHOLE_GPU_SKIP_HOOK is enabled.
+	// wholeGPUDisableHAMiCore is set.
 	wholeGPU *wholeGPUState
 
 	// Fields for the informer-based pod cache mechanism
@@ -219,7 +219,7 @@ func (l *ContainerLister) Update() error {
 		podUIDs[string(pod.UID)] = true
 	}
 
-	if wholeGPUSkipHookEnabled {
+	if wholeGPUDisableHAMiCore {
 		l.reconcileWholeGPU(pods)
 	}
 

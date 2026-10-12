@@ -1413,11 +1413,11 @@ func TestResolveReportNodeCapacity(t *testing.T) {
 	}
 }
 
-// TestWholeGPUSkipHookAllowed pins the env gate and the over-subscription
-// guards: scaled devices must keep the interception hook.
-func TestWholeGPUSkipHookAllowed(t *testing.T) {
-	original := wholeGPUSkipHookEnabled
-	t.Cleanup(func() { wholeGPUSkipHookEnabled = original })
+// TestWholeGPUDisableHAMiCoreAllowed pins the env gate and the
+// over-subscription guards: scaled devices must keep the interception hook.
+func TestWholeGPUDisableHAMiCoreAllowed(t *testing.T) {
+	original := wholeGPUDisableHAMiCore
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = original })
 
 	one, two := float64(1), float64(2)
 	pluginWith := func(memScale, coreScale *float64) *NvidiaDevicePlugin {
@@ -1431,13 +1431,13 @@ func TestWholeGPUSkipHookAllowed(t *testing.T) {
 		}
 	}
 
-	wholeGPUSkipHookEnabled = false
-	require.False(t, pluginWith(&one, &one).wholeGPUSkipHookAllowed())
+	wholeGPUDisableHAMiCore = false
+	require.False(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
 
-	wholeGPUSkipHookEnabled = true
-	require.True(t, pluginWith(&one, &one).wholeGPUSkipHookAllowed())
-	require.False(t, pluginWith(&two, &one).wholeGPUSkipHookAllowed())
-	require.False(t, pluginWith(&one, &two).wholeGPUSkipHookAllowed())
+	wholeGPUDisableHAMiCore = true
+	require.True(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&two, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&one, &two).wholeGPUDisableHAMiCoreAllowed())
 }
 
 // TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication checks that deferred MIG recovery

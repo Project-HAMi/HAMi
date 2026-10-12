@@ -1466,7 +1466,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				// auto-inject CUDA_DISABLE_CONTROL=true only when the user hasn't
 				// set it explicitly and every allocated device is a whole GPU
-				if !userSpecified && plugin.wholeGPUSkipHookAllowed() {
+				if !userSpecified && plugin.wholeGPUDisableHAMiCoreAllowed() {
 					isWhole := isWholeGPUAllocation(devreq, plugin.rm)
 					if isWhole {
 						response.Envs["CUDA_DISABLE_CONTROL"] = "true"
@@ -1758,16 +1758,15 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
 }
 
-// wholeGPUSkipHookEnabled turns on skipping the ld.so.preload mount (and
-// injecting CUDA_DISABLE_CONTROL=true) for whole-GPU allocations.
-var wholeGPUSkipHookEnabled = os.Getenv("HAMI_WHOLE_GPU_SKIP_HOOK") == "true"
+// wholeGPUDisableHAMiCore turns on injecting CUDA_DISABLE_CONTROL=true
+// instead of the ld.so.preload mount for whole-GPU allocations.
+var wholeGPUDisableHAMiCore = os.Getenv("DISABLE_HAMI_CORE_FOR_WHOLE_GPU") == "true"
 
-// wholeGPUSkipHookAllowed reports whether the plugin may skip the
-// interception hook for whole-GPU allocations on this node: the feature must
-// be enabled, and memory/core over-subscription must be off — a scaled
-// device needs the hook to enforce the scaling, so it never qualifies.
-func (plugin *NvidiaDevicePlugin) wholeGPUSkipHookAllowed() bool {
-	return wholeGPUSkipHookEnabled &&
+// wholeGPUDisableHAMiCoreAllowed reports whether the interception hook may be
+// disabled for whole-GPU allocations on this node: a scaled device needs the
+// hook to enforce the scaling, so it never qualifies.
+func (plugin *NvidiaDevicePlugin) wholeGPUDisableHAMiCoreAllowed() bool {
+	return wholeGPUDisableHAMiCore &&
 		*plugin.schedulerConfig.DeviceMemoryScaling == 1 &&
 		*plugin.schedulerConfig.DeviceCoreScaling == 1
 }

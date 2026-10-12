@@ -602,11 +602,11 @@ func newWholeGPUTestLister(dir string, pods ...*corev1.Pod) *ContainerLister {
 }
 
 func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
-	originalEnabled := wholeGPUSkipHookEnabled
-	t.Cleanup(func() { wholeGPUSkipHookEnabled = originalEnabled })
+	originalEnabled := wholeGPUDisableHAMiCore
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = originalEnabled })
 
 	t.Run("disabled: annotated pod is left alone, matching current behavior", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = false
+		wholeGPUDisableHAMiCore = false
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid7",
@@ -625,8 +625,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: annotated pod gets a synthesized entry through Update", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -659,8 +659,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: the device plugin's empty cache directory keeps the synthesized entry", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		dir := t.TempDir()
 		pod := wholeGPUTestPod("uid9")
@@ -679,8 +679,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: libvgpu.so without a cache file keeps the synthesized entry", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		dir := t.TempDir()
 		pod := wholeGPUTestPod("uid10")
@@ -699,8 +699,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: a corrupt cache file keeps the synthesized entry", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		dir := t.TempDir()
 		pod := wholeGPUTestPod("uid14")
@@ -721,8 +721,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: a real cache file hands the entry back to disk monitoring", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		dir := t.TempDir()
 		pod := wholeGPUTestPod("uid11")
@@ -750,8 +750,8 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 	})
 
 	t.Run("enabled: shared-pod cache sweep leaves the synthesized whole-GPU entry intact", func(t *testing.T) {
-		wholeGPUSkipHookEnabled = true
-		defer func() { wholeGPUSkipHookEnabled = false }()
+		wholeGPUDisableHAMiCore = true
+		defer func() { wholeGPUDisableHAMiCore = false }()
 
 		dir := t.TempDir()
 		wholePod := wholeGPUTestPod("uid12")

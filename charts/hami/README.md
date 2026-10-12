@@ -332,7 +332,7 @@ listener is started.
 | `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
 | `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
-| `devicePlugin.monitor.skipHookForWholeGPU` | Skip the ld.so.preload hook for whole-GPU containers (inject `CUDA_DISABLE_CONTROL=true`) and synthesize their metrics via NVML; over-subscribed nodes always keep the hook | `false` |
+| `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Disable the HAMi-core hook for whole-GPU containers (inject `CUDA_DISABLE_CONTROL=true` instead of the ld.so.preload hook); the monitor synthesizes their metrics via NVML; over-subscribed nodes always keep the hook | `true` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 | `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 

@@ -33,12 +33,10 @@ import (
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-// wholeGPUSkipHookEnabled turns on synthesizing per-pod NVML metrics for
-// containers that hold one or more entire physical GPUs. It shares the
-// device plugin's gate: pods only stop writing libvgpu shared-memory cache
-// files when the hook is skipped for whole-GPU allocations, and those are
-// exactly the containers this synthesized path exists to cover.
-var wholeGPUSkipHookEnabled = os.Getenv("HAMI_WHOLE_GPU_SKIP_HOOK") == "true"
+// wholeGPUDisableHAMiCore turns on synthesizing per-pod NVML metrics for
+// whole-GPU containers, covering the libvgpu cache data they stop writing
+// once the hook is disabled for them.
+var wholeGPUDisableHAMiCore = os.Getenv("DISABLE_HAMI_CORE_FOR_WHOLE_GPU") == "true"
 
 // nvidiaDeviceChecklist mirrors the single NVIDIA entry of device.SupportDevices.
 // That global map is only populated by nvidia.InitNvidiaDevice, which the
