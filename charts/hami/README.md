@@ -386,7 +386,7 @@ NVML and discovers GPUs through the driver libraries and device nodes that the
 NVIDIA Container Toolkit injects into its container, so the chart mounts only
 the GPU Operator validation directory read-only. This requires the device
 plugin Pod to run with the NVIDIA runtime, either because it is the node's
-default container runtime or through `devicePlugin.runtimeClassName`.
+default container runtime or through `devices.nvidia.runtimeClassName`.
 
 CDI specifications must reference the host driver layout, which can differ
 from the layout inside the device plugin container. When
