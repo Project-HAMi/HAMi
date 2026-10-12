@@ -221,13 +221,21 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 			},
 		},
 	})
-	// Pod UID is the workload identity lupine's usage endpoint groups by.
-	setEnv(ctr, corev1.EnvVar{
-		Name: lupineWorkloadIDEnv,
+	// Kubelet expands the UID before launching the container. Admission cannot
+	// know the UID of a new Pod; container names are stable across restarts.
+	// Append these together so expansion also works when users supplied either.
+	filtered := ctr.Env[:0]
+	for _, env := range ctr.Env {
+		if env.Name != "HAMI_REMOTE_POD_UID" && env.Name != lupineWorkloadIDEnv {
+			filtered = append(filtered, env)
+		}
+	}
+	ctr.Env = append(filtered, corev1.EnvVar{
+		Name: "HAMI_REMOTE_POD_UID",
 		ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.uid"},
 		},
-	})
+	}, corev1.EnvVar{Name: lupineWorkloadIDEnv, Value: "$(HAMI_REMOTE_POD_UID)/" + ctr.Name})
 	// Last, because it appends to pod.Spec.InitContainers and ctr may point
 	// into that slice: the webhook hands out &pod.Spec.InitContainers[i] for an
 	// init container that asks for a card. Appending can move the backing

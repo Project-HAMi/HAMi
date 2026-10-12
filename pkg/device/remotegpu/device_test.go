@@ -594,7 +594,8 @@ func TestMutateAdmission_ReplacesLiteralServerEnv(t *testing.T) {
 			assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.annotations['"+LupineServerAnno+"']")
 		case lupineWorkloadIDEnv:
 			workload++
-			assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.uid")
+			assert.Equal(t, env.Value, "$(HAMI_REMOTE_POD_UID)/"+ctr.Name)
+			assert.Assert(t, env.ValueFrom == nil)
 		}
 	}
 	assert.Equal(t, server, 1, "must replace, not duplicate")
@@ -887,4 +888,34 @@ func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, request(2, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, false, "only one card is big enough")
 	assert.Assert(t, reason != "")
+}
+
+// Reinvocation and user-supplied reserved variables must not break kubelet's
+// ordered expansion; each container receives its own identity.
+func TestMutateAdmissionWorkloadIdentity(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	for _, name := range []string{"worker", "sidecar"} {
+		ctr := &corev1.Container{Name: name, Env: []corev1.EnvVar{{Name: lupineWorkloadIDEnv, Value: "user-value"}, {Name: "HAMI_REMOTE_POD_UID", Value: "user-uid"}}, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+		for range 2 {
+			_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+			assert.NilError(t, err)
+		}
+		var uidIndex, workloadIndex int
+		var uidCount, workloadCount int
+		for i, env := range ctr.Env {
+			switch env.Name {
+			case "HAMI_REMOTE_POD_UID":
+				uidIndex = i
+				uidCount++
+				assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.uid")
+			case lupineWorkloadIDEnv:
+				workloadIndex = i
+				workloadCount++
+				assert.Equal(t, env.Value, "$(HAMI_REMOTE_POD_UID)/"+name)
+			}
+		}
+		assert.Equal(t, uidCount, 1)
+		assert.Equal(t, workloadCount, 1)
+		assert.Assert(t, uidIndex < workloadIndex)
+	}
 }

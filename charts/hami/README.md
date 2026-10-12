@@ -544,6 +544,9 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | legacyMetrics | bool | `false` | Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility. |
 | prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`. |
 | device-config.content | string | `""` | Full replacement of device-config.yaml; takes precedence over a bundled file and values. This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides. Please note that extender resources still use `devices.*`, keep resource names consistent. Values validation still applies. |
+| devices.remotegpu.monitor.enabled | bool | `true` | Enable the remote GPU monitor container in chart-managed Lupine server Pods |
+| devices.remotegpu.monitor.port | int | `31993` | Remote GPU monitor HTTP port on the server node |
+| devices.remotegpu.monitor.resources | object | `{}` | Remote GPU monitor container resources |
 
 <!-- END GENERATED VALUES -->
 

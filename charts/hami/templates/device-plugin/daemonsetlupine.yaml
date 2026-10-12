@@ -26,6 +26,9 @@ spec:
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
     spec:
       {{- include "hami.remotegpu.server.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.devices.remotegpu.monitor.enabled }}
+      serviceAccountName: {{ include "hami-vgpu.fullname" . }}-remote-monitor
+      {{- end }}
       {{- if .Values.devices.remotegpu.server.runtimeClassName }}
       runtimeClassName: {{ .Values.devices.remotegpu.server.runtimeClassName }}
       {{- end }}
@@ -77,4 +80,41 @@ spec:
           {{- with .Values.devices.remotegpu.server.resources }}
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}
+        {{- if .Values.devices.remotegpu.monitor.enabled }}
+        - name: remote-gpu-monitor
+          image: {{ include "hami.devicePlugin.monitor.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
+          command:
+            - remoteGPUmonitor
+            - --lupine-metrics-url=http://127.0.0.1:{{ .Values.devices.remotegpu.defaultPort }}/metrics
+            - --metrics-bind-address=:{{ .Values.devices.remotegpu.monitor.port }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: void
+          ports:
+            - name: remote-metrics
+              containerPort: {{ .Values.devices.remotegpu.monitor.port }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: remote-metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: remote-metrics
+          {{- with .Values.devices.remotegpu.monitor.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
 {{- end }}
