@@ -317,17 +317,15 @@ scheduler:
     enabled: false
 
 devicePlugin:
-  # -- Deploy the NVIDIA device plugin and vGPU monitor DaemonSet and their supporting resources.
+  # -- Deploy the NVIDIA device plugin DaemonSet, including the vGPU monitor container.
   enabled: true
   gpuOperatorToolkitReady:
-    # -- Add an init container that waits for the GPU Operator toolkit-ready file before starting the device
-    # plugin and monitor.
+    # -- Wait for `<hostPath>/toolkit-ready` in an init container before starting the device plugin and monitor.
     enabled: false
-    # -- Host directory containing GPU Operator validation files. Used by the toolkit wait init container and,
-    # when `nvidiaDriverRoot=auto`, mounted at `/run/nvidia/validations` for driver discovery.
+    # -- Host directory containing `toolkit-ready`. Also supplies `driver-ready` when
+    # `devicePlugin.nvidiaDriverRoot=auto`.
     hostPath: "/run/nvidia/validations"
-    # -- Kubernetes container security context for the toolkit wait init container. The default runs it as
-    # privileged root.
+    # -- Security context for the toolkit-validation init container.
     securityContext:
       privileged: true
       runAsUser: 0
@@ -343,9 +341,8 @@ devicePlugin:
     # -- Image pull policy for the NVIDIA device plugin and its enabled init containers: `Always`,
     # `IfNotPresent`, or `Never`. Defaults to `IfNotPresent`, including when the image tag is `latest`.
     pullPolicy: IfNotPresent
-    # -- List of existing image pull Secret names for the NVIDIA device plugin Pod, for example
-    # `[myRegistryKeySecretName]`. Appended to `global.imagePullSecrets`; all Secrets must exist in the Pod's
-    # namespace. An empty list adds no component-specific Secrets.
+    # -- Image pull Secret names for the device plugin Pod, appended to `global.imagePullSecrets`,
+    # e.g. `[myRegistryKeySecretName]`.
     pullSecrets: []
   vgpuCache:
     # -- Minimum age of a cache directory before the device plugin considers it for deletion, using Go
