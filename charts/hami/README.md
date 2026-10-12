@@ -151,14 +151,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 | `devices.cambricon.resourceMemoryName` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
 | `devices.cambricon.resourceCoreName` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
 
-### Hygon HCU Resources
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.hygon.resourceCountName` | HCU resource name | `"hygon.com/hcunum"` |
-| `devices.hygon.resourceMemoryName` | HCU memory resource name | `"hygon.com/hcumem"` |
-| `devices.hygon.resourceCoreName` | HCU core resource name | `"hygon.com/hcucores"` |
-
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -509,6 +501,10 @@ More values will be added in follow-up PRs.
 | devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.hygon.memoryFactor | int | `1` | Multiplier applied to the container's HCU memory request (in MiB) when scheduling Hygon HCU devices. Must be at least 1. |
+| devices.hygon.resourceCoreName | string | `"hygon.com/hcucores"` | Extended resource name for Hygon HCU compute core percentage requests (0 to 100). If omitted by a container requesting HCUs, HAMi defaults to allocating 100% of the cores. |
+| devices.hygon.resourceCountName | string | `"hygon.com/hcunum"` | Extended resource name for Hygon HCU device count requests. Containers requesting this resource are scheduled onto nodes with registered Hygon HCU devices. |
+| devices.hygon.resourceMemoryName | string | `"hygon.com/hcumem"` | Extended resource name for Hygon HCU memory requests in MiB. Multiplied by memoryFactor during admission. If omitted or set to 0, HAMi defaults to allocating 100% of device memory. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
 | devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
