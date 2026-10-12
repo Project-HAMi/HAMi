@@ -211,7 +211,7 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
+            GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
             NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
