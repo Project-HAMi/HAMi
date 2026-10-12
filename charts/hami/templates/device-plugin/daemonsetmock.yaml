@@ -18,6 +18,7 @@ spec:
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "hami-vgpu.mock-device-plugin" . }}
+      {{- include "hami.mockDevicePlugin.imagePullSecrets" . | nindent 6 }}
       tolerations:
       - key: CriticalAddonsOnly
         operator: Exists

@@ -14,6 +14,7 @@ all: update-versions deps lint package
 validate:
 	helm lint --with-subcharts ./hami --debug
 	helm template hami ./hami > /dev/null
+	bash ../hack/verify-chart-mock-device-plugin.sh
 
 #update version in chart
 update-versions:
