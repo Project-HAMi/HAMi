@@ -323,6 +323,7 @@ listener is started.
 | `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
 | `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
+| `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Skip the HAMi-core interception for whole-GPU workloads on non-oversubscribed nodes and read their metrics from NVML instead. Whole-GPU means: non-MIG device, full device memory allocated, cores unrequested or `gpucores=100` | `true` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 
 ### vGPU Cache Garbage Collection

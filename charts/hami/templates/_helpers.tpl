@@ -56,6 +56,14 @@ The app name for DevicePlugin
 {{- end -}}
 
 {{/*
+Whether HAMi-core is disabled for whole-GPU containers, as a quoted bool.
+Defaults to true; a plain `default true` pipe would swallow an explicit false.
+*/}}
+{{- define "hami-vgpu.disableHAMiCoreForWholeGPU" -}}
+{{- if or (not (hasKey .Values.devicePlugin.monitor "disableHAMiCoreForWholeGPU")) .Values.devicePlugin.monitor.disableHAMiCoreForWholeGPU -}}"true"{{- else -}}"false"{{- end -}}
+{{- end -}}
+
+{{/*
 The tls secret name for Scheduler
 */}}
 {{- define "hami-vgpu.scheduler.tls" -}}

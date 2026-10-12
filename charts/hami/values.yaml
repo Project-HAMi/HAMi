@@ -376,6 +376,8 @@ devicePlugin:
     # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
+    ## @param devicePlugin.monitor.disableHAMiCoreForWholeGPU disable the HAMi-core hook for whole-GPU containers; the monitor reads their metrics from NVML instead
+    disableHAMiCoreForWholeGPU: true
     extraArgs:
       - -v=4
     # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
