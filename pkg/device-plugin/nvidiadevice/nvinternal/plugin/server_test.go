@@ -1200,8 +1200,16 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 
 type mockListAndWatchServer struct {
 	grpc.ServerStream
+	ctx      context.Context
 	sendErrs []error
 	sent     []*kubeletdevicepluginv1beta1.ListAndWatchResponse
+}
+
+func (m *mockListAndWatchServer) Context() context.Context {
+	if m.ctx != nil {
+		return m.ctx
+	}
+	return context.Background()
 }
 
 func (m *mockListAndWatchServer) Send(response *kubeletdevicepluginv1beta1.ListAndWatchResponse) error {
@@ -1243,6 +1251,32 @@ func TestListAndWatchSendError(t *testing.T) {
 		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
 		require.NoError(t, err)
 		require.Len(t, server.sent, 2)
+	})
+
+	t.Run("context cancelled terminates stream", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		server := &mockListAndWatchServer{ctx: ctx}
+		plugin := &NvidiaDevicePlugin{
+			rm: mockRM, stop: make(chan any), health: make(chan *rm.Device, 1),
+			schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr[uint](1)}},
+		}
+		cancel()
+		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Len(t, server.sent, 1)
+	})
+
+	t.Run("plugin stop terminates stream", func(t *testing.T) {
+		stop := make(chan any)
+		close(stop)
+		server := &mockListAndWatchServer{}
+		plugin := &NvidiaDevicePlugin{
+			rm: mockRM, stop: stop, health: make(chan *rm.Device, 1),
+			schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr[uint](1)}},
+		}
+		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
+		require.NoError(t, err)
+		require.Len(t, server.sent, 1)
 	})
 }
 

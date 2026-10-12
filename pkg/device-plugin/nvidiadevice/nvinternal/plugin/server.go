@@ -1117,8 +1117,12 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 		return err
 	}
 
+	streamCtx := s.Context()
 	for {
 		select {
+		case <-streamCtx.Done():
+			klog.Infof("ListAndWatch stream context done for %s: %v", plugin.rm.Resource(), streamCtx.Err())
+			return streamCtx.Err()
 		case <-plugin.stop:
 			return nil
 		case d := <-plugin.health:
