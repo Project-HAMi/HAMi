@@ -1527,6 +1527,16 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				)
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
+				limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
+				if err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("write GPU limits file: %w", err)
+				}
+				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+					ContainerPath: overrideEnvContainerPath,
+					HostPath:      limitsFile,
+					ReadOnly:      true,
+				})
 				found := false
 				userSpecified := false
 				for _, val := range currentCtr.Env {
