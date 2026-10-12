@@ -277,6 +277,17 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found cambricon devices")
+			if n > 1 {
+				// The plugin gives a count above 1 whole MLUs and ignores the
+				// memory and core values, so account the whole device and skip
+				// validating them.
+				return device.ContainerDeviceRequest{
+					Nums:             int32(n),
+					Type:             CambriconMLUDevice,
+					MemPercentagereq: 100,
+					Coresreq:         100,
+				}, nil
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
@@ -307,11 +318,6 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				corenum = int32(corenums)
 			}
 
-			if n > 1 {
-				// The plugin gives a count above 1 whole MLUs and ignores the
-				// memory and core values, so account the whole device.
-				memnum, corenum = 0, 100
-			}
 			mempnum := 0
 			if memnum == 0 {
 				mempnum = 100

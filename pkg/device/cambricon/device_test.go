@@ -484,6 +484,25 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
+			name: "a count above 1 ignores memory and core values even out of range",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("2"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("2147483647"),
+						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("101"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(2),
+				Type:             CambriconMLUDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(100),
+				Coresreq:         int32(100),
+			},
+		},
+		{
 			name: "resourcememoryname don't set to limits and requests",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
