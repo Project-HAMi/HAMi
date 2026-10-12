@@ -1889,6 +1889,39 @@ func TestDevices_Fit_ResourceQuotaWholeCardRequest(t *testing.T) {
 	}
 }
 
+// A count above 1 allocates whole MLUs, so a declared memory below the card
+// size must not shrink what the allocation records as used.
+func TestDevices_Fit_MultiMLUAllocatesWholeCards(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
+
+	devices := []*device.DeviceUsage{}
+	for i := 0; i < 2; i++ {
+		devices = append(devices, &device.DeviceUsage{
+			ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 100,
+			Totalmem: 40960, Totalcore: 100, Type: CambriconMLUDevice, Health: true,
+		})
+	}
+	request := device.ContainerDeviceRequest{
+		Nums: 2, Type: CambriconMLUDevice, Memreq: 256000 / 100, MemPercentagereq: 100, Coresreq: 100,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+
+	fit, result, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if !fit {
+		t.Fatalf("expected the request to fit, got reason %q", reason)
+	}
+	for _, d := range result[CambriconMLUDevice] {
+		if d.Usedmem != 40960 {
+			t.Errorf("device %s Usedmem = %d, want the whole card 40960", d.UUID, d.Usedmem)
+		}
+	}
+}
+
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
