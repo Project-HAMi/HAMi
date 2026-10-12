@@ -25,8 +25,10 @@ Please include the following information:
 >   --namespace hami-system --pod affected-pod --output-dir ./hami-support
 > ```
 >
-> The collector never queries Kubernetes Secrets. Use `--help` for node and
-> cluster-wide options, and attach only artifacts appropriate for the issue.
+> The collector never queries Kubernetes Secrets and applies best-effort
+> structured redaction, but logs and resource fields can contain unexpected
+> private data. Use `--help` for node and cluster-wide options, inspect every
+> artifact, and attach only files appropriate for the issue.
 
 - The Pod manifest, or at least its accelerator resource requests and limits
 - Pod events and relevant accelerator-related node annotations

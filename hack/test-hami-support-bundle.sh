@@ -42,6 +42,7 @@ if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   exit 0
 fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
+if [[ " $* " == *" logs "* && " $* " == *" --previous "* ]]; then echo 'previous container diagnostics'; exit 0; fi
 if [[ " $* " == *" logs pod/device-plugin-3 "* ]]; then echo 'one Pod log failed' >&2; exit 1; fi
 if [[ "${MOCK_MODE:-}" == large ]]; then
   head -c "${MOCK_BYTES:-4096}" /dev/zero | tr '\0' x
@@ -60,10 +61,17 @@ password: yaml-password
 access_token: access-token-value
 password=equals-password
 api_key="quoted equals api key"
+endpoint: https://url-user:url-pass@service.example/path
+command: tool --password space-separated-password --verbose
+args: ["--token=json-array-token","--normal=visible"]
+inline_json: {"name":"HF_TOKEN","value":"inline-json-secret"}
 apiVersion: v1
 kind: Pod
 metadata:
   name: multiline-redaction-test
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"spec":{"containers":[{"env":[{"name":"HF_TOKEN","value":"last-applied-secret"}]}]}}
 spec:
   containers:
     - name: test
@@ -92,6 +100,10 @@ spec:
             private-key-block-value
         - name: DATABASE_PASSWORD
           value: database-password
+        - name: SECRET_KEY
+          value: secret-key-value
+        - name: JWT_SIGNING_KEY
+          value: jwt-signing-key-value
         - name: NORMAL_MULTILINE
           value: |
             normal-env-multiline-first
@@ -99,6 +111,7 @@ spec:
             normal-env-multiline-after-blank
         - name: NORMAL_SETTING
           value: keep-this-value
+      flowProbe: {name: HF_TOKEN, value: flow-style-secret}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -134,6 +147,11 @@ password: |-
 normal_note: |
   ordinary multiline text
 extra: custom-secret
+status:
+  images:
+    - names:
+        - private.node.example/team/image:latest
+      sizeBytes: 1234
 OUT
 EOF
 chmod +x "$tmp/bin/kubectl"
@@ -166,7 +184,9 @@ sensitive_fragments=(
   equals-password 'quoted equals api key' hf-multiline-secret password-folded-secret
   api-key-block-secret access-key-block-secret client-secret-block-value
   private-key-block-value deployment-api-key-secret configmap-password-secret
-  database-password multiline-password custom-secret
+  database-password multiline-password custom-secret secret-key-value
+  jwt-signing-key-value flow-style-secret last-applied-secret url-user url-pass
+  space-separated-password json-array-token inline-json-secret private.node.example
 )
 for fragment in "${sensitive_fragments[@]}"; do
   if grep -R -F -- "$fragment" "$bundle" >/dev/null; then
@@ -175,30 +195,38 @@ for fragment in "${sensitive_fragments[@]}"; do
 done
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'nvidia\.com/gpu: 1'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'hami\.io/vgpu-devices-allocated: GPU-123,1'
-assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: keep-this-value'
-assert_contains "$bundle/artifacts/workloads/pod.yaml" 'normal-env-multiline-first'
-assert_contains "$bundle/artifacts/workloads/pod.yaml" 'normal-env-multiline-after-blank'
-assert_contains "$bundle/artifacts/workloads/pod.yaml" 'deployment-normal-multiline'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'env: <redacted-environment>'
+assert_not_contains "$bundle/artifacts/workloads/pod.yaml" 'keep-this-value'
+assert_not_contains "$bundle/artifacts/workloads/pod.yaml" 'normal-env-multiline-first'
+assert_not_contains "$bundle/artifacts/workloads/pod.yaml" 'deployment-normal-multiline'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'image: <redacted-image>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'imageID: <redacted-image>'
-assert_contains "$bundle/artifacts/workloads/pod.yaml" 'value: <redacted-credential>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'kubectl\.kubernetes\.io/last-applied-configuration: <redacted-credential>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'flowProbe: \{name: HF_TOKEN, value: <redacted-credential>\}'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'endpoint: https://<redacted>@service\.example/path'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'command: tool --password <redacted-credential> --verbose'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'args: \["--token=<redacted-credential>","--normal=visible"\]'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'inline_json: \{"name":"HF_TOKEN","value":"<redacted-credential>"\}'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'images: <redacted-image-inventory>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'ordinary multiline text'
-test "$(grep -c 'value: <redacted-credential>' "$bundle/artifacts/workloads/pod.yaml")" -ge 8 || fail 'multiline environment redaction markers are missing'
 assert_contains "$bundle/artifacts/config/scheduler.yaml" 'password: <redacted-credential>'
 assert_contains "$bundle/artifacts/config/scheduler.yaml" 'configmap-normal-multiline'
 assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
 assert_contains "$KUBECTL_LOG" ' get daemonsets -l app.kubernetes.io/component=hami-device-plugin '
-test "$(grep -c 'logs pod/device-plugin-' "$KUBECTL_LOG")" -eq 7 || fail 'did not collect all seven device-plugin Pod logs'
-device_plugin_log_order=$(sed -n 's/.*logs pod\/device-plugin-\([0-9][0-9]*\).*/\1/p' "$KUBECTL_LOG" | paste -sd ' ' -)
+test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -vc -- '--previous')" -eq 7 || fail 'did not collect all seven current device-plugin Pod logs'
+test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -c -- '--previous')" -eq 7 || fail 'did not collect all seven previous device-plugin Pod logs'
+device_plugin_log_order=$(grep -v -- '--previous' "$KUBECTL_LOG" | sed -n 's/.*logs pod\/device-plugin-\([0-9][0-9]*\).*/\1/p' | paste -sd ' ' -)
 test "$device_plugin_log_order" = '1 2 3 4 5 6 7' || fail "device-plugin logs were not collected deterministically: $device_plugin_log_order"
 assert_not_contains "$KUBECTL_LOG" 'logs -l '
 assert_not_contains "$KUBECTL_LOG" ' get nodes '
 assert_contains "$KUBECTL_LOG" ' get node gpu-node-a -o yaml'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--tail=3 --since=1h'
+assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 --previous .*--tail=3 --since=1h'
 assert_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-logs-device-plugin-3"'
 test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.txt" || fail 'a Pod log failure stopped later Pod collection'
+test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.previous.txt" || fail 'previous container logs were not collected'
 assert_no_secret_requests "$KUBECTL_LOG" || fail 'collector requested a Secret resource'
 if grep -Eqi '(^|[[:space:]])(exec|debug|apply|create|delete|patch|replace|scale|set|label|annotate|cordon|drain|taint)([[:space:]]|$)' "$KUBECTL_LOG"; then
   fail 'collector issued a mutating or remote-execution kubectl command'
@@ -232,10 +260,11 @@ assert_contains "$tmp/cluster-dry.txt" '-A get events'
 assert_contains "$tmp/cluster-dry.txt" ' get nodes -o yaml'
 assert_contains "$tmp/cluster-dry.txt" '-n hami get configmaps'
 
-# Node mode is cross-namespace only for workloads/events on the selected node.
+# Node mode limits tenant workloads/events to the requested namespace.
 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --node gpu-node-a --dry-run --output-dir "$tmp/node-dry" >"$tmp/node-dry.txt"
-assert_contains "$tmp/node-dry.txt" '-A get pods --field-selector spec.nodeName=gpu-node-a'
-assert_contains "$tmp/node-dry.txt" '-A get events --field-selector involvedObject.kind=Node'
+assert_contains "$tmp/node-dry.txt" '-n hami get pods --field-selector spec.nodeName=gpu-node-a'
+assert_contains "$tmp/node-dry.txt" '-n hami get events --field-selector involvedObject.kind=Node'
+assert_not_contains "$tmp/node-dry.txt" '-A get pods'
 assert_contains "$tmp/node-dry.txt" ' get node gpu-node-a -o yaml'
 assert_not_contains "$tmp/node-dry.txt" ' get nodes '
 test "$(wc -l <"$KUBECTL_LOG")" -eq "$kubectl_calls_before_dry_run" || fail 'dry-run executed kubectl'
@@ -280,6 +309,13 @@ overall="$tmp/overall-bundle/hami-support-bundle"
 assert_contains "$overall/manifest.json" '"status":"limited"'
 test "$(du -sb "$overall" | awk '{print $1}')" -le 131072 || fail 'uncompressed bundle exceeds overall limit'
 
+# A reservation left by a dead process is reclaimed without overwriting output.
+mkdir -p "$tmp/stale-out/.hami-support-bundle.lock"
+printf '999999 1\n' >"$tmp/stale-out/.hami-support-bundle.lock/owner"
+"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/stale-out" >/dev/null
+test -f "$tmp/stale-out/hami-support-bundle.tar.gz" || fail 'stale reservation was not reclaimed'
+test ! -e "$tmp/stale-out/.hami-support-bundle.lock" || fail 'reclaimed reservation was not released'
+
 # Private staging exists with mode 700 and is removed after interruption.
 mkdir "$tmp/private-staging"
 : >"$KUBECTL_LOG"
@@ -299,5 +335,6 @@ assert_contains "$tmp/concurrent.out" 'already reserved by another collector'
 kill -TERM "$collector_pid"
 if wait "$collector_pid"; then fail 'interrupted collector unexpectedly succeeded'; fi
 test -z "$(find "$tmp/private-staging" -mindepth 1 -maxdepth 1 -name 'hami-support-bundle.*' -print -quit)" || fail 'staging data remained after interruption'
+test ! -e "$tmp/interrupted-out/.hami-support-bundle.lock" || fail 'reservation remained after interruption'
 
 echo 'support bundle tests passed'
