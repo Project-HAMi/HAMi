@@ -551,8 +551,31 @@ devices:
     resourceMemoryName: "hygon.com/hcumem"
     resourceCoreName: "hygon.com/hcucores"
   cambricon:
+    # -- Kubernetes resource name for the number of Cambricon MLUs requested by a container.<ul>
+    # <li>Resource name: Use a non-empty Kubernetes extended resource name matching the Cambricon device plugin; an empty name has no automatic fallback.</li>
+    # <li>Scheduler: Also registers this resource with the scheduler extender using `ignoredByScheduler=true`.</li>
+    # <li>Custom configuration: A non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration,
+    # so set the count resource name there too; the extender still uses this value.</li>
+    # <li>Requests: Use this key in container resource limits to request MLUs; a zero count requests no device.
+    # Memory and core requests are only processed when the container also requests this count resource.</li>
+    # <li>Sharing: Request one MLU and deploy the Cambricon device plugin in `dynamic-smlu` mode.
+    # Memory and core constraints apply only when the requested count is 1; counts greater than 1 allocate whole MLUs regardless of the requested memory and core values.</li></ul>
     resourceCountName: "cambricon.com/vmlu"
+    # -- Kubernetes resource name for Cambricon MLU memory, used in container resource requests or limits and node capacity.<ul>
+    # <li>Resource name: Use a non-empty Kubernetes extended resource name matching the memory resource advertised by the Cambricon device plugin;
+    # an empty name has no automatic fallback.</li>
+    # <li>Custom configuration: If a non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration,
+    # set the memory resource name there instead.</li>
+    # <li>Units and format: HAMi interprets memory requests as integer counts of 256 MiB units, without `Mi` or `Gi` suffixes
+    # (for example, `20` requests 5120 MiB). Configure the plugin with `min-dsmlu-unit=256` to match.</li>
+    # <li>Default request: For a shared MLU, omitting the memory request or setting it to zero makes HAMi reserve its full memory.</li></ul>
     resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
+    # -- Kubernetes resource name for Cambricon MLU compute capacity, used in container resource requests or limits and node capacity.<ul>
+    # <li>Resource name: Use a non-empty Kubernetes extended resource name matching the core resource advertised by the Cambricon device plugin;
+    # an empty name has no automatic fallback.</li>
+    # <li>Custom configuration: If a non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration,
+    # set the core resource name there instead.</li>
+    # <li>Range and default request: For a shared MLU, HAMi accepts an integer percentage from 0 to 100; omitting the core request defaults to 100.</li></ul>
     resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
     resourceCountName: "amd.com/gpu"
