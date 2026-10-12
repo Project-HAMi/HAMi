@@ -162,6 +162,12 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = AMDCommonWord
+		// The scheduler picks a node's devices for a request by a substring of
+		// the registered type, so a registration without a type would never
+		// match and the node would be rejected as having no device.
+		if nodedevices[idx].Type == "" {
+			nodedevices[idx].Type = AMDDevice
+		}
 	}
 	return nodedevices, nil
 }

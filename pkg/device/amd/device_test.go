@@ -174,6 +174,23 @@ func Test_GetNodeDevices(t *testing.T) {
 	assert.ErrorContains(t, err, "annos not found")
 }
 
+// The scheduler matches a request to a node's devices by a substring of the
+// registered type, so a registration without a type must read as the AMD type.
+func Test_GetNodeDevicesEmptyTypeReadsAsAMD(t *testing.T) {
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	node := func(registration string) corev1.Node {
+		return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n", Annotations: map[string]string{RegisterAnnos: registration}}}
+	}
+
+	got, err := dev.GetNodeDevices(node(`[{"id":"GPU-0","index":0,"count":1,"devmem":8192,"devcore":100,"numa":0,"health":true}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, AMDDevice, got[0].Type)
+
+	got, err = dev.GetNodeDevices(node(`[{"id":"GPU-0","index":0,"count":1,"devmem":8192,"devcore":100,"type":"AMD Instinct MI325X","numa":0,"health":true}]`))
+	assert.NilError(t, err)
+	assert.Equal(t, "AMD Instinct MI325X", got[0].Type)
+}
+
 func Test_PatchAnnotations(t *testing.T) {
 	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
 	pd := device.PodDevices{
