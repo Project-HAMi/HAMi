@@ -142,6 +142,25 @@ func TestBindRejectsRemoteGPUReservationOutsideSelector(t *testing.T) {
 	assert.Equal(t, "client-node", pi.NodeID)
 }
 
+func TestBindRejectsRemoteGPUSelectorWithoutReservation(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+	pod := remoteGPUWebhookPod(resourceName, map[string]string{
+		remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+	})
+	pod.UID = "remote-gpu-uid"
+	s := schedulerWithPods(t, pod)
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       pod.UID,
+		Node:         "client-node",
+	})
+
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(res.Error, "has no scheduler reservation"), "bind result: %q", res.Error)
+}
+
 // The reported attack: a bind request pairs a running pod's UID with a pod
 // name that does not exist. The lookup fails, and the stale-allocation
 // cleanup that follows must not free the devices of whoever holds that UID.

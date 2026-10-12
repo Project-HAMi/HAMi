@@ -1185,15 +1185,22 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 	// The node the filter phase picked is the only node this pod may be bound
 	// to. Binding it elsewhere would leave the reservation on the scheduled
 	// node while the pod consumes devices on another.
-	if pi, ok := s.podManager.GetPod(current); ok {
-		if pi.NodeID != "" && pi.NodeID != args.Node {
-			return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
-				args.PodNamespace, args.PodName, pi.NodeID, args.Node)
-		}
-		if remote, ok := device.GetDevices()[remotegpu.RemoteGPUCommonWord].(*remotegpu.RemoteGPUDevices); ok {
-			if err := remote.ValidateReservedServer(current, pi.Devices); err != nil {
-				return err
+	pi, reserved := s.podManager.GetPod(current)
+	if !reserved {
+		if remotegpu.PodRequestsRemoteGPU(current) {
+			if _, selected := current.Annotations[remotegpu.LupineServerSelectorAnno]; selected {
+				return fmt.Errorf("RemoteGPU pod %s/%s has no scheduler reservation", args.PodNamespace, args.PodName)
 			}
+		}
+		return nil
+	}
+	if pi.NodeID != "" && pi.NodeID != args.Node {
+		return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
+			args.PodNamespace, args.PodName, pi.NodeID, args.Node)
+	}
+	if remote, ok := device.GetDevices()[remotegpu.RemoteGPUCommonWord].(*remotegpu.RemoteGPUDevices); ok {
+		if err := remote.ValidateReservedServer(current, pi.Devices); err != nil {
+			return err
 		}
 	}
 	return nil
