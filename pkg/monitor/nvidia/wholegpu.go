@@ -239,6 +239,12 @@ type wholeGPUInputs struct {
 	nodeDevsErr    error
 }
 
+type wholeGPUCandidate struct {
+	pod       *corev1.Pod
+	container string
+	devices   device.ContainerDevices
+}
+
 // reconcileWholeGPU composes prefetchWholeGPUInputs+reconcileWholeGPULocked
 // for tests; Update calls the pair around its own locked section. pods is
 // node-scoped by the pod informer.
