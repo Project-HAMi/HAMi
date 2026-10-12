@@ -53,6 +53,9 @@ type VNPUs struct {
 	RuntimeClassName string       `yaml:"runtimeClassName"`
 	Configs          []VNPUConfig `yaml:"configs"`
 
+	// Consumed by the Ascend device plugin from the shared device ConfigMap.
+	VNPUDeviceSplitCount int `yaml:"vnpuDeviceSplitCount,omitempty"`
+
 	// Deprecated: use HamiVnpuMode. Only applies when HamiVnpuMode is empty.
 	HamiVnpuCore bool `yaml:"hamiVnpuCore,omitempty"`
 }

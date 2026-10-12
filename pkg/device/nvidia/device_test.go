@@ -217,27 +217,42 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		pct     int64
+		pct     string
 		wantErr bool
 	}{
 		{
 			name:    "percentage of 0 is accepted",
-			pct:     0,
+			pct:     "0",
 			wantErr: false,
 		},
 		{
 			name:    "percentage of 100 is accepted",
-			pct:     100,
+			pct:     "100",
 			wantErr: false,
 		},
 		{
 			name:    "percentage of 101 is rejected",
-			pct:     101,
+			pct:     "101",
+			wantErr: true,
+		},
+		{
+			name:    "fractional percentage 99.1 is rejected",
+			pct:     "99.1",
+			wantErr: true,
+		},
+		{
+			name:    "milli percentage 50m is rejected",
+			pct:     "50m",
+			wantErr: true,
+		},
+		{
+			name:    "negative percentage is rejected",
+			pct:     "-1",
 			wantErr: true,
 		},
 		{
 			name:    "percentage above 100 is rejected",
-			pct:     150,
+			pct:     "150",
 			wantErr: true,
 		},
 	}
@@ -248,16 +263,16 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
-						"nvidia.com/gpumem-percentage": *resource.NewQuantity(test.pct, resource.DecimalSI),
+						"nvidia.com/gpumem-percentage": resource.MustParse(test.pct),
 					},
 				},
 			}
 			_, err := gpuDevices.MutateAdmission(ctr, &corev1.Pod{})
 			if test.wantErr && err == nil {
-				t.Fatalf("expected MutateAdmission to reject percentage %d, but got no error", test.pct)
+				t.Fatalf("expected MutateAdmission to reject percentage %s, but got no error", test.pct)
 			}
 			if !test.wantErr && err != nil {
-				t.Fatalf("expected MutateAdmission to accept percentage %d, but got error: %v", test.pct, err)
+				t.Fatalf("expected MutateAdmission to accept percentage %s, but got error: %v", test.pct, err)
 			}
 		})
 	}
@@ -1939,7 +1954,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "gpu count + memory percentage above 100 — clamped to 100",
+			name: "gpu count + memory percentage above 100 — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1948,16 +1963,10 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "gpu count + memory percentage beyond int32 range — clamped to 100 without wrapping",
+			name: "gpu count + memory percentage beyond int32 range — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1966,16 +1975,10 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "gpu count + memory percentage equal to sentinel 101 — clamped to 100",
+			name: "gpu count + memory percentage equal to sentinel 101 — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1984,13 +1987,31 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + fractional 99.1 memory percentage — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": resource.MustParse("99.1"),
+					},
+				},
 			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + milli 50m memory percentage — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": resource.MustParse("50m"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "gpu count + explicit cores 0",
@@ -2169,7 +2190,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "negative memory percentage — treated as unset",
+			name: "negative memory percentage — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -2178,13 +2199,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "memory percentage of 0 + explicit memory — explicit memory wins",
@@ -2783,13 +2798,11 @@ func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
 	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
 }
 
-func TestResourceValue_NilAndEmpty(t *testing.T) {
-	v, ok := resourceValue(nil, "nvidia.com/gpu")
-	assert.Equal(t, v, int64(0))
+func TestResourceQuantity_NilAndEmpty(t *testing.T) {
+	_, ok := resourceQuantity(nil, "nvidia.com/gpu")
 	assert.Equal(t, ok, false)
 
-	v, ok = resourceValue(&corev1.Container{}, "")
-	assert.Equal(t, v, int64(0))
+	_, ok = resourceQuantity(&corev1.Container{}, "")
 	assert.Equal(t, ok, false)
 }
 
@@ -3871,4 +3884,27 @@ func TestNormalizeDeviceModel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMemoryPercentage_InvalidRequestBehindValidLimit(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	})
+	ctr := &corev1.Container{
+		Name: "c",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			},
+			Requests: corev1.ResourceList{"nvidia.com/gpumem-percentage": resource.MustParse("99.1")},
+		},
+	}
+	_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.Assert(t, err != nil)
+	req, err := dev.GenerateResourceRequests(ctr)
+	assert.Assert(t, err != nil)
+	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
 }

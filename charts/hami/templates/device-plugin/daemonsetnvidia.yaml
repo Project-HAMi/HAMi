@@ -1,3 +1,6 @@
+{{- if and .Values.devicePlugin.enabled (regexMatch "(?i)^(127\\.|localhost|\\[[0:]*:0{0,3}1\\]|\\[::ffff:127\\.)" .Values.devicePlugin.monitor.metricsBindAddress) }}
+{{- fail "devicePlugin.monitor.metricsBindAddress must not be a loopback address, the probes and the Service reach the monitor through the Pod IP" }}
+{{- end }}
 {{- if and .Values.devicePlugin.enabled .Values.devicePlugin.hostPIDBroker.enabled (not .Values.devicePlugin.hostPID) }}
 {{- fail "devicePlugin.hostPIDBroker requires devicePlugin.hostPID" }}
 {{- end }}
@@ -215,6 +218,8 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            - name: dynamic-mig-state
+              mountPath: /var/run/hami/dynamic-mig-state
             {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
@@ -250,6 +255,7 @@ spec:
             {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}
+            - --metrics-bind-address={{ .Values.devicePlugin.monitor.metricsBindAddress }}
           {{- with .Values.devicePlugin.monitor.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -280,8 +286,22 @@ spec:
             {{- end }}
           ports:
             - name: metrics
-              containerPort: 9394
+              containerPort: {{ last (splitList ":" .Values.devicePlugin.monitor.metricsBindAddress) | int }}
               protocol: TCP
+          {{- if .Values.devicePlugin.monitor.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          {{- end }}
           resources:
           {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:
@@ -354,6 +374,10 @@ spec:
         - name: cdi-root
           hostPath:
             path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: dynamic-mig-state
+          hostPath:
+            path: /var/run/hami/dynamic-mig-state
             type: DirectoryOrCreate
         {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
         - name: hostpid-broker

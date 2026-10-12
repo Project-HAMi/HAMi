@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -38,6 +39,7 @@ type AMDDevices struct {
 	resourceMemoryName           string
 	resourceMemoryPercentageName string
 	resourceCoreName             string
+	runtimeClassName             string
 }
 
 const (
@@ -48,9 +50,11 @@ const (
 	AMDNoUse           = "amd.com/nouse-gputype"
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
-	AMDAssignedNode    = "amd.com/predicate-node"
-	NodeLockAMD        = "hami.io/mutex.lock"
-	RegisterAnnos      = "hami.io/node-amd-register"
+	// AMDNumaBind asks for every GPU of a multi-GPU request to sit on one NUMA node.
+	AMDNumaBind     = "amd.com/numa-bind"
+	AMDAssignedNode = "amd.com/predicate-node"
+	NodeLockAMD     = "hami.io/mutex.lock"
+	RegisterAnnos   = "hami.io/node-amd-register"
 )
 
 type AMDConfig struct {
@@ -58,6 +62,8 @@ type AMDConfig struct {
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
 	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
 	ResourceCoreName             string `yaml:"resourceCoreName"`
+	// RuntimeClassName is set on the Pod when the user left spec.runtimeClassName empty.
+	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -71,6 +77,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		resourceMemoryName:           config.ResourceMemoryName,
 		resourceMemoryPercentageName: config.ResourceMemoryPercentageName,
 		resourceCoreName:             config.ResourceCoreName,
+		runtimeClassName:             config.RuntimeClassName,
 	}
 }
 
@@ -109,6 +116,9 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	}
 	if !ok && dev.resourceCoreName != "" {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+	}
+	if ok && p.Spec.RuntimeClassName == nil && dev.runtimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.runtimeClassName
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
@@ -208,9 +218,14 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 	return true
 }
 
+func assertNuma(annos map[string]string) bool {
+	enforce, err := strconv.ParseBool(annos[AMDNumaBind])
+	return err == nil && enforce
+}
+
 func (dev *AMDDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.EqualFold(n.Type, AMDDevice) {
-		return true, checkAMDType(annos, d.Type), false
+		return true, checkAMDType(annos, d.Type), assertNuma(annos)
 	}
 	return false, false, false
 }
@@ -219,7 +234,10 @@ func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) 
 	if dev.resourceCountName == "" {
 		return true, true
 	}
-	gpuCount, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
+	// Allocatable, not capacity: kubelet keeps an unhealthy GPU in capacity and
+	// drops it from allocatable, so only allocatable says whether a pod bound
+	// here can still be admitted.
+	gpuCount, ok := n.Status.Allocatable.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
 	if !ok {
 		return false, false
 	}
@@ -319,9 +337,33 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// fitQuota checks the pod's total AMD memory, this candidate card included,
+// against the namespace ResourceQuota. Only memory is checked: the core quota
+// counts the CUs the plugin masks while a request is a percentage.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int32) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
+	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
+	hypo[AMDDevice] = append(hypo[AMDDevice], cur)
+
+	var mem int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
+		for _, val := range ctrDevs {
+			mem += int64(val.Usedmem)
+		}
+	}
+	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
+}
+
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
+	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
@@ -339,11 +381,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
-		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, numa := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
+		}
+		// numa-bind: a run of GPUs must share one NUMA node, so a new node starts the run over.
+		if numa && prevnuma != dev.Numa {
+			if k.Nums != originReq {
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "prevnuma", prevnuma, "device numa", dev.Numa)
+			}
+			k.Nums = originReq
+			prevnuma = dev.Numa
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AMDUseUUID, AMDNoUseUUID, amddevice.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
@@ -367,6 +419,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memReq) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memReq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memReq {
 			reason[common.CardInsufficientMemory]++

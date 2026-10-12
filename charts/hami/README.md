@@ -329,9 +329,10 @@ listener is started.
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
+| `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
-| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### vGPU Cache Garbage Collection
 
@@ -375,13 +376,13 @@ or the five-failure limit for directory deletion.
 | `devices.nvidia.runtimeClassName` | Runtime class name | `""` |
 | `devices.nvidia.createRuntimeClass` | Create the NVIDIA RuntimeClass named by `devices.nvidia.runtimeClassName` when the device plugin is enabled | `false` |
 | `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
+| `devices.nvidia.adoptExistingMIGInstances` | Adopt pre-existing MIG GI/CI pairs for lazy reuse. Enable only when HAMi exclusively manages the node's MIG layout | `false` |
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
-| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
 | `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
@@ -521,3 +522,40 @@ vendor are removed.
 
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
+
+<!-- BEGIN GENERATED VALUES -->
+
+## Generated values (partial)
+
+This table includes only values with helm-docs descriptions.
+More values will be added in follow-up PRs.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
+| devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
+| devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
+| devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
+| openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
+
+<!-- END GENERATED VALUES -->
+
+## Updating chart documentation
+
+Install [helm-docs](https://github.com/norwoodj/helm-docs), then run these commands
+from the repository root:
+
+```bash
+make update-helm-chart-docs
+make verify-helm-chart-docs
+```
+
+Only values with helm-docs descriptions appear in the generated section.
+Add descriptions with `# -- Description` immediately above a value. The commands
+use `--ignore-non-descriptions`; strict documentation checking is disabled until
+the remaining descriptions are complete. Text outside the generated markers
+is maintained directly in this README.

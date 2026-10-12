@@ -366,12 +366,20 @@ devicePlugin:
       ##
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
+    # Address the monitor serves /metrics on. The container port, the Service
+    # target port and the probes follow it; set it here, not in extraArgs.
+    metricsBindAddress: ":9394"
+    # Liveness and readiness probes of the monitor. Turn them off to debug inside
+    # the container without kubelet restarting it.
+    probes:
+      enabled: true
     # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
     extraArgs:
       - -v=4
-    extraEnvs: {}
+    # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
+    extraEnvs: []
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -414,6 +422,19 @@ devicePlugin:
   reportNodeCapacity: false
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
+    # Each node uses the nodeconfig entries whose "name" is the node name. A node
+    # that no entry names uses the entries whose "nodelabelselector" (a
+    # Kubernetes label selector with matchLabels or matchExpressions) matches its
+    # labels. Several matching entries apply in list order, a later one overriding
+    # the fields it sets, as several name entries always have. An entry sets either
+    # "name" or "nodelabelselector"; an entry that sets both, or whose selector is
+    # empty or invalid, is ignored:
+    #   { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
+    #     "operatingmode": "mig", "devicesplitcount": 10 }
+    # The device plugin reads the node labels each time it starts, so restart it
+    # after changing them, and select on labels the node has when it registers
+    # (node group or kubelet --node-labels), not on labels a controller adds later.
+    # A node that neither a name nor a selector picks uses the entries named "*".
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json(An example is as follows).
     config: |
@@ -453,7 +474,8 @@ devicePlugin:
 
   extraArgs:
     - -v=4
-  extraEnvs: {}
+  # -- Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom.
+  extraEnvs: []
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
@@ -537,6 +559,7 @@ devices:
     resourceMemoryName: "amd.com/gpumem"
     resourceMemoryPercentageName: "amd.com/gpumem-percentage"
     resourceCoreName: "amd.com/gpucores"
+    runtimeClassName: ""  # Name of the runtime class to set on Pods that request an AMD GPU
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
@@ -587,6 +610,8 @@ devices:
     # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
   nvidia:
+    # Adopt pre-existing GI/CI pairs only when HAMi exclusively owns the node's MIG layout.
+    adoptExistingMIGInstances: false
     migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
@@ -816,6 +841,8 @@ devices:
     # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
     # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
     hamiVnpuMode: ""
+    # -- Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity.
+    vnpuDeviceSplitCount: 10
     enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
     enabled: false
     image: ""

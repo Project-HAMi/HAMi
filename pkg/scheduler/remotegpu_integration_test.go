@@ -17,10 +17,12 @@ limitations under the License.
 package scheduler
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,9 +36,63 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
+
+func TestRemoteGPUWebhookCopiesLibraryBeforeInitWorkload(t *testing.T) {
+	setupRemoteGPUScheduler(t)
+	previousImage := remotegpu.RemoteGPULibImage
+	previousScheduler := config.SchedulerName
+	remotegpu.RemoteGPULibImage = "projecthami/hami:test"
+	config.SchedulerName = "hami-scheduler"
+	t.Cleanup(func() {
+		remotegpu.RemoteGPULibImage = previousImage
+		config.SchedulerName = previousScheduler
+	})
+	pod := &corev1.Pod{Spec: corev1.PodSpec{
+		InitContainers: []corev1.Container{{
+			Name: "warmup",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"nvidia.com/remote-gpu":        resource.MustParse("1"),
+				"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
+			}},
+		}},
+		Containers: []corev1.Container{{Name: "app"}},
+	}}
+	resp := admitPod(t, pod)
+	if !resp.Allowed {
+		t.Fatalf("admission rejected supported remote GPU pod: %+v", resp.Result)
+	}
+	rawPatch, err := json.Marshal(resp.Patches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err := jsonpatch.DecodePatch(rawPatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPod, err := json.Marshal(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched, err := patch.Apply(rawPod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admitted corev1.Pod
+	if err := json.Unmarshal(patched, &admitted); err != nil {
+		t.Fatal(err)
+	}
+	init := admitted.Spec.InitContainers
+	if len(init) != 2 {
+		t.Fatalf("expected two init containers, got %d", len(init))
+	}
+	if init[0].Name != "hami-remote-gpu-lib" || init[1].Name != "warmup" {
+		t.Fatalf("library copy must precede requesting init container, got [%q, %q]", init[0].Name, init[1].Name)
+	}
+}
 
 // These tests drive the real scoring path (buildNodeUsage -> calcScore ->
 // fitInDevices -> Fit -> AddResourceUsage) with only the apiserver faked, so
