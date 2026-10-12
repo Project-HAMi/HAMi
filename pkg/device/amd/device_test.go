@@ -1292,12 +1292,13 @@ func TestMutateAdmissionDefaultsTheGPUCount(t *testing.T) {
 		want int64
 		ok   bool
 	}{
-		"memory alone":              {ctr(corev1.ResourceList{"amd.com/gpumem": q(4096)}, nil), 1, true},
-		"cores alone":               {ctr(corev1.ResourceList{"amd.com/gpucores": q(25)}, nil), 1, true},
-		"percentage alone":          {ctr(corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}, nil), 1, true},
-		"percentage in requests":    {ctr(nil, corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}), 1, true},
-		"an explicit count is kept": {ctr(corev1.ResourceList{"amd.com/gpu": q(3), "amd.com/gpumem": q(4096)}, nil), 3, true},
-		"no AMD resource":           {ctr(corev1.ResourceList{"cpu": q(1)}, nil), -1, false},
+		"memory alone":                 {ctr(corev1.ResourceList{"amd.com/gpumem": q(4096)}, nil), 1, true},
+		"cores alone":                  {ctr(corev1.ResourceList{"amd.com/gpucores": q(25)}, nil), 1, true},
+		"percentage alone":             {ctr(corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}, nil), 1, true},
+		"percentage in requests":       {ctr(nil, corev1.ResourceList{"amd.com/gpumem-percentage": q(50)}), 1, true},
+		"an explicit count is kept":    {ctr(corev1.ResourceList{"amd.com/gpu": q(3), "amd.com/gpumem": q(4096)}, nil), 3, true},
+		"a request-only count is kept": {ctr(corev1.ResourceList{"amd.com/gpumem": q(4096)}, corev1.ResourceList{"amd.com/gpu": q(3)}), 3, true},
+		"no AMD resource":              {ctr(corev1.ResourceList{"cpu": q(1)}, nil), -1, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ok, err := InitAMDGPUDevice(cfg).MutateAdmission(tc.c, &corev1.Pod{})

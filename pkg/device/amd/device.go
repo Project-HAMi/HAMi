@@ -130,7 +130,12 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 			if ctr.Resources.Limits == nil {
 				ctr.Resources.Limits = corev1.ResourceList{}
 			}
-			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = *resource.NewQuantity(int64(dev.defaultGPUNum), resource.DecimalSI)
+			count := *resource.NewQuantity(int64(dev.defaultGPUNum), resource.DecimalSI)
+			if requested, inRequests := ctr.Resources.Requests[corev1.ResourceName(dev.resourceCountName)]; inRequests {
+				// A request-only count must match the limit we add, so keep it.
+				count = requested
+			}
+			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = count
 			ok = true
 		}
 	}
