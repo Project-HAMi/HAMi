@@ -546,11 +546,11 @@ devices:
     resourceVMemoryName: "metax-tech.com/vmemory"
     sgpuTopologyAware: false
   hygon:
-    # -- Multiplier applied to the container's HCU memory request (in MiB) when scheduling Hygon HCU devices. Must be at least 1.
+    # -- Multiplier applied to the container's HCU memory request (in MiB) when generating scheduler resource requests. `0` and `1` disable scaling. Must not be negative.
     memoryFactor: 1
     # -- Extended resource name for Hygon HCU device count requests. Containers requesting this resource are scheduled onto nodes with registered Hygon HCU devices.
     resourceCountName: "hygon.com/hcunum"
-    # -- Extended resource name for Hygon HCU memory requests in MiB. Multiplied by memoryFactor during admission. If omitted or set to 0, HAMi defaults to allocating 100% of device memory.
+    # -- Extended resource name for Hygon HCU memory requests in MiB. Multiplied by memoryFactor when generating scheduler resource requests. If omitted or set to 0, HAMi defaults to allocating 100% of device memory.
     resourceMemoryName: "hygon.com/hcumem"
     # -- Extended resource name for Hygon HCU compute core percentage requests (0 to 100). If omitted by a container requesting HCUs, HAMi defaults to allocating 100% of the cores.
     resourceCoreName: "hygon.com/hcucores"
