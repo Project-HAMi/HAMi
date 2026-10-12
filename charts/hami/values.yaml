@@ -609,9 +609,23 @@ devices:
     enabled: true
     # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
     customresources: []
+  # Most devices.nvidia values are written to the generated device-config.yaml that
+  # the scheduler and the device plugin read. When device-config.content is set, it
+  # replaces that file and those values no longer reach either component.
   nvidia:
-    # Adopt pre-existing GI/CI pairs only when HAMi exclusively owns the node's MIG layout.
+    # -- In the `mig` operating mode, let the device plugin adopt, when it starts, MIG instances HAMi has no record of creating, so it can reuse or destroy them.
+    # When false, they are left untouched. Enable it only when HAMi alone manages the MIG layout of the node.
     adoptExistingMIGInstances: false
+    # -- MIG profiles HAMi may create on nodes whose device plugin runs in the `mig` operating mode.
+    # Each entry has `models`, a list of GPU model names matched as substrings of the name NVML reports,
+    # and `profiles`, a list of MIG profile names such as `1g.10gb`, for example `{models: ["A30"], profiles: ["1g.6gb", "2g.12gb"]}`.
+    # The first entry that matches a GPU's model decides the profiles for that GPU; a GPU that no entry matches is not registered.
+    # The `nvidia.com/mig-profile-preference` Pod annotation accepts only listed profiles or their slice prefix, such as `4g`.
+    # The scheduler and device plugin fail to start if an entry has empty `models` or `profiles`, or if a profile name has no `.`
+    # or its part before the first `.` is not at least two characters ending in `g`. The part after the `.` is not checked.
+    # A profile that passes this check but names a slice count the GPU does not support, such as `5g.20gb`, is skipped on the node.
+    # Setting this value replaces the whole default list.
+    # @default -- Profiles for A30, A100, H100, H20, GH200, H200, B200, and RTX PRO 6000 Blackwell Server Edition
     migProfileAllowlist:
       - models: [ "A30" ]
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
@@ -631,28 +645,71 @@ devices:
         profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "4g.90gb", "7g.180gb" ]
       - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
         profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
+    # -- GPU memory in MiB assigned to each requested GPU when a container sets neither the `resourceMemoryName` nor the `resourceMemoryPercentageName` resource, or sets them to `0`.
+    # `0` assigns the whole memory of the GPU. `memoryFactor` does not apply to this value. Must not be negative.
     defaultMemory: 0
+    # -- Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container does not set the `resourceCoreName` resource.
+    # `0` reserves no cores and sets no core limit.
+    # When the admission webhook is enabled, a container that requests GPUs without a memory amount, or with 100% of the memory, gets 100 instead,
+    # which requests each GPU exclusively when `deviceCoreScaling` is 1.
     defaultCores: 0
+    # -- Number of GPUs the admission webhook adds to a container that sets a `resourceMemoryName`, `resourceMemoryPercentageName`, or `resourceCoreName` limit but no `resourceCountName` limit.
+    # `0` adds nothing, so such a container is not treated as an NVIDIA GPU request.
     defaultGPUNum: 1
+    # -- Multiplier applied to the `resourceMemoryName` value a container requests, which is otherwise in MiB.
+    # For example, `1024` makes `nvidia.com/gpumem: 4` request 4 GiB. ResourceQuota limits for that resource are scaled the same way.
+    # `0` and `1` disable scaling. Must not be negative.
     memoryFactor: 1
+    # -- Extended resource name for the number of NVIDIA GPUs a container requests.
+    # The device plugin registers it with kubelet, advertising each physical GPU `deviceSplitCount` times.
     resourceCountName: "nvidia.com/gpu"
+    # -- Extended resource name for the GPU memory a container requests on each GPU, in MiB multiplied by `memoryFactor`.
     resourceMemoryName: "nvidia.com/gpumem"
+    # -- Extended resource name for the GPU memory a container requests on each GPU as a percentage of that GPU's memory, an integer from 0 to 100.
+    # `0` is treated as unset.
     resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
+    # -- Extended resource name for the GPU cores a container requests on each GPU, as an integer percentage from 0 to 100.
+    # `0` reserves no cores and sets no core limit. With `deviceCoreScaling: 1`, `100` requests each GPU exclusively.
     resourceCoreName: "nvidia.com/gpucores"
+    # -- Extended resource name for the task priority of a container. The admission webhook passes its limit to HAMi-core as `CUDA_TASK_PRIORITY`.
+    # A lower value is a higher priority, and HAMi-core uses `1` when it is unset.
+    # On a shared GPU, vGPUmonitor pauses kernel launches of lower-priority tasks while higher-priority tasks are active,
+    # but only for tasks with a `resourceCoreName` limit between 1 and 99 whose core limit is being enforced (see `gpuCorePolicy`).
     resourcePriorityName: "nvidia.com/priority"
+    # -- Number of vGPUs each physical GPU is advertised as, which is the maximum number of containers that can share one GPU.
+    # In the `mig` operating mode, the number of MIG instances a GPU can hold limits sharing instead.
+    # A device-plugin `nodeconfig` entry can override it per node with `devicesplitcount`.
     deviceSplitCount: 10
+    # -- (float) Factor applied to the memory each GPU reports to the scheduler. Accepts decimals, such as `1.5`.
+    # A value above `1` lets the memory requests on one GPU add up to more than its physical memory, and the device plugin sets `CUDA_OVERSUBSCRIBE=true` in those containers.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicememoryscaling`.
     deviceMemoryScaling: 1
+    # -- (float) Factor applied to the cores each GPU reports to the scheduler, which is `100` times this value. Accepts decimals, such as `1.5`.
+    # A value above `1` lets the `resourceCoreName` requests on one GPU add up to more than 100.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `devicecorescaling`.
     deviceCoreScaling: 1
-    # Memory in MB for GPUs without memory queries; 0 uses auto-detection.
-    # The node configuration can override this for unified-memory GPUs.
+    # -- Total memory in MiB registered for a GPU whose memory NVML cannot query, such as a unified-memory GPU like the NVIDIA GB10.
+    # GPUs that report their memory always use the reported value.
+    # `0` skips GPUs whose memory cannot be queried. A device-plugin `nodeconfig` entry can override it per node with `preconfigureddevicememory`.
     preConfiguredDeviceMemory: 0
-    # Advertise the GPU's NUMA node to kubelet's TopologyManager.
-    # Opt-in because single-numa-node policy changes admission behavior.
+    # -- Advertise each GPU's NUMA node on its vGPUs so kubelet's Topology Manager can align CPUs and GPUs.
+    # Disabled by default because the `single-numa-node` Topology Manager policy then changes which Pods kubelet admits.
+    # A device-plugin `nodeconfig` entry can override it per node with `enablenumatopology`.
     enableNumaTopology: false
+    # -- RuntimeClass set on the device plugin Pods and, by the admission webhook, on GPU Pods that do not set `runtimeClassName`, commonly `nvidia` when the NVIDIA container runtime is not the default.
+    # The RuntimeClass must exist, either created by `createRuntimeClass` or already present in the cluster. Empty sets no RuntimeClass.
     runtimeClassName: ""
-    # Create the named NVIDIA RuntimeClass when the device plugin is enabled.
+    # -- Create the RuntimeClass named by `runtimeClassName`, with the `nvidia` handler, when `devicePlugin.enabled` is true.
+    # Has no effect when `runtimeClassName` is empty. Leave it false if the RuntimeClass already exists, such as one created by the GPU Operator.
     createRuntimeClass: false
+    # -- How HAMi-core enforces the `resourceCoreName` limit. The admission webhook passes values other than `default` as `GPU_CORE_UTILIZATION_POLICY`.
+    # `default` lets vGPUmonitor turn enforcement on only while it sees other active tasks of the same or higher priority on the GPU.
+    # `force` always enforces it. `disable` never enforces it. HAMi-core treats any other value as `default`. Limits of 0 and 100 are never enforced.
     gpuCorePolicy: default
+    # -- HAMi-core log level, passed to containers as `LIBCUDA_LOG_LEVEL`.
+    # Errors are always logged. `0` and `1` log errors only, `2` adds warnings and messages, `3` adds info, and `4` adds debug logs.
+    # HAMi-core itself defaults to `2` when the variable is unset.
+    # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `libcudaloglevel`.
     libCudaLogLevel: 1
   remotegpu:
     # Schedule pods onto GPUs served over the network by a lupine server.
