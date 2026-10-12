@@ -418,13 +418,6 @@ host-installed drivers, or appends the GPU Operator path suffix
 |-----------|-------------|---------------|
 | `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
-### Mthreads
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.mthreads.enabled` | Whether to enable | `true` |
-| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
-| `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
-
 ### Huawei Ascend
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -517,6 +510,12 @@ More values will be added in follow-up PRs.
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
+| devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
+| devices.mthreads.memoryPerCard | list | `[96]` | Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. 96 = MTT S4000 (48 GiB); 160 = MTT S5000 (80 GiB). Use [96, 160] for mixed fleets. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list. |
+| devices.mthreads.resourceCoreName | string | `"mthreads.com/sgpu-core"` | Resource name for integer sGPU time-sharing weight requests. HAMi accounts for 16 units per card: a single-card request of 8 consumes 8/16 of its allocatable compute units. Device sharing for multi-cards is not supported. For multi-card requests, HAMi overwrites the compute request with 16 units per card. Actual GPU time depends on the vendor scheduling policy and competing workloads. |
+| devices.mthreads.resourceCountName | string | `"mthreads.com/vgpu"` | Resource name for MThreads GPU count requests. Must match the vendor device plugin and the entry in customresources. Requesting only this resource allocates exclusive GPUs. |
+| devices.mthreads.resourceMemoryName | string | `"mthreads.com/sgpu-memory"` | Resource name for sGPU memory requests in integer units of 512 MiB (32 = 16 GiB). When memory is not requested, HAMi uses the selected node's per-card capacity. |
 | devices.nvidia.adoptExistingMIGInstances | bool | `false` | In the `mig` operating mode, let the device plugin adopt, when it starts, MIG instances HAMi has no record of creating, so it can reuse or destroy them. When false, they are left untouched. Enable it only when HAMi alone manages the MIG layout of the node. |
 | devices.nvidia.createRuntimeClass | bool | `false` | Create the RuntimeClass named by `runtimeClassName`, with the `nvidia` handler, when `devicePlugin.enabled` is true. Has no effect when `runtimeClassName` is empty. Leave it false if the RuntimeClass already exists, such as one created by the GPU Operator. |
 | devices.nvidia.defaultCores | int | `0` | Percentage of GPU cores, from 0 to 100, assigned to each requested GPU when a container does not set the `resourceCoreName` resource. `0` reserves no cores and sets no core limit. When the admission webhook is enabled, a container that requests GPUs without a memory amount, or with 100% of the memory, gets 100 instead, which requests each GPU exclusively when `deviceCoreScaling` is 1. |
