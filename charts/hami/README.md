@@ -434,11 +434,8 @@ host-installed drivers, or appends the GPU Operator path suffix
 | `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Mthreads
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.mthreads.enabled` | Whether to enable | `true` |
-| `devices.mthreads.memoryPerCard` | List of integer memory units of 512 MiB per card model, for example `[96, 160]`. Legacy scalar values are rendered as a one-item list. | `[96]` |
-| `devices.mthreads.customresources` | Custom resources | `["mthreads.com/vgpu"]` |
+
+See the `devices.mthreads.*` entries in [Generated values](#generated-values-partial) for resource names, memory and compute units, and scheduler extender settings.
 
 ### NVIDIA
 | Parameter | Description | Default Value |
@@ -538,6 +535,12 @@ More values will be added in follow-up PRs.
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
+| devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
+| devices.mthreads.memoryPerCard | list | `[96]` | Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. Use [96, 160] for mixed 48 GiB and 80 GiB cards. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list. |
+| devices.mthreads.resourceCoreName | string | `"mthreads.com/sgpu-core"` | Resource name for integer sGPU time-sharing weight requests. HAMi accounts for 16 units per card: a single-card request of 8 consumes 8/16 of its allocatable compute units. Actual GPU time depends on the vendor scheduling policy and competing workloads. |
+| devices.mthreads.resourceCountName | string | `"mthreads.com/vgpu"` | Resource name for MThreads GPU count requests. Must match the vendor device plugin and the entry in customresources. Requesting only this resource allocates exclusive GPUs. |
+| devices.mthreads.resourceMemoryName | string | `"mthreads.com/sgpu-memory"` | Resource name for sGPU memory requests in integer units of 512 MiB (32 = 16 GiB). When memory is not requested, HAMi uses the selected node's per-card capacity. |
 | devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
 | openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
