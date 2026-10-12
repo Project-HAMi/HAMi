@@ -465,7 +465,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "a count above 1 is accounted as whole MLUs whatever memory and cores it asks",
+			name: "a count above 1 takes whole MLUs but keeps the declared memory for quota",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -478,7 +478,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(2),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(0),
+				Memreq:           int32(256000),
 				MemPercentagereq: int32(100),
 				Coresreq:         int32(100),
 			},

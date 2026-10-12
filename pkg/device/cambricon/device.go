@@ -279,14 +279,22 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			klog.Info("Found cambricon devices")
 			if n > 1 {
 				// The plugin gives a count above 1 whole MLUs and ignores the
-				// memory and core values, so account the whole device and skip
-				// validating them.
-				return device.ContainerDeviceRequest{
+				// memory and core values, so skip validating them and take the
+				// whole device. A declared memory still counts toward quota.
+				req := device.ContainerDeviceRequest{
 					Nums:             int32(n),
 					Type:             CambriconMLUDevice,
 					MemPercentagereq: 100,
 					Coresreq:         100,
-				}, nil
+				}
+				mem, ok := ctr.Resources.Limits[mluResourceMem]
+				if !ok {
+					mem, ok = ctr.Resources.Requests[mluResourceMem]
+				}
+				if memnums, parsed := mem.AsInt64(); ok && parsed && memnums > 0 && memnums <= int64(math.MaxInt32)/int64(MemoryFactor) {
+					req.Memreq = int32(memnums) * int32(MemoryFactor)
+				}
+				return req, nil
 			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
