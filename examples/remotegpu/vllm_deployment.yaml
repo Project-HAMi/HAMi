@@ -1,5 +1,5 @@
 # Official vLLM image with remote driver libraries delivered separately.
-# Two-card A100 server; adjust GPU count, TP size and memory for your fleet.
+# Two-card A100 server; HAMi limits each remote GPU to 20480 MiB.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,40 +16,21 @@ spec:
       labels:
         app: vllm-remote-gpu
     spec:
-      initContainers:
-        - name: lupine-libs
-          image: ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04
-          command: ["sh", "-ec", "cp -a /opt/lupine/lib/. /lupine-lib/"]
-          env:
-            - name: NVIDIA_VISIBLE_DEVICES
-              value: void
-          volumeMounts:
-            - name: lupine-lib
-              mountPath: /lupine-lib
       containers:
         - name: vllm
           image: vllm/vllm-openai:v0.25.1-ubuntu2404
-          command: ["vllm", "serve", "Qwen/Qwen3-0.6B"]
+          command: ["vllm", "serve", "Qwen/Qwen3-8B"]
           args:
             - --host=0.0.0.0
             - --port=8000
             - --dtype=float16
             - --tensor-parallel-size=2
-            - --gpu-memory-utilization=0.5
-            - --kv-cache-memory-bytes=268435456
-            - --max-model-len=1024
+            - --gpu-memory-utilization=0.8
+            - --max-model-len=4096
             - --max-num-seqs=4
             - --enforce-eager
             - --attention-config.backend=TRITON_ATTN
           env:
-            - name: NVIDIA_VISIBLE_DEVICES
-              value: void
-            - name: LD_LIBRARY_PATH
-              value: /opt/lupine/lib:/usr/local/cuda/lib64
-            - name: LUPINE_LIB
-              value: /opt/lupine/lib/libcuda.so.1
-            - name: LUPINE_LIBCUDA
-              value: /opt/lupine/lib/libcuda.so.1
             - name: TORCH_BLAS_PREFER_CUBLASLT
               value: "0"
             - name: CUDA_LAUNCH_BLOCKING
@@ -71,16 +52,14 @@ spec:
           resources:
             requests:
               cpu: "4"
-              memory: 8Gi
-            limits:
               memory: 16Gi
+            limits:
+              memory: 32Gi
               nvidia.com/remote-gpu: 2
+              nvidia.com/remote-gpu-memory: 20480
           volumeMounts:
-            - name: lupine-lib
-              mountPath: /opt/lupine/lib
-              readOnly: true
-            # PyTorch loads NCCL by absolute path; LD_LIBRARY_PATH is insufficient.
-            - name: lupine-lib
+            # HAMi populates this volume. PyTorch loads NCCL by absolute path.
+            - name: hami-lupine-client
               mountPath: /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2
               subPath: libnccl.so.2
               readOnly: true
@@ -89,7 +68,8 @@ spec:
             - name: hf-cache
               mountPath: /root/.cache/huggingface
       volumes:
-        - name: lupine-lib
+        # Controllers validate mount references before the Pod admission webhook.
+        - name: hami-lupine-client
           emptyDir: {}
         - name: shm
           emptyDir:

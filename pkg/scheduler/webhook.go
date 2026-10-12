@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -120,6 +121,9 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 			hasResource = hasResource || found
 		}
 	}
+	// Delivery must precede GPU-using init containers. Reorder only after all
+	// mutations, when no pointers into the init-container slice remain live.
+	remotegpu.FinalizeAdmission(pod)
 	// Validate device-scoring weights for HAMi workloads so malformed input is
 	// reported before scheduling. The scheduler retains the same validation as
 	// a defense-in-depth check.

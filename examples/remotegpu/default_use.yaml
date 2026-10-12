@@ -1,29 +1,14 @@
 # CUDA computation on a client node without a local GPU or NVIDIA driver.
-# HAMi injects LUPINE_SERVER; the init container delivers the remote driver.
+# HAMi automatically delivers Lupine libraries and injects the server endpoint.
 apiVersion: v1
 kind: Pod
 metadata:
   name: remote-gpu-pod
 spec:
   restartPolicy: Never
-  initContainers:
-    - name: lupine-libs
-      image: ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04
-      command: ["sh", "-ec", "cp -a /opt/lupine/lib/. /lupine-lib/"]
-      env:
-        - name: NVIDIA_VISIBLE_DEVICES
-          value: void
-      volumeMounts:
-        - name: lupine-lib
-          mountPath: /lupine-lib
   containers:
     - name: cuda-container
-      image: nvidia/cuda:13.1.1-devel-ubuntu24.04
-      env:
-        - name: NVIDIA_VISIBLE_DEVICES
-          value: void
-        - name: LD_LIBRARY_PATH
-          value: /opt/lupine/lib:/usr/local/cuda/lib64
+      image: nvidia/cuda:13.0.2-devel-ubuntu24.04
       command: ["bash", "-ec"]
       args:
         - |
@@ -57,15 +42,7 @@ spec:
           CUDA
           nvcc -arch=sm_80 /tmp/check.cu -o /tmp/check
           /tmp/check
-      volumeMounts:
-        - name: lupine-lib
-          mountPath: /opt/lupine/lib
-          readOnly: true
       resources:
         limits:
-          # Reserve the entire server: match its physical GPU count.
           nvidia.com/remote-gpu: 2
           nvidia.com/remote-gpu-memory: 3000
-  volumes:
-    - name: lupine-lib
-      emptyDir: {}

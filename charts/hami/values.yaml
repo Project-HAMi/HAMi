@@ -728,6 +728,9 @@ devices:
     # Leave it unset for the device plugin image. Set it to "" to schedule
     # remote GPUs without enforcement.
     libImage:
+    # Lupine client libraries delivered automatically to remote GPU workloads.
+    # Match the server version and workload ABI; an empty string disables delivery.
+    clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04"
     # Image for the session stub the scheduler keeps on each lupine server, so
     # a user port-forwards to the stub instead of the server. Needs socat on
     # the path. Empty runs no stubs, and no port-forward sessions with them.
