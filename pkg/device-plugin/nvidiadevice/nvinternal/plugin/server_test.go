@@ -1320,6 +1320,30 @@ func TestIsWholeGPUAllocation(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "plain nvidia.com/gpu: 1 without core request qualifies",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory without core request is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "unknown UUID fails closed even without core request",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
 			name: "two whole-GPU allocations",
 			devreq: device.ContainerDevices{
 				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},

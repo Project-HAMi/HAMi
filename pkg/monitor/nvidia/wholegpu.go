@@ -401,15 +401,10 @@ func physTotalMiB(nvmllib nvml.Interface, uuid string) (int32, bool) {
 	return int32(mem.Total / 1024 / 1024), true
 }
 
-// evaluateContainerWholeGPU decides whether every device a container was
-// allocated is a whole physical GPU: not a MIG slice, allocated its full
-// memory and core quota, and free of memory/core over-subscription — a
-// scaled device requires the interception library by construction, so it
-// is never whole-GPU. All figures must match the node's registered device
-// exactly, so stale or forged annotation values fail closed. The device
-// plugin's isWholeGPUAllocation reaches the same verdict from physical
-// totals and its scheduler config, so both components agree on which
-// containers are whole-GPU.
+// evaluateContainerWholeGPU decides whether every allocated device is a whole
+// physical GPU: not a MIG slice, allocated full memory, and free of
+// over-subscription (a scaled device needs the hook to enforce it). Figures
+// must match the node registry exactly, so stale or forged values fail closed.
 //
 // The second return value reports why an indeterminate verdict is pending:
 // causeRegistryMiss or causePhysUnreadable (causeNotIndeterminate for any
@@ -425,7 +420,9 @@ func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[str
 			cause = causeRegistryMiss
 			continue
 		}
-		if nodeDev.Mode == nv.MigMode || cd.Usedmem != nodeDev.Devmem || cd.Usedcores != nv.WholeGPUUsedCores {
+		// Cores fully requested or unrequested (0 is unbounded) both mean
+		// the whole card; only an explicit partial core request disqualifies.
+		if nodeDev.Mode == nv.MigMode || cd.Usedmem != nodeDev.Devmem || (cd.Usedcores != 0 && cd.Usedcores != nv.WholeGPUUsedCores) {
 			return notWholeGPU, causeNotIndeterminate
 		}
 		// Over-subscribed (core-scaled) devices register a scaled core

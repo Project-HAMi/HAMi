@@ -1771,12 +1771,10 @@ func (plugin *NvidiaDevicePlugin) wholeGPUDisableHAMiCoreAllowed() bool {
 		*plugin.schedulerConfig.DeviceCoreScaling == 1
 }
 
-// isWholeGPUAllocation reports whether every device allocated to the container
-// is a whole GPU (full memory and full cores). Usedmem is in MiB while
-// TotalMemory is in bytes, so convert before comparing. Returns false when the
-// allocation cannot be confirmed whole-GPU (empty devreq, nil ResourceManager,
-// or an unknown device); the caller then falls back to the default
-// ld.so.preload path.
+// isWholeGPUAllocation reports whether every allocated device is whole: full
+// memory, and cores fully requested or unrequested (annotation Usedcores 0
+// means unbounded). Usedmem is MiB, TotalMemory bytes. On any doubt (empty
+// devreq, nil rm, unknown device) it fails closed to the ld.so.preload path.
 func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager) bool {
 	if len(devreq) == 0 {
 		return false
@@ -1791,7 +1789,7 @@ func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager)
 			return false
 		}
 		totalMiB := deviceInfo.TotalMemory / (1024 * 1024)
-		if uint64(dev.Usedmem) != totalMiB || dev.Usedcores != nvidia.WholeGPUUsedCores {
+		if uint64(dev.Usedmem) != totalMiB || (dev.Usedcores != 0 && dev.Usedcores != nvidia.WholeGPUUsedCores) {
 			return false
 		}
 	}

@@ -106,6 +106,24 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), confirmedWholeGPU)
 	})
 
+	t.Run("full memory allocation without explicit core request is confirmed", func(t *testing.T) {
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 0}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), confirmedWholeGPU)
+	})
+
+	t.Run("unrequested cores do not rescue a MIG mode device", func(t *testing.T) {
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 0}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode}}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+	})
+
+	t.Run("unrequested cores do not rescue a core over-subscribed registry", func(t *testing.T) {
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 0}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 300, Mode: ""}}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+	})
+
 	t.Run("over-allocation beyond registered memory is not a whole GPU", func(t *testing.T) {
 		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 9000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}
