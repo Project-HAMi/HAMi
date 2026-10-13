@@ -166,7 +166,7 @@ jobs:
     uses: ./.github/workflows/call-release-helm.yaml
     with:
       ref: ${{ needs.ensure-tag.outputs.tag }}
-      submit: true
+      submit: "true"
     secrets: inherit
 
   # generate changelog and update to github releases pages
