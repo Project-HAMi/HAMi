@@ -1900,7 +1900,7 @@ func TestDevices_Fit_MultiMLUAllocatesWholeCards(t *testing.T) {
 	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
 
 	devices := []*device.DeviceUsage{}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		devices = append(devices, &device.DeviceUsage{
 			ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 100,
 			Totalmem: 40960, Totalcore: 100, Type: CambriconMLUDevice, Health: true,
