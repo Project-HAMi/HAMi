@@ -952,6 +952,8 @@ func TestSetupNodeLockTimeout(t *testing.T) {
 		{"empty env uses default", "", original},
 		{"valid duration sets timeout", "10m", 10 * time.Minute},
 		{"invalid duration keeps default", "notaduration", original},
+		{"zero duration keeps default", "0s", original},
+		{"negative duration keeps default", "-1m", original},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

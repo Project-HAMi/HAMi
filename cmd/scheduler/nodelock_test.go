@@ -20,20 +20,40 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
-// HAMI_NODELOCK_EXPIRE is read at package init, so the check runs in a child
+// HAMI_NODELOCK_EXPIRE is read at package init, so each case runs in a child
 // process that starts with it set.
-func TestNodeLockTimeoutFlagDefaultsToEnv(t *testing.T) {
+func TestNodeLockTimeout(t *testing.T) {
 	if os.Getenv("HAMI_TEST_CHILD") == "1" {
-		if got := rootCmd.Flags().Lookup("node-lock-timeout").DefValue; got != "10m0s" {
-			t.Fatalf("node-lock-timeout default = %s, want 10m0s", got)
+		if flag := os.Getenv("HAMI_TEST_FLAG"); flag != "" {
+			if err := rootCmd.Flags().Parse([]string{flag}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, want := config.NodeLockTimeout.String(), os.Getenv("HAMI_TEST_WANT"); got != want {
+			t.Fatalf("node lock timeout = %s, want %s", got, want)
 		}
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestNodeLockTimeoutFlagDefaultsToEnv$")
-	cmd.Env = append(os.Environ(), "HAMI_TEST_CHILD=1", "HAMI_NODELOCK_EXPIRE=10m")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	tests := []struct {
+		name, env, flag, want string
+	}{
+		{"env sets the default", "10m", "", "10m0s"},
+		{"explicit flag wins over env", "10m", "--node-lock-timeout=2m", "2m0s"},
+		{"invalid env keeps 5m", "abc", "", "5m0s"},
+		{"zero env keeps 5m", "0s", "", "5m0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestNodeLockTimeout$")
+			cmd.Env = append(os.Environ(), "HAMI_TEST_CHILD=1", "HAMI_NODELOCK_EXPIRE="+tt.env,
+				"HAMI_TEST_FLAG="+tt.flag, "HAMI_TEST_WANT="+tt.want)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+		})
 	}
 }
