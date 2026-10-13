@@ -950,6 +950,15 @@ func TestEffectivePodDeviceUsageHonorsInitRelease(t *testing.T) {
 // TestRefitNumaAllocationSerializesInitRelease verifies that the informer
 // cannot replace quota and reservations while a refit uses its earlier snapshot.
 func TestRefitNumaAllocationSerializesInitRelease(t *testing.T) {
+	testRefitNumaAllocationSerializesInitRelease(t, false)
+}
+
+func TestRefitNumaAllocationSerializesInitReleaseOnAdd(t *testing.T) {
+	testRefitNumaAllocationSerializesInitRelease(t, true)
+}
+
+func testRefitNumaAllocationSerializesInitRelease(t *testing.T, replay bool) {
+	t.Helper()
 	nodes := newNodeManager()
 	nodes.addNode(refitNode, &device.NodeInfo{
 		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
@@ -1020,7 +1029,11 @@ func TestRefitNumaAllocationSerializesInitRelease(t *testing.T) {
 	updateDone := make(chan struct{})
 	go func() {
 		close(updateStarted)
-		s.onUpdatePod(pod, updatedPod)
+		if replay {
+			s.onAddPod(updatedPod)
+		} else {
+			s.onUpdatePod(pod, updatedPod)
+		}
 		close(updateDone)
 	}()
 	<-updateStarted
