@@ -15,6 +15,11 @@ make tidy               # Run go mod tidy
 make test               # Run unit tests with coverage (output in _output/coverage/)
 make lint               # Run golangci-lint (version pinned in hack/verify-staticcheck.sh)
 make verify             # Run all verification checks (license, lint, import aliases)
+make bench              # Run the benchmarks (CI only checks that they still execute)
+make verify_chart       # Lint and render the chart, run Trivy, check chart and app versions
+make update-helm-chart-docs   # Regenerate the values table in charts/hami/README.md (needs helm-docs)
+make verify-helm-chart-docs   # Check that generated table is current
+make local-deploy       # Build the image and deploy it to a local minikube/kind cluster
 ```
 
 ### Running a single test
@@ -67,6 +72,9 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 - golangci-lint with config in `.golangci.yaml` (version pinned in `hack/verify-staticcheck.sh`)
 - `goimports` with local prefix `github.com/Project-HAMi/HAMi`
 - Unit tests with race detector
+- DCO: every commit needs a `Signed-off-by` trailer (`git commit -s`)
+- Chart docs: the generated values table in `charts/hami/README.md` must match `charts/hami/values.yaml` (`make verify-helm-chart-docs`)
+- Nightly Trivy scan of the built images, plus CodeQL and OpenSSF Scorecard
 
 ## Conventions
 
@@ -74,7 +82,8 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 - Import grouping: stdlib, then external, then `github.com/Project-HAMi/HAMi/...` (enforced by goimports local-prefixes)
 - K8s API import aliases are enforced (see `hack/.import-aliases`): `corev1`, `metav1`, `apierrors`, etc.
 - All Go files require Apache 2.0 license header
-- Helm chart lives in `charts/hami/`
+- Helm chart lives in `charts/hami/`; vendor settings live under `devices.<vendor>` in `values.yaml`, and values are documented with `# -- Description` comments for helm-docs
+- Image and tool versions are pinned in `version.mk`, `hack/verify-staticcheck.sh` and the workflows; HAMi-core is the `libvgpu` submodule
 - E2E tests use Ginkgo/Gomega (`test/e2e/`)
 - Annotations use the `hami.io/` prefix
 

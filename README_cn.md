@@ -86,6 +86,8 @@ resources:
 
 HAMi 支持多种异构加速器后端，包括 GPU、NPU、HCU、MLU、GCU、XPU 等。设备能力因厂商、型号、驱动和硬件代次而异。
 
+本仓库中的设备后端：NVIDIA GPU（含 MIG）、AMD GPU、华为昇腾 NPU、寒武纪 MLU、海光 HCU、天数智芯 GPU、昆仑芯 XPU、沐曦 GPU、摩尔线程 GPU、燧原 GCU、壁仞 GPU、VastAI、AWS Neuron，以及由 [Lupine](https://github.com/lupinemachines) 提供的远程 NVIDIA GPU。各厂商的 Pod 示例位于 [examples/](examples/)。
+
 请参阅 [HAMi 支持的设备](https://project-hami.io/docs/userguide/device-supported)页面获取最新的支持矩阵。
 
 ## 快速开始
@@ -135,7 +137,16 @@ kubectl get pods -n kube-system
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
+厂商相关配置位于 `values.yaml` 的 `devices.<vendor>` 下。[Chart README](charts/hami/README.md) 记录了可配置的值，以及如何从旧的配置布局迁移。
+
 完整的安装指南和配置选项，请参阅 [HAMi 文档](https://project-hami.io/docs/get-started/deploy-with-helm/)。
+
+### 部署选项
+
+- **高可用**：设置 `scheduler.leaderElect=true` 并将 `scheduler.replicas` 设为大于 1，即可运行多个调度器副本并由一个 leader 对外服务，同时会创建 PodDisruptionBudget。
+- **OpenShift 与 SELinux**：在 OpenShift 上设置 `platform.openshift=true`，在启用 SELinux 的节点上设置 `selinux.enabled=true`。
+- **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` 会限制对调度器 webhook 与 `/refit` 端口的访问。
+- **Prometheus Operator**：`prometheus.enabled=true` 会为调度器和设备插件创建 ServiceMonitor。
 
 ## 调度策略
 
@@ -144,6 +155,10 @@ HAMi 支持多种 AI 工作负载调度模式：
 - **binpack**：将工作负载打包到更少的节点或设备上以提高资源利用率。
 - **spread**：将工作负载分布到不同节点或设备上以减少争用。
 - **拓扑感知调度**：在支持的情况下，基于 GPU 拓扑选择设备组合。
+- **mutex**：只分配空闲 GPU，使工作负载不与其他任务共享设备。
+- **numa**：按 NUMA 节点对设备分组的排序键，可与 binpack 或 spread 组合使用。Pod 可通过 `nvidia.com/numa-bind` 注解请求 GPU 之间的 NUMA 同节点放置。
+
+集群默认策略通过 `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` 和 `gpuSchedulerPolicy` 设置。Pod 可用 `hami.io/node-scheduler-policy` 和 `hami.io/gpu-scheduler-policy` 注解覆盖默认值，GPU 策略支持逗号分隔的组合，例如 `binpack,numa`。
 - **动态 MIG**：为支持的显卡和模式动态创建和分配 NVIDIA MIG 实例。
 
 HAMi 兼容默认 Kubernetes 调度路径，也可与 Volcano 配合用于批量 AI 工作负载。请参阅 [HAMi 网站](https://project-hami.io/docs/)获取当前的调度器集成指南。
@@ -161,6 +176,7 @@ http://<scheduler-ip>:<monitor-port>/metrics
 HAMi 还提供：
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) 用于可视化集群和设备管理。
+- [skill/](skill/) 下的 Agent skills，用于排查 GPU Pod 和汇总 vGPU 指标。
 - Grafana 仪表盘示例用于加速器监控。
 - 基准测试材料用于评估工作负载行为和调度效果。
 

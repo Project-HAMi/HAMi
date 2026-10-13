@@ -86,6 +86,8 @@ resources:
 
 HAMi は GPU、NPU、HCU、MLU、GCU、XPU など、複数のヘテロジニアスアクセラレータバックエンドをサポートしています。デバイスの機能はベンダー、モデル、ドライバー、ハードウェア世代によって異なります。
 
+このリポジトリのデバイスバックエンド：NVIDIA GPU（MIG を含む）、AMD GPU、Huawei Ascend NPU、Cambricon MLU、Hygon HCU、Iluvatar GPU、Kunlunxin XPU、MetaX GPU、Moore Threads GPU、Enflame GCU、Biren GPU、VastAI、AWS Neuron、および [Lupine](https://github.com/lupinemachines) が提供するリモート NVIDIA GPU。ベンダーごとの Pod の例は [examples/](examples/) にあります。
+
 最新のサポートマトリクスについては、[HAMi サポートデバイス](https://project-hami.io/docs/userguide/device-supported)ページを参照してください。
 
 ## クイックスタート
@@ -135,7 +137,16 @@ kubectl get pods -n kube-system
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
+ベンダー固有の設定は `values.yaml` の `devices.<vendor>` にあります。設定可能な値と従来のレイアウトからの移行方法は [Chart README](charts/hami/README.md) に記載されています。
+
 完全なインストールガイドと設定オプションについては、[HAMi ドキュメント](https://project-hami.io/docs/get-started/deploy-with-helm/)を参照してください。
+
+### デプロイオプション
+
+- **高可用性**：`scheduler.leaderElect=true` を設定し、`scheduler.replicas` を 1 より大きくすると、複数のスケジューラレプリカを 1 つのリーダーの背後で実行できます。PodDisruptionBudget も作成されます。
+- **OpenShift と SELinux**：OpenShift では `platform.openshift=true`、SELinux が有効なノードでは `selinux.enabled=true` を設定します。
+- **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` で、スケジューラの webhook と `/refit` ポートへのアクセスを制限します。
+- **Prometheus Operator**：`prometheus.enabled=true` で、スケジューラとデバイスプラグインの ServiceMonitor を作成します。
 
 ## スケジューリングポリシー
 
@@ -144,6 +155,10 @@ HAMi は AI ワークロード向けに複数のスケジューリングモー�
 - **binpack**：少数のノードまたはデバイスにワークロードをパックしてリソース利用率を向上させます。
 - **spread**：ノードまたはデバイス間でワークロードを分散させ、競合を減らします。
 - **トポロジアウェアスケジューリング**：サポートされている場合、GPU トポロジに基づいてデバイスの組み合わせを選択します。
+- **mutex**：空いている GPU のみを割り当て、ワークロードがデバイスを共有しないようにします。
+- **numa**：NUMA ノードでデバイスをグループ化するソートキーで、binpack または spread と組み合わせて使います。Pod は `nvidia.com/numa-bind` アノテーションで GPU 同士の NUMA 同一ノード配置を要求できます。
+
+クラスタのデフォルトは `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` と `gpuSchedulerPolicy` で設定します。Pod は `hami.io/node-scheduler-policy` と `hami.io/gpu-scheduler-policy` アノテーションで上書きでき、GPU ポリシーは `binpack,numa` のようなカンマ区切りの組み合わせを受け付けます。
 - **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 HAMi はデフォルトの Kubernetes スケジューラパスと互換性があり、バッチ指向の AI ワークロードに Volcano を組み合わせて使用することもできます。現在のスケジューラ統合ガイドについては、[HAMi Web サイト](https://project-hami.io/docs/)を参照してください。
@@ -161,6 +176,7 @@ http://<scheduler-ip>:<monitor-port>/metrics
 HAMi は他にも以下を提供します：
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI)：ビジュアルクラスタおよびデバイス管理。
+- [skill/](skill/) の Agent skills：GPU Pod のデバッグと vGPU メトリクスの要約用。
 - Grafana ダッシュボードの例：アクセラレータモニタリング用。
 - ベンチマーク素材：ワークロードの動作とスケジューリング効果の評価用。
 

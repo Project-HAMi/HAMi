@@ -86,6 +86,8 @@ The workload sees the allocated device resources inside the container, while HAM
 
 HAMi supports multiple heterogeneous accelerator backends, including GPUs, NPUs, HCUs, MLUs, GCUs, XPUs, and more. Device capabilities vary by vendor, model, driver, and hardware generation.
 
+Device backends in this repository: NVIDIA GPU (including MIG), AMD GPU, Huawei Ascend NPU, Cambricon MLU, Hygon HCU, Iluvatar GPU, Kunlunxin XPU, MetaX GPU, Moore Threads GPU, Enflame GCU, Biren GPU, VastAI, AWS Neuron, and remote NVIDIA GPUs served by [Lupine](https://github.com/lupinemachines). Pod examples for each vendor are under [examples/](examples/).
+
 See the current [HAMi supported devices](https://project-hami.io/docs/userguide/device-supported) page for the maintained support matrix.
 
 ## Quick Start
@@ -135,7 +137,16 @@ When `hami-device-plugin` and `hami-scheduler` are both `Running`, submit an exa
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
+Vendor settings live under `devices.<vendor>` in `values.yaml`. The [chart README](charts/hami/README.md) documents the configurable values and how to move from the previous layout.
+
 For the complete installation guide and configuration options, see the [HAMi documentation](https://project-hami.io/docs/get-started/deploy-with-helm/).
+
+### Deployment Options
+
+- **High availability**: set `scheduler.leaderElect=true` and `scheduler.replicas` above 1 to run several scheduler replicas behind one leader. A PodDisruptionBudget is created for them.
+- **OpenShift and SELinux**: set `platform.openshift=true` for OpenShift, and `selinux.enabled=true` on SELinux-enabled nodes.
+- **NetworkPolicy**: `scheduler.networkPolicy.enabled=true` restricts access to the scheduler's webhook and `/refit` port.
+- **Prometheus Operator**: `prometheus.enabled=true` creates ServiceMonitors for the scheduler and the device plugin.
 
 ## Scheduling Policies
 
@@ -144,6 +155,10 @@ HAMi supports multiple scheduling modes for AI workloads:
 - **binpack**: pack workloads onto fewer nodes or devices to improve consolidation.
 - **spread**: distribute workloads across nodes or devices to reduce contention.
 - **topology-aware scheduling**: choose device combinations based on GPU topology when supported.
+- **mutex**: allocate only idle GPUs, so a workload does not share a device.
+- **numa**: a sort key that groups devices by NUMA node, chained with binpack or spread. A pod can ask for GPU-to-GPU NUMA co-location with the `nvidia.com/numa-bind` annotation.
+
+Set the cluster defaults with `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` and `gpuSchedulerPolicy`. A pod overrides them with the `hami.io/node-scheduler-policy` and `hami.io/gpu-scheduler-policy` annotations, and the GPU policy accepts a comma-separated combination such as `binpack,numa`.
 - **dynamic MIG**: create, cache, reuse, and reclaim NVIDIA MIG instances dynamically for supported cards and modes. See the [Dynamic MIG instance lifecycle](docs/develop/dynamic-mig-lifecycle.md).
 
 HAMi works with the default Kubernetes scheduler path and can also be used with Volcano for batch-oriented AI workloads. See the [HAMi website](https://project-hami.io/docs/) for current scheduler integration guides.
@@ -161,6 +176,7 @@ The default monitor port is `31993`. You can change it with Helm values such as 
 HAMi also provides:
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) for visual cluster and device management.
+- Agent skills under [skill/](skill/) for debugging GPU pods and summarizing vGPU metrics.
 - [Grafana dashboards](https://project-hami.io/docs/userguide/monitoring/grafana-dashboard) for accelerator monitoring.
 - Benchmark material for evaluating workload behavior and scheduling effects.
 

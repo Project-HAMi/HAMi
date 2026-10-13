@@ -16,6 +16,7 @@ Welcome to HAMi!
     - [File an Issue](#file-an-issue)
 - [Contributor Workflow](#contributor-workflow)
   - [Creating Pull Requests](#creating-pull-requests)
+  - [Issue and PR Lifecycle](#issue-and-pr-lifecycle)
   - [Code Review](#code-review)
 
 # Before you get started
@@ -143,7 +144,7 @@ Please never hesitate to ask questions or submit a pull request.
 This is a rough outline of what a contributor's workflow looks like:
 
 - Create a topic branch from where you want to base the contribution (usually master)
-- Make commits of logical units
+- Make commits of logical units, signed off with `git commit -s` (the DCO check fails without a `Signed-off-by` trailer)
 - Push changes in your topic branch to your personal fork of the repository
 - Submit a pull request to [Project-HAMi/HAMi](https://github.com/Project-HAMi/HAMi)
 
