@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SERVER_IMAGE=${SERVER_IMAGE:-"qwen3-vllm-service"}
+SERVER_IMAGE=${SERVER_IMAGE:-"vllm-bench-server"}
 CLIENT_IMAGE=${CLIENT_IMAGE:-"vllm-bench-client"}
 TAG=${TAG:-"latest"}
 PLATFORM=${PLATFORM:-"linux/amd64"}
