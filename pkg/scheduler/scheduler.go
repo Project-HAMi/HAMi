@@ -95,10 +95,8 @@ type Scheduler struct {
 	synced atomic.Bool
 
 	// allocLock serializes reservation mutations between Filter, the NUMA
-	// refit (RefitNumaAllocation), and pod updates that release init-container
-	// usage. kube-scheduler already serializes Filter calls per scheduling
-	// cycle, so in the common path this adds no contention; it exists so these
-	// paths cannot observe or produce half-applied accounting.
+	// refit (RefitNumaAllocation), and pod adds/updates that release init-container
+	// usage, so these paths cannot observe or produce half-applied accounting.
 	allocLock sync.Mutex
 
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
@@ -241,6 +239,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	}
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
 	if util.IsPodInTerminatedState(pod) {
+		// Terminal objects can omit annotations; remove any cached usage first.
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
@@ -250,6 +249,14 @@ func (s *Scheduler) onAddPod(obj any) {
 	if !ok {
 		return
 	}
+	// Unrelated Pods must not wait for allocation or NUMA refit operations.
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
+	s.onAddPodLocked(pod, assignedNodeName)
+}
+
+// onAddPodLocked restores an assigned pod's accounting with allocLock held.
+func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 	if util.IsPodTerminating(pod) {
 		// A terminating pod still holds its devices. When it is already
 		// cached, refresh the object; when it is not (the informer's initial
@@ -276,6 +283,10 @@ func (s *Scheduler) onAddPod(obj any) {
 	if s.podManager.AddPod(pod, assignedNodeName, effectiveDevices) {
 		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
+	// Initial informer sync can replay a pod after its init containers have
+	// already finished. Restore the same usage and release flag as an update,
+	// without waiting for another pod event to free the completed init usage.
+	s.releaseCompletedInitContainersLocked(pod, nil, rawDevices)
 }
 
 func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
@@ -320,33 +331,51 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	pi, exists := s.podManager.GetPod(newPod)
 	if !exists {
-		s.onAddPod(newPod)
+		s.onAddPodLocked(newPod, assignedNodeName)
 		return
 	}
 
 	s.podManager.UpdatePod(newPod)
 
-	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
-		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
-		if err != nil {
-			if newPod.Spec.NodeName != "" {
-				s.recordAllocationDecodeFailureEvent(newPod, newPod.Spec.NodeName, err)
-			}
-			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod), "assignedNode", assignedNodeName, "nodeName", newPod.Spec.NodeName)
+	s.releaseCompletedInitContainersLocked(newPod, pi, nil)
+}
+
+// releaseCompletedInitContainersLocked releases init usage once with allocLock held.
+// Callers can reuse a snapshot obtained under that lock and decoded allocations.
+// Missing inputs are loaded only when needed for the transition.
+func (s *Scheduler) releaseCompletedInitContainersLocked(pod *corev1.Pod, pi *device.PodInfo, rawDevices device.PodDevices) {
+	if (pi != nil && pi.InitContainerResourceReleased) || !util.AllNonSidecarInitContainersSucceeded(pod) {
+		return
+	}
+	if pi == nil {
+		var exists bool
+		pi, exists = s.podManager.GetPod(pod)
+		if !exists || pi.InitContainerResourceReleased {
 			return
 		}
-
-		steadyStateDevices := device.SteadyStateDeviceUsage(newPod, rawDevices)
-
-		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, steadyStateDevices)
-		if ok {
-			s.quotaManager.ReplaceUsage(newPod, oldDevices, steadyStateDevices)
-			klog.InfoS("Non-sidecar init containers completed, shrunk usage to steady state",
-				"pod", klog.KObj(newPod),
-				"oldUsage", oldDevices,
-				"newUsage", steadyStateDevices,
-			)
+	}
+	if rawDevices == nil {
+		var err error
+		rawDevices, err = device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+		if err != nil {
+			if pod.Spec.NodeName != "" {
+				s.recordAllocationDecodeFailureEvent(pod, pod.Spec.NodeName, err)
+			}
+			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(pod), "assignedNode", pod.Annotations[util.AssignedNodeAnnotations], "nodeName", pod.Spec.NodeName)
+			return
 		}
+	}
+
+	steadyStateDevices := device.SteadyStateDeviceUsage(pod, rawDevices)
+
+	oldDevices, ok := s.podManager.UpdatePodDevice(pod, steadyStateDevices)
+	if ok {
+		s.quotaManager.ReplaceUsage(pod, oldDevices, steadyStateDevices)
+		klog.InfoS("Non-sidecar init containers completed, shrunk usage to steady state",
+			"pod", klog.KObj(pod),
+			"oldUsage", oldDevices,
+			"newUsage", steadyStateDevices,
+		)
 	}
 }
 
