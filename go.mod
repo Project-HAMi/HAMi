@@ -1,6 +1,6 @@
 module github.com/Project-HAMi/HAMi
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
@@ -23,7 +23,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v2 v2.27.7
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/tools v0.51.0
