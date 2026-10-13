@@ -403,7 +403,7 @@ func (dev *Devices) checkType(annos map[string]string, d device.DeviceUsage, n d
 }
 
 func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[dev.nodeRegisterAnno])
 }
 
 func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

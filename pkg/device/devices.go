@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -627,45 +627,59 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	}
 }
 
-func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
-	handshake := node.Annotations[util.HandshakeAnnos[devType]]
-	if strings.Contains(handshake, "Requesting") {
-		_, timestampStr, found := strings.Cut(handshake, "_")
-		if !found {
-			return true, false
-		}
-		formertime, err := time.ParseInLocation(time.DateTime, timestampStr, time.Local)
-		if err != nil {
-			return true, false
-		}
-		if time.Now().Before(formertime.Add(time.Second * 60)) {
-			return true, false
-		}
+var registeredDevices = struct {
+	sync.Mutex
+	seen map[string]string
+}{seen: map[string]string{}}
 
-		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
-		if qty.Value() > 0 {
-			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
-			return true, false
-		}
-		return false, false
-	} else {
-		_, ok := util.HandshakeAnnos[devType]
-		if ok {
-			tmppat := make(map[string]string)
-			tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
-			klog.V(5).InfoS("New timestamp for annotation", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
-			n, err := util.GetNode(node.Name)
-			if err != nil {
-				klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
-				return true, false
-			}
-			klog.V(5).InfoS("Patching node annotations", "nodeName", node.Name, "annotations", tmppat)
-			if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-				klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
-			}
-		}
+func registeredDevicesKey(devType, nodeName string) string {
+	return devType + "/" + nodeName
+}
+
+func registerAnnoChanged(devType, nodeName, registerAnno string) bool {
+	key := registeredDevicesKey(devType, nodeName)
+	registeredDevices.Lock()
+	defer registeredDevices.Unlock()
+	if previous, ok := registeredDevices.seen[key]; ok && previous == registerAnno {
+		return false
+	}
+	registeredDevices.seen[key] = registerAnno
+	return true
+}
+
+func ForgetRegisteredDevices(devType, nodeName string) {
+	key := registeredDevicesKey(devType, nodeName)
+	registeredDevices.Lock()
+	defer registeredDevices.Unlock()
+	delete(registeredDevices.seen, key)
+}
+
+func RemoveObsoleteHandshake(devType string, node *corev1.Node) {
+	annoKey, ok := util.HandshakeAnnos[devType]
+	if !ok {
+		return
+	}
+	if _, present := node.Annotations[annoKey]; !present {
+		return
+	}
+	klog.V(5).InfoS("Removing obsolete handshake annotation", "nodeName", node.Name, "annotationKey", annoKey)
+	if err := util.RemoveNodeAnnotation(node, annoKey); err != nil {
+		klog.ErrorS(err, "Failed to remove obsolete handshake annotation", "nodeName", node.Name, "annotationKey", annoKey)
+	}
+}
+
+func CheckHealth(devType string, resourceCountName string, node *corev1.Node, registerAnno string) (bool, bool) {
+	RemoveObsoleteHandshake(devType, node)
+	if resourceCountName == "" {
 		return true, true
 	}
+	qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
+	if qty.Value() <= 0 {
+		klog.V(5).InfoS("Device absent from node Allocatable", "nodeName", node.Name, "resource", resourceCountName)
+		ForgetRegisteredDevices(devType, node.Name)
+		return false, false
+	}
+	return true, registerAnnoChanged(devType, node.Name, registerAnno)
 }
 
 // Deprecated: new MIG allocations never encode template/slot indexes in UUIDs.

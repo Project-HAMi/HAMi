@@ -124,10 +124,10 @@ func (dev *RemoteGPUDevices) GetResourceNames() device.ResourceNames {
 
 // CheckHealth always reports healthy and always asks for an update.
 //
-// The shared device.CheckHealth handshake expects a device plugin on the node
-// to answer a "Requesting_" annotation. A client node runs no such plugin, and
+// The shared device.CheckHealth judges a node by the device resource in its
+// Allocatable. A client node runs no device plugin and so advertises none, and
 // the lupine fleet's own liveness is already covered by the pool refresh, so
-// running the handshake here would time out after 60s and evict the whole pool.
+// using the shared check here would evict the whole pool.
 // CheckHealth reports an update only once the fleet has actually moved.
 //
 // Every client node is handed the same cluster-wide pool, so answering "yes"
