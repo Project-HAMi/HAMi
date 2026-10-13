@@ -49,7 +49,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/google/uuid"
-	"github.com/imdario/mergo"
+	"dario.cat/mergo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
