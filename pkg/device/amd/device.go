@@ -40,9 +40,9 @@ type AMDDevices struct {
 	resourceMemoryPercentageName string
 	resourceCoreName             string
 	runtimeClassName             string
-	defaultGPUNum                int32
-	defaultMemory                int32
-	defaultCores                 int32
+	defaultGPUNum                int64
+	defaultMemory                int64
+	defaultCores                 int64
 }
 
 const (
@@ -71,12 +71,12 @@ type AMDConfig struct {
 	RuntimeClassName string `yaml:"runtimeClassName"`
 	// DefaultGPUNum is how many GPUs a container gets when it asks for memory or
 	// cores but not a count. 0 means 1.
-	DefaultGPUNum int32 `yaml:"defaultGPUNum"`
+	DefaultGPUNum int64 `yaml:"defaultGPUNum"`
 	// DefaultMemory (MiB) is the memory of a container that asks for neither memory nor
 	// a percentage; 0 leaves it the whole GPU.
-	DefaultMemory int32 `yaml:"defaultMemory"`
+	DefaultMemory int64 `yaml:"defaultMemory"`
 	// DefaultCores (percent, 1-100) is the cores of a container that asks for none; 0 leaves it all of them.
-	DefaultCores int32 `yaml:"defaultCores"`
+	DefaultCores int64 `yaml:"defaultCores"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -130,7 +130,7 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 			if ctr.Resources.Limits == nil {
 				ctr.Resources.Limits = corev1.ResourceList{}
 			}
-			count := *resource.NewQuantity(int64(dev.defaultGPUNum), resource.DecimalSI)
+			count := *resource.NewQuantity(dev.defaultGPUNum, resource.DecimalSI)
 			if requested, inRequests := ctr.Resources.Requests[corev1.ResourceName(dev.resourceCountName)]; inRequests {
 				// A request-only count must match the limit we add, so keep it.
 				count = requested
@@ -360,7 +360,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 
 			// the default memory applies only when the container names no memory at all, so an explicit 0 stays a whole GPU
 			if !memOK && !dev.hasResource(ctr, dev.resourceMemoryPercentageName) && dev.defaultMemory > 0 {
-				memnum = int64(dev.defaultMemory)
+				memnum = dev.defaultMemory
 			}
 
 			// An omitted core limit means the container receives all CUs on each
@@ -368,7 +368,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			// AMD requests valid.
 			corePercentageNum := int64(100)
 			if dev.defaultCores > 0 {
-				corePercentageNum = int64(dev.defaultCores)
+				corePercentageNum = dev.defaultCores
 			}
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
 			if !corePercentageOK {
