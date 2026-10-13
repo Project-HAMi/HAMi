@@ -321,7 +321,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			}
 			got, _ := dev.GenerateResourceRequests(ctr)
-			assert.Equal(t, int64(cores), got.Coresreq)
+			assert.Equal(t, cores, got.Coresreq)
 		}
 		for _, cores := range []int64{0, 101, 150, 200, -1} {
 			ctr := &corev1.Container{

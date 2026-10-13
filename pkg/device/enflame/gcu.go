@@ -108,7 +108,7 @@ func (dev *GCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			}
 			klog.Info("Found enflame devices")
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             EnflameGCUDevice,
 				Memreq:           100,
 				MemPercentagereq: 100,

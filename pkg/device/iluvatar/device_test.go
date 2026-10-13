@@ -1062,7 +1062,7 @@ func Test_GenerateResourceRequests_MutatedMultiCard(t *testing.T) {
 			t.Fatalf("MutateAdmission(count=%d): %v", count, err)
 		}
 		got, _ := dev.GenerateResourceRequests(ctr)
-		if got.Nums != int64(count) {
+		if got.Nums != count {
 			t.Errorf("count=%d: Nums = %d, want %d", count, got.Nums, count)
 		}
 		if count > 1 && got.Coresreq != 100 {

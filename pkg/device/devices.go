@@ -385,9 +385,9 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 			}
 			i := DeviceInfo{
 				ID:      items[0],
-				Count:   int64(count),
-				Devmem:  int64(devmem),
-				Devcore: int64(devcore),
+				Count:   count,
+				Devmem:  devmem,
+				Devcore: devcore,
 				Type:    items[4],
 				Numa:    numa,
 				Health:  health,
@@ -415,7 +415,7 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	for _, val := range dlist {
 		builder.WriteString(val.ID)
 		builder.WriteString(",")
-		builder.WriteString(strconv.FormatInt(int64(val.Count), 10))
+		builder.WriteString(strconv.FormatInt(val.Count, 10))
 		builder.WriteString(",")
 		builder.WriteString(strconv.Itoa(int(val.Devmem)))
 		builder.WriteString(",")
@@ -562,14 +562,14 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		tmpdev := ContainerDevice{
 			UUID:      tmpstr[0],
 			Type:      tmpstr[1],
-			Usedmem:   int64(devmem),
-			Usedcores: int64(devcores),
+			Usedmem:   devmem,
+			Usedcores: devcores,
 		}
 		// The 5th field is optional. An unusable value is ignored rather than
 		// rejected: dropping the whole annotation undercounts far more than one slot.
 		if len(tmpstr) >= 5 {
 			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
-				tmpdev.Slots = int64(devslots)
+				tmpdev.Slots = devslots
 			} else {
 				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
 			}

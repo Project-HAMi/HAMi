@@ -149,7 +149,7 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) (devic
 			klog.Info("Found kunlunxin devices")
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             KunlunGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 100,

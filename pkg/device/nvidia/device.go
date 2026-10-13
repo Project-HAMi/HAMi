@@ -517,7 +517,7 @@ func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool
 
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
 		if dev.config.DefaultGPUNum > 0 {
-			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
+			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(dev.config.DefaultGPUNum, resource.BinarySI)
 			return true
 		}
 	}
@@ -655,7 +655,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			}
 			if ok {
 				memnums, parsed := mem.AsInt64()
-				factor := max(int64(dev.config.MemoryFactor), 1)
+				factor := max(dev.config.MemoryFactor, 1)
 				if !parsed || memnums < 0 || memnums > math.MaxInt64/factor {
 					klog.ErrorS(nil, "nvidia memory request is not a non-negative integer or overflows after applying the memory factor",
 						"container", ctr.Name)
@@ -684,7 +684,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				mempnums, _ := mem.AsInt64()
 				// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
 				if mempnums > 0 {
-					mempnum = int64(mempnums)
+					mempnum = mempnums
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
@@ -705,10 +705,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 					klog.ErrorS(nil, "nvidia core request is out of range", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", core.String())}
 				}
-				corenum = int64(corenums)
+				corenum = corenums
 			}
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             NvidiaGPUDevice,
 				Memreq:           int64(memnum),
 				MemPercentagereq: mempnum,
@@ -954,16 +954,16 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	cur = append(cur, device.ContainerDevice{
 		UUID:      devUUID,
 		Type:      NvidiaGPUDevice,
-		Usedmem:   int64(memreq),
-		Usedcores: int64(coresreq),
+		Usedmem:   memreq,
+		Usedcores: coresreq,
 	})
 	hypo[NvidiaGPUDevice] = append(hypo[NvidiaGPUDevice], cur)
 
 	var mem, core int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[NvidiaGPUDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
-			core += int64(val.Usedcores)
+			mem += val.Usedmem
+			core += val.Usedcores
 		}
 	}
 
@@ -1077,7 +1077,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			}
 			usedmem, usedcores = profile.MemoryMB, profile.Core
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(usedmem), int64(usedcores)) {
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, usedmem, usedcores) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue

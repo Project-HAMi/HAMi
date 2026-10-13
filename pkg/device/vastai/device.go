@@ -150,7 +150,7 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) (devic
 			mempnum := 100
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             VastaiDevice,
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),

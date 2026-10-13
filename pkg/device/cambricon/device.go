@@ -220,7 +220,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Index:        uint(i),
 			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int64(memoryTotal * MemoryFactor * 100 / cards),
+			Devmem:       memoryTotal * MemoryFactor * 100 / cards,
 			Devcore:      100,
 			Type:         mluType,
 			Numa:         0,
@@ -304,7 +304,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 					klog.ErrorS(nil, "cambricon core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("core request %s is out of range (must be 0-100)", core.String())}
 				}
-				corenum = int64(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -313,7 +313,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             CambriconMLUDevice,
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),
@@ -382,16 +382,16 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	cur = append(cur, device.ContainerDevice{
 		UUID:      devUUID,
 		Type:      CambriconMLUDevice,
-		Usedmem:   int64(memreq),
-		Usedcores: int64(coresreq),
+		Usedmem:   memreq,
+		Usedcores: coresreq,
 	})
 	hypo[CambriconMLUDevice] = append(hypo[CambriconMLUDevice], cur)
 
 	var mem, core int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[CambriconMLUDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
-			core += int64(val.Usedcores)
+			mem += val.Usedmem
+			core += val.Usedcores
 		}
 	}
 
@@ -458,7 +458,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memreq), int64(k.Coresreq)) {
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, k.Coresreq) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue

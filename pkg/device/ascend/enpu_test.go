@@ -243,7 +243,7 @@ func TestENPUAdmissionRequestsOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateResourceRequests: %v", err)
 			}
-			if request.Nums != 1 || int64(request.Memreq) != tc.wantMemory {
+			if request.Nums != 1 || request.Memreq != tc.wantMemory {
 				t.Fatalf("scheduler request does not match admitted resources: %+v", request)
 			}
 		})

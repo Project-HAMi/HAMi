@@ -269,11 +269,11 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	klog.Infof("container<%s> request<count:%d, mem:%d, memPercent:%d, core:%d>",
 		ctr.Name, count, mem, memPercent, core)
 	return device.ContainerDeviceRequest{
-		Nums:             int64(count),
+		Nums:             count,
 		Type:             MetaxSGPUDevice,
-		Memreq:           int64(mem),
+		Memreq:           mem,
 		MemPercentagereq: int64(memPercent),
-		Coresreq:         int64(core),
+		Coresreq:         core,
 	}, nil
 }
 

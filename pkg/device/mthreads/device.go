@@ -276,7 +276,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 			cardIDs = append(cardIDs, i)
 		}
 	}
-	devmemPerCard := int64(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores)
+	devmemPerCard := memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores
 
 	for _, cardID := range cardIDs {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
@@ -416,7 +416,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					klog.ErrorS(nil, "mthreads core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
-				corenum = int64(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -425,9 +425,9 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             MthreadsGPUDevice,
-				Memreq:           int64(memnum) / int64(n),
+				Memreq:           int64(memnum) / n,
 				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil

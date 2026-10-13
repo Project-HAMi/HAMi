@@ -148,7 +148,7 @@ func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) (device
 			mempnum := 100
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             BirenDevice,
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),

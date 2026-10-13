@@ -143,7 +143,7 @@ func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int64, error) {
 	if !isInt || pct < 0 || pct > 100 {
 		return 0, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.resourceMemoryPercentageName, q.String(), ctr.Name)
 	}
-	return int64(pct), nil
+	return pct, nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -339,14 +339,14 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("core percentage request %s is out of range (must be an integer between 1 and 100)", corePercentage.String())}
 				}
-				corePercentageNum = int64(corePercentageNums)
+				corePercentageNum = corePercentageNums
 			}
 
 			klog.InfoS("Detected AMD device request",
 				"container", ctr.Name,
 				"deviceCount", n)
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             AMDDevice,
 				Memreq:           memnum,
 				MemPercentagereq: memPercentage,
@@ -391,7 +391,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	var mem int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
+			mem += val.Usedmem
 		}
 	}
 	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
@@ -478,7 +478,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		}
 		memReq := k.Memreq
 		if memReq <= 0 && k.MemPercentagereq > 0 && dev.Totalmem > 0 {
-			memReq = max(int64(int64(dev.Totalmem)*int64(k.MemPercentagereq)/100), 1)
+			memReq = max(dev.Totalmem*k.MemPercentagereq/100, 1)
 		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
@@ -511,7 +511,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 			// RDNA applies the CU mask per WGP, so the device plugin hands out
 			// whole WGPs; account for the same count.
 			if unit := cuPerWGP(dev.CustomInfo); unit > 1 {
-				coreReq = int64(min((int64(coreReq)+int64(unit)-1)/int64(unit)*int64(unit), int64(dev.Totalcore)))
+				coreReq = min((coreReq+unit-1)/unit*unit, dev.Totalcore)
 			}
 			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {

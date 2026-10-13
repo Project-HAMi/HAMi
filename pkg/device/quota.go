@@ -81,7 +81,7 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int64, cor
 		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq, "memoryFactor", memoryFactor)
 		limit := memQuota.Limit
 		if memoryFactor > 1 {
-			limit = limit * int64(memoryFactor)
+			limit = limit * memoryFactor
 		}
 		if memQuota.LimitSet && memQuota.Used+memreq > limit {
 			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
@@ -107,13 +107,13 @@ func countPodDevices(podDev PodDevices) map[string]int64 {
 		for _, ctrdevices := range podSingle {
 			for _, ctrdevice := range ctrdevices {
 				if len(resourceNames.ResourceMemoryName) > 0 {
-					res[resourceNames.ResourceMemoryName] += int64(ctrdevice.Usedmem)
+					res[resourceNames.ResourceMemoryName] += ctrdevice.Usedmem
 				}
 				if len(resourceNames.ResourceCoreName) > 0 {
 					if accounting, ok := devs.(CoreMaskAccounting); ok {
 						res[resourceNames.ResourceCoreName] += accounting.CountAllocatedCores(ctrdevice.Usedcores)
 					} else {
-						res[resourceNames.ResourceCoreName] += int64(ctrdevice.Usedcores)
+						res[resourceNames.ResourceCoreName] += ctrdevice.Usedcores
 					}
 				}
 			}

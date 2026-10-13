@@ -139,7 +139,7 @@ func TestDRSSlice_SliceCountPrefersSlots(t *testing.T) {
 			enf.PatchAnnotations(pod, &annos, device.PodDevices{
 				EnflameVGCUDevice: {device.ContainerDevices{tt.ctr}},
 			})
-			assert.Equal(t, annos[PodRequestGCUSize], strconv.FormatInt(int64(tt.want), 10))
+			assert.Equal(t, annos[PodRequestGCUSize], strconv.FormatInt(tt.want, 10))
 		})
 	}
 }

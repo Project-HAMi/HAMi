@@ -228,7 +228,7 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 					klog.ErrorS(nil, "hcu device core request is out of range", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", core.String())}
 				}
-				corenum = int64(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -237,7 +237,7 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             HygonHCUDevice,
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),

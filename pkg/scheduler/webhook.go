@@ -302,11 +302,11 @@ func fitResourceQuota(pod *corev1.Pod) error {
 			if req.Nums == 0 {
 				continue
 			}
-			appMemoryReq += int64(req.Memreq) * int64(req.Nums)
+			appMemoryReq += req.Memreq * req.Nums
 			if req.TotalCoresreq > 0 {
 				appCoresReq += req.TotalCoresreq
 			} else {
-				appCoresReq += int64(req.Coresreq) * int64(req.Nums)
+				appCoresReq += req.Coresreq * req.Nums
 			}
 		}
 
@@ -321,8 +321,8 @@ func fitResourceQuota(pod *corev1.Pod) error {
 			if req.Nums == 0 {
 				continue
 			}
-			mem := int64(req.Memreq) * int64(req.Nums)
-			cores := int64(req.Coresreq) * int64(req.Nums)
+			mem := req.Memreq * req.Nums
+			cores := req.Coresreq * req.Nums
 			if req.TotalCoresreq > 0 {
 				cores = req.TotalCoresreq
 			}

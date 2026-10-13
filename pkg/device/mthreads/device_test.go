@@ -1584,7 +1584,7 @@ func TestGenerateResourceRequests_MultiCardCoresPerCard(t *testing.T) {
 		}
 		result, err := dev.GenerateResourceRequests(ctr)
 		assert.NilError(t, err)
-		assert.Equal(t, result.Nums, int64(cards))
+		assert.Equal(t, result.Nums, cards)
 		assert.Equal(t, result.Coresreq, int64(16))
 	}
 }

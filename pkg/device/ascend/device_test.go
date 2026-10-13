@@ -3805,7 +3805,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
 				assert.Equal(t, int64(1), req.Nums)
-				assert.Equal(t, int64(tt.cores), req.Coresreq)
+				assert.Equal(t, tt.cores, req.Coresreq)
 			} else {
 				assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
 			}

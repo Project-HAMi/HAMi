@@ -354,12 +354,12 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 
 				// Soft-slice allocations use their exact memory without a template.
 				if effectiveMode == VNPUModeHamiCore || isENPUMode(effectiveMode) {
-					info.Memory = int64(val.Usedmem)
+					info.Memory = val.Usedmem
 					info.Core = val.Usedcores
 				} else {
-					_, temp := dev.trimMemory(int64(val.Usedmem))
+					_, temp := dev.trimMemory(val.Usedmem)
 					info.Temp = temp
-					info.Memory = int64(val.Usedmem)
+					info.Memory = val.Usedmem
 					info.Core = val.Usedcores
 				}
 
@@ -474,7 +474,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 						klog.ErrorS(nil, "ascend device core request is out of range", "container", ctr.Name, "request", cv.String())
 						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", cv.String())}
 					}
-					corenum = int64(corenums)
+					corenum = corenums
 				}
 			}
 
@@ -484,7 +484,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             dev.CommonWord(),
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),
@@ -908,14 +908,14 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	// Resolve template memory only after the candidate node's mode is known.
 	// k is a per-Fit copy, so evaluating one candidate cannot affect another.
 	if vnpuMode == "" && !nodeSupportHamiCore && npu.config.MemoryAllocatable > 0 && k.Memreq > 0 {
-		trimmedMem, _ := npu.trimMemory(int64(k.Memreq))
+		trimmedMem, _ := npu.trimMemory(k.Memreq)
 		if trimmedMem <= 0 {
 			reason[common.CardInsufficientMemory] += len(devices)
 			return false, nil, common.GenReason(reason, len(devices))
 		}
-		k.Memreq = int64(trimmedMem)
+		k.Memreq = trimmedMem
 	}
-	if vnpuMode == "" && !nodeSupportHamiCore && k.Nums > 1 && k.Memreq > 0 && k.Memreq != int64(npu.config.MemoryAllocatable) {
+	if vnpuMode == "" && !nodeSupportHamiCore && k.Nums > 1 && k.Memreq > 0 && k.Memreq != npu.config.MemoryAllocatable {
 		return false, nil, "vNPU not supported for multiple devices"
 	}
 	effectiveMode := vnpuMode

@@ -254,8 +254,8 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	var quotaMem, quotaCores int64
 	for _, ctrDevs := range effectivePodDeviceUsage(pod, hypothetical, pi.InitContainerResourceReleased)[req.DeviceType] {
 		for _, d := range ctrDevs {
-			quotaMem += int64(d.Usedmem)
-			quotaCores += int64(d.Usedcores)
+			quotaMem += d.Usedmem
+			quotaCores += d.Usedcores
 		}
 	}
 	resourceNames := refitDevice.GetResourceNames()

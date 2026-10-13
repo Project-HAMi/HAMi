@@ -568,7 +568,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
 				assert.Equal(t, req.Nums, int64(1))
-				assert.Equal(t, req.Coresreq, int64(tt.cores))
+				assert.Equal(t, req.Coresreq, tt.cores)
 			} else {
 				assert.Equal(t, req.Nums, int64(0))
 			}

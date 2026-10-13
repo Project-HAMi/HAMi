@@ -222,7 +222,7 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		// Fit books Memreq makes the device look emptier than the allocation
 		// it is about to receive.
 		if container.Memreq == 0 && container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
-			mem += int64((int64(ds.Device.Totalmem) * int64(container.MemPercentagereq)) / 100)
+			mem += (ds.Device.Totalmem * container.MemPercentagereq) / 100
 			continue
 		}
 		mem += container.Memreq

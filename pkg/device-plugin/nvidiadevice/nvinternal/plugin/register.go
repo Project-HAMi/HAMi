@@ -289,8 +289,8 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		var totalCores int64
 		for _, dev := range *devices {
 			if dev.Health {
-				totalMemory += int64(dev.Devmem)
-				totalCores += int64(dev.Devcore)
+				totalMemory += dev.Devmem
+				totalCores += dev.Devcore
 			}
 		}
 		memName := plugin.schedulerConfig.ResourceMemoryName

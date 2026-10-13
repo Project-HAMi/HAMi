@@ -193,7 +193,7 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 				memnum = KunlunMaxMemory
 			}
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             dev.CommonWord(),
 				Memreq:           int64(memnum), //int32(dev.config.MemoryMax),
 				MemPercentagereq: int64(mempnum),

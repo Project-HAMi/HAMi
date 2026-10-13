@@ -278,7 +278,7 @@ func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 				}
 			}
 			if _, exists := (*annoinput)[PodRequestGCUSize]; !exists && slice > 0 {
-				(*annoinput)[PodRequestGCUSize] = strconv.FormatInt(int64(slice), 10)
+				(*annoinput)[PodRequestGCUSize] = strconv.FormatInt(slice, 10)
 			}
 		}
 		if len(assigned) > 0 {
@@ -337,7 +337,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 			return device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             EnflameVGCUDevice,
-				Memreq:           int64(n),
+				Memreq:           n,
 				MemPercentagereq: enflameRequestModeDirect,
 				Coresreq:         enflameUnknownCoreRequest,
 			}, nil
@@ -356,9 +356,9 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	return device.ContainerDeviceRequest{
 		Nums:             1,
 		Type:             EnflameVGCUDevice,
-		Memreq:           int64(memReq),
+		Memreq:           memReq,
 		MemPercentagereq: enflameRequestModeBySpec,
-		Coresreq:         int64(coreReq),
+		Coresreq:         coreReq,
 	}, nil
 }
 

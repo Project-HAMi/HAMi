@@ -151,7 +151,7 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) (device
 			}
 			klog.Info("Found metax devices")
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             MetaxGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 100,

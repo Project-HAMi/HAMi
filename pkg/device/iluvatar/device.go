@@ -251,7 +251,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					klog.ErrorS(nil, "iluvatar core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
-				corenum = int64(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -260,7 +260,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int64(n),
+				Nums:             n,
 				Type:             dev.config.CommonWord,
 				Memreq:           int64(memnum),
 				MemPercentagereq: int64(mempnum),
