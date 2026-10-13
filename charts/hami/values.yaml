@@ -523,6 +523,7 @@ devicePlugin:
   hostPIDBroker:
     # -- Enable the host PID broker so HAMi-core can query the device plugin for its host PID. Requires
     # `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`.
+    # See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker).
     enabled: false
   # -- Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy:
   # ClusterFirstWithHostNet` so the scheduler Service remains resolvable.

@@ -450,7 +450,7 @@ More values will be added in follow-up PRs.
 | devicePlugin.gpuOperatorToolkitReady.securityContext | object | `{"privileged":true,"runAsUser":0}` | Security context for the toolkit-validation init container. |
 | devicePlugin.hostNetwork | bool | `false` | Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy: ClusterFirstWithHostNet` so the scheduler Service remains resolvable. |
 | devicePlugin.hostPID | bool | `true` | Use the host PID namespace for NVIDIA device plugin Pods. Must be true when `hostPIDBroker.enabled` is true. |
-| devicePlugin.hostPIDBroker.enabled | bool | `false` | Enable the host PID broker so HAMi-core can query the device plugin for its host PID. Requires `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`. |
+| devicePlugin.hostPIDBroker.enabled | bool | `false` | Enable the host PID broker so HAMi-core can query the device plugin for its host PID. Requires `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`. See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker). |
 | devicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the NVIDIA device plugin and its enabled init containers: `Always`, `IfNotPresent`, or `Never`. |
 | devicePlugin.image.pullSecrets | list | `[]` | Image pull Secret names for the device plugin Pod, appended to `global.imagePullSecrets`, e.g. `[myRegistryKeySecretName]`. |
 | devicePlugin.image.registry | string | `"docker.io"` | NVIDIA device plugin image registry. Overridden by a non-empty `global.imageRegistry`. |
