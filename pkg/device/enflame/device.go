@@ -383,8 +383,18 @@ func sliceCount(ctr *device.ContainerDevice) int64 {
 }
 
 func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	n.Used += sliceCount(ctr)
+	slices := sliceCount(ctr)
+	if n.Used > math.MaxInt64-slices {
+		return fmt.Errorf("enflame slice usage overflows int64")
+	}
+	n.Used += slices
+	if ctr.Usedcores < 0 || n.Usedcores > math.MaxInt64-ctr.Usedcores {
+		return fmt.Errorf("enflame core usage overflows int64")
+	}
 	n.Usedcores += ctr.Usedcores
+	if ctr.Usedmem < 0 || n.Usedmem > math.MaxInt64-ctr.Usedmem {
+		return fmt.Errorf("enflame memory usage overflows int64")
+	}
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
@@ -405,11 +415,16 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	if profile.Size <= 0 || profile.MemoryGB <= 0 {
+	// Size and core percent must stay non-negative: a wrapped value is negative
+	// and the "enough room" comparisons below would then succeed. Memory is
+	// stored in MiB, so a MemoryGB above MaxInt64/1024 wraps the product the
+	// same way.
+	memGB := int64(profile.MemoryGB)
+	if profile.Size <= 0 || profile.CorePercent < 0 || memGB <= 0 || memGB > math.MaxInt64/1024 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	profileMemoryMiB := int64(profile.MemoryGB) * 1024
+	profileMemoryMiB := memGB * 1024
 	profileCorePercent := int64(profile.CorePercent)
 	profileSlices := int64(profile.Size)
 

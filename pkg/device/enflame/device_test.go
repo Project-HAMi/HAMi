@@ -489,6 +489,24 @@ func TestFit_OversizedProfileRejected(t *testing.T) {
 	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+
+	// MemoryGB above MaxInt64/1024. Multiplying by 1024 would wrap negative and
+	// the card would look large enough.
+	devices[0].CustomInfo["maxSlice"] = ""
+	devices[0].CustomInfo["profiles"] = map[string]string{"1g.9007199254740992gb": "0"}
+	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+}
+
+func TestAddResourceUsage_RejectsOverflow(t *testing.T) {
+	dev := &EnflameDevices{}
+	n := &device.DeviceUsage{Used: math.MaxInt64}
+	ctr := &device.ContainerDevice{Slots: 1}
+
+	err := dev.AddResourceUsage(&corev1.Pod{}, n, ctr)
+	assert.Assert(t, err != nil)
+	assert.Equal(t, n.Used, int64(math.MaxInt64))
 }
 
 func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {

@@ -1290,6 +1290,16 @@ func TestEncodeDecodeContainerDevicesSlots(t *testing.T) {
 			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
 		},
 		{
+			name: "values above MaxInt32 survive the round trip",
+			cd: ContainerDevices{{
+				UUID: "GPU-1", Type: "Enflame", Usedmem: 1 << 32, Usedcores: 1 << 32, Slots: 1 << 32,
+			}},
+			wantEncoded: "GPU-1,Enflame,4294967296,4294967296,4294967296:",
+			wantDecoded: ContainerDevices{{
+				UUID: "GPU-1", Type: "Enflame", Usedmem: 1 << 32, Usedcores: 1 << 32, Slots: 1 << 32,
+			}},
+		},
+		{
 			name: "mixed entries in one container",
 			cd: ContainerDevices{
 				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
@@ -2115,6 +2125,22 @@ func TestEncodeDecodeNodeDevicesRoundtrip(t *testing.T) {
 					Devmem:  32768,
 					Devcore: 100,
 					Type:    "NVIDIA-Tesla V100-PCIE-32GB",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+		},
+		{
+			name: "values above MaxInt32 survive the round trip",
+			dlist: []*DeviceInfo{
+				{
+					ID:      "GPU-wide",
+					Index:   0,
+					Count:   1 << 32,
+					Devmem:  1 << 32,
+					Devcore: 1 << 32,
+					Type:    "NVIDIA",
 					Mode:    "hami-core",
 					Numa:    0,
 					Health:  true,

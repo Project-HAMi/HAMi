@@ -351,15 +351,15 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 		}
 		items := strings.Split(val, ",")
 		if len(items) == 7 || len(items) == 9 {
-			count, err := strconv.ParseInt(items[1], 10, 32)
+			count, err := strconv.ParseInt(items[1], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid count field: %w", err)
 			}
-			devmem, err := strconv.ParseInt(items[2], 10, 32)
+			devmem, err := strconv.ParseInt(items[2], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid memory field: %w", err)
 			}
-			devcore, err := strconv.ParseInt(items[3], 10, 32)
+			devcore, err := strconv.ParseInt(items[3], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid core field: %w", err)
 			}
@@ -417,9 +417,9 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 		builder.WriteString(",")
 		builder.WriteString(strconv.FormatInt(val.Count, 10))
 		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devmem)))
+		builder.WriteString(strconv.FormatInt(val.Devmem, 10))
 		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devcore)))
+		builder.WriteString(strconv.FormatInt(val.Devcore, 10))
 		builder.WriteString(",")
 		builder.WriteString(val.Type)
 		builder.WriteString(",")
@@ -545,14 +545,14 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		if tmpstr[1] == "" {
 			return nil, fmt.Errorf("pod annotation format error, missing device type")
 		}
-		devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
+		devmem, err := strconv.ParseInt(tmpstr[2], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid memory field: %w", err)
 		}
 		if devmem < 0 {
 			return nil, fmt.Errorf("memory field must not be negative: %d", devmem)
 		}
-		devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
+		devcores, err := strconv.ParseInt(tmpstr[3], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid core field: %w", err)
 		}
@@ -568,7 +568,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		// The 5th field is optional. An unusable value is ignored rather than
 		// rejected: dropping the whole annotation undercounts far more than one slot.
 		if len(tmpstr) >= 5 {
-			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
+			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 64); err == nil && devslots >= 0 {
 				tmpdev.Slots = devslots
 			} else {
 				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
