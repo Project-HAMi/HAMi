@@ -26,25 +26,29 @@ fullnameOverride: ""
 namespaceOverride: ""
 
 platform:
+  # -- Enable when deploying HAMi on OpenShift.
   openshift: false
 
 openshift:
   securityContextConstraints:
-    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
+    # -- Create the named SecurityContextConstraints (SCC) and its use ClusterRole (`system:openshift:scc:<name>`) when `platform.openshift=true` and `name` is non-empty. Set to false to reuse an existing SCC and matching ClusterRole. Must be false for the built-in `privileged` SCC.
     create: true
 
-    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
+    # -- Name of the SCC that enabled NVIDIA and mock device-plugin service accounts are allowed to use when `platform.openshift=true`. Leave empty to skip SCC creation and binding, and manage SCC access separately.
     name: "hami-device-plugin"
 
-# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
 selinux:
+  # -- Add a privileged NVIDIA device-plugin init container to recursively relabel host directories `devicePlugin.libPath`, `devicePlugin.monitor.ctrPath`, and `/tmp/vgpulock`. Creates missing directories and sets permissions to `0777` on `devicePlugin.monitor.ctrPath` and `1777` on `/tmp/vgpulock`. Requires `devicePlugin.enabled=true` and SELinux-enabled nodes. Uninstalling does not restore host labels or permissions.
   enabled: false
+  # -- SELinux file type passed to `chcon -t` for the shared vGPU host directories when `selinux.enabled=true`. Must be a type supported by the node's SELinux policy.
   type: container_file_t
+  # -- SELinux security level or range passed to `chcon -l` for the shared vGPU host directories when `selinux.enabled=true`, for example `s0` or `s0:c123,c456`.
   level: s0
 
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
+  # -- Render a `policy/v1beta1` PodSecurityPolicy and its use RBAC rule for the webhook certificate creation and patch jobs. Only takes effect when `scheduler.admissionWebhook.enabled=true`, `scheduler.patch.enabled=true`, and `scheduler.certManager.enabled=false`. Keep disabled on Kubernetes 1.25 and later, where the PodSecurityPolicy API is removed.
   enabled: false
 
 scheduler:
