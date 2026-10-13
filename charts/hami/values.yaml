@@ -443,9 +443,12 @@ devicePlugin:
             "name": "your-node-name",
             "operatingmode": "hami-core",
             "devicememoryscaling": 1,
+            "devicecorescaling": 1,
             "devicesplitcount": 10,
             "preconfigureddevicememory": 0,
+            "libcudaloglevel": "1",
             "enablenumatopology": false,
+            "reportnodecapacity": false,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
