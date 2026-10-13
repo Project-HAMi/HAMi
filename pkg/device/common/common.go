@@ -22,6 +22,21 @@ import (
 	"strings"
 )
 
+// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
+// device UUIDs that must not receive new pods.
+const DeviceCordonAnnotation = "hami.io/device-cordon"
+
+// CordonedDevices parses DeviceCordonAnnotation off a node's annotations into a UUID set.
+func CordonedDevices(nodeAnnotations map[string]string) map[string]struct{} {
+	cordoned := make(map[string]struct{})
+	for uuid := range strings.SplitSeq(nodeAnnotations[DeviceCordonAnnotation], ",") {
+		if uuid = strings.TrimSpace(uuid); uuid != "" {
+			cordoned[uuid] = struct{}{}
+		}
+	}
+	return cordoned
+}
+
 const (
 	CardTypeMismatch                  = "CardTypeMismatch"
 	CardUUIDMismatch                  = "CardUuidMismatch"

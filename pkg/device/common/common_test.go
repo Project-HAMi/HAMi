@@ -70,3 +70,18 @@ func TestParseReason(t *testing.T) {
 		})
 	}
 }
+
+func TestCordonedDevices(t *testing.T) {
+	got := CordonedDevices(map[string]string{DeviceCordonAnnotation: " a, b ,,c"})
+	if len(got) != 3 {
+		t.Fatalf("cordoned = %v, want a, b, c", got)
+	}
+	for _, id := range []string{"a", "b", "c"} {
+		if _, ok := got[id]; !ok {
+			t.Fatalf("%s missing from %v", id, got)
+		}
+	}
+	if len(CordonedDevices(nil)) != 0 || len(CordonedDevices(map[string]string{DeviceCordonAnnotation: ""})) != 0 {
+		t.Fatal("no annotation or an empty one cordons nothing")
+	}
+}
