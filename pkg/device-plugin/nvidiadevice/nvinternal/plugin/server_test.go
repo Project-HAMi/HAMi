@@ -573,7 +573,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	_, err = readFromConfigFile(&nvconfig, path+"/config.json", nil)
 	if err != nil {
@@ -590,7 +590,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
@@ -956,8 +956,8 @@ func TestAlignContainerDevicesWithAllocatedIDsPreservesMetadata(t *testing.T) {
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1",
 	})
 	require.NoError(t, err)
-	require.Equal(t, int32(3000), aligned[0].Usedmem)
-	require.Equal(t, int32(50), aligned[0].Usedcores)
+	require.Equal(t, int64(3000), aligned[0].Usedmem)
+	require.Equal(t, int64(50), aligned[0].Usedcores)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[0].UUID)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[1].UUID)
 }
@@ -1436,7 +1436,7 @@ func TestResolveOperatingMode(t *testing.T) {
 func TestIsWholeGPUAllocation(t *testing.T) {
 	// 8 GiB card: TotalMemory is in bytes, Usedmem in MiB.
 	const (
-		gibInMiB = int32(8 * 1024)
+		gibInMiB = int64(8 * 1024)
 		uuidA    = "GPU-aaaa"
 		uuidB    = "GPU-bbbb"
 	)

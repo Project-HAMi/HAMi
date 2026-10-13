@@ -21,7 +21,7 @@ import "fmt"
 // CardMemoryMB reports the memory a device plugin published for a card, and
 // whether that card is known to it. A percentage request is sized against this
 // number, so a card the plugin does not know leaves such a request unbounded.
-type CardMemoryMB func(uuid string) (int32, bool)
+type CardMemoryMB func(uuid string) (int64, bool)
 
 // CoresUnit says whether a backend records ContainerDevice.Usedcores in the
 // same unit the request carries, which decides whether the two can be compared
@@ -69,7 +69,7 @@ func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, all
 
 // requestedMemoryMB returns the memory the request entitles the container to on
 // the named card, and whether the request bounds it at all.
-func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int32, bool) {
+func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int64, bool) {
 	// A container can carry both. Every backend sizes the slice from the
 	// percentage only while Memreq is zero, so the absolute request has to win
 	// here too, or an allocation the scheduler sized from it is rejected.

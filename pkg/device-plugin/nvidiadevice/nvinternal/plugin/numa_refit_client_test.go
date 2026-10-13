@@ -108,7 +108,7 @@ func TestRequestNumaRefitRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, devices, 1)
 	require.Equal(t, numaTestGPUB, devices[0].UUID)
-	require.Equal(t, int32(20000), devices[0].Usedmem)
+	require.Equal(t, int64(20000), devices[0].Usedmem)
 
 	require.Equal(t, "refit-pod-uid", lastRequest.PodUID)
 	require.Equal(t, "default", lastRequest.PodNamespace)

@@ -200,7 +200,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "iluvatar device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
@@ -212,14 +212,14 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 			if ok {
 				memnums, parsed := mem.AsInt64()
-				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
-					klog.ErrorS(nil, "iluvatar memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+				if !parsed || memnums < 0 || memnums > math.MaxInt64/int64(MemoryFactor) {
+					klog.ErrorS(nil, "iluvatar memory request is not a non-negative integer or overflows after applying the memory factor",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("memory request %s is not a non-negative integer or overflows after applying the memory factor", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 			}
-			corenum := int32(0)
+			corenum := int64(0)
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
@@ -251,7 +251,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					klog.ErrorS(nil, "iluvatar core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "iluvatar", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
-				corenum = int32(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -260,10 +260,10 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             dev.config.CommonWord,
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
@@ -330,7 +330,7 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

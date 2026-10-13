@@ -113,7 +113,7 @@ func Test_MutateAdmission(t *testing.T) {
 			ResourceMemoryName:           "nvidia.com/gpumem",
 			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 			ResourceCoreName:             "nvidia.com/gpucores",
-			DefaultGPUNum:                int32(1),
+			DefaultGPUNum:                int64(1),
 		},
 	}
 	for _, test := range tests {
@@ -162,7 +162,7 @@ func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
 				ResourceMemoryName:           "nvidia.com/gpumem",
 				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 				ResourceCoreName:             "nvidia.com/gpucores",
-				DefaultGPUNum:                int32(1),
+				DefaultGPUNum:                int64(1),
 				OverwriteEnv:                 overwriteEnv,
 			},
 		}
@@ -211,7 +211,7 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 			ResourceMemoryName:           "nvidia.com/gpumem",
 			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 			ResourceCoreName:             "nvidia.com/gpucores",
-			DefaultGPUNum:                int32(1),
+			DefaultGPUNum:                int64(1),
 		},
 	}
 	tests := []struct {
@@ -284,7 +284,7 @@ func Test_MutateAdmission_CoresValidation(t *testing.T) {
 			ResourceMemoryName:           "nvidia.com/gpumem",
 			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 			ResourceCoreName:             "nvidia.com/gpucores",
-			DefaultGPUNum:                int32(1),
+			DefaultGPUNum:                int64(1),
 		},
 	}
 	tests := []struct {
@@ -519,7 +519,7 @@ func Test_checkType(t *testing.T) {
 			ResourceMemoryName:           "nvidia.com/gpumem",
 			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 			ResourceCoreName:             "nvidia.com/gpucores",
-			DefaultGPUNum:                int32(1),
+			DefaultGPUNum:                int64(1),
 		},
 	}
 	tests := []struct {
@@ -739,13 +739,13 @@ func Test_InitNvidiaDevice(t *testing.T) {
 			args: NvidiaConfig{
 				ResourceCountName:  "nvidia.com/gpu",
 				ResourceMemoryName: "nvidia.com/gpumem",
-				DefaultGPUNum:      int32(1),
+				DefaultGPUNum:      int64(1),
 			},
 			want: &NvidiaGPUDevices{
 				config: NvidiaConfig{
 					ResourceCountName:  "nvidia.com/gpu",
 					ResourceMemoryName: "nvidia.com/gpumem",
-					DefaultGPUNum:      int32(1),
+					DefaultGPUNum:      int64(1),
 				},
 			},
 		},
@@ -2014,7 +2014,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "gpu count + memory percentage beyond int32 range — rejected",
+			name: "gpu count + memory percentage beyond int64 range — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -2269,30 +2269,6 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "byte-scale memory quantity that overflows int32 is rejected",
-			ctr: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
-						"nvidia.com/gpumem": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			ctr: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
-						"nvidia.com/gpumem": resource.MustParse("16.0Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
 			name: "gpu count zero is rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -2309,20 +2285,6 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"nvidia.com/gpu": *resource.NewQuantity(-1, resource.BinarySI),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "gpu count above int32 max is rejected",
-			ctr: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/gpu": *resource.NewQuantity(
-							2147483648,
-							resource.BinarySI,
-						),
 					},
 				},
 			},
@@ -2356,9 +2318,10 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 		},
 	}
 	result, _ := dev.GenerateResourceRequests(ctr)
-	assert.Equal(t, result.Memreq, int32(2048))
+	assert.Equal(t, result.Memreq, int64(2048))
 
-	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1Gi")
+	// A value that fits int64 but overflows once scaled by the factor is rejected.
+	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("5E")
 	result, _ = dev.GenerateResourceRequests(ctr)
 	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
@@ -2381,14 +2344,14 @@ func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 		},
 	}
 	result, _ := dev.GenerateResourceRequests(ctr)
-	assert.Equal(t, result.Memreq, int32(512))
-	assert.Equal(t, result.MemPercentagereq, int32(101))
+	assert.Equal(t, result.Memreq, int64(512))
+	assert.Equal(t, result.MemPercentagereq, int64(101))
 
 	// a percentage of 0 is unset, so it lands on defaultMemory just like nvidia.com/gpumem: 0
 	ctr.Resources.Limits["nvidia.com/gpumem-percentage"] = *resource.NewQuantity(0, resource.DecimalSI)
 	result, _ = dev.GenerateResourceRequests(ctr)
-	assert.Equal(t, result.Memreq, int32(512))
-	assert.Equal(t, result.MemPercentagereq, int32(101))
+	assert.Equal(t, result.Memreq, int64(512))
+	assert.Equal(t, result.MemPercentagereq, int64(101))
 
 	delete(ctr.Resources.Limits, "nvidia.com/gpumem-percentage")
 	ctr.Resources.Limits["nvidia.com/gpumem"] = *resource.NewQuantity(0, resource.DecimalSI)
@@ -2419,7 +2382,7 @@ func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "zero-percentage", Namespace: "zero-percentage-ns"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{*ctr}},
 	}
-	newCard := func(usedmem int32) []*device.DeviceUsage {
+	newCard := func(usedmem int64) []*device.DeviceUsage {
 		return []*device.DeviceUsage{{
 			ID: "dev-0", Index: 0, Used: 0, Count: 10,
 			Usedmem: usedmem, Totalmem: 11264, Totalcore: 100, Usedcores: 0,
@@ -2431,7 +2394,7 @@ func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
 	fit, result, reason := dev.Fit(newCard(0), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Assert(t, fit, "empty card should fit, reason: %s", reason)
 	// must book the whole card, not 0
-	assert.Equal(t, int32(11264), result[NvidiaGPUDevice][0].Usedmem)
+	assert.Equal(t, int64(11264), result[NvidiaGPUDevice][0].Usedmem)
 
 	fit, _, reason = dev.Fit(newCard(11260), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Assert(t, !fit, "an almost full card must not fit")
@@ -2449,7 +2412,7 @@ func TestGenerateCombinations(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		nums    int32
+		nums    int64
 		wantLen int
 	}{
 		{name: "C(4,1)=4", nums: 1, wantLen: 4},
@@ -3489,7 +3452,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -3602,7 +3565,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		name    string
 		cores   string
 		wantOk  bool
-		wantVal int32
+		wantVal int64
 	}{
 		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
 		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
@@ -3627,10 +3590,10 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
-				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Nums, int64(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)
 			} else {
-				assert.Equal(t, req.Nums, int32(0))
+				assert.Equal(t, req.Nums, int64(0))
 			}
 		})
 	}
@@ -3865,7 +3828,7 @@ func TestGenerateResourceRequests_InvalidCoresFailsClosed(t *testing.T) {
 // is a common way to say "no GPU" (chart templates render it that way whenever
 // GPU support is switched off), so it has to stay a device-less pod that is
 // admitted and scheduled normally rather than being denied. Only a negative or
-// out-of-int32 count is an error.
+// out-of-int64 count is an error.
 func TestGenerateResourceRequests_ZeroCountIsDeviceLess(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",

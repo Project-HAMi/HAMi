@@ -104,7 +104,7 @@ func (ns *NodeScore) SnapshotDevice(devices DeviceUsageList) []*device.DeviceUsa
 }
 
 func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
-	used, usedCore, usedMem := int32(0), int32(0), int32(0)
+	used, usedCore, usedMem := int64(0), int64(0), int64(0)
 	for _, device := range devices.DeviceLists {
 		used += device.Device.Used
 		usedCore += device.Device.Usedcores
@@ -112,7 +112,7 @@ func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
 	}
 	klog.V(2).Infof("node %s used %d, usedCore %d, usedMem %d,", ns.NodeID, used, usedCore, usedMem)
 
-	total, totalCore, totalMem := int32(0), int32(0), int32(0)
+	total, totalCore, totalMem := int64(0), int64(0), int64(0)
 	for _, deviceLists := range devices.DeviceLists {
 		total += deviceLists.Device.Count
 		totalCore += deviceLists.Device.Totalcore

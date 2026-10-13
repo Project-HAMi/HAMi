@@ -70,7 +70,7 @@ type RuntimeInfo struct {
 	UUID   string `json:"UUID,omitempty"`
 	Temp   string `json:"temp,omitempty"`
 	Memory int64  `json:"memory,omitempty"`
-	Core   int32  `json:"core,omitempty"`
+	Core   int64  `json:"core,omitempty"`
 }
 
 var enableAscend bool
@@ -354,12 +354,12 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 
 				// Soft-slice allocations use their exact memory without a template.
 				if effectiveMode == VNPUModeHamiCore || isENPUMode(effectiveMode) {
-					info.Memory = int64(val.Usedmem)
+					info.Memory = val.Usedmem
 					info.Core = val.Usedcores
 				} else {
-					_, temp := dev.trimMemory(int64(val.Usedmem))
+					_, temp := dev.trimMemory(val.Usedmem)
 					info.Temp = temp
-					info.Memory = int64(val.Usedmem)
+					info.Memory = val.Usedmem
 					info.Core = val.Usedcores
 				}
 
@@ -424,7 +424,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "ascend device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
@@ -441,7 +441,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 				}
 				memnums, ok := mem.AsInt64()
 				if ok {
-					// Ascend memory is in MB, so an over-int32 value such as a byte quantity 16Gi is a wrong-unit mistake.
+					// Ascend memory is in MB, so a value as large as a byte quantity such as 16Gi is a wrong-unit mistake.
 					if memnums > math.MaxInt32 {
 						klog.ErrorS(nil, "ascend device memory request is out of range; memory unit is treated as MB not Byte, so a quantity such as 16Gi is invalid, request 16384 for 16GB instead",
 							"container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
@@ -449,13 +449,12 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 					}
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
-						// memnums is bounded by math.MaxInt32 and MemoryFactor is int32, so this product cannot overflow int64.
-						memnums = memnums * int64(dev.config.MemoryFactor)
-						if memnums > math.MaxInt32 {
-							klog.ErrorS(nil, "ascend device memory request overflows int32 after applying memory factor; memory unit is treated as MB not Byte",
-								"container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", dev.config.MemoryFactor)
-							return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("memory request %d overflows int32 after applying memory factor %d", rawMemnums, dev.config.MemoryFactor)}
+						if memnums > math.MaxInt64/dev.config.MemoryFactor {
+							klog.ErrorS(nil, "ascend device memory request overflows int64 after applying memory factor; memory unit is treated as MB not Byte",
+								"container", ctr.Name, "raw", rawMemnums, "factor", dev.config.MemoryFactor)
+							return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("memory request %d overflows int64 after applying memory factor %d", rawMemnums, dev.config.MemoryFactor)}
 						}
+						memnums *= dev.config.MemoryFactor
 						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
 					memnum = int(memnums)
@@ -463,7 +462,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 			}
 
 			// Process Core Resources
-			corenum := int32(0)
+			corenum := int64(0)
 			if ascendResourceCore != "" {
 				cv, ok := ctr.Resources.Limits[ascendResourceCore]
 				if !ok {
@@ -475,7 +474,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 						klog.ErrorS(nil, "ascend device core request is out of range", "container", ctr.Name, "request", cv.String())
 						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: dev.config.CommonWord, Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", cv.String())}
 					}
-					corenum = int32(corenums)
+					corenum = corenums
 				}
 			}
 
@@ -485,10 +484,10 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) (device.Cont
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             dev.CommonWord(),
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
@@ -698,7 +697,7 @@ func softSliceModeCompatible(usage *device.DeviceUsage, enpu, nodeHamiCore bool)
 // The coupled plugin change (Project-HAMi/ascend-device-plugin#132) advertises
 // Devcore = round(100 * deviceCoreScaling) for hami-core and never reports less
 // than the base, so any higher value is an intentional oversell budget.
-func hamiCorePercentBudget(advertisedTotalcore int32) int32 {
+func hamiCorePercentBudget(advertisedTotalcore int64) int64 {
 	if advertisedTotalcore > hamiCorePercentBase {
 		return advertisedTotalcore
 	}
@@ -754,8 +753,8 @@ func hamiCoreExclusiveOccupant(dev *device.DeviceUsage) bool {
 // This value feeds the `self` argument of hamiCoreIncomingExclusive, which adds
 // the request under judgement itself, so the container being fitted must NOT be
 // included here or its request would be counted twice.
-func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices, pod *corev1.Pod) int32 {
-	var sum int32
+func incomingHamiCoreOnDevice(devID string, allocated *device.PodDevices, tmpDevs map[string]device.ContainerDevices, pod *corev1.Pod) int64 {
+	var sum int64
 	add := func(devs device.ContainerDevices) {
 		for _, d := range devs {
 			if d.UUID == devID {
@@ -810,8 +809,8 @@ func containerStillRunning(pod *corev1.Pod, cidx, numInit int) bool {
 // hamiCoreOthersOnDevice sums cores already held on dev by pods other than
 // pod. In-flight usage from this scheduling pass (sidecar / prior containers
 // recorded by AddResourceUsage but not yet in PodInfos) is treated as self.
-func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int32 {
-	var others int32
+func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int64 {
+	var others int64
 	for _, podInfo := range dev.PodInfos {
 		if podInfo == nil || podInfo.Pod == nil {
 			continue
@@ -835,7 +834,7 @@ func hamiCoreOthersOnDevice(dev *device.DeviceUsage, pod *corev1.Pod) int32 {
 // hamiCoreIncomingExclusive reports whether this request would take the
 // incoming pod to the percentage base on a card that already has another
 // tenant.
-func hamiCoreIncomingExclusive(dev *device.DeviceUsage, pod *corev1.Pod, self, coresreq int32) bool {
+func hamiCoreIncomingExclusive(dev *device.DeviceUsage, pod *corev1.Pod, self, coresreq int64) bool {
 	if self+coresreq < hamiCorePercentBase {
 		return false
 	}
@@ -909,14 +908,14 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	// Resolve template memory only after the candidate node's mode is known.
 	// k is a per-Fit copy, so evaluating one candidate cannot affect another.
 	if vnpuMode == "" && !nodeSupportHamiCore && npu.config.MemoryAllocatable > 0 && k.Memreq > 0 {
-		trimmedMem, _ := npu.trimMemory(int64(k.Memreq))
+		trimmedMem, _ := npu.trimMemory(k.Memreq)
 		if trimmedMem <= 0 {
 			reason[common.CardInsufficientMemory] += len(devices)
 			return false, nil, common.GenReason(reason, len(devices))
 		}
-		k.Memreq = int32(trimmedMem)
+		k.Memreq = trimmedMem
 	}
-	if vnpuMode == "" && !nodeSupportHamiCore && k.Nums > 1 && k.Memreq > 0 && k.Memreq != int32(npu.config.MemoryAllocatable) {
+	if vnpuMode == "" && !nodeSupportHamiCore && k.Nums > 1 && k.Memreq > 0 && k.Memreq != npu.config.MemoryAllocatable {
 		return false, nil, "vNPU not supported for multiple devices"
 	}
 	effectiveMode := vnpuMode
@@ -978,7 +977,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

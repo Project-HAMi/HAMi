@@ -86,11 +86,11 @@ func Test_containerNameByIndex(t *testing.T) {
 
 func Test_evaluateContainerWholeGPU(t *testing.T) {
 	// physOK pretends every UUID carries exactly 8000 MiB of physical memory.
-	physOK := func(string) (int32, bool) { return 8000, true }
+	physOK := func(string) (int64, bool) { return 8000, true }
 
 	// verdict adapts evaluateContainerWholeGPU for assertions that only
 	// care about the verdict itself.
-	verdict := func(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(string) (int32, bool)) wholeGPUVerdict {
+	verdict := func(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(string) (int64, bool)) wholeGPUVerdict {
 		got, _ := evaluateContainerWholeGPU(ctrDevs, nodeDevs, physMiB)
 		return got
 	}
@@ -183,7 +183,7 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 	})
 
 	t.Run("unreadable physical memory is indeterminate, not failed closed", func(t *testing.T) {
-		physFail := func(string) (int32, bool) { return 0, false }
+		physFail := func(string) (int64, bool) { return 0, false }
 		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}
 		got, cause := evaluateContainerWholeGPU(ctrDevs, nodeDevs, physFail)
@@ -192,7 +192,7 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 	})
 
 	t.Run("registry miss outranks physical read failure for the pending cause", func(t *testing.T) {
-		physFail := func(string) (int32, bool) { return 0, false }
+		physFail := func(string) (int64, bool) { return 0, false }
 		ctrDevs := device.ContainerDevices{
 			{UUID: "GPU-unregistered", Usedmem: 8000, Usedcores: 100},
 			{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100},
@@ -330,7 +330,7 @@ func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -375,7 +375,7 @@ func Test_reconcileWholeGPU_replacesRealShmEntry(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -407,7 +407,7 @@ func Test_reconcileWholeGPU_prunesOnPodDeletion(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -445,7 +445,7 @@ func Test_reconcileWholeGPU_verdictCached_noNodeGet(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				calls++
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
@@ -478,7 +478,7 @@ func Test_reconcileWholeGPU_noFlapOnNodeTableFailure(t *testing.T) {
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
 				firstSeenAt:     make(map[string]time.Time),
-				physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+				physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					if *fail {
 						return nil, errors.New("apiserver unavailable")
@@ -521,7 +521,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	// newLister builds a lister whose verdict for "uid6_ctr" has supposedly
 	// been pending since firstSeen, with the device optionally present in
 	// the node registry.
-	newLister := func(registered bool, phys func(string) (int32, bool), firstSeen time.Time) (*ContainerLister, *corev1.Pod) {
+	newLister := func(registered bool, phys func(string) (int64, bool), firstSeen time.Time) (*ContainerLister, *corev1.Pod) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid6",
@@ -551,7 +551,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	past := time.Now().Add(-indeterminateRetryWindow - time.Minute)
 
 	t.Run("registry miss past the window locks to notWholeGPU", func(t *testing.T) {
-		l, pod := newLister(false, func(string) (int32, bool) { return 8000, true }, past)
+		l, pod := newLister(false, func(string) (int64, bool) { return 8000, true }, past)
 		l.reconcileWholeGPU([]*corev1.Pod{pod})
 		assert.Equal(t, l.wholeGPU.verdicts["uid6_ctr"], notWholeGPU)
 		_, ok := l.containers["uid6_ctr"]
@@ -559,7 +559,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	})
 
 	t.Run("unreadable physical memory never ages out of retry", func(t *testing.T) {
-		l, pod := newLister(true, func(string) (int32, bool) { return 0, false }, past)
+		l, pod := newLister(true, func(string) (int64, bool) { return 0, false }, past)
 		l.reconcileWholeGPU([]*corev1.Pod{pod})
 		_, cached := l.wholeGPU.verdicts["uid6_ctr"]
 		assert.Equal(t, cached, false)
@@ -567,7 +567,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 
 	t.Run("physical memory readable again later still confirms", func(t *testing.T) {
 		failing := true
-		l, pod := newLister(true, func(string) (int32, bool) {
+		l, pod := newLister(true, func(string) (int64, bool) {
 			if failing {
 				return 0, false
 			}
@@ -611,7 +611,7 @@ func newWholeGPUTestLister(dir string, pods ...*corev1.Pod) *ContainerLister {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -662,7 +662,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
 				firstSeenAt:     make(map[string]time.Time),
-				physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+				physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 				},
@@ -835,7 +835,7 @@ func Test_fetchNodeDevices(t *testing.T) {
 		devs, err := serveNodeForTest(t, http.StatusOK, registered).fetchNodeDevices()
 		assert.NilError(t, err)
 		assert.Equal(t, len(devs), 1)
-		assert.Equal(t, devs["GPU-1"].Devmem, int32(8000))
+		assert.Equal(t, devs["GPU-1"].Devmem, int64(8000))
 	})
 
 	t.Run("node without a register annotation yields an empty registry", func(t *testing.T) {
@@ -882,7 +882,7 @@ func Test_physTotalMiB(t *testing.T) {
 		}}
 		got, ok := physTotalMiB(lib, "GPU-1")
 		assert.Equal(t, ok, true)
-		assert.Equal(t, got, int32(8000))
+		assert.Equal(t, got, int64(8000))
 	})
 }
 

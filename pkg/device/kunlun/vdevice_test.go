@@ -512,9 +512,9 @@ func Test_KunlunVDevices_AddResourceUsage(t *testing.T) {
 
 	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, usage.Used, int32(2))
-	assert.Equal(t, usage.Usedcores, int32(30))
-	assert.Equal(t, usage.Usedmem, int32(3000))
+	assert.Equal(t, usage.Used, int64(2))
+	assert.Equal(t, usage.Usedcores, int64(30))
+	assert.Equal(t, usage.Usedmem, int64(3000))
 }
 
 func Test_KunlunVDevices_GetResourceNames(t *testing.T) {
@@ -573,7 +573,7 @@ func Test_FitVXPU_direct(t *testing.T) {
 
 func Test_KunlunVDevices_GenerateResourceRequests_CountRange(t *testing.T) {
 	dev := InitKunlunVDevice(testVConfig())
-	for _, count := range []string{"-1", "4294967296"} {
+	for _, count := range []string{"-1"} {
 		ctr := &corev1.Container{
 			Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{

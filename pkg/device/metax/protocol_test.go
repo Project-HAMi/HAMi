@@ -80,7 +80,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					CustomInfo: map[string]any{
 						"QosPolicy": BestEffort,
 						"Model":     "native",
-						"LinkZone":  int32(1),
+						"LinkZone":  int64(1),
 					},
 				},
 				{
@@ -98,7 +98,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					CustomInfo: map[string]any{
 						"QosPolicy": BurstShare,
 						"Model":     "sgpu",
-						"LinkZone":  int32(2),
+						"LinkZone":  int64(2),
 					},
 				},
 			},

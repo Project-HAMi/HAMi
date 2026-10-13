@@ -95,7 +95,7 @@ func setNodeReady(n *corev1.Node, status corev1.ConditionStatus) {
 	n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
 }
 
-func gpu(uuid string, mem int32) *device.DeviceInfo {
+func gpu(uuid string, mem int64) *device.DeviceInfo {
 	return &device.DeviceInfo{ID: uuid, Count: 10, Devmem: mem, Devcore: 100, Type: "NVIDIA", Health: true, Mode: nvidia.RemoteMode}
 }
 
@@ -114,7 +114,7 @@ func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
 		ids[d.ID] = true
 		assert.Equal(t, d.DeviceVendor, RemoteGPUCommonWord)
 		// Whole-card allocation: the NVIDIA plugin's split count is discarded.
-		assert.Equal(t, d.Count, int32(1))
+		assert.Equal(t, d.Count, int64(1))
 	}
 	assert.Assert(t, ids["gpu-a/GPU-1"])
 	assert.Assert(t, ids["gpu-b/GPU-3"])

@@ -118,7 +118,7 @@ type wholeGPUState struct {
 	// physTotalMiB resolves a device's physical memory in MiB via NVML;
 	// declared as a field so tests can stub it. Populated when the state
 	// is created.
-	physTotalMiB func(uuid string) (int32, bool)
+	physTotalMiB func(uuid string) (int64, bool)
 }
 
 // indeterminateRetryWindow caps how long a pending verdict caused by a
@@ -324,7 +324,7 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 			ownedContainerKeys: make(map[string]struct{}),
 		}
 		l.wholeGPU.getNodeDevices = l.fetchNodeDevices
-		l.wholeGPU.physTotalMiB = func(uuid string) (int32, bool) {
+		l.wholeGPU.physTotalMiB = func(uuid string) (int64, bool) {
 			return physTotalMiB(l.wholeGPU.nvmllib, uuid)
 		}
 	}
@@ -433,7 +433,7 @@ func (l *ContainerLister) fetchNodeDevices() (map[string]*device.DeviceInfo, err
 // physTotalMiB reports a device's physical total memory in MiB via NVML.
 // Over-subscribed nodes register scaled memory instead, so comparing this
 // against the registry's Devmem detects DeviceMemoryScaling != 1.
-func physTotalMiB(nvmllib nvml.Interface, uuid string) (int32, bool) {
+func physTotalMiB(nvmllib nvml.Interface, uuid string) (int64, bool) {
 	handle, ret := nvmllib.DeviceGetHandleByUUID(uuid)
 	if !errors.Is(ret, nvml.SUCCESS) {
 		return 0, false
@@ -442,7 +442,7 @@ func physTotalMiB(nvmllib nvml.Interface, uuid string) (int32, bool) {
 	if !errors.Is(ret, nvml.SUCCESS) {
 		return 0, false
 	}
-	return int32(mem.Total / 1024 / 1024), true
+	return int64(mem.Total / 1024 / 1024), true
 }
 
 // evaluateContainerWholeGPU decides whether every allocated device is a whole
@@ -453,7 +453,7 @@ func physTotalMiB(nvmllib nvml.Interface, uuid string) (int32, bool) {
 // The second return value reports why an indeterminate verdict is pending:
 // causeRegistryMiss or causePhysUnreadable (causeNotIndeterminate for any
 // terminal verdict).
-func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(uuid string) (int32, bool)) (wholeGPUVerdict, indeterminateCause) {
+func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(uuid string) (int64, bool)) (wholeGPUVerdict, indeterminateCause) {
 	if len(ctrDevs) == 0 {
 		return notWholeGPU, causeNotIndeterminate
 	}

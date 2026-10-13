@@ -77,7 +77,7 @@ func enpuTestUsage(id string, occupant *corev1.Pod) *device.DeviceUsage {
 }
 
 func enpuTestRequest(mode string) device.ContainerDeviceRequest {
-	cores := int32(0)
+	cores := int64(0)
 	if mode != "" {
 		cores = 20
 	}
@@ -243,7 +243,7 @@ func TestENPUAdmissionRequestsOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateResourceRequests: %v", err)
 			}
-			if request.Nums != 1 || int64(request.Memreq) != tc.wantMemory {
+			if request.Nums != 1 || request.Memreq != tc.wantMemory {
 				t.Fatalf("scheduler request does not match admitted resources: %+v", request)
 			}
 		})
@@ -331,7 +331,7 @@ func TestENPUNodeOverridesAndDefaultCoreAccounting(t *testing.T) {
 		globalMode string
 		node       *device.NodeInfo
 		wantFit    bool
-		wantCore   int32
+		wantCore   int64
 	}{
 		{name: "node enables ENPU", mode: VNPUModeENPU, node: enpuTestNode(false, true), wantFit: true, wantCore: 100},
 		{name: "node disables global ENPU", mode: VNPUModeENPU, globalMode: VNPUModeENPU, node: enpuTestNode(false, false)},

@@ -109,9 +109,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:           "7-0",
-					Count:        int32(1),
-					Devmem:       int32(32768),
-					Devcore:      int32(100),
+					Count:        int64(1),
+					Devmem:       int64(32768),
+					Devcore:      int64(100),
 					Type:         dev.CommonWord(),
 					Numa:         0,
 					Health:       true,
@@ -287,8 +287,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       1,
 								UUID:      "test1",
 								Type:      VastaiDevice,
-								Usedmem:   int32(2048),
-								Usedcores: int32(1),
+								Usedmem:   int64(2048),
+								Usedcores: int64(1),
 							},
 						},
 					},
@@ -349,11 +349,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -366,11 +366,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -383,11 +383,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -413,7 +413,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "max int32 count is accepted",
+			name: "max int64 count is accepted",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -428,17 +428,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: 100,
 				Coresreq:         0,
 			},
-		},
-		{
-			name: "count above max int32 is rejected",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"vastaitech.com/va": resource.MustParse("2147483648"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {

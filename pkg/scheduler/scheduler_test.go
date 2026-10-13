@@ -129,9 +129,9 @@ func Test_getNodesUsage(t *testing.T) {
 	v, ok := (*cachenodeMap)["node1"]
 	assert.Equal(t, ok, true)
 	assert.Equal(t, len(v.Devices.DeviceLists), 2)
-	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
-	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
-	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int64(2))
+	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int64(200))
+	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int64(20))
 }
 
 func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
@@ -152,7 +152,7 @@ func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
 		}}},
 	})
 	pods := device.NewPodManager()
-	for i, mask := range []int32{1, 2} {
+	for i, mask := range []int64{1, 2} {
 		pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			UID:  types.UID(fmt.Sprintf("neuron-%d", i)),
 			Name: fmt.Sprintf("neuron-%d", i), Namespace: "default",
@@ -164,7 +164,7 @@ func Test_getNodesUsage_ReplaysAWSNeuronCoreMasks(t *testing.T) {
 	nodeNames := []string{"node1"}
 	usage, _, _, err := s.getNodesUsage(&nodeNames, nil)
 	require.NoError(t, err)
-	assert.Equal(t, (*usage)["node1"].Devices.DeviceLists[0].Device.Usedcores, int32(3))
+	assert.Equal(t, (*usage)["node1"].Devices.DeviceLists[0].Device.Usedcores, int64(3))
 }
 
 // Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()
@@ -250,7 +250,7 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
-		assert.Equal(t, int32(0), dev.Used)
+		assert.Equal(t, int64(0), dev.Used)
 		// A stale UUID must not poison unrelated healthy devices.
 		// Health is per-device (checked individually in every vendor Fit loop).
 		// Existing HAMi precedent: unknown-node pods are silently skipped with no
@@ -299,9 +299,9 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
-		assert.Equal(t, int32(1), dev.Used)
-		assert.Equal(t, int32(200), dev.Usedmem)
-		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.Equal(t, int64(1), dev.Used)
+		assert.Equal(t, int64(200), dev.Usedmem)
+		assert.Equal(t, int64(20), dev.Usedcores)
 		assert.Assert(t, dev.Health, "device health should be true for valid allocation")
 	})
 
@@ -356,9 +356,9 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
-		assert.Equal(t, int32(1), dev.Used)
-		assert.Equal(t, int32(200), dev.Usedmem)
-		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.Equal(t, int64(1), dev.Used)
+		assert.Equal(t, int64(200), dev.Usedmem)
+		assert.Equal(t, int64(20), dev.Usedcores)
 		// GPU-B matched a valid allocation and must stay healthy.
 		// The stale GPU-A reference from another pod must not contaminate GPU-B.
 		assert.Assert(t, dev.Health, "stale UUID from another pod must not mark the valid device unhealthy")
@@ -425,7 +425,7 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 			assert.Assert(t, d.Health,
 				"device %s must remain healthy: a stale UUID must not trigger node-wide health poisoning", d.ID)
 			// The stale UUID was not matched, so no usage should be counted.
-			assert.Equal(t, int32(0), d.Used)
+			assert.Equal(t, int64(0), d.Used)
 		}
 	})
 }
@@ -2800,8 +2800,8 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, pi.Devices[nvidia.NvidiaGPUDevice], 1)
 	require.Len(t, pi.Devices[nvidia.NvidiaGPUDevice][0], 1)
-	assert.Equal(t, int32(20000), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
-	assert.Equal(t, int32(10), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
+	assert.Equal(t, int64(20000), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
+	assert.Equal(t, int64(10), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
 
 	updatedPod := pod.DeepCopy()
 	updatedPod.Status.InitContainerStatuses = []corev1.ContainerStatus{
@@ -2818,8 +2818,8 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 	piAfter, ok := s.podManager.GetPod(updatedPod)
 	require.True(t, ok)
 	assert.Assert(t, piAfter.InitContainerResourceReleased)
-	assert.Equal(t, int32(10000), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
-	assert.Equal(t, int32(5), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
+	assert.Equal(t, int64(10000), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
+	assert.Equal(t, int64(5), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
 
 	quotas := s.quotaManager.GetResourceQuota()
 	require.Contains(t, quotas, "default")
@@ -2868,9 +2868,9 @@ func Test_getNodesUsage_WithInitContainers(t *testing.T) {
 	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
 	require.NoError(t, err)
 	v := (*cachenodeMap)["node1"]
-	assert.Equal(t, int32(1), v.Devices.DeviceLists[0].Device.Used)
-	assert.Equal(t, int32(20000), v.Devices.DeviceLists[0].Device.Usedmem) // peak, not sum
-	assert.Equal(t, int32(10), v.Devices.DeviceLists[0].Device.Usedcores)
+	assert.Equal(t, int64(1), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, int64(20000), v.Devices.DeviceLists[0].Device.Usedmem) // peak, not sum
+	assert.Equal(t, int64(10), v.Devices.DeviceLists[0].Device.Usedcores)
 }
 
 func Test_getNodesUsage_WithMultipleAppContainersSharingDevice(t *testing.T) {
@@ -2905,7 +2905,7 @@ func Test_getNodesUsage_WithMultipleAppContainersSharingDevice(t *testing.T) {
 	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
 	require.NoError(t, err)
 	v := (*cachenodeMap)["node1"]
-	assert.Equal(t, int32(2), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, int64(2), v.Devices.DeviceLists[0].Device.Used)
 }
 
 func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
@@ -3181,7 +3181,7 @@ type transactionMockDevice struct {
 	registerMockDevice
 	name         string
 	lockErr      error
-	lockErrFunc  func(attempt int32) error // optional dynamic lock error generator
+	lockErrFunc  func(attempt int64) error // optional dynamic lock error generator
 	releaseErr   error                     // returned by ReleaseNodeLock; exercises rollback error branch
 	lockCalls    atomic.Int32
 	releaseCalls atomic.Int32
@@ -3201,7 +3201,7 @@ func (m *transactionMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 		m.mu.Unlock()
 	}
 	if m.lockErrFunc != nil {
-		return m.lockErrFunc(attempt)
+		return m.lockErrFunc(int64(attempt))
 	}
 	return m.lockErr
 }
@@ -3427,7 +3427,7 @@ func Test_lockAllDevices_Transactional(t *testing.T) {
 		dev2 := &transactionMockDevice{
 			name:   "backend2",
 			events: events,
-			lockErrFunc: func(attempt int32) error {
+			lockErrFunc: func(attempt int64) error {
 				if attempt == 1 {
 					return nodelockutil.ErrNodeLockContention
 				}

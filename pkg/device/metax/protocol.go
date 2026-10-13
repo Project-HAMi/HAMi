@@ -51,23 +51,23 @@ type MetaxSDeviceInfo struct {
 	UUID              string `json:"uuid"`
 	BDF               string `json:"bdf,omitempty"`
 	Model             string `json:"model,omitempty"`
-	TotalDevCount     int32  `json:"totalDevCount,omitempty"`
-	TotalCompute      int32  `json:"totalCompute,omitempty"`
-	TotalVRam         int32  `json:"totalVRam,omitempty"`
-	AvailableDevCount int32  `json:"availableDevCount,omitempty"`
-	AvailableCompute  int32  `json:"availableCompute,omitempty"`
-	AvailableVRam     int32  `json:"availableVRam,omitempty"`
-	Numa              int32  `json:"numa,omitempty"`
+	TotalDevCount     int64  `json:"totalDevCount,omitempty"`
+	TotalCompute      int64  `json:"totalCompute,omitempty"`
+	TotalVRam         int64  `json:"totalVRam,omitempty"`
+	AvailableDevCount int64  `json:"availableDevCount,omitempty"`
+	AvailableCompute  int64  `json:"availableCompute,omitempty"`
+	AvailableVRam     int64  `json:"availableVRam,omitempty"`
+	Numa              int64  `json:"numa,omitempty"`
 	Healthy           bool   `json:"healthy,omitempty"`
 	QosPolicy         string `json:"qosPolicy,omitempty"`
-	LinkZone          int32  `json:"linkZone,omitempty"`
+	LinkZone          int64  `json:"linkZone,omitempty"`
 }
 type NodeMetaxSDeviceInfo []*MetaxSDeviceInfo
 
 type ContainerMetaxSDevice struct {
 	UUID    string `json:"uuid"`
-	Compute int32  `json:"compute,omitempty"`
-	VRam    int32  `json:"vRam,omitempty"`
+	Compute int64  `json:"compute,omitempty"`
+	VRam    int64  `json:"vRam,omitempty"`
 }
 type ContainerMetaxSDevices []ContainerMetaxSDevice
 type PodMetaxSDevice []ContainerMetaxSDevices

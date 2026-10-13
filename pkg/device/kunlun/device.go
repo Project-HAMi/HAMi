@@ -18,7 +18,6 @@ package kunlun
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -143,14 +142,14 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) (devic
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "kunlun device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found kunlunxin devices")
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             KunlunGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 100,

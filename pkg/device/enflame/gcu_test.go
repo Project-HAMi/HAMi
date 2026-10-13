@@ -379,7 +379,7 @@ func TestGCUDevices_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(3),
+				Nums:             int64(3),
 				Type:             EnflameGCUDevice,
 				Memreq:           100,
 				MemPercentagereq: 100,
@@ -397,7 +397,7 @@ func TestGCUDevices_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int64(2),
 				Type:             EnflameGCUDevice,
 				Memreq:           100,
 				MemPercentagereq: 100,
@@ -730,7 +730,7 @@ func TestGCUDevices_AddResourceUsage(t *testing.T) {
 
 func TestGCUDevices_GenerateResourceRequests_CountRange(t *testing.T) {
 	dev := GCUDevices{}
-	for _, count := range []string{"-1", "4294967296"} {
+	for _, count := range []string{"-1"} {
 		ctr := &corev1.Container{
 			Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{
