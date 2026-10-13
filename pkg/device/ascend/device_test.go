@@ -664,78 +664,49 @@ func Test_checkType(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	dev := Devices{}
-	tests := []struct {
-		name string
-		args struct {
-			devType string
-			n       corev1.Node
+	const (
+		commonWord   = "Ascend910"
+		resourceName = "huawei.com/Ascend910"
+	)
+	dev := Devices{
+		config:           VNPUConfig{CommonWord: commonWord, ResourceName: resourceName},
+		nodeRegisterAnno: "hami.io/node-register-" + commonWord,
+	}
+
+	node := func(name string, allocatable int64, registerAnno string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		want1 bool
-		want2 bool
-	}{
-		{
-			name: "Requesting state",
-			args: struct {
-				devType string
-				n       corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			name: "Unknown state",
-			args: struct {
-				devType string
-				n       corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: true,
-		},
-		{
-			name: "Requesting state expired",
-			args: struct {
-				devType string
-				n       corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: false,
-			want2: false,
-		},
+		if allocatable > 0 {
+			n.Status.Allocatable[resourceName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if registerAnno != "" {
+			n.Annotations[dev.nodeRegisterAnno] = registerAnno
+		}
+		return n
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result1, result2 := dev.CheckHealth(test.args.devType, &test.args.n)
-			assert.Equal(t, result1, test.want1)
-			assert.Equal(t, result2, test.want2)
-		})
-	}
+
+	t.Run("no allocatable is unhealthy", func(t *testing.T) {
+		healthy, needUpdate := dev.CheckHealth(commonWord, node("npu-absent", 0, "anno"))
+		assert.Equal(t, healthy, false)
+		assert.Equal(t, needUpdate, false)
+	})
+
+	t.Run("allocatable present registers then stays cached", func(t *testing.T) {
+		n := node("npu-present", 8, "anno-v1")
+		healthy, needUpdate := dev.CheckHealth(commonWord, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+
+		healthy, needUpdate = dev.CheckHealth(commonWord, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, false)
+
+		healthy, needUpdate = dev.CheckHealth(commonWord, node("npu-present", 8, "anno-v2"))
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
 }
 
 func Test_MutateAdmission(t *testing.T) {

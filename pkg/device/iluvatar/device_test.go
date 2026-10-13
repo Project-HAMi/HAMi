@@ -17,6 +17,7 @@ limitations under the License.
 package iluvatar
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,11 +25,13 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 )
 
@@ -1138,4 +1141,27 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNodeCleanUpRemovesHandshake(t *testing.T) {
+	dev := InitIluvatarDevice([]IluvatarConfig{{CommonWord: "MR-V100", ResourceCountName: "iluvatar.ai/MR-V100-vgpu"}})[0]
+	prevClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = prevClient })
+	client.KubeClient = fake.NewClientset()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-cleanup",
+			Annotations: map[string]string{dev.handshakeAnno: "Requesting_2024-01-02 00:00:00"},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	assert.NilError(t, dev.NodeCleanUp(node.Name))
+
+	got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, ok := got.Annotations[dev.handshakeAnno]
+	assert.Equal(t, ok, false)
 }

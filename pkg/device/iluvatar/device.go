@@ -170,7 +170,7 @@ func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 }
 
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
-	return nil
+	return util.MarkAnnotationsToDelete(dev.handshakeAnno, nn)
 }
 
 func (dev *IluvatarDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
@@ -181,7 +181,7 @@ func (dev *IluvatarDevices) checkType(annos map[string]string, d device.DeviceUs
 }
 
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[dev.nodeRegisterAnno])
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

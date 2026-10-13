@@ -122,7 +122,7 @@ func (dev *BirenDevices) checkType(annos map[string]string, d device.DeviceUsage
 }
 
 func (dev *BirenDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[RegisterAnnos])
 }
 
 func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

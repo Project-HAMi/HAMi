@@ -280,6 +280,7 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	device.RemoveObsoleteHandshake(devType, n)
 	current := int64(0)
 	quantity := n.Status.Allocatable.Name(corev1.ResourceName(dev.config.ResourceCountName), resource.DecimalSI)
 	if quantity != nil {
@@ -292,31 +293,22 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	reported := dev.ReportedGPUNum[n.Name]
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
-	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, dev.config.ResourceCountName, n)
 	registerAnno := n.Annotations[RegisterAnnos]
 	reportedRegisterAnno := dev.ReportedRegisterAnnos[n.Name]
 
 	if current == 0 {
-		if reported == 0 {
-			return handshakeHealthy, handshakeChanged
-		}
-		dev.ReportedGPUNum[n.Name] = current
-		dev.ReportedRegisterAnnos[n.Name] = registerAnno
-		return false, handshakeChanged
+		delete(dev.ReportedGPUNum, n.Name)
+		delete(dev.ReportedRegisterAnnos, n.Name)
+		return false, false
 	}
 
-	if reported != current {
+	if reported != current || reportedRegisterAnno != registerAnno {
 		dev.ReportedGPUNum[n.Name] = current
 		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return true, true
 	}
 
-	if reportedRegisterAnno != registerAnno {
-		dev.ReportedRegisterAnnos[n.Name] = registerAnno
-		return handshakeHealthy, true
-	}
-
-	return handshakeHealthy, handshakeChanged
+	return true, false
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {

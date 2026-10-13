@@ -159,7 +159,7 @@ func (dev *HCUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *HCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[RegisterAnnos])
 }
 
 func (dev *HCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {

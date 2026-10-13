@@ -30,7 +30,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -160,60 +159,47 @@ func Test_GetNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			devType string
-			n       *corev1.Node
+	const resourceName = "birentech.com/gpu"
+	previous := BirenResourceCount
+	t.Cleanup(func() { BirenResourceCount = previous })
+	BirenResourceCount = resourceName
+
+	node := func(name string, allocatable int64, registerAnno string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		want1 bool
-		want2 bool
-	}{
-		{
-			name: "Requesting state expired",
-			args: struct {
-				devType string
-				n       *corev1.Node
-			}{
-				devType: "birentech.com/gpu",
-				n: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-biren"]: "Requesting_2025-01-07 00:00:00",
-						},
-					},
-				},
-			},
-			want1: false,
-			want2: false,
-		},
-		{
-			name: "Unknown state",
-			args: struct {
-				devType string
-				n       *corev1.Node
-			}{
-				devType: "birentech.com/gpu",
-				n: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-biren"]: "Unknown",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: true,
-		},
+		if allocatable > 0 {
+			n.Status.Allocatable[resourceName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if registerAnno != "" {
+			n.Annotations[RegisterAnnos] = registerAnno
+		}
+		return n
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := BirenDevices{}
-			result1, result2 := dev.CheckHealth(test.args.devType, test.args.n)
-			assert.Equal(t, result1, test.want1)
-			assert.Equal(t, result2, test.want2)
-		})
-	}
+
+	dev := BirenDevices{}
+
+	t.Run("no allocatable is unhealthy", func(t *testing.T) {
+		healthy, needUpdate := dev.CheckHealth(BirenDevice, node("biren-absent", 0, "anno"))
+		assert.Equal(t, healthy, false)
+		assert.Equal(t, needUpdate, false)
+	})
+
+	t.Run("allocatable present registers then stays cached", func(t *testing.T) {
+		n := node("biren-present", 8, "anno-v1")
+		healthy, needUpdate := dev.CheckHealth(BirenDevice, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+
+		healthy, needUpdate = dev.CheckHealth(BirenDevice, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, false)
+
+		healthy, needUpdate = dev.CheckHealth(BirenDevice, node("biren-present", 8, "anno-v2"))
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
 }
 
 func Test_checkType(t *testing.T) {

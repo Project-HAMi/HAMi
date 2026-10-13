@@ -48,6 +48,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -1161,103 +1162,48 @@ func TestSchedulerOnDelNodeIgnoresNonNodeObjects(t *testing.T) {
 	require.Equal(t, initial, nodelockutil.NodeLockCountForTest())
 }
 
-func Test_RegisterFromNodeAnnotations(t *testing.T) {
-	tests := []struct {
-		name      string
-		Scheduler *Scheduler
-		want      func(node *corev1.Node) bool
-	}{
-		{
-			name: "test node handshake annotations layout",
-			Scheduler: func() *Scheduler {
-				s := NewScheduler()
-				s.stopCh = make(chan struct{})
-				s.nodeNotify = make(chan struct{})
-				client.KubeClient = fake.NewClientset()
-				s.kubeClient = client.KubeClient
-				informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
-				s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+// Test_register_RemovesObsoleteHandshake checks that register() deletes the
+// handshake annotations an older scheduler left behind, including on a node
+// that has none of the device in question.
+func Test_register_RemovesObsoleteHandshake(t *testing.T) {
+	previousDevices := device.DevicesMap
+	previousHygon := [3]string{hygon.HygonResourceCount, hygon.HygonResourceMemory, hygon.HygonResourceCores}
+	t.Cleanup(func() {
+		device.DevicesMap = previousDevices
+		hygon.HygonResourceCount, hygon.HygonResourceMemory, hygon.HygonResourceCores = previousHygon[0], previousHygon[1], previousHygon[2]
+	})
+	device.DevicesMap = map[string]device.Devices{
+		nvidia.NvidiaGPUDevice: nvidia.InitNvidiaDevice(nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}),
+		hygon.HygonHCUDevice:   hygon.InitHCUDevice(hygon.HygonConfig{ResourceCountName: "hygon.com/dcunum"}),
+	}
 
-				// Create a node
-				node := &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "node",
-						Annotations: map[string]string{
-							"hami.io/node-handshake":     "Requesting_2025-06-13 09:07:40",
-							"hami.io/node-handshake-hcu": "Requesting_2025-06-13 09:07:40",
-						},
-					},
-				}
-				_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
-				if err != nil {
-					t.Errorf("failed to create node: %v", err)
-					return nil
-				}
+	client.KubeClient = fake.NewClientset()
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
 
-				// Add node to informer cache
-				err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
-				if err != nil {
-					t.Errorf("failed to add node to indexer: %v", err)
-					return nil
-				}
-
-				// Start informer factory to sync cache
-				informerFactory.Start(s.stopCh)
-				informerFactory.WaitForCacheSync(s.stopCh)
-
-				return s
-			}(),
-			want: func(node *corev1.Node) bool {
-				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
-				if !okHami {
-					t.Errorf("missing annotation: hami.io/node-handshake")
-					return false
-				}
-				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
-				if !okHcu {
-					t.Errorf("missing annotation: hami.io/node-handshake-hcu")
-					return false
-				}
-				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
-				if errHami != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
-					return false
-				}
-				if errHcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
-					return false
-				}
-				return true
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node",
+			Annotations: map[string]string{
+				"hami.io/node-handshake":     "Requesting_2025-06-13 09:07:40",
+				"hami.io/node-handshake-hcu": "Requesting_2025-06-13 09:07:40",
 			},
 		},
 	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Graceful shutdown after 5 seconds
-			time.AfterFunc(5*time.Second, func() {
-				close(test.Scheduler.stopCh)
-			})
+	s.register(labels.Everything())
 
-			// Notify node annotations
-			go func() {
-				test.Scheduler.nodeNotify <- struct{}{}
-			}()
-
-			// Invoke the method to test
-			test.Scheduler.RegisterFromNodeAnnotations()
-
-			// Get the node to verify annotations
-			node, err := test.Scheduler.kubeClient.CoreV1().Nodes().Get(context.TODO(), "node", metav1.GetOptions{})
-			if err != nil {
-				t.Errorf("failed to get node: %v", err)
-				return
-			}
-
-			// Verify the annotations
-			assert.Equal(t, test.want(node), true)
-		})
+	got, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node", metav1.GetOptions{})
+	require.NoError(t, err)
+	for _, key := range []string{"hami.io/node-handshake", "hami.io/node-handshake-hcu"} {
+		_, ok := got.Annotations[key]
+		require.False(t, ok, "annotation %s should have been removed", key)
 	}
 }
 
@@ -1314,35 +1260,14 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 					return false
 				}
 
-				// Check if RegisterFromNodeAnnotations handles nil annotations gracefully
-				if node.Annotations == nil {
-					t.Logf("node annotations are nil, checking if handled properly...")
-					return true // Adjust based on expected behavior
+				// The scheduler no longer writes handshake annotations, so a
+				// node that had none must still have none.
+				for _, key := range []string{"hami.io/node-handshake", "hami.io/node-handshake-hcu"} {
+					if value, ok := node.Annotations[key]; ok {
+						t.Errorf("unexpected annotation %s=%q", key, value)
+						return false
+					}
 				}
-
-				// If annotations exist, check for specific annotations
-				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
-				hcuTimeStr, okHcu := node.Annotations["hami.io/node-handshake-hcu"]
-
-				// Here you can define what should happen when annotations are present but not set
-				if !okHami || !okHcu {
-					t.Logf("expected annotations are missing, checking if handled properly...")
-					return true // Adjust based on expected behavior
-				}
-
-				// Verify time format in annotations if they exist
-				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errHcu := time.Parse(time.DateTime, strings.TrimPrefix(hcuTimeStr, "Requesting_"))
-
-				if errHami != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
-					return false
-				}
-				if errHcu != nil {
-					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-hcu': %v", errHcu)
-					return false
-				}
-
 				return true
 			},
 		},

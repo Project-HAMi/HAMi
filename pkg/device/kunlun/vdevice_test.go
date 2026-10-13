@@ -19,7 +19,6 @@ package kunlun
 import (
 	"context"
 	"testing"
-	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -157,37 +156,42 @@ func Test_KunlunVDevices_CheckHealth(t *testing.T) {
 	InitKunlunVDevice(testVConfig())
 	dev := &KunlunVDevices{}
 
-	t.Run("unknown handshake state patches node via fake client", func(t *testing.T) {
-		client.KubeClient = fake.NewClientset()
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-unknown",
-				Annotations: map[string]string{
-					util.HandshakeAnnos[XPUDevice]: "Unknown",
-				},
-			},
+	node := func(name string, allocatable int64, annos map[string]string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{RegisterAnnos: "anno"}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
-		assert.NilError(t, err)
+		for k, v := range annos {
+			n.Annotations[k] = v
+		}
+		if allocatable > 0 {
+			n.Status.Allocatable[corev1.ResourceName(KunlunResourceVCount)] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		return n
+	}
 
-		online, deleted := dev.CheckHealth(XPUDevice, node)
-		assert.Equal(t, online, true)
-		assert.Equal(t, deleted, true)
+	t.Run("no allocatable vxpu is unhealthy", func(t *testing.T) {
+		online, needUpdate := dev.CheckHealth(XPUDevice, node("node-absent", 0, nil))
+		assert.Equal(t, online, false)
+		assert.Equal(t, needUpdate, false)
 	})
 
-	t.Run("requesting state recently set is still online", func(t *testing.T) {
+	t.Run("allocatable vxpu is online and drops the obsolete handshake", func(t *testing.T) {
 		client.KubeClient = fake.NewClientset()
-		node := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-requesting",
-				Annotations: map[string]string{
-					util.HandshakeAnnos[XPUDevice]: "Requesting_" + time.Now().Format(time.DateTime),
-				},
-			},
-		}
-		online, deleted := dev.CheckHealth(XPUDevice, node)
+		n := node("node-present", 16, map[string]string{
+			util.HandshakeAnnos[XPUDevice]: "Requesting_2024-01-02 00:00:00",
+		})
+		_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), n, metav1.CreateOptions{})
+		assert.NilError(t, err)
+
+		online, needUpdate := dev.CheckHealth(XPUDevice, n)
 		assert.Equal(t, online, true)
-		assert.Equal(t, deleted, false)
+		assert.Equal(t, needUpdate, true)
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-present", metav1.GetOptions{})
+		assert.NilError(t, err)
+		_, present := updated.Annotations[util.HandshakeAnnos[XPUDevice]]
+		assert.Equal(t, present, false)
 	})
 }
 
