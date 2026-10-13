@@ -409,4 +409,23 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix multiple device typos
 - Add unit test coverage for node discovery handshake parsing with malformed or empty annotations
 
+## v2.10.0 - 2026-08-21
 
+**New features**
+- Remove DRA components from the HAMi main chart
+- Add init container GPU resource accounting
+- Add PodGroup support, retrying NodeLock in Bind for PodGroup members
+- Add flexible MIG with dynamic instance allocation and deallocation
+- Add the mutex GPU scheduling policy and comma-separated scheduler policy combinations
+- Add opt-in NUMA topology alignment for vGPU replicas
+- Add support for Biren devices
+- Add support for AMD Instinct MI300X series vGPU
+- Add vNPU compat mode, letting Ascend pods schedule across vNPU-template and HAMi-core nodes
+- Add 910C vNPU templates to the mock device plugin
+
+**Improvements**
+- Remove the 'deleted' handshake annotations when registering
+- Compile HAMi-core on a ubi8 image to support all glibc versions
+
+**Bug fixes**
+- Skip memory alignment to vNPU templates in HAMi-core mode for Ascend
