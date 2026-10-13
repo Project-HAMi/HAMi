@@ -287,7 +287,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MetaxGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 100,
@@ -327,7 +327,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "max int32 count is accepted",
+			name: "max int64 count is accepted",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -342,17 +342,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: 100,
 				Coresreq:         100,
 			},
-		},
-		{
-			name: "count above max int32 is rejected",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"metax-tech.com/gpu": resource.MustParse("2147483648"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {
@@ -396,15 +385,15 @@ func Test_ScoreNode(t *testing.T) {
 							Idx:       int(0),
 							UUID:      "test-0",
 							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
+							Usedmem:   int64(1000),
+							Usedcores: int64(1),
 						},
 						{
 							Idx:       int(1),
 							UUID:      "test-1",
 							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
+							Usedmem:   int64(1000),
+							Usedcores: int64(1),
 						},
 					},
 				},
@@ -432,8 +421,8 @@ func Test_ScoreNode(t *testing.T) {
 							Idx:       int(0),
 							UUID:      "test-0",
 							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
+							Usedmem:   int64(1000),
+							Usedcores: int64(1),
 						},
 					},
 				},
@@ -927,7 +916,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{

@@ -19,7 +19,6 @@ package metax
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -146,13 +145,13 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) (device
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "metax device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found metax devices")
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             MetaxGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 100,
@@ -266,7 +265,7 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

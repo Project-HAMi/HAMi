@@ -165,9 +165,9 @@ func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 }
 
 type peakUsageSnapshot struct {
-	used      int32
-	usedcores int32
-	usedmem   int32
+	used      int64
+	usedcores int64
+	usedmem   int64
 }
 
 func snapshotPeakUsage(devices policy.DeviceUsageList) map[string]peakUsageSnapshot {
@@ -217,9 +217,9 @@ func applyPeakUsage(node *NodeUsage, appNodeCopy *NodeUsage, peakUsage map[strin
 				break
 			}
 		}
-		finalUsed := int32(0)
-		finalCores := int32(0)
-		finalMem := int32(0)
+		finalUsed := int64(0)
+		finalCores := int64(0)
+		finalMem := int64(0)
 		if appDev != nil {
 			finalUsed = appDev.Used
 			finalCores = appDev.Usedcores

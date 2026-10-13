@@ -19,7 +19,6 @@ package kunlun
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -94,7 +93,7 @@ func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 }
 
 func (dev *KunlunVDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[RegisterAnnos])
 }
 
 func (dev *KunlunVDevices) NodeCleanUp(nn string) error {
@@ -170,7 +169,7 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "kunlun vdevice count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "kunlun", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
@@ -194,11 +193,11 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 				memnum = KunlunMaxMemory
 			}
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             dev.CommonWord(),
-				Memreq:           int32(memnum), //int32(dev.config.MemoryMax),
-				MemPercentagereq: int32(mempnum),
-				Coresreq:         int32(cores),
+				Memreq:           int64(memnum), //int32(dev.config.MemoryMax),
+				MemPercentagereq: int64(mempnum),
+				Coresreq:         int64(cores),
 			}, nil
 		}
 		// A quantity the apiserver accepts as an integer can still be too

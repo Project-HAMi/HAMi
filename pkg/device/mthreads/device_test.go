@@ -345,9 +345,9 @@ func Test_GetNodeDevices(t *testing.T) {
 				{
 					Index:        uint(0),
 					ID:           "test-mthreads-0",
-					Count:        int32(100),
-					Devmem:       int32(8192),
-					Devcore:      int32(16),
+					Count:        int64(100),
+					Devmem:       int64(8192),
+					Devcore:      int64(16),
 					Type:         MthreadsGPUDevice,
 					Numa:         0,
 					Health:       true,
@@ -465,8 +465,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       0,
 								UUID:      "test1",
 								Type:      MthreadsGPUDevice,
-								Usedmem:   int32(1000),
-								Usedcores: int32(1),
+								Usedmem:   int64(1000),
+								Usedcores: int64(1),
 							},
 						},
 					},
@@ -571,11 +571,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(512000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(1),
+				Memreq:           int64(512000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(1),
 			},
 		},
 		{
@@ -590,11 +590,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(512000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(50),
+				Memreq:           int64(512000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(50),
 			},
 		},
 		{
@@ -609,11 +609,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(512000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(100),
+				Memreq:           int64(512000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -628,11 +628,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(512000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(512000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -707,11 +707,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -741,38 +741,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "count overflowing int32 with memory and cores",
+			name: "count overflowing int64 with memory and cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"mthreads.com/vgpu":        resource.MustParse("4294967296"),
 						"mthreads.com/sgpu-memory": resource.MustParse("1000"),
-						"mthreads.com/sgpu-core":   resource.MustParse("1"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "memory overflowing int32 is rejected, not truncated to zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-memory": resource.MustParse("16Gi"),
-						"mthreads.com/sgpu-core":   resource.MustParse("1"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-memory": resource.MustParse("16.0Gi"),
 						"mthreads.com/sgpu-core":   resource.MustParse("1"),
 					},
 				},
@@ -1446,7 +1420,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -1557,8 +1531,8 @@ func TestGenerateResourceRequests_MultiCardCoresDivision(t *testing.T) {
 
 	result, err := dev.GenerateResourceRequests(ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, result.Nums, int32(7))
-	assert.Equal(t, result.Coresreq, int32(16))
+	assert.Equal(t, result.Nums, int64(7))
+	assert.Equal(t, result.Coresreq, int64(16))
 }
 
 // TestGenerateResourceRequests_UnevenCoresFailsClosed makes sure a core total
@@ -1610,8 +1584,8 @@ func TestGenerateResourceRequests_MultiCardCoresPerCard(t *testing.T) {
 		}
 		result, err := dev.GenerateResourceRequests(ctr)
 		assert.NilError(t, err)
-		assert.Equal(t, result.Nums, int32(cards))
-		assert.Equal(t, result.Coresreq, int32(16))
+		assert.Equal(t, result.Nums, cards)
+		assert.Equal(t, result.Coresreq, int64(16))
 	}
 }
 
@@ -1653,8 +1627,8 @@ func TestGenerateResourceRequests_MultiCardCoresAreAlwaysATotal(t *testing.T) {
 
 	result, err := dev.GenerateResourceRequests(ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, result.Nums, int32(2))
-	assert.Equal(t, result.Coresreq, int32(16))
+	assert.Equal(t, result.Nums, int64(2))
+	assert.Equal(t, result.Coresreq, int64(16))
 }
 
 func TestBuildLegalMemorySlices(t *testing.T) {

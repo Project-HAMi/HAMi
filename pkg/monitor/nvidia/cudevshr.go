@@ -89,6 +89,10 @@ type ContainerLister struct {
 	clientset     *kubernetes.Clientset
 	nodeName      string
 
+	// wholeGPU holds the whole-GPU reconciliation state; nil unless
+	// wholeGPUDisableHAMiCore is set.
+	wholeGPU *wholeGPUState
+
 	// Fields for the informer-based pod cache mechanism
 	informerFactory informers.SharedInformerFactory
 	podInformer     cache.SharedIndexInformer
@@ -191,9 +195,28 @@ func (l *ContainerLister) SetContainersForTest(m map[string]*ContainerUsage) {
 	l.containers = m
 }
 
+// SetPodListerForTest installs a pod lister; use only in tests that skip
+// NewContainerLister (e.g. zero-value listers).
+func (l *ContainerLister) SetPodListerForTest(pl corelisters.PodLister) {
+	l.podLister = pl
+}
+
 // Update refreshes cache mappings under the lister lock without deleting files owned by the
 // device plugin.
 func (l *ContainerLister) Update() error {
+	// The pod lister reads an informer cache and needs no lister lock.
+	pods, err := l.podLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	// Prefetch before locking: prefetchWholeGPUInputs may run the
+	// node-registry GET, which must not happen while the lock is held.
+	var inputs *wholeGPUInputs
+	if wholeGPUDisableHAMiCore {
+		inputs = l.prefetchWholeGPUInputs(pods)
+	}
+
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
@@ -205,14 +228,13 @@ func (l *ContainerLister) Update() error {
 		return err
 	}
 
-	pods, err := l.podLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
 	podUIDs := make(map[string]bool, len(pods))
 	for _, pod := range pods {
 		podUIDs[string(pod.UID)] = true
+	}
+
+	if inputs != nil {
+		l.reconcileWholeGPULocked(inputs)
 	}
 
 	present := make(map[string]struct{}, len(entries))
@@ -237,6 +259,29 @@ func (l *ContainerLister) Update() error {
 			continue
 		}
 		if current, ok := l.containers[entry.Name()]; ok {
+			owned := false
+			if l.wholeGPU != nil {
+				_, owned = l.wholeGPU.ownedContainerKeys[entry.Name()]
+			}
+			if owned {
+				// loadCache maps a supported cache file and remembers its
+				// identity so it can detect when the file has been replaced.
+				usage, err := loadCache(dirName)
+				if err != nil {
+					klog.Errorf("Failed to load cache: %s, error: %v", dirName, err)
+					continue
+				}
+				if usage == nil {
+					continue
+				}
+				klog.InfoS("wholegpu: cache file appeared, handing synthesized entry back to disk monitoring", "directory", dirName)
+				delete(l.wholeGPU.ownedContainerKeys, entry.Name())
+				l.unmapContainer(entry.Name())
+				usage.PodUID = podUID
+				usage.ContainerName = parts[1]
+				l.containers[entry.Name()] = usage
+				continue
+			}
 			if cacheMappingIsCurrent(current) {
 				continue
 			}
@@ -261,10 +306,16 @@ func (l *ContainerLister) Update() error {
 	// the old inode alive, so explicitly release mappings whose directory has
 	// disappeared instead of relying on directory traversal to encounter them.
 	for name := range l.containers {
-		if _, ok := present[name]; !ok {
-			klog.InfoS("Releasing mapping for removed vGPU cache directory", "directory", name)
-			l.unmapContainer(name)
+		if _, ok := present[name]; ok {
+			continue
 		}
+		if l.wholeGPU != nil {
+			if _, owned := l.wholeGPU.ownedContainerKeys[name]; owned {
+				continue
+			}
+		}
+		klog.InfoS("Releasing mapping for removed vGPU cache directory", "directory", name)
+		l.unmapContainer(name)
 	}
 	return nil
 }

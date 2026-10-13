@@ -1527,9 +1527,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				)
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
+				limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
+				if err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("write GPU limits file: %w", err)
+				}
+				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+					ContainerPath: overrideEnvContainerPath,
+					HostPath:      limitsFile,
+					ReadOnly:      true,
+				})
 				found := false
+				userSpecified := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+						userSpecified = true
 						// if env existed but is set to false or can not be parsed, ignore
 						t, _ := strconv.ParseBool(val.Value)
 						if !t {
@@ -1538,6 +1550,18 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						// only env existed and set to true, we mark it "found"
 						found = true
 						break
+					}
+				}
+				// auto-inject CUDA_DISABLE_CONTROL=true only when the user hasn't
+				// set it explicitly and every allocated device is a whole GPU
+				if !userSpecified && plugin.wholeGPUDisableHAMiCoreAllowed() {
+					isWhole := isWholeGPUAllocation(devreq, plugin.rm)
+					if isWhole {
+						response.Envs["CUDA_DISABLE_CONTROL"] = "true"
+						klog.Infof("whole-GPU allocation: injecting CUDA_DISABLE_CONTROL=true (pod=%s/%s, container=%s)",
+							current.Namespace, current.Name, currentCtr.Name)
+						// mark found so the ld.so.preload mount below is skipped
+						found = true
 					}
 				}
 				if !found {
@@ -1820,4 +1844,42 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
 	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
+}
+
+// wholeGPUDisableHAMiCore turns on injecting CUDA_DISABLE_CONTROL=true
+// instead of the ld.so.preload mount for whole-GPU allocations.
+var wholeGPUDisableHAMiCore = os.Getenv("DISABLE_HAMI_CORE_FOR_WHOLE_GPU") == "true"
+
+// wholeGPUDisableHAMiCoreAllowed reports whether the interception hook may be
+// disabled for whole-GPU allocations on this node: a scaled device needs the
+// hook to enforce the scaling, so it never qualifies.
+func (plugin *NvidiaDevicePlugin) wholeGPUDisableHAMiCoreAllowed() bool {
+	return wholeGPUDisableHAMiCore &&
+		*plugin.schedulerConfig.DeviceMemoryScaling == 1 &&
+		*plugin.schedulerConfig.DeviceCoreScaling == 1
+}
+
+// isWholeGPUAllocation reports whether every allocated device is whole: full
+// memory, and cores fully requested or unrequested (annotation Usedcores 0
+// means unbounded). Usedmem is MiB, TotalMemory bytes. On any doubt (empty
+// devreq, nil rm, unknown device) it fails closed to the ld.so.preload path.
+func isWholeGPUAllocation(devreq device.ContainerDevices, rm rm.ResourceManager) bool {
+	if len(devreq) == 0 {
+		return false
+	}
+	if rm == nil {
+		return false
+	}
+	allDevices := rm.Devices()
+	for _, dev := range devreq {
+		deviceInfo := allDevices.GetByID(dev.UUID)
+		if deviceInfo == nil {
+			return false
+		}
+		totalMiB := deviceInfo.TotalMemory / (1024 * 1024)
+		if uint64(dev.Usedmem) != totalMiB || (dev.Usedcores != 0 && dev.Usedcores != nvidia.WholeGPUUsedCores) {
+			return false
+		}
+	}
+	return true
 }

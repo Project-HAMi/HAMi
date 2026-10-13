@@ -93,9 +93,9 @@ func Test_addNode_ListNodes(t *testing.T) {
 					Devices: map[string][]device.DeviceInfo{
 						"vendor1": {{
 							ID:      "node-02",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
+							Count:   int64(1),
+							Devcore: int64(1),
+							Devmem:  int64(2000),
 						}},
 					},
 				},
@@ -107,9 +107,9 @@ func Test_addNode_ListNodes(t *testing.T) {
 					Devices: map[string][]device.DeviceInfo{
 						"vendor1": {{
 							ID:      "GPU-0",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
+							Count:   int64(1),
+							Devcore: int64(1),
+							Devmem:  int64(2000),
 						}},
 					},
 				},
@@ -119,9 +119,9 @@ func Test_addNode_ListNodes(t *testing.T) {
 					Devices: map[string][]device.DeviceInfo{
 						"vendor1": {{
 							ID:      "node-02",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
+							Count:   int64(1),
+							Devcore: int64(1),
+							Devmem:  int64(2000),
 						}},
 					},
 				},
@@ -140,9 +140,9 @@ func Test_addNode_ListNodes(t *testing.T) {
 						Devices: map[string][]device.DeviceInfo{
 							"vendor1": {{
 								ID:      "GPU-0",
-								Count:   int32(1),
-								Devcore: int32(1),
-								Devmem:  int32(2000),
+								Count:   int64(1),
+								Devcore: int64(1),
+								Devmem:  int64(2000),
 							}},
 						},
 					},
@@ -181,9 +181,9 @@ func Test_GetNode(t *testing.T) {
 				Devices: map[string][]device.DeviceInfo{
 					"vendor1": {{
 						ID:      "GPU-0",
-						Count:   int32(1),
-						Devcore: int32(1),
-						Devmem:  int32(2000),
+						Count:   int64(1),
+						Devcore: int64(1),
+						Devmem:  int64(2000),
 					}},
 				},
 			},
@@ -200,9 +200,9 @@ func Test_GetNode(t *testing.T) {
 						Devices: map[string][]device.DeviceInfo{
 							"vendor1": {{
 								ID:      "GPU-0",
-								Count:   int32(1),
-								Devcore: int32(1),
-								Devmem:  int32(2000),
+								Count:   int64(1),
+								Devcore: int64(1),
+								Devmem:  int64(2000),
 							}},
 						},
 					},
@@ -442,9 +442,9 @@ func Test_rmNodeDevices(t *testing.T) {
 						Devices: map[string][]device.DeviceInfo{
 							"NVIDIA": {{
 								ID:           "GPU-0",
-								Count:        int32(1),
-								Devcore:      int32(1),
-								Devmem:       int32(2000),
+								Count:        int64(1),
+								Devcore:      int64(1),
+								Devmem:       int64(2000),
 								DeviceVendor: "NVIDIA",
 							}},
 						},
@@ -460,9 +460,9 @@ func Test_rmNodeDevices(t *testing.T) {
 						Devices: map[string][]device.DeviceInfo{
 							"test1": {{
 								ID:           "GPU-0",
-								Count:        int32(1),
-								Devcore:      int32(1),
-								Devmem:       int32(2000),
+								Count:        int64(1),
+								Devcore:      int64(1),
+								Devmem:       int64(2000),
 								DeviceVendor: "test",
 							}},
 						},
@@ -473,16 +473,16 @@ func Test_rmNodeDevices(t *testing.T) {
 						Devices: map[string][]device.DeviceInfo{
 							"NVIDIA": {{
 								ID:           "GPU-0",
-								Count:        int32(1),
-								Devcore:      int32(1),
-								Devmem:       int32(2000),
+								Count:        int64(1),
+								Devcore:      int64(1),
+								Devmem:       int64(2000),
 								DeviceVendor: "NVIDIA",
 							},
 								{
 									ID:           "GPU-0",
-									Count:        int32(1),
-									Devcore:      int32(1),
-									Devmem:       int32(2000),
+									Count:        int64(1),
+									Devcore:      int64(1),
+									Devmem:       int64(2000),
 									DeviceVendor: "NVIDIA",
 								}},
 						},
@@ -502,9 +502,9 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		Devices: map[string][]device.DeviceInfo{
 			"NVIDIA": {{
 				ID:           "GPU-0",
-				Count:        int32(1),
-				Devcore:      int32(100),
-				Devmem:       int32(8000),
+				Count:        int64(1),
+				Devcore:      int64(100),
+				Devmem:       int64(8000),
 				DeviceVendor: "NVIDIA",
 			}},
 		},
@@ -515,13 +515,13 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		t.Fatalf("GetNode returned unexpected error: %v", err)
 	}
 
-	got.Devices["NVIDIA"][0].Devmem = int32(9999)
+	got.Devices["NVIDIA"][0].Devmem = int64(9999)
 
 	m.mutex.RLock()
 	internalMem := m.nodes["node-copy"].Devices["NVIDIA"][0].Devmem
 	m.mutex.RUnlock()
 
-	if internalMem == int32(9999) {
+	if internalMem == int64(9999) {
 		t.Errorf("GetNode returned a live pointer instead of a deep copy: internal Devmem was mutated to %d", internalMem)
 	}
 
@@ -613,7 +613,7 @@ func TestAddNodeStoresDetachedCopy(t *testing.T) {
 	got, err := m.GetNode("node1")
 	assert.NilError(t, err)
 	assert.Equal(t, "v", got.Node.Annotations["k"])
-	assert.Equal(t, int32(1024), got.Devices["NVIDIA"][0].Devmem)
+	assert.Equal(t, int64(1024), got.Devices["NVIDIA"][0].Devmem)
 
 	// and the update path must copy too
 	node2 := &corev1.Node{
@@ -633,5 +633,5 @@ func TestAddNodeStoresDetachedCopy(t *testing.T) {
 	got, err = m.GetNode("node1")
 	assert.NilError(t, err)
 	assert.Equal(t, "v2", got.Node.Annotations["k"])
-	assert.Equal(t, int32(2048), got.Devices["NVIDIA"][0].Devmem)
+	assert.Equal(t, int64(2048), got.Devices["NVIDIA"][0].Devmem)
 }

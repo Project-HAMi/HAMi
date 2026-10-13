@@ -124,17 +124,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `global.imageRegistry` | Global Docker image registry | `""` |
-| `global.imagePullSecrets` | Global Docker image pull secrets | `[]` |
-| `global.imageTag` | Image tag | `"v2.10.0"` |
-| `global.gpuHookPath` | GPU Hook path | `/usr/local` |
-| `global.labels` | Global labels | `{}` |
-| `global.annotations` | Global annotations | `{}` |
-| `global.managedNodeSelectorEnable` | Whether to enable managed node selector | `false` |
-| `global.managedNodeSelector.usage` | Managed node selector usage | `"gpu"` |
-| `nameOverride` | Name override | `""` |
-| `fullnameOverride` | Full name override | `""` |
-| `namespaceOverride` | Namespace override | `""` |
 | `platform.openshift` | Enable OpenShift-specific resources and handling | `false` |
 | `openshift.securityContextConstraints.create` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. | `true` |
 | `openshift.securityContextConstraints.name` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. | `"hami-device-plugin"` |
@@ -323,6 +312,7 @@ listener is started.
 | `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
 | `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
 | `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
+| `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Skip the HAMi-core interception for whole-GPU workloads on non-oversubscribed nodes and read their metrics from NVML instead. Whole-GPU means: non-MIG device, full device memory allocated, cores unrequested or `gpucores=100` | `true` |
 | `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
 
 ### vGPU Cache Garbage Collection
@@ -376,10 +366,25 @@ When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
 `/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
 host-installed driver and uses `/` for both the driver and device roots. When
 HAMi starts before GPU Operator validation completes, wait for GPU Operator to
-become ready and restart the HAMi device plugin DaemonSet. The chart mounts the
-host root at `/host`; the device plugin uses that mount directly for
-host-installed drivers, or appends the GPU Operator path suffix
-(`/run/nvidia/driver`) for GPU Operator installations.
+become ready and restart the HAMi device plugin DaemonSet.
+
+The detected roots only describe the host paths that the device plugin returns
+to the runtime: `NVIDIA_DRIVER_ROOT` is used in generated CDI specifications and
+`NVIDIA_DEV_ROOT` is used for `DeviceSpec.HostPath` when
+`devicePlugin.passDeviceSpecsEnabled=true`. The device plugin itself initializes
+NVML and discovers GPUs through the driver libraries and device nodes that the
+NVIDIA Container Toolkit injects into its container, so the chart mounts only
+the GPU Operator validation directory read-only. This requires the device
+plugin Pod to run with the NVIDIA runtime, either because it is the node's
+default container runtime or through `devices.nvidia.runtimeClassName`.
+
+CDI specifications must reference the host driver layout, which can differ
+from the layout inside the device plugin container. When
+`devicePlugin.deviceListStrategy` includes a `cdi-*` strategy, the chart
+additionally mounts the host root read-only at `/host`; the device plugin uses
+that mount directly for host-installed drivers, or appends the GPU Operator
+path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
+`devicePlugin.nvidiaDriverRoot` explicitly to mount only the driver root instead.
 
 ### Device Plugin Service Configuration
 
@@ -537,6 +542,17 @@ More values will be added in follow-up PRs.
 | devices.nvidia.resourcePriorityName | string | `"nvidia.com/priority"` | Extended resource name for the task priority of a container. The admission webhook passes its limit to HAMi-core as `CUDA_TASK_PRIORITY`. A lower value is a higher priority, and HAMi-core uses `1` when it is unset. On a shared GPU, vGPUmonitor pauses kernel launches of lower-priority tasks while higher-priority tasks are active, but only for tasks with a `resourceCoreName` limit between 1 and 99 whose core limit is being enforced (see `gpuCorePolicy`). |
 | devices.nvidia.runtimeClassName | string | `""` | RuntimeClass set on the device plugin Pods and, by the admission webhook, on GPU Pods that do not set `runtimeClassName`, commonly `nvidia` when the NVIDIA container runtime is not the default. The RuntimeClass must exist, either created by `createRuntimeClass` or already present in the cluster. Empty sets no RuntimeClass. |
 | devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| fullnameOverride | string | `""` | Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters. |
+| global.annotations | object | `{}` | Annotations added to the scheduler Deployment and PodDisruptionBudget and to the NVIDIA and remote-gpu DaemonSets. |
+| global.gpuHookPath | string | `"/usr/local"` | Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin. |
+| global.imagePullSecrets | list | `[]` | Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`. |
+| global.imageRegistry | string | `""` | Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries. |
+| global.imageTag | string | `"v2.10.0"` | Tag used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty. A non-empty per-component tag takes precedence. The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it. |
+| global.labels | object | `{}` | Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors. |
+| global.managedNodeSelector | object | `{"usage":"gpu"}` | Node labels exposed to the scheduler pod when `global.managedNodeSelectorEnable` is true. Each key/value pair becomes a `NODE_SELECTOR_<KEY>` environment variable on the scheduler pod (key upper-cased, with `-`, `/` and `.` replaced by `_`), e.g. `usage: gpu` becomes `NODE_SELECTOR_USAGE=gpu`. |
+| global.managedNodeSelectorEnable | bool | `false` | When true, add `global.managedNodeSelector` to the scheduler pod as `NODE_SELECTOR_*` environment variables. |
+| nameOverride | string | `""` | Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names. |
+| namespaceOverride | string | `""` | Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
 | openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
 

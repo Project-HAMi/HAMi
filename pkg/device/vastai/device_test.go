@@ -30,7 +30,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -110,9 +109,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:           "7-0",
-					Count:        int32(1),
-					Devmem:       int32(32768),
-					Devcore:      int32(100),
+					Count:        int64(1),
+					Devmem:       int64(32768),
+					Devcore:      int64(100),
 					Type:         dev.CommonWord(),
 					Numa:         0,
 					Health:       true,
@@ -160,60 +159,47 @@ func Test_GetNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			devType string
-			n       *corev1.Node
+	const resourceName = "vastaitech.com/va"
+	previous := VastaiResourceCount
+	t.Cleanup(func() { VastaiResourceCount = previous })
+	VastaiResourceCount = resourceName
+
+	node := func(name string, allocatable int64, registerAnno string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		want1 bool
-		want2 bool
-	}{
-		{
-			name: "Requesting state expired",
-			args: struct {
-				devType string
-				n       *corev1.Node
-			}{
-				devType: "vastaitech.com/va",
-				n: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-va"]: "Requesting_2025-01-07 00:00:00",
-						},
-					},
-				},
-			},
-			want1: false,
-			want2: false,
-		},
-		{
-			name: "Unknown state",
-			args: struct {
-				devType string
-				n       *corev1.Node
-			}{
-				devType: "vastaitech.com/va",
-				n: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-va"]: "Unknown",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: true,
-		},
+		if allocatable > 0 {
+			n.Status.Allocatable[resourceName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if registerAnno != "" {
+			n.Annotations[RegisterAnnos] = registerAnno
+		}
+		return n
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := VastaiDevices{}
-			result1, result2 := dev.CheckHealth(test.args.devType, test.args.n)
-			assert.Equal(t, result1, test.want1)
-			assert.Equal(t, result2, test.want2)
-		})
-	}
+
+	dev := VastaiDevices{}
+
+	t.Run("no allocatable is unhealthy", func(t *testing.T) {
+		healthy, needUpdate := dev.CheckHealth(VastaiDevice, node("va-absent", 0, "anno"))
+		assert.Equal(t, healthy, false)
+		assert.Equal(t, needUpdate, false)
+	})
+
+	t.Run("allocatable present registers then stays cached", func(t *testing.T) {
+		n := node("va-present", 4, "anno-v1")
+		healthy, needUpdate := dev.CheckHealth(VastaiDevice, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+
+		healthy, needUpdate = dev.CheckHealth(VastaiDevice, n)
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, false)
+
+		healthy, needUpdate = dev.CheckHealth(VastaiDevice, node("va-present", 4, "anno-v2"))
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
 }
 
 func Test_checkType(t *testing.T) {
@@ -301,8 +287,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       1,
 								UUID:      "test1",
 								Type:      VastaiDevice,
-								Usedmem:   int32(2048),
-								Usedcores: int32(1),
+								Usedmem:   int64(2048),
+								Usedcores: int64(1),
 							},
 						},
 					},
@@ -363,11 +349,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -380,11 +366,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -397,11 +383,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             VastaiDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -427,7 +413,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "max int32 count is accepted",
+			name: "max int64 count is accepted",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -442,17 +428,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: 100,
 				Coresreq:         0,
 			},
-		},
-		{
-			name: "count above max int32 is rejected",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"vastaitech.com/va": resource.MustParse("2147483648"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {

@@ -36,6 +36,11 @@ import (
 
 const maxDeleteAttempts = 5
 
+// LimitsFileSuffix names the read-only limits file the device plugin writes
+// beside a container's cache directory. The file cannot live inside the
+// directory, because the directory is mounted read-write into the container.
+const LimitsFileSuffix = ".limits"
+
 // deletionFailure belongs to one directory identity, not merely its pathname.
 // mutex protects these records, including resets when Prepare replaces a directory.
 type deletionFailure struct {
@@ -134,6 +139,11 @@ func (m *Manager) Prepare(podUID, containerName string) (string, error) {
 	return target, nil
 }
 
+// LimitsFilePath returns the limits file that belongs to a cache directory returned by Prepare.
+func LimitsFilePath(cacheDirectory string) string {
+	return cacheDirectory + LimitsFileSuffix
+}
+
 // Run scans once at startup and then periodically until the process stops.
 func (m *Manager) Run(ctx context.Context) {
 	m.scanAndLog()
@@ -227,7 +237,7 @@ func (m *Manager) scan() error {
 			}
 			continue
 		}
-		if before.Mode()&os.ModeSymlink != 0 || !before.IsDir() {
+		if before.Mode()&os.ModeSymlink != 0 || (!before.IsDir() && !isLimitsFile(entry.Name(), before)) {
 			klog.InfoS("Skipping non-directory vGPU cache entry", "entry", target)
 			continue
 		}
@@ -347,6 +357,12 @@ func (m *Manager) ensureRoot() error {
 		return fmt.Errorf("vGPU cache root is not a real directory: %s", m.root)
 	}
 	return nil
+}
+
+// isLimitsFile reports whether a root entry is a limits file written beside a
+// cache directory.
+func isLimitsFile(name string, info os.FileInfo) bool {
+	return info.Mode().IsRegular() && strings.HasSuffix(name, LimitsFileSuffix)
 }
 
 // parseCacheDirectoryName extracts the Pod UID and container name, rejecting malformed names and

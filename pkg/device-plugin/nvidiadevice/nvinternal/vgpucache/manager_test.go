@@ -765,3 +765,42 @@ func TestScanDeleteFailureRecovery(t *testing.T) {
 		})
 	}
 }
+
+// TestLimitsFilePathIsBesideCacheDirectory checks that the limits file is a sibling of the
+// directory Prepare returns, so it stays outside the read-write mount.
+func TestLimitsFilePathIsBesideCacheDirectory(t *testing.T) {
+	root := t.TempDir()
+	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) { return nil, nil })
+	target, err := manager.Prepare("pod-uid", "main")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(root, "pod-uid_main.limits"), LimitsFilePath(target))
+}
+
+// TestScanRemovesStaleLimitsFile checks that a deleted Pod's limits file is collected with its
+// cache directory, while a live Pod's file and a symlink are kept.
+func TestScanRemovesStaleLimitsFile(t *testing.T) {
+	root := t.TempDir()
+	staleDirectory := filepath.Join(root, "missing-uid_main")
+	require.NoError(t, os.Mkdir(staleDirectory, 0o755))
+	staleFile := LimitsFilePath(staleDirectory)
+	liveFile := filepath.Join(root, "live-uid_main"+LimitsFileSuffix)
+	for _, path := range []string{staleFile, liveFile} {
+		require.NoError(t, os.WriteFile(path, []byte("CUDA_DEVICE_MEMORY_LIMIT_0=3000m\n"), 0o644))
+	}
+	linkTarget := filepath.Join(t.TempDir(), "target")
+	require.NoError(t, os.WriteFile(linkTarget, []byte("x"), 0o600))
+	link := filepath.Join(root, "missing-uid_link"+LimitsFileSuffix)
+	require.NoError(t, os.Symlink(linkTarget, link))
+	manager := newTestManager(t, root, func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: types.UID("live-uid")}}}, nil
+	})
+	manager.gracePeriod = 0
+
+	require.NoError(t, manager.scan())
+	require.NoDirExists(t, staleDirectory)
+	require.NoFileExists(t, staleFile)
+	require.FileExists(t, liveFile)
+	_, err := os.Lstat(link)
+	require.NoError(t, err, "a symlink must not be followed or removed")
+	require.FileExists(t, linkTarget)
+}

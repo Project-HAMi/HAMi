@@ -58,14 +58,14 @@ var (
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
-	MemoryFactor        int32
+	MemoryFactor        int64
 )
 
 type HygonConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
-	MemoryFactor       int32  `yaml:"memoryFactor"`
+	MemoryFactor       int64  `yaml:"memoryFactor"`
 }
 
 func InitHCUDevice(config HygonConfig) *HCUDevices {
@@ -103,11 +103,16 @@ func (dev *HCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	}
 	// Check limits and requests, a valid one must not hide an invalid other.
 	for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
-		for name, max := range map[string]int64{HygonResourceCount: math.MaxInt32, HygonResourceMemory: math.MaxInt32, HygonResourceCores: 100} {
+		for _, name := range []string{HygonResourceCount, HygonResourceMemory} {
 			if qty, found := list[corev1.ResourceName(name)]; found {
-				if v, valid := qty.AsInt64(); !valid || v < 0 || v > max {
-					return false, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and %d", name, qty.String(), ctr.Name, max)
+				if v, valid := qty.AsInt64(); !valid || v < 0 {
+					return false, fmt.Errorf("invalid %s value %s in container %s: must be a non-negative integer", name, qty.String(), ctr.Name)
 				}
+			}
+		}
+		if qty, found := list[corev1.ResourceName(HygonResourceCores)]; found {
+			if v, valid := qty.AsInt64(); !valid || v < 0 || v > 100 {
+				return false, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", HygonResourceCores, qty.String(), ctr.Name)
 			}
 		}
 	}
@@ -159,7 +164,7 @@ func (dev *HCUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *HCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[RegisterAnnos])
 }
 
 func (dev *HCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
@@ -185,7 +190,7 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "hcu device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
@@ -197,22 +202,22 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			}
 			if ok {
 				memnums, valid := mem.AsInt64()
-				if !valid || memnums < 0 || memnums > math.MaxInt32 {
+				if !valid || memnums < 0 {
 					klog.ErrorS(nil, "hcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("memory request %s is out of range", mem.String())}
 				}
 				if MemoryFactor > 1 {
 					rawMemnums := memnums
-					memnums = memnums * int64(MemoryFactor)
-					if memnums > math.MaxInt32 {
-						klog.ErrorS(nil, "hcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
-						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("memory request %d overflows int32 after applying memory factor %d", rawMemnums, MemoryFactor)}
+					if memnums > math.MaxInt64/MemoryFactor {
+						klog.ErrorS(nil, "hcu device memory request overflows int64 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "factor", MemoryFactor)
+						return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("memory request %d overflows int64 after applying memory factor %d", rawMemnums, MemoryFactor)}
 					}
+					memnums *= MemoryFactor
 					klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
 				}
 				memnum = int(memnums)
 			}
-			corenum := int32(100)
+			corenum := int64(100)
 			core, ok := ctr.Resources.Limits[hcuResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[hcuResourceCores]
@@ -223,7 +228,7 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 					klog.ErrorS(nil, "hcu device core request is out of range", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "hcu", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", core.String())}
 				}
-				corenum = int32(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -232,10 +237,10 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             HygonHCUDevice,
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
@@ -314,7 +319,7 @@ func (hcu *HCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

@@ -56,6 +56,14 @@ The app name for DevicePlugin
 {{- end -}}
 
 {{/*
+Whether HAMi-core is disabled for whole-GPU containers, as a quoted bool.
+Defaults to true; a plain `default true` pipe would swallow an explicit false.
+*/}}
+{{- define "hami-vgpu.disableHAMiCoreForWholeGPU" -}}
+{{- if or (not (hasKey .Values.devicePlugin.monitor "disableHAMiCoreForWholeGPU")) .Values.devicePlugin.monitor.disableHAMiCoreForWholeGPU -}}"true"{{- else -}}"false"{{- end -}}
+{{- end -}}
+
+{{/*
 The tls secret name for Scheduler
 */}}
 {{- define "hami-vgpu.scheduler.tls" -}}
@@ -168,6 +176,35 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "hami.devicePlugin.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
+{{- end -}}
+
+{{/*
+With an auto-detected driver root, the device plugin loads NVML from the driver
+injected by the NVIDIA Container Toolkit. The host root is mounted only when a
+CDI device list strategy needs to walk the host driver layout. The strategy can
+also be overridden through extraArgs or extraEnvs, so check those too.
+*/}}
+{{- define "hami.devicePlugin.autoDriverRootHostMount" -}}
+{{- $strategies := list (toString .Values.devicePlugin.deviceListStrategy) -}}
+{{- $takeNext := false -}}
+{{- range .Values.devicePlugin.extraArgs -}}
+{{- $arg := toString . -}}
+{{- if $takeNext -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- $takeNext = regexMatch "^--?device-list-strategy$" $arg -}}
+{{- if regexMatch "^--?device-list-strategy=" $arg -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.devicePlugin.extraEnvs -}}
+{{- if eq (toString .name) "DEVICE_LIST_STRATEGY" -}}
+{{- $strategies = append $strategies (toString .value) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (join "," $strategies)) -}}
+true
+{{- end -}}
 {{- end -}}
 
 {{- define "hami.scheduler.patch.imagePullSecrets" -}}

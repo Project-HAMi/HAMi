@@ -573,7 +573,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	_, err = readFromConfigFile(&nvconfig, path+"/config.json", nil)
 	if err != nil {
@@ -590,7 +590,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
@@ -956,8 +956,8 @@ func TestAlignContainerDevicesWithAllocatedIDsPreservesMetadata(t *testing.T) {
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1",
 	})
 	require.NoError(t, err)
-	require.Equal(t, int32(3000), aligned[0].Usedmem)
-	require.Equal(t, int32(50), aligned[0].Usedcores)
+	require.Equal(t, int64(3000), aligned[0].Usedmem)
+	require.Equal(t, int64(50), aligned[0].Usedcores)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[0].UUID)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[1].UUID)
 }
@@ -1431,6 +1431,145 @@ func TestResolveOperatingMode(t *testing.T) {
 	}
 }
 
+// TestIsWholeGPUAllocation covers the byte-vs-MiB unit handling that
+// previously made the function always return false.
+func TestIsWholeGPUAllocation(t *testing.T) {
+	// 8 GiB card: TotalMemory is in bytes, Usedmem in MiB.
+	const (
+		gibInMiB = int64(8 * 1024)
+		uuidA    = "GPU-aaaa"
+		uuidB    = "GPU-bbbb"
+	)
+	totalA := uint64(gibInMiB) * 1024 * 1024
+	totalB := uint64(gibInMiB) * 1024 * 1024
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				uuidA: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidA}, TotalMemory: totalA},
+				uuidB: {Device: kubeletdevicepluginv1beta1.Device{ID: uuidB}, TotalMemory: totalB},
+			}
+		},
+		ResourceFunc: func() v1.ResourceName { return v1.ResourceName("nvidia.com/gpu") },
+	}
+
+	cases := []struct {
+		name   string
+		devreq device.ContainerDevices
+		rm     rm.ResourceManager
+		want   bool
+	}{
+		{
+			name:   "nil ResourceManager falls through to default preload",
+			devreq: device.ContainerDevices{{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores}},
+			rm:     nil,
+			want:   false,
+		},
+		{
+			name:   "empty devreq yields false",
+			devreq: device.ContainerDevices{},
+			rm:     mockRM,
+			want:   false,
+		},
+		{
+			name: "single whole-GPU allocation (MiB == bytes/1Mi)",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "plain nvidia.com/gpu: 1 without core request qualifies",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory without core request is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "unknown UUID fails closed even without core request",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: 0},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "two whole-GPU allocations",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "regression: pre-fix code rejected this because MiB vs bytes are not equal as raw integers",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: true,
+		},
+		{
+			name: "partial memory is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "partial cores is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores - 1},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "memory exceeding full card is not whole-GPU",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB + 1, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "UUID missing from registry falls through",
+			devreq: device.ContainerDevices{
+				{UUID: "GPU-cccc", Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+		{
+			name: "any non-whole device in a multi-device request fails the whole",
+			devreq: device.ContainerDevices{
+				{UUID: uuidA, Usedmem: gibInMiB, Usedcores: nvidia.WholeGPUUsedCores},
+				{UUID: uuidB, Usedmem: gibInMiB / 2, Usedcores: nvidia.WholeGPUUsedCores},
+			},
+			rm:   mockRM,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isWholeGPUAllocation(tc.devreq, tc.rm))
+		})
+	}
+}
+
 // The chart always passes --report-node-capacity explicitly (true or
 // false), so chartDefault is realistically never nil in that deployment.
 // A per-node Nodeconfig override must still survive it.
@@ -1456,6 +1595,33 @@ func TestResolveReportNodeCapacity(t *testing.T) {
 			require.Equal(t, *tc.want, *got)
 		})
 	}
+}
+
+// TestWholeGPUDisableHAMiCoreAllowed pins the env gate and the
+// over-subscription guards: scaled devices must keep the interception hook.
+func TestWholeGPUDisableHAMiCoreAllowed(t *testing.T) {
+	original := wholeGPUDisableHAMiCore
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = original })
+
+	one, two := float64(1), float64(2)
+	pluginWith := func(memScale, coreScale *float64) *NvidiaDevicePlugin {
+		return &NvidiaDevicePlugin{
+			schedulerConfig: nvidia.NvidiaConfig{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceMemoryScaling: memScale,
+					DeviceCoreScaling:   coreScale,
+				},
+			},
+		}
+	}
+
+	wholeGPUDisableHAMiCore = false
+	require.False(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
+
+	wholeGPUDisableHAMiCore = true
+	require.True(t, pluginWith(&one, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&two, &one).wholeGPUDisableHAMiCoreAllowed())
+	require.False(t, pluginWith(&one, &two).wholeGPUDisableHAMiCoreAllowed())
 }
 
 // TestDynamicMIGRecoveryWaitsForSnapshotAndRetriesPublication checks that deferred MIG recovery

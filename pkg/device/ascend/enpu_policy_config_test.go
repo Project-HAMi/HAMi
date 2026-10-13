@@ -105,7 +105,7 @@ func TestENPUInvalidConfiguredPolicyLeavesLegacyModesUnchanged(t *testing.T) {
 		name, mode          string
 		core                bool
 		wantAdmissionMemory int64
-		wantFitMemory       int32
+		wantFitMemory       int64
 	}{
 		{name: "hami-core", mode: VNPUModeHamiCore, core: true, wantAdmissionMemory: 20480, wantFitMemory: 20480},
 		{name: "template", mode: VNPUModeTemplate, wantAdmissionMemory: 32768, wantFitMemory: 32768},

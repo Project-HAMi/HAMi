@@ -191,6 +191,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            - name: DISABLE_HAMI_CORE_FOR_WHOLE_GPU
+              value: {{ include "hami-vgpu.disableHAMiCoreForWholeGPU" . }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -224,6 +226,8 @@ spec:
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
               readOnly: true
+            {{- end }}
+            {{- if include "hami.devicePlugin.autoDriverRootHostMount" . }}
             - name: host
               mountPath: /host
               readOnly: true
@@ -273,6 +277,8 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            - name: DISABLE_HAMI_CORE_FOR_WHOLE_GPU
+              value: {{ include "hami-vgpu.disableHAMiCoreForWholeGPU" . }}
             {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             # fake-gpu-operator validation requires the monitor to receive the
             # same driver-root configuration as the device plugin.
@@ -359,7 +365,7 @@ spec:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | default "/run/nvidia/validations" }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
+        {{- if include "hami.devicePlugin.autoDriverRootHostMount" . }}
         - name: host
           hostPath:
             path: /

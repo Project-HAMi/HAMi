@@ -156,7 +156,7 @@ func (dev *AMDDevices) hasResource(ctr *corev1.Container, name string) bool {
 	return inLimits || inRequests
 }
 
-func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
+func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int64, error) {
 	if dev.resourceMemoryPercentageName == "" {
 		return 0, nil
 	}
@@ -172,7 +172,7 @@ func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
 	if !isInt || pct < 0 || pct > 100 {
 		return 0, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.resourceMemoryPercentageName, q.String(), ctr.Name)
 	}
-	return int32(pct), nil
+	return pct, nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -191,6 +191,12 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = AMDCommonWord
+		// The scheduler picks a node's devices for a request by a substring of
+		// the registered type, so a registration without a type would never
+		// match and the node would be rejected as having no device.
+		if nodedevices[idx].Type == "" {
+			nodedevices[idx].Type = AMDDevice
+		}
 	}
 	return nodedevices, nil
 }
@@ -328,22 +334,22 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "amd device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
-			memnum := int32(0)
+			memnum := int64(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
 			if !memOK {
 				mem, memOK = ctr.Resources.Requests[amdResourceMemory]
 			}
 			if memOK {
 				memnums, ok := mem.AsInt64()
-				if !ok || memnums < 0 || memnums > math.MaxInt32 {
+				if !ok || memnums < 0 {
 					klog.ErrorS(nil, "amd device memory request is out of range", "container", ctr.Name, "request", mem.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("memory request %s is out of range", mem.String())}
 				}
-				memnum = int32(memnums)
+				memnum = memnums
 			}
 
 			memPercentage, err := dev.memoryPercentage(ctr)
@@ -354,15 +360,15 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 
 			// the default memory applies only when the container names no memory at all, so an explicit 0 stays a whole GPU
 			if !memOK && !dev.hasResource(ctr, dev.resourceMemoryPercentageName) && dev.defaultMemory > 0 {
-				memnum = dev.defaultMemory
+				memnum = int64(dev.defaultMemory)
 			}
 
 			// An omitted core limit means the container receives all CUs on each
 			// allocated GPU (or the configured default). This also keeps memory-only
 			// AMD requests valid.
-			corePercentageNum := int32(100)
+			corePercentageNum := int64(100)
 			if dev.defaultCores > 0 {
-				corePercentageNum = dev.defaultCores
+				corePercentageNum = int64(dev.defaultCores)
 			}
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
 			if !corePercentageOK {
@@ -374,14 +380,14 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("core percentage request %s is out of range (must be an integer between 1 and 100)", corePercentage.String())}
 				}
-				corePercentageNum = int32(corePercentageNums)
+				corePercentageNum = corePercentageNums
 			}
 
 			klog.InfoS("Detected AMD device request",
 				"container", ctr.Name,
 				"deviceCount", n)
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             AMDDevice,
 				Memreq:           memnum,
 				MemPercentagereq: memPercentage,
@@ -412,7 +418,7 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 // fitQuota checks the pod's total AMD memory, this candidate card included,
 // against the namespace ResourceQuota. Only memory is checked: the core quota
 // counts the CUs the plugin masks while a request is a percentage.
-func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int32) bool {
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int64) bool {
 	hypo := device.PodDevices{}
 	if allocated != nil {
 		for devType, podSingle := range *allocated {
@@ -426,7 +432,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	var mem int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
+			mem += val.Usedmem
 		}
 	}
 	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
@@ -522,7 +528,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		}
 		memReq := k.Memreq
 		if memReq <= 0 && k.MemPercentagereq > 0 && dev.Totalmem > 0 {
-			memReq = max(int32(int64(dev.Totalmem)*int64(k.MemPercentagereq)/100), 1)
+			memReq = max(dev.Totalmem*k.MemPercentagereq/100, 1)
 		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
@@ -544,7 +550,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 
-		coreReq := int32(0)
+		coreReq := int64(0)
 		if k.Coresreq > 0 {
 			if dev.Totalcore <= 0 {
 				reason[common.CardInsufficientCore]++
@@ -555,7 +561,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 			// RDNA applies the CU mask per WGP, so the device plugin hands out
 			// whole WGPs; account for the same count.
 			if unit := cuPerWGP(dev.CustomInfo); unit > 1 {
-				coreReq = int32(min((int64(coreReq)+int64(unit)-1)/int64(unit)*int64(unit), int64(dev.Totalcore)))
+				coreReq = min((coreReq+unit-1)/unit*unit, dev.Totalcore)
 			}
 			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {
@@ -741,9 +747,9 @@ func bestInGroup(byID map[string]*device.DeviceUsage, group device.ContainerDevi
 
 // cuPerWGP returns how many CUs the device plugin allocates together, as
 // published in the registration custominfo; 1 when absent.
-func cuPerWGP(info map[string]any) int32 {
-	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 && v == math.Trunc(v) {
-		return int32(v)
+func cuPerWGP(info map[string]any) int64 {
+	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v < math.MaxInt64 && v == math.Trunc(v) {
+		return int64(v)
 	}
 	return 1
 }

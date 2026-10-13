@@ -456,30 +456,19 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "oversized memory request exceeds int32 range (no unit, pre-multiply guard)",
+			name: "memory request overflowing int64 after the memory factor is rejected",
 			container: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"metax-tech.com/sgpu":    resource.MustParse("1"),
-						"metax-tech.com/vmemory": resource.MustParse("2100001"),
+						"metax-tech.com/vmemory": resource.MustParse("9100000000000001"),
 					},
 				},
 			},
 			expected: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "oversized sgpu count exceeds int32 range",
-			container: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"metax-tech.com/sgpu": resource.MustParse("2200000000"),
-					},
-				},
-			},
-			expected: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "oversized vcore exceeds int32 range",
+			name: "oversized vcore exceeds int64 range",
 			container: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1440,15 +1429,15 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 			require: 1,
@@ -1456,7 +1445,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 		},
@@ -1465,23 +1454,23 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 			require: 2,
@@ -1489,11 +1478,11 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 		},
@@ -1502,27 +1491,27 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 			require: 4,
@@ -1530,19 +1519,19 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 		},
@@ -1551,23 +1540,23 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 			require: 4,
@@ -1575,19 +1564,19 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 		},
@@ -1596,15 +1585,15 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 			},
 			require: 2,
@@ -1612,11 +1601,11 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-5",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 			},
 		},
@@ -1625,19 +1614,19 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-3",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-4",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 			require: 2,
@@ -1645,11 +1634,11 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 		},
@@ -1658,23 +1647,23 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			candidateDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-3",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-4",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 			require: 4,
@@ -1682,19 +1671,19 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			expectedDevices: []*device.DeviceUsage{
 				{
 					ID:         "GPU-6",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-7",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-8",
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
-					CustomInfo: map[string]any{"LinkZone": int32(0)},
+					CustomInfo: map[string]any{"LinkZone": int64(0)},
 				},
 			},
 		},
@@ -1822,7 +1811,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 				},
 			},
@@ -1830,22 +1819,22 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 
@@ -1858,7 +1847,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 				},
 			},
@@ -1866,22 +1855,22 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 
@@ -1894,12 +1883,12 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 				},
 			},
@@ -1907,22 +1896,22 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 			},
 
@@ -1935,12 +1924,12 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-5",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 				},
 			},
@@ -1948,42 +1937,42 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-8",
 					Used:       1,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 
@@ -1996,22 +1985,22 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-1",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-2",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 				},
 			},
@@ -2019,27 +2008,27 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 
@@ -2052,22 +2041,22 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-5",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 					{
 						UUID:       "GPU-6",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 				},
 			},
@@ -2075,27 +2064,27 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-2",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 
@@ -2108,42 +2097,42 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					{
 						UUID:       "GPU-1",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-2",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(1)},
+						CustomInfo: map[string]any{"LinkZone": int64(1)},
 					},
 					{
 						UUID:       "GPU-5",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 					{
 						UUID:       "GPU-6",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 					{
 						UUID:       "GPU-7",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 					{
 						UUID:       "GPU-8",
 						Usedcores:  100,
-						CustomInfo: map[string]any{"LinkZone": int32(2)},
+						CustomInfo: map[string]any{"LinkZone": int64(2)},
 					},
 				},
 			},
@@ -2151,42 +2140,42 @@ func TestScoreExclusiveDevices(t *testing.T) {
 				{
 					ID:         "GPU-1",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-2",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-3",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-4",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(1)},
+					CustomInfo: map[string]any{"LinkZone": int64(1)},
 				},
 				{
 					ID:         "GPU-5",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-6",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-7",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 				{
 					ID:         "GPU-8",
 					Used:       0,
-					CustomInfo: map[string]any{"LinkZone": int32(2)},
+					CustomInfo: map[string]any{"LinkZone": int64(2)},
 				},
 			},
 
@@ -3065,7 +3054,7 @@ func TestScoreNodePolicyIndependence(t *testing.T) {
 						UUID:      "GPU-3",
 						Usedcores: 100,
 						CustomInfo: map[string]any{
-							"LinkZone": int32(1),
+							"LinkZone": int64(1),
 							"Pod.Annotations": map[string]string{
 								MetaxSGPUTopologyAware: "true",
 							},
@@ -3075,7 +3064,7 @@ func TestScoreNodePolicyIndependence(t *testing.T) {
 						UUID:      "GPU-4",
 						Usedcores: 100,
 						CustomInfo: map[string]any{
-							"LinkZone": int32(1),
+							"LinkZone": int64(1),
 							"Pod.Annotations": map[string]string{
 								MetaxSGPUTopologyAware: "true",
 							},
@@ -3084,10 +3073,10 @@ func TestScoreNodePolicyIndependence(t *testing.T) {
 				},
 			},
 			previous: []*device.DeviceUsage{
-				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
 			},
 		},
 		{
@@ -3172,7 +3161,7 @@ func TestSDeviceFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -3264,7 +3253,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		name    string
 		cores   string
 		wantOk  bool
-		wantVal int32
+		wantVal int64
 	}{
 		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
 		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
@@ -3287,10 +3276,10 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 			req, _ := sdev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
-				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Nums, int64(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)
 			} else {
-				assert.Equal(t, req.Nums, int32(0))
+				assert.Equal(t, req.Nums, int64(0))
 			}
 		})
 	}

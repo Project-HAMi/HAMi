@@ -52,7 +52,7 @@ func fallbackPod(annotationValue string) *corev1.Pod {
 // GetGPUSchedulerPolicyByPod resolves for task. The spread of utilisation is
 // what makes binpack and spread pick different cards.
 func newFallbackNode(task *corev1.Pod, clusterDefault string) *NodeUsage {
-	mk := func(id string, used, usedcores, usedmem int32) *policy.DeviceListsScore {
+	mk := func(id string, used, usedcores, usedmem int64) *policy.DeviceListsScore {
 		return &policy.DeviceListsScore{
 			Device: &device.DeviceUsage{
 				ID:        id,
