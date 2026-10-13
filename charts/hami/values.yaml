@@ -530,22 +530,17 @@ devicePlugin:
 #      memory: 100Mi
 
 mockDevicePlugin:
+  # -- Deploy the mock device plugin as a DaemonSet on all eligible nodes without node selectors.
   enabled: false
   image:
+    # -- Image registry, overridden by `global.imageRegistry`.
     registry: "docker.io"
+    # -- Image repository for the mock-device-plugin.
     repository: "projecthami/mock-device-plugin"
+    # -- Image tag (required); does not inherit `global.imageTag`.
     tag: "1.0.1"
-    ## Specify a imagePullPolicy
-    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
-    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
-    ##
+    # -- Image pull policy: `Always`, `IfNotPresent`, or `Never`.
     pullPolicy: IfNotPresent
-    ## Optionally specify an array of imagePullSecrets.
-    ## Secrets must be manually created in the namespace.
-    ## Example:
-    ## pullSecrets:
-    ##   - myRegistryKeySecretName
-    ##
     pullSecrets: []
 devices:
   metax:
@@ -984,12 +979,18 @@ devices:
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
 
+# -- Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility.
 legacyMetrics: false
 
 prometheus:
+  # -- Create scheduler and device-plugin ServiceMonitors when the API is available.
+  # The device-plugin ServiceMonitor also requires `devicePlugin.enabled`.
+  # For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
   enabled: false
 
-# Full replacement of device-config.yaml; takes precedence over a bundled file and values.
-# This is a complete document, not a merge; prefer devices.<vendor> fields for partial overrides.
 device-config:
+  # -- Full replacement of device-config.yaml; takes precedence over a bundled file and values.
+  # This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides.
+  # Please note that extender resources still use `devices.*`,
+  # keep resource names consistent. Values validation still applies.
   content: ""
