@@ -335,18 +335,17 @@ devicePlugin:
     # -- Image repository for the NVIDIA device plugin container and the `selinux-relabel` and
     # `toolkit-validation` init containers when enabled.
     repository: "projecthami/hami"
-    # -- NVIDIA device plugin image tag. An empty value uses `global.imageTag`; a non-empty value takes
-    # precedence.
+    # -- NVIDIA device plugin image tag. Empty uses `global.imageTag`.
     tag: ""
     # -- Image pull policy for the NVIDIA device plugin and its enabled init containers: `Always`,
-    # `IfNotPresent`, or `Never`. The chart does not change this policy based on the image tag.
+    # `IfNotPresent`, or `Never`.
     pullPolicy: IfNotPresent
     # -- Image pull Secret names for the device plugin Pod, appended to `global.imagePullSecrets`,
     # e.g. `[myRegistryKeySecretName]`.
     pullSecrets: []
   vgpuCache:
-    # -- Minimum age of a cache directory before the device plugin considers it for deletion, using Go
-    # duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations
+    # -- Minimum cache directory age, measured from its modification time, before garbage collection. Use
+    # Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations
     # prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent
     # of monitor resync and the GC scan interval.
     gracePeriod: "5m"
@@ -425,14 +424,14 @@ devicePlugin:
     # -- Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
-  # -- Report GPU memory and core resources in Node capacity and allocatable. Per-node `reportnodecapacity`
-  # settings in the node configuration take precedence over this default.
+  # -- Report GPU memory and core resources in Node capacity and allocatable. The `reportnodecapacity`
+  # JSON field in `nodeConfiguration.config` overrides this setting for matching nodes.
   reportNodeCapacity: false
   nodeConfiguration:
     # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
     # `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If
     # none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named
-    # `*`. Later matching entries override the fields they set. An entry must set either `name` or a non-empty
+    # `*`. Selected entries apply in list order. An entry must set either `name` or a non-empty
     # valid Kubernetes label selector, never both. For example, use
     # `{"nodelabelselector":{"matchLabels":{"gpu.example.com/pool":"mig"}},"operatingmode":"mig"}`. Node
     # labels are read at plugin startup; restart the plugin after changing them and use labels available when
@@ -465,8 +464,7 @@ devicePlugin:
   # -- Strategy for exposing NVIDIA MIG devices: `none`, `single`, or `mixed`. `mixed` exposes MIG profiles as
   # separate resources. Passed as `--mig-strategy`.
   migStrategy: "none"
-  # -- String boolean passed as `--disable-core-limit`: `"true"` disables the HAMi-core utilization limit;
-  # `"false"` keeps it enabled.
+  # -- String type, "true" means disable core limit, "false" means enable core limit
   disablecorelimit: "false"
   # -- Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy`
   # contains only CDI strategies. Null leaves the plugin default unchanged (disabled).
