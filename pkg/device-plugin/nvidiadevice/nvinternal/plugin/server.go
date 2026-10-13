@@ -1493,7 +1493,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
+				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%s", hostHookPath, sharedCacheName)
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
@@ -1527,16 +1527,18 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				)
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
-				limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
-				if err != nil {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
-					return nil, fmt.Errorf("write GPU limits file: %w", err)
+				if resolveLimitDelivery(current, plugin.schedulerConfig.LimitDelivery) == nvidia.LimitDeliveryFile {
+					limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
+					if err != nil {
+						PodAllocationFailed(nodename, current, NodeLockNvidia)
+						return nil, fmt.Errorf("write GPU limits file: %w", err)
+					}
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: overrideEnvContainerPath,
+						HostPath:      limitsFile,
+						ReadOnly:      true,
+					})
 				}
-				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-					ContainerPath: overrideEnvContainerPath,
-					HostPath:      limitsFile,
-					ReadOnly:      true,
-				})
 				found := false
 				userSpecified := false
 				for _, val := range currentCtr.Env {

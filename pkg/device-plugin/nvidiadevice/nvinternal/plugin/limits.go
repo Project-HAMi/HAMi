@@ -24,9 +24,11 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -47,6 +49,11 @@ const (
 	// memoryLimitEnvPrefix matches CUDA_DEVICE_MEMORY_LIMIT and the per-device
 	// CUDA_DEVICE_MEMORY_LIMIT_<i> variables.
 	memoryLimitEnvPrefix = "CUDA_DEVICE_MEMORY_LIMIT"
+
+	// sharedCacheName is HAMi-core's shared accounting file in the container's
+	// cache directory. The directory is unique to the container and recreated on
+	// every allocation.
+	sharedCacheName = "usage.cache"
 )
 
 // limitsResponseEnvs are the other variables the allocate response sets for
@@ -66,6 +73,33 @@ var limitsContainerEnvs = []string{
 	util.TaskPriority,
 	util.CoreLimitSwitch,
 	"LIBCUDA_LOG_LEVEL",
+}
+
+// resolveLimitDelivery returns how the limits of a pod's containers reach
+// HAMi-core: the pod annotation, else the device configuration, else file.
+// An unknown value is logged and skipped.
+func resolveLimitDelivery(pod *corev1.Pod, configured *nvidia.LimitDelivery) nvidia.LimitDelivery {
+	if pod != nil && pod.Annotations[nvidia.LimitDeliveryAnnotation] != "" {
+		mode := nvidia.LimitDelivery(pod.Annotations[nvidia.LimitDeliveryAnnotation])
+		if knownLimitDelivery(mode) {
+			return mode
+		}
+		klog.Warningf("pod %s/%s: ignoring %s=%q, want %q or %q", pod.Namespace, pod.Name,
+			nvidia.LimitDeliveryAnnotation, mode, nvidia.LimitDeliveryFile, nvidia.LimitDeliveryEnv)
+	}
+	if configured != nil && *configured != "" {
+		if knownLimitDelivery(*configured) {
+			return *configured
+		}
+		klog.Warningf("ignoring limitDelivery=%q in the device configuration, want %q or %q",
+			*configured, nvidia.LimitDeliveryFile, nvidia.LimitDeliveryEnv)
+	}
+	return nvidia.LimitDeliveryFile
+}
+
+// knownLimitDelivery reports whether the device plugin implements mode.
+func knownLimitDelivery(mode nvidia.LimitDelivery) bool {
+	return mode == nvidia.LimitDeliveryFile || mode == nvidia.LimitDeliveryEnv
 }
 
 // writeContainerLimits writes the limits file of one container beside its
