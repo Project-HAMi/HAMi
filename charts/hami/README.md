@@ -120,17 +120,6 @@ kubectl rollout restart daemonset/hami-device-plugin -n kube-system
 kubectl rollout status daemonset/hami-device-plugin -n kube-system
 ```
 
-## Global Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `platform.openshift` | Enable OpenShift-specific resources and handling | `false` |
-| `openshift.securityContextConstraints.create` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. | `true` |
-| `openshift.securityContextConstraints.name` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. | `"hami-device-plugin"` |
-| `selinux.enabled` | Relabel shared vGPU host directories on SELinux-enabled Kubernetes nodes | `false` |
-| `selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
-| `selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |
-
 ## Resource Name Configuration
 
 ### Cambricon MLU Resources
@@ -561,9 +550,14 @@ More values will be added in follow-up PRs.
 | mockDevicePlugin.image.tag | string | `"1.0.1"` | Image tag (required); does not inherit `global.imageTag`. |
 | nameOverride | string | `""` | Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names. |
 | namespaceOverride | string | `""` | Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist. |
-| openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
-| openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
+| openshift.securityContextConstraints.create | bool | `true` | Create the named SecurityContextConstraints (SCC) and its use ClusterRole (`system:openshift:scc:<name>`) when `platform.openshift=true` and `name` is non-empty. The created SCC allows privileged containers, hostPath volumes, and the host PID namespace. Set to false to reuse an existing SCC and matching ClusterRole. Must be false for the built-in `privileged` SCC. |
+| openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | Name of the SCC that enabled NVIDIA and mock device-plugin service accounts are allowed to use when `platform.openshift=true`. Leave empty to skip SCC creation and binding, and manage SCC access separately. |
+| platform.openshift | bool | `false` | Enable when deploying HAMi on OpenShift. Applies restricted security contexts to the scheduler extender and webhook jobs, and omits `scheduler.patch.runAsUser` so OpenShift can assign job UIDs. |
+| podSecurityPolicy.enabled | bool | `false` | Render a `policy/v1beta1` PodSecurityPolicy and its use RBAC rule for the webhook certificate creation and patch jobs. Only takes effect when `scheduler.admissionWebhook.enabled=true`, `scheduler.patch.enabled=true`, and `scheduler.certManager.enabled=false`. Keep disabled on Kubernetes 1.25 and later, where the PodSecurityPolicy API is removed. |
 | prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`. |
+| selinux.enabled | bool | `false` | Add a privileged NVIDIA device-plugin init container to recursively relabel host directories `devicePlugin.libPath`, `devicePlugin.monitor.ctrPath`, and `/tmp/vgpulock`. Creates missing directories and sets permissions to `0777` on `devicePlugin.monitor.ctrPath` and `1777` on `/tmp/vgpulock`. Requires `devicePlugin.enabled=true`. Available on any SELinux-enabled Kubernetes distribution, independently of `platform.openshift`. Uninstalling does not restore host labels or permissions. |
+| selinux.level | string | `"s0"` | SELinux security level or range passed to `chcon -l` for the shared vGPU host directories when `selinux.enabled=true`, for example `s0` or `s0:c123,c456`. |
+| selinux.type | string | `"container_file_t"` | SELinux file type passed to `chcon -t` for the shared vGPU host directories when `selinux.enabled=true`. Must be a type supported by the node's SELinux policy. |
 
 <!-- END GENERATED VALUES -->
 
