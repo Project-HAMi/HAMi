@@ -460,7 +460,7 @@ More values will be added in follow-up PRs.
 | mockDevicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy: `Always`, `IfNotPresent`, or `Never`. |
 | mockDevicePlugin.image.registry | string | `"docker.io"` | Image registry, overridden by `global.imageRegistry`. |
 | mockDevicePlugin.image.repository | string | `"projecthami/mock-device-plugin"` | Image repository for the mock-device-plugin. |
-| mockDevicePlugin.image.tag | string | `"1.0.1"` | Image tag (required); does not inherit `global.imageTag`. |
+| mockDevicePlugin.image.tag | string | `"1.0.1@sha256:61d08a5641251ed776e4701c0dcf05c2c2bed5a58b39b8a11ec85ca5e57e674a"` | Image tag (required), pinned by digest; does not inherit `global.imageTag`. |
 | nameOverride | string | `""` | Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names. |
 | namespaceOverride | string | `""` | Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named SecurityContextConstraints (SCC) and its use ClusterRole (`system:openshift:scc:<name>`) when `platform.openshift=true` and `name` is non-empty. The created SCC allows privileged containers, hostPath volumes, and the host PID namespace. Set to false to reuse an existing SCC and matching ClusterRole. Must be false for the built-in `privileged` SCC. |
@@ -518,12 +518,12 @@ More values will be added in follow-up PRs.
 | scheduler.patch.image.pullSecrets | list | `[]` | Names of existing image pull Secrets for the certgen Jobs on Kubernetes versions before 1.22, added after `global.imagePullSecrets`. |
 | scheduler.patch.image.registry | string | `"docker.io"` | Registry of the certgen image used on Kubernetes versions before 1.22. `global.imageRegistry` overrides it. |
 | scheduler.patch.image.repository | string | `"jettech/kube-webhook-certgen"` | Repository of the certgen image used on Kubernetes versions before 1.22. |
-| scheduler.patch.image.tag | string | `"v1.5.2"` | Tag of the certgen image used on Kubernetes versions before 1.22. |
+| scheduler.patch.image.tag | string | `"v1.5.2@sha256:2217d8028431f82afef26b0023ff8b9247971be3964a22e80ef5ca2f36e1a293"` | Tag of the certgen image used on Kubernetes versions before 1.22, pinned by digest. |
 | scheduler.patch.imageNew.pullPolicy | string | `"IfNotPresent"` | Pull policy of the certgen image used on Kubernetes 1.22 and later. |
 | scheduler.patch.imageNew.pullSecrets | list | `[]` | Names of existing image pull Secrets for the certgen Jobs on Kubernetes 1.22 and later, added after `global.imagePullSecrets`. |
 | scheduler.patch.imageNew.registry | string | `"docker.io"` | Registry of the certgen image used on Kubernetes 1.22 and later. `global.imageRegistry` overrides it. |
 | scheduler.patch.imageNew.repository | string | `"liangjw/kube-webhook-certgen"` | Repository of the certgen image used on Kubernetes 1.22 and later. |
-| scheduler.patch.imageNew.tag | string | `"v1.1.1"` | Tag of the certgen image used on Kubernetes 1.22 and later. |
+| scheduler.patch.imageNew.tag | string | `"v1.1.1@sha256:64d8c73dca984af206adf9d6d7e46aa550362b1d7a01f3a0a91b20cc67868660"` | Tag of the certgen image used on Kubernetes 1.22 and later, pinned by digest. |
 | scheduler.patch.nodeSelector | object | `{}` | Node selector for the certgen Job Pods. |
 | scheduler.patch.podAnnotations | object | `{}` | Annotations for the certgen Job Pods. |
 | scheduler.patch.priorityClassName | string | `""` | PriorityClass for the certgen Job Pods. Empty sets none. |
