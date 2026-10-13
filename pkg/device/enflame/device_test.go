@@ -433,11 +433,11 @@ func TestParseDRSCapacity_RejectsNaNAndInf(t *testing.T) {
 }
 
 func TestReadCustomInfoInt_RejectsNaNAndInf(t *testing.T) {
-	assert.Equal(t, readCustomInfoInt(map[string]any{"k": math.NaN()}, "k"), 0)
-	assert.Equal(t, readCustomInfoInt(map[string]any{"k": math.Inf(-1)}, "k"), 0)
-	assert.Equal(t, readCustomInfoInt(map[string]any{"k": 1e300}, "k"), 0)
-	assert.Equal(t, readCustomInfoInt(map[string]any{"k": float64(7)}, "k"), 7)
-	assert.Equal(t, readCustomInfoInt(map[string]any{"k": "7"}, "k"), 7)
+	assert.Equal(t, readCustomInfoInt(map[string]any{"k": math.NaN()}, "k"), int64(0))
+	assert.Equal(t, readCustomInfoInt(map[string]any{"k": math.Inf(-1)}, "k"), int64(0))
+	assert.Equal(t, readCustomInfoInt(map[string]any{"k": 1e300}, "k"), int64(0))
+	assert.Equal(t, readCustomInfoInt(map[string]any{"k": float64(7)}, "k"), int64(7))
+	assert.Equal(t, readCustomInfoInt(map[string]any{"k": "7"}, "k"), int64(7))
 }
 
 func TestAddResourceUsage_ReadsSliceString(t *testing.T) {

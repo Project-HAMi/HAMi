@@ -185,8 +185,8 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 	if err := json.Unmarshal([]byte(capacityRaw), &spec); err != nil {
 		return []*device.DeviceInfo{}, fmt.Errorf("failed to parse %s: %w", GCUDrsCapacity, err)
 	}
-	maxSlice := 0
-	maxMemGB := 0
+	maxSlice := int64(0)
+	maxMemGB := int64(0)
 	for profileName := range spec.Profiles {
 		slice, memGB := parseProfile(profileName)
 		if slice > maxSlice {
@@ -201,6 +201,9 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 	}
 	if maxMemGB <= 0 {
 		maxMemGB = maxSlice
+	}
+	if maxMemGB > math.MaxInt64/1024 {
+		return []*device.DeviceInfo{}, fmt.Errorf("drs profile memory %d GiB overflows int64 on node %s", maxMemGB, n.Name)
 	}
 	nodedevices := make([]*device.DeviceInfo, 0, len(spec.Devices))
 	for idx, d := range spec.Devices {
@@ -222,7 +225,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 			Index:        uint(devIndex),
 			ID:           fmt.Sprintf("%s-enflame-drs-%d", n.Name, devIndex),
 			Count:        capacity,
-			Devmem:       int64(maxMemGB * 1024),
+			Devmem:       maxMemGB * 1024,
 			Devcore:      100,
 			Type:         EnflameVGCUDevice,
 			Numa:         0,
@@ -374,7 +377,7 @@ func sliceCount(ctr *device.ContainerDevice) int64 {
 	}
 	slice := ctr.Slots
 	if slice <= 0 {
-		slice = int64(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
+		slice = readCustomInfoInt(ctr.CustomInfo, "drsSlice")
 	}
 	if slice <= 0 {
 		return 1
@@ -419,14 +422,13 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	// and the "enough room" comparisons below would then succeed. Memory is
 	// stored in MiB, so a MemoryGB above MaxInt64/1024 wraps the product the
 	// same way.
-	memGB := int64(profile.MemoryGB)
-	if profile.Size <= 0 || profile.CorePercent < 0 || memGB <= 0 || memGB > math.MaxInt64/1024 {
+	if profile.Size <= 0 || profile.CorePercent < 0 || profile.MemoryGB <= 0 || profile.MemoryGB > math.MaxInt64/1024 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	profileMemoryMiB := memGB * 1024
-	profileCorePercent := int64(profile.CorePercent)
-	profileSlices := int64(profile.Size)
+	profileMemoryMiB := profile.MemoryGB * 1024
+	profileCorePercent := profile.CorePercent
+	profileSlices := profile.Size
 
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -517,11 +519,11 @@ func (dev *EnflameDevices) GetResourceNames() device.ResourceNames {
 type drsProfileCandidate struct {
 	Name               string
 	ID                 string
-	Size               int
-	MemoryGB           int
-	CorePercent        int
-	RequestMemoryGB    int
-	RequestCorePercent int
+	Size               int64
+	MemoryGB           int64
+	CorePercent        int64
+	RequestMemoryGB    int64
+	RequestCorePercent int64
 }
 
 func (dev *EnflameDevices) selectProfileByRequest(devices []*device.DeviceUsage, request device.ContainerDeviceRequest) (drsProfileCandidate, bool) {
@@ -531,7 +533,7 @@ func (dev *EnflameDevices) selectProfileByRequest(devices []*device.DeviceUsage,
 	}
 	if request.MemPercentagereq == enflameRequestModeDirect {
 		for _, c := range candidates {
-			if c.Size == int(request.Memreq) {
+			if c.Size == request.Memreq {
 				return c, true
 			}
 		}
@@ -540,7 +542,7 @@ func (dev *EnflameDevices) selectProfileByRequest(devices []*device.DeviceUsage,
 
 	maxMemGB := candidates[len(candidates)-1].MemoryGB
 	requestMemGB := normalizeMemoryRequestToGB(request.Memreq, maxMemGB)
-	requestCorePercent := int(request.Coresreq)
+	requestCorePercent := request.Coresreq
 
 	for _, c := range candidates {
 		if requestMemGB > 0 && c.MemoryGB < requestMemGB {
@@ -583,7 +585,7 @@ func parseProfilesFromCustomInfo(customInfo map[string]any) map[string]string {
 }
 
 func collectDRSProfiles(devices []*device.DeviceUsage) []drsProfileCandidate {
-	maxSlice := 0
+	maxSlice := int64(0)
 	for _, devUsage := range devices {
 		if candidateMaxSlice := readCustomInfoInt(devUsage.CustomInfo, "maxSlice"); candidateMaxSlice > maxSlice {
 			maxSlice = candidateMaxSlice
@@ -612,7 +614,10 @@ func collectDRSProfiles(devices []*device.DeviceUsage) []drsProfileCandidate {
 			}
 			// Round down so the costs of a fully sliced device never sum past
 			// its 100 core budget; ceil left 6x1g at 102 and blocked the last
-			// advertised slice.
+			// advertised slice. Skip a size whose *100 would wrap.
+			if size > math.MaxInt64/100 {
+				continue
+			}
 			corePercent := size * 100 / maxSlice
 			seen[profileName] = drsProfileCandidate{
 				Name:        profileName,
@@ -636,7 +641,7 @@ func collectDRSProfiles(devices []*device.DeviceUsage) []drsProfileCandidate {
 	return candidates
 }
 
-func parseProfile(profileName string) (int, int) {
+func parseProfile(profileName string) (int64, int64) {
 	normalized := strings.ToLower(strings.TrimSpace(profileName))
 	parts := strings.Split(normalized, ".")
 	if len(parts) < 2 {
@@ -644,31 +649,31 @@ func parseProfile(profileName string) (int, int) {
 	}
 	sizePart := strings.TrimSpace(parts[0])
 	sizePart = strings.TrimSuffix(sizePart, "g")
-	size, err := strconv.Atoi(sizePart)
+	size, err := strconv.ParseInt(sizePart, 10, 64)
 	if err != nil {
 		return 0, 0
 	}
 	memPart := strings.TrimSpace(parts[1])
 	memPart = strings.TrimSuffix(memPart, "gb")
-	memGB, err := strconv.Atoi(memPart)
+	memGB, err := strconv.ParseInt(memPart, 10, 64)
 	if err != nil {
 		return size, 0
 	}
 	return size, memGB
 }
 
-func normalizeMemoryRequestToGB(rawMemory int64, maxProfileMemoryGB int) int {
+func normalizeMemoryRequestToGB(rawMemory int64, maxProfileMemoryGB int64) int64 {
 	if rawMemory <= 0 {
 		return 0
 	}
-	if maxProfileMemoryGB <= 0 {
-		return int(rawMemory)
+	if maxProfileMemoryGB <= 0 || maxProfileMemoryGB > math.MaxInt64/2 {
+		return rawMemory
 	}
 	// If the request value is much larger than profile-GB units, treat it as MiB.
-	if int(rawMemory) > maxProfileMemoryGB*2 {
-		return int(math.Ceil(float64(rawMemory) / 1024.0))
+	if rawMemory > maxProfileMemoryGB*2 {
+		return int64(math.Ceil(float64(rawMemory) / 1024.0))
 	}
-	return int(rawMemory)
+	return rawMemory
 }
 
 func parseDRSCapacity(raw any) (int64, error) {
@@ -731,7 +736,7 @@ func readCustomInfoString(customInfo map[string]any, key string) string {
 	}
 }
 
-func readCustomInfoInt(customInfo map[string]any, key string) int {
+func readCustomInfoInt(customInfo map[string]any, key string) int64 {
 	if customInfo == nil {
 		return 0
 	}
@@ -741,18 +746,18 @@ func readCustomInfoInt(customInfo map[string]any, key string) int {
 	}
 	switch typed := raw.(type) {
 	case int:
-		return typed
+		return int64(typed)
 	case int32:
-		return int(typed)
+		return int64(typed)
 	case int64:
-		return int(typed)
+		return typed
 	case float64:
 		if math.IsNaN(typed) || typed >= math.MaxInt64 || typed < math.MinInt64 {
 			return 0
 		}
-		return int(typed)
+		return int64(typed)
 	case string:
-		v, err := strconv.Atoi(strings.TrimSpace(typed))
+		v, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
 		if err != nil {
 			return 0
 		}
