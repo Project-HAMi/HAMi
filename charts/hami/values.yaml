@@ -530,7 +530,7 @@ devicePlugin:
 #      memory: 100Mi
 
 mockDevicePlugin:
-  # -- Deploy mock device plugin.
+  # -- Deploy the mock device plugin as a DaemonSet on all eligible nodes without node selectors.
   enabled: false
   image:
     # -- Image registry, overridden by `global.imageRegistry`.
