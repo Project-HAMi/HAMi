@@ -26,7 +26,7 @@ fullnameOverride: ""
 namespaceOverride: ""
 
 platform:
-  # -- Enable when deploying HAMi on OpenShift.
+  # -- Enable when deploying HAMi on OpenShift. Applies restricted security contexts to the scheduler extender and webhook jobs, and omits `scheduler.patch.runAsUser` so OpenShift can assign job UIDs.
   openshift: false
 
 openshift:
