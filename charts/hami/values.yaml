@@ -978,6 +978,7 @@ legacyMetrics: false
 prometheus:
   # -- Create scheduler and device-plugin ServiceMonitors when the API is available.
   # The device-plugin ServiceMonitor also requires `devicePlugin.enabled`.
+  # For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
   enabled: false
 
 device-config:

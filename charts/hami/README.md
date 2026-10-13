@@ -562,7 +562,7 @@ More values will be added in follow-up PRs.
 | namespaceOverride | string | `""` | Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
 | openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
-| prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. |
+| prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`. |
 
 <!-- END GENERATED VALUES -->
 
