@@ -113,6 +113,8 @@ scheduler:
     enabled: true
     image:
       # -- Registry of the kube-scheduler image. `global.imageRegistry` overrides it.
+      # The default is an Alibaba Cloud mirror of `registry.k8s.io/kube-scheduler`, kept because `registry.k8s.io` is hard to reach from China.
+      # Elsewhere, set `registry: registry.k8s.io` and `repository: kube-scheduler` to pull the upstream image.
       registry: "registry.cn-hangzhou.aliyuncs.com"
       # -- Repository of the kube-scheduler image.
       repository: "google_containers/kube-scheduler"
