@@ -146,7 +146,6 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	return ok, nil
 }
 
-// memoryPercentage returns the requested share of device memory, 0 when unset.
 func (dev *AMDDevices) hasResource(ctr *corev1.Container, name string) bool {
 	if name == "" {
 		return false
@@ -156,6 +155,7 @@ func (dev *AMDDevices) hasResource(ctr *corev1.Container, name string) bool {
 	return inLimits || inRequests
 }
 
+// memoryPercentage returns the requested share of device memory, 0 when unset.
 func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int64, error) {
 	if dev.resourceMemoryPercentageName == "" {
 		return 0, nil
