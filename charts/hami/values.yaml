@@ -427,11 +427,15 @@ devicePlugin:
     # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
     # `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If
     # none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named
-    # `*`. Selected entries apply in list order. An entry must set either `name` or a non-empty
-    # valid Kubernetes label selector, never both. For example, use
+    # `*`. For example, use
     # `{"nodelabelselector":{"matchLabels":{"gpu.example.com/pool":"mig"}},"operatingmode":"mig"}`. Node
     # labels are read at plugin startup; restart the plugin after changing them and use labels available when
     # the node registers.
+    # Selected entries apply in list order; later overrides take precedence. For per-node resource
+    # settings, null, zero, or false does not replace an existing non-zero or true value. Empty
+    # `operatingmode` and `filterdevices` values are ignored. Entries with both or neither of `name` and
+    # `nodelabelselector`, or with an empty or invalid label selector, are skipped.
+    # @default -- Example node configuration; see [values.yaml](values.yaml).
     config: |
       {
         "nodeconfig": [
@@ -439,12 +443,12 @@ devicePlugin:
             "name": "your-node-name",
             "operatingmode": "hami-core",
             "devicememoryscaling": 1,
-            "devicecorescaling": 1,
+            "devicecorescaling": null,
             "devicesplitcount": 10,
             "preconfigureddevicememory": 0,
-            "libcudaloglevel": "1",
+            "libcudaloglevel": null,
             "enablenumatopology": false,
-            "reportnodecapacity": false,
+            "reportnodecapacity": null,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
