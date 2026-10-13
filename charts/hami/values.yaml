@@ -350,49 +350,45 @@ devicePlugin:
     # of monitor resync and the GC scan interval.
     gracePeriod: "5m"
   monitor:
-    ## @param image.registry monitor image registry
-    ## @param image.repository monitor image repository
-    ## @param image.tag monitor image tag (immutable tags are recommended)
-    ## @param image.pullPolicy monitor image pull policy
-    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
+      # -- Monitor image registry. Overridden by a non-empty `global.imageRegistry`.
       registry: "docker.io"
+      # -- Monitor image repository.
       repository: "projecthami/hami"
+      # -- Monitor image tag. Empty uses `global.imageTag`.
       tag: ""
-      ## Specify a imagePullPolicy
-      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
-      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
-      ##
+      # -- Monitor image pull policy: `Always`, `IfNotPresent`, or `Never`.
       pullPolicy: IfNotPresent
-      ## Optionally specify an array of imagePullSecrets.
-      ## Secrets must be manually created in the namespace.
-      ## Example:
-      ## pullSecrets:
-      ##   - myRegistryKeySecretName
-      ##
+      # -- Monitor image pull Secret names. Currently unused by the DaemonSet; configure
+      # `devicePlugin.image.pullSecrets` or `global.imagePullSecrets` for the shared Pod.
       pullSecrets: []
+    # -- Shared per-container libvgpu cache path used by the device plugin and monitor.
     ctrPath: /usr/local/vgpu/containers
-    # Address the monitor serves /metrics on. The container port, the Service
-    # target port and the probes follow it; set it here, not in extraArgs.
+    # -- Address the monitor serves `/metrics` on. The container port, Service target port and probes
+    # follow it. Loopback addresses are rejected. Set it here, not in `extraArgs`.
     metricsBindAddress: ":9394"
-    # Liveness and readiness probes of the monitor. Turn them off to debug inside
-    # the container without kubelet restarting it.
     probes:
+      # -- Run the monitor liveness and readiness probes. Disable to debug inside the container.
       enabled: true
-    # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
+    # -- Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
-    ## @param devicePlugin.monitor.disableHAMiCoreForWholeGPU disable the HAMi-core hook for whole-GPU containers; the monitor reads their metrics from NVML instead
+    # -- Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1;
+    # the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full
+    # device memory allocated and cores unrequested or `gpucores=100`.
     disableHAMiCoreForWholeGPU: true
+    # -- Additional monitor command-line arguments as a list of strings.
     extraArgs:
       - -v=4
     # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
     extraEnvs: []
+    # -- Security context for the monitor container.
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
+    # -- Resource requests and limits for the monitor container.
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.

@@ -280,22 +280,6 @@ listener is started.
 
 ## Device Plugin Configuration
 
-### Monitor Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.monitor.image.registry` | Monitor image registry | `"docker.io"` |
-| `devicePlugin.monitor.image.repository` | Monitor image repository | `"projecthami/hami"` |
-| `devicePlugin.monitor.image.tag` | Monitor image tag | `""` |
-| `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
-| `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
-| `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
-| `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
-| `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
-| `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
-| `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Skip the HAMi-core interception for whole-GPU workloads on non-oversubscribed nodes and read their metrics from NVML instead. Whole-GPU means: non-MIG device, full device memory allocated, cores unrequested or `gpucores=100` | `true` |
-| `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
-
 ### vGPU Cache Garbage Collection
 
 The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
@@ -476,7 +460,20 @@ More values will be added in follow-up PRs.
 | devicePlugin.libPath | string | `"/usr/local/vgpu"` | Host directory for HAMi-core library files, mounted at `<global.gpuHookPath>/vgpu` inside the device plugin container. |
 | devicePlugin.migStrategy | string | `"none"` | Strategy for exposing NVIDIA MIG devices: `none`, `single`, or `mixed`. `mixed` exposes MIG profiles as separate resources. Passed as `--mig-strategy`. |
 | devicePlugin.mofedEnabled | bool | `nil` | Enable MOFED support for allocated GPU containers. A boolean sets `MOFED_ENABLED`; null leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime support. |
+| devicePlugin.monitor.ctrPath | string | `"/usr/local/vgpu/containers"` | Shared per-container libvgpu cache path used by the device plugin and monitor. |
+| devicePlugin.monitor.disableHAMiCoreForWholeGPU | bool | `true` | Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1; the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full device memory allocated and cores unrequested or `gpucores=100`. |
+| devicePlugin.monitor.extraArgs | list | `["-v=4"]` | Additional monitor command-line arguments as a list of strings. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
+| devicePlugin.monitor.image.pullPolicy | string | `"IfNotPresent"` | Monitor image pull policy: `Always`, `IfNotPresent`, or `Never`. |
+| devicePlugin.monitor.image.pullSecrets | list | `[]` | Monitor image pull Secret names. Currently unused by the DaemonSet; configure `devicePlugin.image.pullSecrets` or `global.imagePullSecrets` for the shared Pod. |
+| devicePlugin.monitor.image.registry | string | `"docker.io"` | Monitor image registry. Overridden by a non-empty `global.imageRegistry`. |
+| devicePlugin.monitor.image.repository | string | `"projecthami/hami"` | Monitor image repository. |
+| devicePlugin.monitor.image.tag | string | `""` | Monitor image tag. Empty uses `global.imageTag`. |
+| devicePlugin.monitor.metricsBindAddress | string | `":9394"` | Address the monitor serves `/metrics` on. The container port, Service target port and probes follow it. Loopback addresses are rejected. Set it here, not in `extraArgs`. |
+| devicePlugin.monitor.probes.enabled | bool | `true` | Run the monitor liveness and readiness probes. Disable to debug inside the container. |
+| devicePlugin.monitor.resources | object | `{}` | Resource requests and limits for the monitor container. |
+| devicePlugin.monitor.resyncInterval | string | `"5m"` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods. Does not control directory GC or Prometheus scrape frequency. |
+| devicePlugin.monitor.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]}}` | Security context for the monitor container. |
 | devicePlugin.nodeConfiguration.config | string | `"{\n  \"nodeconfig\": [\n    {\n      \"name\": \"your-node-name\",\n      \"operatingmode\": \"hami-core\",\n      \"devicememoryscaling\": 1,\n      \"devicecorescaling\": 1,\n      \"devicesplitcount\": 10,\n      \"preconfigureddevicememory\": 0,\n      \"libcudaloglevel\": \"1\",\n      \"enablenumatopology\": false,\n      \"reportnodecapacity\": false,\n      \"migstrategy\": \"none\",\n      \"filterdevices\": {\n        \"uuid\": [],\n        \"index\": []\n      },\n      \"enablegetpreferredallocation\": false\n    }\n  ]\n}\n"` | JSON content for the generated device plugin ConfigMap key `config.json`; ignored when `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named `*`. Selected entries apply in list order. An entry must set either `name` or a non-empty valid Kubernetes label selector, never both. For example, use `{"nodelabelselector":{"matchLabels":{"gpu.example.com/pool":"mig"}},"operatingmode":"mig"}`. Node labels are read at plugin startup; restart the plugin after changing them and use labels available when the node registers. |
 | devicePlugin.nodeConfiguration.externalConfigName | string | `""` | Existing ConfigMap containing a `config.json` key in the Pod namespace. When non-empty, the chart mounts it instead of creating a ConfigMap from `nodeConfiguration.config`. |
 | devicePlugin.numaRefit.caFile | string | `""` | Path to a CA bundle already present inside the device-plugin container. |
