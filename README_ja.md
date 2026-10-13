@@ -12,7 +12,7 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
-[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.com/invite/Amhy7XmbNq)
 [![website](https://img.shields.io/badge/website-blue?style=for-the-badge&logo=readthedocs)](https://project-hami.io)
 
 # HAMi
@@ -177,7 +177,7 @@ HAMi は他にも以下を提供します：
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI)：ビジュアルクラスタおよびデバイス管理。
 - [skill/](skill/) の Agent skills：GPU Pod のデバッグと vGPU メトリクスの要約用。
-- Grafana ダッシュボードの例：アクセラレータモニタリング用。
+- [Grafana ダッシュボード](https://project-hami.io/docs/userguide/monitoring/grafana-dashboard)：アクセラレータモニタリング用。
 - ベンチマーク素材：ワークロードの動作とスケジューリング効果の評価用。
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
@@ -204,7 +204,7 @@ HAMi は[メンテナー](./MAINTAINERS.md)と[コントリビューター](./AU
 HAMi コミュニティは、ユーザー、コントリビューター、ハードウェアベンダー、Kubernetes ベースの AI インフラストラクチャを構築するプラットフォームチームに開かれています。
 
 - Web サイト：[project-hami.io](https://project-hami.io)
-- Discord：[HAMi Discord に参加](https://discord.gg/Amhy7XmbNq)（推奨）
+- Discord：[HAMi Discord に参加](https://discord.com/invite/Amhy7XmbNq)（推奨）
 - Slack：[CNCF Slack #hami-dev](https://cloud-native.slack.com/archives/C07T10BU4R2)
 - メーリングリスト：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [ミーティングノートとアジェンダ](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)

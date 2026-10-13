@@ -22,7 +22,7 @@ REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 cd "${REPO_ROOT}"
 
 if [[ "$(which addlicense)" == "" ]]; then
-  go install github.com/google/addlicense@v1.1.1
+  go install github.com/google/addlicense@v1.2.0
 fi
 ADDLICENSE_BIN=$(which addlicense)
 

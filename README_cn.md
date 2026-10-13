@@ -12,7 +12,7 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
-[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.com/invite/Amhy7XmbNq)
 [![website](https://img.shields.io/badge/website-blue?style=for-the-badge&logo=readthedocs)](https://project-hami.io)
 
 # HAMi
@@ -177,7 +177,7 @@ HAMi 还提供：
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) 用于可视化集群和设备管理。
 - [skill/](skill/) 下的 Agent skills，用于排查 GPU Pod 和汇总 vGPU 指标。
-- Grafana 仪表盘示例用于加速器监控。
+- [Grafana 仪表盘](https://project-hami.io/docs/userguide/monitoring/grafana-dashboard)用于加速器监控。
 - 基准测试材料用于评估工作负载行为和调度效果。
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
@@ -204,7 +204,7 @@ HAMi 由[维护者](./MAINTAINERS.md)和[贡献者](./AUTHORS.md)共同治理。
 HAMi 社区欢迎用户、贡献者、硬件厂商和构建 Kubernetes AI 基础设施的平台团队。
 
 - 官网：[project-hami.io](https://project-hami.io)
-- Discord：[加入 HAMi Discord](https://discord.gg/Amhy7XmbNq)（推荐）
+- Discord：[加入 HAMi Discord](https://discord.com/invite/Amhy7XmbNq)（推荐）
 - Slack：[CNCF Slack #hami-dev](https://cloud-native.slack.com/archives/C07T10BU4R2)
 - 邮件列表：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [会议记录和议程](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
