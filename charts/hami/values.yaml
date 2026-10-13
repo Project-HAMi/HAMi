@@ -408,7 +408,7 @@ devicePlugin:
     # (best-effort or strict). Disabled by default: mismatches are only logged.
     enabled: false
     # -- Scheduler base URL override. Defaults to the in-cluster scheduler
-    # service, https://<release>-scheduler.<namespace>.svc:<httpPort>.
+    # service, `https://<release>-scheduler.<namespace>.svc:<scheduler.service.httpPort>`.
     schedulerEndpoint: ""
     # -- The scheduler serves the admission webhook's self-signed certificate,
     # so verification is skipped by default with the same posture as the
