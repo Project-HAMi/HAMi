@@ -141,14 +141,14 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	i = 0
 	customInfo := map[string]any{
 		AWSNodeType:             n.Labels["node.kubernetes.io/instance-type"],
-		AWSCoresPerNeuronDevice: int64(coresPerDevice),
+		AWSCoresPerNeuronDevice: coresPerDevice,
 	}
 
 	for int64(i) < counts {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
-			Count:        int64(coresPerDevice),
+			Count:        coresPerDevice,
 			Devmem:       0,
 			Devcore:      coremask,
 			Type:         AWSNeuronDevice,
@@ -196,10 +196,10 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 						}
 					} else {
 						coresPerDevice := coresPerNeuronDevice(val.CustomInfo)
-						coreOffset := int64(val.Idx) * int64(coresPerDevice)
-						for core := range min(coresPerDevice, int64(maxCoresPerNeuronDevice)) {
+						coreOffset := int64(val.Idx) * coresPerDevice
+						for core := range min(coresPerDevice, maxCoresPerNeuronDevice) {
 							if (val.Usedcores & (1 << core)) != 0 {
-								value = value + fmt.Sprint(coreOffset+int64(core)) + ","
+								value = value + fmt.Sprint(coreOffset+core) + ","
 								(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 							}
 						}
@@ -284,7 +284,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			"container", ctr.Name,
 			"deviceCount", n)
 		return device.ContainerDeviceRequest{
-			Nums:             int64(n),
+			Nums:             n,
 			Type:             AWSNeuronDevice,
 			Memreq:           0,
 			MemPercentagereq: 0,
@@ -335,7 +335,7 @@ func (dev *AWSNeuronDevices) AccumulateCores(used, allocated int64) int64 {
 }
 
 func (dev *AWSNeuronDevices) CountAllocatedCores(allocated int64) int64 {
-	return int64(countMaskAvailable(allocated))
+	return countMaskAvailable(allocated)
 }
 
 func countMaskAvailable(mask int64) int64 {
@@ -352,10 +352,10 @@ func countMaskAvailable(mask int64) int64 {
 // runtime requires a contiguous core range, so separate free bits cannot be
 // combined into one allocation.
 func allocateCoreMask(used, available int64, required int64) (int64, bool) {
-	if required <= 0 || required > int64(maxCoresPerNeuronDevice) {
+	if required <= 0 || required > maxCoresPerNeuronDevice {
 		return 0, false
 	}
-	for start := int64(0); start+required <= int64(maxCoresPerNeuronDevice); start++ {
+	for start := int64(0); start+required <= maxCoresPerNeuronDevice; start++ {
 		mask := ((int64(1) << required) - 1) << start
 		if available&mask == mask && used&mask == 0 {
 			return mask, true
@@ -453,7 +453,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	remainingCores := k.TotalCoresreq
 	if remainingCores > 0 && len(devices) > 0 {
-		coresPerDevice := int64(countMaskAvailable(devices[0].Totalcore))
+		coresPerDevice := countMaskAvailable(devices[0].Totalcore)
 		if coresPerDevice == 0 {
 			return false, tmpDevs, common.GenReason(map[string]int{common.CardInsufficientCore: 1}, len(devices))
 		}
@@ -461,7 +461,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		if deviceCount > int64(len(devices)) {
 			return false, tmpDevs, common.GenReason(map[string]int{common.NodeInsufficientDevice: len(devices)}, int(deviceCount))
 		}
-		k.Nums = int64(deviceCount)
+		k.Nums = deviceCount
 	}
 	if k.Nums > 1 {
 		candidates := make([]*device.DeviceUsage, len(devices))
@@ -469,7 +469,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			copy := candidate.DeepCopy()
 			requiredCores := k.Coresreq
 			if remainingCores > 0 {
-				requiredCores = int64(min(remainingCores, int64(countMaskAvailable(copy.Totalcore))))
+				requiredCores = min(remainingCores, countMaskAvailable(copy.Totalcore))
 			} else if requiredCores == 0 {
 				requiredCores = countMaskAvailable(copy.Totalcore)
 			}
@@ -489,8 +489,8 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 				if val.Index == uint(dev) {
 					requiredCores := k.Coresreq
 					if remainingCores > 0 {
-						requiredCores = int64(min(remainingCores, int64(countMaskAvailable(val.Totalcore))))
-						remainingCores -= int64(requiredCores)
+						requiredCores = min(remainingCores, countMaskAvailable(val.Totalcore))
+						remainingCores -= requiredCores
 					} else if requiredCores == 0 {
 						requiredCores = countMaskAvailable(val.Totalcore)
 					}
@@ -552,7 +552,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 
 		requiredCores := k.Coresreq
 		if remainingCores > 0 {
-			requiredCores = int64(remainingCores)
+			requiredCores = remainingCores
 		} else if requiredCores == 0 {
 			requiredCores = countMaskAvailable(dev.Totalcore)
 		}
