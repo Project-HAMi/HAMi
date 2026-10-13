@@ -1144,7 +1144,7 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 }
 
 func TestNodeCleanUpRemovesHandshake(t *testing.T) {
-	dev := InitIluvatarDevice([]IluvatarConfig{{CommonWord: "MR-V100", ResourceCountName: "iluvatar.ai/MR-V100-vgpu"}})[0]
+	dev := &IluvatarDevices{handshakeAnno: "hami.io/node-handshake-MR-V100"}
 	prevClient := client.KubeClient
 	t.Cleanup(func() { client.KubeClient = prevClient })
 	client.KubeClient = fake.NewClientset()
