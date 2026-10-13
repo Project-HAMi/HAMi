@@ -405,24 +405,25 @@ devicePlugin:
 #        memory: 100Mi
 
   numaRefit:
-    # -- Allow the device plugin to ask the scheduler to refit an allocation onto the NUMA-restricted devices
-    # allowed by kubelet. Requires `devices.nvidia.enableNumaTopology`, per-node
-    # `enablegetpreferredallocation`, and the workload annotation `hami.io/numa-alignment: best-effort` or
-    # `strict`. For authenticated refit requests, also set `tlsInsecure=false` and configure trust for the
-    # scheduler certificate.
+    # -- NUMA alignment refit (#2080): when enabled, the device plugin asks the
+    # scheduler to re-run its fit over the NUMA-restricted device set kubelet
+    # allows, keeping scheduler accounting authoritative. Requires
+    # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
+    # configuration; pods opt in with the hami.io/numa-alignment annotation
+    # (best-effort or strict). Disabled by default: mismatches are only logged.
     enabled: false
-    # -- Scheduler base URL for NUMA refit. Empty uses the in-cluster scheduler Service URL with the
-    # chart-resolved name, namespace, and `scheduler.service.httpPort`.
+    # -- Scheduler base URL override. Defaults to the in-cluster scheduler
+    # service, https://<release>-scheduler.<namespace>.svc:<httpPort>.
     schedulerEndpoint: ""
-    # -- Skip TLS certificate verification only for unauthenticated NUMA refit requests. Requests carrying a
-    # ServiceAccount token reject this setting when true. Set false and configure `caFile` or `caSecret` for a
-    # scheduler certificate not trusted by the system roots.
+    # -- The scheduler serves the admission webhook's self-signed certificate,
+    # so verification is skipped by default with the same posture as the
+    # extender configmap (tlsConfig.insecure). Set false to verify, and use
+    # caFile to point at a CA bundle mounted into the device plugin.
     tlsInsecure: true
-    # -- Path to a PEM CA bundle already present inside the device plugin container, used when NUMA refit is
-    # enabled. Takes precedence over `caSecret` when non-empty.
+    # -- Path to a CA bundle already present inside the device-plugin container.
     caFile: ""
-    # -- Name of an existing Secret in the Pod namespace containing `ca.crt`. Mounted when NUMA refit is
-    # enabled and used as the CA bundle when `caFile` is empty.
+    # -- Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
+    # when caFile is empty.
     caSecret: ""
   # -- Report GPU memory and core resources in Node capacity and allocatable. Per-node `reportnodecapacity`
   # settings in the node configuration take precedence over this default.
