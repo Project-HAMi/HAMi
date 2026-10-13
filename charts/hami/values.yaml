@@ -468,8 +468,8 @@ devicePlugin:
   # -- String boolean passed as `--disable-core-limit`: `"true"` disables the HAMi-core utilization limit;
   # `"false"` keeps it enabled.
   disablecorelimit: "false"
-  # -- Pass device specifications to kubelet in Allocate responses. A boolean sets `PASS_DEVICE_SPECS`; null
-  # leaves the plugin default unchanged.
+  # -- Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy`
+  # contains only CDI strategies. Null leaves the plugin default unchanged (disabled).
   passDeviceSpecsEnabled: true
   # -- Comma-separated device list strategies passed to the container runtime: `envvar`, `volume-mounts`,
   # `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires
