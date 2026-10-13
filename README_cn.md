@@ -97,7 +97,7 @@ HAMi 支持多种异构加速器后端，包括 GPU、NPU、HCU、MLU、GCU、XP
 使用 NVIDIA 设备插件路径，需准备：
 
 - NVIDIA 驱动 >= 440
-- `nvidia-docker` 版本 > 2.0
+- NVIDIA Container Toolkit（`nvidia-docker2` 的继任者）
 - NVIDIA 配置为 containerd、Docker 或 CRI-O 的默认运行时
 - Kubernetes >= 1.23
 - glibc >= 2.17

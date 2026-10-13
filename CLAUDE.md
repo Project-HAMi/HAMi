@@ -14,7 +14,7 @@ make docker             # Build Docker image
 make tidy               # Run go mod tidy
 make test               # Run unit tests with coverage (output in _output/coverage/)
 make lint               # Run golangci-lint (version pinned in hack/verify-staticcheck.sh)
-make verify             # Run all verification checks (license, lint, import aliases)
+make verify             # Run all verification checks (lint, license, import aliases, RBAC permissions)
 make bench              # Run the benchmarks (CI only checks that they still execute)
 make verify_chart       # Lint and render the chart, run Trivy, check chart and app versions
 make update-helm-chart-docs   # Regenerate the values table in charts/hami/README.md (needs helm-docs)
@@ -51,7 +51,7 @@ go test ./pkg/device/nvidia/... -run TestName -short --race -count=1
 
 - **`pkg/scheduler/`** — Scheduler extender logic: node filtering, scoring, webhook handling. `config/config.go` contains `InitDevicesWithConfig()` which registers all device backends into `device.DevicesMap`.
 
-- **`pkg/scheduler/policy/`** — GPU scheduling policies (`binpack`, `spread`) and node-level scoring.
+- **`pkg/scheduler/policy/`** — GPU scheduling policies (`binpack`, `spread`, `topology-aware`, `mutex`, and `numa` as a chained sort key; comma-separated combinations are accepted) and node-level scoring.
 
 - **`pkg/util/`** — Shared utilities including K8s client setup, node locking (annotation-based distributed lock), and leader election.
 
@@ -69,6 +69,7 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 
 - License headers on all `.go` files (`hack/verify-license.sh`, uses `addlicense`)
 - Import aliases must match `hack/.import-aliases` (e.g., `corev1` for `k8s.io/api/core/v1`)
+- RBAC permissions: the ClusterRole in the chart must cover the API calls in `pkg/` and `cmd/` (`hack/verify-rbac.sh`)
 - golangci-lint with config in `.golangci.yaml` (version pinned in `hack/verify-staticcheck.sh`)
 - `goimports` with local prefix `github.com/Project-HAMi/HAMi`
 - Unit tests with race detector

@@ -97,7 +97,7 @@ HAMi は GPU、NPU、HCU、MLU、GCU、XPU など、複数のヘテロジニア�
 NVIDIA デバイスプラグインを使用する場合：
 
 - NVIDIA ドライバー >= 440
-- `nvidia-docker` バージョン > 2.0
+- NVIDIA Container Toolkit（`nvidia-docker2` の後継）
 - NVIDIA が containerd、Docker、または CRI-O のデフォルトランタイムとして設定されていること
 - Kubernetes >= 1.23
 - glibc >= 2.17

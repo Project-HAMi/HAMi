@@ -32,7 +32,7 @@ When adding a new third-party package, maintainers should:
 ## Automation
 
 - Dependabot opens daily update PRs for Go modules, the Dockerfiles under `docker/` and GitHub Actions.
-- Container images and base-image pins (`version.mk`) are updated by hand together with the tool versions in the workflows.
+- The `GOLANG_IMAGE` and `NVIDIA_IMAGE` pins in `version.mk` (mirrored in the Dockerfiles and workflows) and the tool versions in the workflows are updated by hand.
 - A nightly Trivy scan checks the built images, and CodeQL and OpenSSF Scorecard run in CI. Findings are tracked under Security and quality.
 
 ## Archive/Deprecation

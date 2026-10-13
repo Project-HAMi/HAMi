@@ -97,7 +97,7 @@ See the current [HAMi supported devices](https://project-hami.io/docs/userguide/
 For the NVIDIA device plugin path, prepare:
 
 - NVIDIA driver >= 440
-- `nvidia-docker` version > 2.0
+- NVIDIA Container Toolkit (the successor to `nvidia-docker2`)
 - NVIDIA configured as the default runtime for containerd, Docker, or CRI-O
 - Kubernetes >= 1.23
 - glibc >= 2.17
