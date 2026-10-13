@@ -533,22 +533,14 @@ mockDevicePlugin:
   # -- Deploy mock device plugin.
   enabled: false
   image:
-    # -- Image registry; overridden by `global.imageRegistry`.
+    # -- Image registry, overridden by `global.imageRegistry`.
     registry: "docker.io"
-    # -- Image repository.
+    # -- Image repository for the mock-device-plugin.
     repository: "projecthami/mock-device-plugin"
-    # -- Mock image tag (required); does not inherit `global.imageTag`.
+    # -- Image tag (required); does not inherit `global.imageTag`.
     tag: "1.0.1"
-    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
-
-    # -- Image pull policy.
+    # -- Image pull policy: `Always`, `IfNotPresent`, or `Never`.
     pullPolicy: IfNotPresent
-    ## Example:
-    ## pullSecrets:
-    ##   - myRegistryKeySecretName
-
-    # -- Image pull secret names. Secrets must be created in the namespace.
-    # Currently ignored by the mock device plugin DaemonSet.
     pullSecrets: []
 devices:
   metax:
@@ -984,7 +976,7 @@ devices:
 legacyMetrics: false
 
 prometheus:
-  # -- Create scheduler and device-plugin ServiceMonitors when their API is available.
+  # -- Create scheduler and device-plugin ServiceMonitors when the API is available.
   # The device-plugin ServiceMonitor also requires `devicePlugin.enabled`.
   enabled: false
 

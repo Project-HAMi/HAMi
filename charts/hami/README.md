@@ -554,16 +554,15 @@ More values will be added in follow-up PRs.
 | global.managedNodeSelectorEnable | bool | `false` | When true, add `global.managedNodeSelector` to the scheduler pod as `NODE_SELECTOR_*` environment variables. |
 | legacyMetrics | bool | `false` | Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility. |
 | mockDevicePlugin.enabled | bool | `false` | Deploy mock device plugin. |
-| mockDevicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| mockDevicePlugin.image.pullSecrets | list | `[]` | Image pull secret names. Secrets must be created in the namespace. Currently ignored by the mock device plugin DaemonSet. |
-| mockDevicePlugin.image.registry | string | `"docker.io"` | Image registry; overridden by `global.imageRegistry`. |
-| mockDevicePlugin.image.repository | string | `"projecthami/mock-device-plugin"` | Image repository. |
-| mockDevicePlugin.image.tag | string | `"1.0.1"` | Mock image tag (required); does not inherit `global.imageTag`. |
+| mockDevicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy: `Always`, `IfNotPresent`, or `Never`. |
+| mockDevicePlugin.image.registry | string | `"docker.io"` | Image registry, overridden by `global.imageRegistry`. |
+| mockDevicePlugin.image.repository | string | `"projecthami/mock-device-plugin"` | Image repository for the mock-device-plugin. |
+| mockDevicePlugin.image.tag | string | `"1.0.1"` | Image tag (required); does not inherit `global.imageTag`. |
 | nameOverride | string | `""` | Replaces the chart name in resource names and in the `app.kubernetes.io/name` label. Resource names use the release name alone when it already contains this name, otherwise `<release>-<name>`. `fullnameOverride` takes precedence for resource names. |
 | namespaceOverride | string | `""` | Namespace the chart's resources are rendered into instead of the release namespace. The chart does not create it, so it must already exist. |
 | openshift.securityContextConstraints.create | bool | `true` | Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC. |
 | openshift.securityContextConstraints.name | string | `"hami-device-plugin"` | SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`. |
-| prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when their API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. |
+| prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. |
 
 <!-- END GENERATED VALUES -->
 
