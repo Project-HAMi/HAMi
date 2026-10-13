@@ -226,6 +226,8 @@ spec:
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
               readOnly: true
+            {{- end }}
+            {{- if include "hami.devicePlugin.autoDriverRootHostMount" . }}
             - name: host
               mountPath: /host
               readOnly: true
@@ -363,7 +365,7 @@ spec:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | default "/run/nvidia/validations" }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
+        {{- if include "hami.devicePlugin.autoDriverRootHostMount" . }}
         - name: host
           hostPath:
             path: /
