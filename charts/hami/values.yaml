@@ -317,84 +317,78 @@ scheduler:
     enabled: false
 
 devicePlugin:
+  # -- Deploy the NVIDIA device plugin DaemonSet, including the vGPU monitor container.
   enabled: true
   gpuOperatorToolkitReady:
+    # -- Wait for `<hostPath>/toolkit-ready` in an init container before starting the device plugin and monitor.
     enabled: false
+    # -- Host directory containing `toolkit-ready`. Also supplies `driver-ready` when
+    # `devicePlugin.nvidiaDriverRoot=auto`.
     hostPath: "/run/nvidia/validations"
+    # -- Security context for the toolkit-validation init container.
     securityContext:
       privileged: true
       runAsUser: 0
-  ## @param image.registry devicePlugin image registry
-  ## @param image.repository devicePlugin image repository
-  ## @param image.tag devicePlugin image tag (immutable tags are recommended)
-  ## @param image.pullPolicy devicePlugin image pull policy
-  ## @param image.pullSecrets Specify docker-registry secret names as an array
   image:
+    # -- NVIDIA device plugin image registry. Overridden by a non-empty `global.imageRegistry`.
     registry: "docker.io"
+    # -- Image repository for the NVIDIA device plugin container and the `selinux-relabel` and
+    # `toolkit-validation` init containers when enabled.
     repository: "projecthami/hami"
+    # -- NVIDIA device plugin image tag. Empty uses `global.imageTag`.
     tag: ""
-    ## Specify a imagePullPolicy
-    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
-    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
-    ##
+    # -- Image pull policy for the NVIDIA device plugin and its enabled init containers: `Always`,
+    # `IfNotPresent`, or `Never`.
     pullPolicy: IfNotPresent
-    ## Optionally specify an array of imagePullSecrets.
-    ## Secrets must be manually created in the namespace.
-    ## Example:
-    ## pullSecrets:
-    ##   - myRegistryKeySecretName
-    ##
+    # -- Image pull Secret names for the device plugin Pod, appended to `global.imagePullSecrets`,
+    # e.g. `[myRegistryKeySecretName]`.
     pullSecrets: []
   vgpuCache:
-    # @param devicePlugin.vgpuCache.gracePeriod Minimum directory age before stale cache GC.
-    # Independent of monitor.resyncInterval. Uses Go duration syntax (e.g. "5m").
-    # "0s" removes the grace period, but still requires live Pod confirmation.
-    # Negative durations are rejected; invalid duration strings fall back to "5m".
+    # -- Minimum cache directory age, measured from its modification time, before garbage collection. Use
+    # Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations
+    # prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent
+    # of monitor resync and the GC scan interval.
     gracePeriod: "5m"
   monitor:
-    ## @param image.registry monitor image registry
-    ## @param image.repository monitor image repository
-    ## @param image.tag monitor image tag (immutable tags are recommended)
-    ## @param image.pullPolicy monitor image pull policy
-    ## @param image.pullSecrets Specify docker-registry secret names as an array
     image:
+      # -- Monitor image registry. Overridden by a non-empty `global.imageRegistry`.
       registry: "docker.io"
+      # -- Monitor image repository.
       repository: "projecthami/hami"
+      # -- Monitor image tag. Empty uses `global.imageTag`.
       tag: ""
-      ## Specify a imagePullPolicy
-      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
-      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
-      ##
+      # -- Monitor image pull policy: `Always`, `IfNotPresent`, or `Never`.
       pullPolicy: IfNotPresent
-      ## Optionally specify an array of imagePullSecrets.
-      ## Secrets must be manually created in the namespace.
-      ## Example:
-      ## pullSecrets:
-      ##   - myRegistryKeySecretName
-      ##
+      # -- Monitor image pull Secret names. Currently unused by the DaemonSet; configure
+      # `devicePlugin.image.pullSecrets` or `global.imagePullSecrets` for the shared Pod.
       pullSecrets: []
+    # -- Shared per-container libvgpu cache path used by the device plugin and monitor.
     ctrPath: /usr/local/vgpu/containers
-    # Address the monitor serves /metrics on. The container port, the Service
-    # target port and the probes follow it; set it here, not in extraArgs.
+    # -- Address the monitor serves `/metrics` on. The container port, Service target port and probes
+    # follow it. Loopback addresses are rejected. Set it here, not in `extraArgs`.
     metricsBindAddress: ":9394"
-    # Liveness and readiness probes of the monitor. Turn them off to debug inside
-    # the container without kubelet restarting it.
     probes:
+      # -- Run the monitor liveness and readiness probes. Disable to debug inside the container.
       enabled: true
-    # Monitor Pod informer resync and grace period for releasing mappings of missing Pods.
+    # -- Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods.
     # Does not control directory GC or Prometheus scrape frequency.
     resyncInterval: "5m"
-    ## @param devicePlugin.monitor.disableHAMiCoreForWholeGPU disable the HAMi-core hook for whole-GPU containers; the monitor reads their metrics from NVML instead
+    # -- Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1;
+    # the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full
+    # device memory allocated and cores unrequested or `gpucores=100`.
     disableHAMiCoreForWholeGPU: true
+    # -- Additional monitor command-line arguments as a list of strings.
     extraArgs:
       - -v=4
     # -- Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom.
     extraEnvs: []
+    # -- Security context for the monitor container.
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
+    # -- Resource requests and limits for the monitor container.
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -405,48 +399,43 @@ devicePlugin:
 #        cpu: 100m
 #        memory: 100Mi
 
-  # NUMA alignment refit (#2080): when enabled, the device plugin asks the
-  # scheduler to re-run its fit over the NUMA-restricted device set kubelet
-  # allows, keeping scheduler accounting authoritative. Requires
-  # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
-  # configuration; pods opt in with the hami.io/numa-alignment annotation
-  # (best-effort or strict). Disabled by default: mismatches are only logged.
   numaRefit:
+    # -- NUMA alignment refit (#2080): when enabled, the device plugin asks the
+    # scheduler to re-run its fit over the NUMA-restricted device set kubelet
+    # allows, keeping scheduler accounting authoritative. Requires
+    # devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node
+    # configuration; pods opt in with the hami.io/numa-alignment annotation
+    # (best-effort or strict). Disabled by default: mismatches are only logged.
     enabled: false
-    # Scheduler base URL override. Defaults to the in-cluster scheduler
-    # service, https://<release>-scheduler.<namespace>.svc:<httpPort>.
+    # -- Scheduler base URL override. Defaults to the in-cluster scheduler
+    # service, `https://<release>-scheduler.<namespace>.svc:<scheduler.service.httpPort>`.
     schedulerEndpoint: ""
-    # The scheduler serves the admission webhook's self-signed certificate,
+    # -- The scheduler serves the admission webhook's self-signed certificate,
     # so verification is skipped by default with the same posture as the
     # extender configmap (tlsConfig.insecure). Set false to verify, and use
     # caFile to point at a CA bundle mounted into the device plugin.
     tlsInsecure: true
-    # Path to a CA bundle already present inside the device-plugin container.
+    # -- Path to a CA bundle already present inside the device-plugin container.
     caFile: ""
-    # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
+    # -- Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
-  # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
-  # to Node capacity and allocatable fields. Defaults to false. Not NVIDIA-specific,
-  # so this stays here rather than under devices.<vendor>.
+  # -- Report GPU memory and core resources in Node capacity and allocatable. The `reportnodecapacity`
+  # JSON field in `nodeConfiguration.config` overrides this setting for matching nodes.
   reportNodeCapacity: false
-  # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
-    # Each node uses the nodeconfig entries whose "name" is the node name. A node
-    # that no entry names uses the entries whose "nodelabelselector" (a
-    # Kubernetes label selector with matchLabels or matchExpressions) matches its
-    # labels. Several matching entries apply in list order, a later one overriding
-    # the fields it sets, as several name entries always have. An entry sets either
-    # "name" or "nodelabelselector"; an entry that sets both, or whose selector is
-    # empty or invalid, is ignored:
-    #   { "nodelabelselector": { "matchLabels": { "gpu.example.com/pool": "mig" } },
-    #     "operatingmode": "mig", "devicesplitcount": 10 }
-    # The device plugin reads the node labels each time it starts, so restart it
-    # after changing them, and select on labels the node has when it registers
-    # (node group or kubelet --node-labels), not on labels a controller adds later.
-    # A node that neither a name nor a selector picks uses the entries named "*".
-    # If you want to use a custom config.json, you can set the content here.
-    # If this is set, it will override the default config.json(An example is as follows).
+    # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
+    # `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If
+    # none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named
+    # `*`. For example, use
+    # `{"nodelabelselector":{"matchLabels":{"gpu.example.com/pool":"mig"}},"operatingmode":"mig"}`. Node
+    # labels are read at plugin startup; restart the plugin after changing them and use labels available when
+    # the node registers.
+    # Selected entries apply in list order; later overrides take precedence. For per-node resource
+    # settings, null, zero, or false does not replace an existing non-zero or true value. Empty
+    # `operatingmode` and `filterdevices` values are ignored. Entries with both or neither of `name` and
+    # `nodelabelselector`, or with an empty or invalid label selector, are skipped.
+    # @default -- Example node configuration; see [values.yaml](values.yaml).
     config: |
       {
         "nodeconfig": [
@@ -454,9 +443,12 @@ devicePlugin:
             "name": "your-node-name",
             "operatingmode": "hami-core",
             "devicememoryscaling": 1,
+            "devicecorescaling": null,
             "devicesplitcount": 10,
             "preconfigureddevicememory": 0,
+            "libcudaloglevel": null,
             "enablenumatopology": false,
+            "reportnodecapacity": null,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
@@ -466,72 +458,106 @@ devicePlugin:
           }
         ]
       }
-    # If you want to use an existing ConfigMap, you can set the name here.
-    # If this is set, the chart will not create the ConfigMap and will use the existing one.
+    # -- Existing ConfigMap containing a `config.json` key in the Pod namespace. When non-empty, the chart
+    # mounts it instead of creating a ConfigMap from `nodeConfiguration.config`.
     externalConfigName: ""
+  # -- Strategy for exposing NVIDIA MIG devices: `none`, `single`, or `mixed`. `mixed` exposes MIG profiles as
+  # separate resources. Passed as `--mig-strategy`.
   migStrategy: "none"
   disablecorelimit: "false"
+  # -- Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy`
+  # contains only CDI strategies. Null leaves the plugin default unchanged (disabled).
   passDeviceSpecsEnabled: true
+  # -- Comma-separated device list strategies passed to the container runtime: `envvar`, `volume-mounts`,
+  # `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires
+  # kubelet/CRI support for CDI devices.
   deviceListStrategy: "envvar"
+  # -- (string) Path for NVIDIA CDI hooks in generated CDI specifications. Null omits `NVIDIA_CDI_HOOK_PATH`
+  # and keeps the plugin default `/usr/bin/nvidia-ctk`.
   nvidiaHookPath: null
-  # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
+  # -- Root of the NVIDIA driver on the host. Set to "auto" to read the driver
   # and device roots from GPU Operator's driver-ready contract. If the
   # contract is absent, both roots default to / for a host-installed driver.
   # In auto mode the device plugin uses the driver injected by the NVIDIA
   # Container Toolkit, so it must run with the NVIDIA runtime; the host root is
   # mounted read-only only when deviceListStrategy uses a cdi-* strategy.
   nvidiaDriverRoot: "auto"
+  # -- (bool) Enable GDRCopy support for allocated GPU containers. A boolean sets `GDRCOPY_ENABLED`; null
+  # leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime
+  # support.
   gdrcopyEnabled: null
+  # -- (bool) Enable GPUDirect Storage support for allocated GPU containers. A boolean sets `GDS_ENABLED`;
+  # null leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime
+  # support.
   gdsEnabled: null
+  # -- (bool) Enable MOFED support for allocated GPU containers. A boolean sets `MOFED_ENABLED`; null leaves
+  # the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime support.
   mofedEnabled: null
 
+  # -- Additional NVIDIA device plugin command-line arguments as a list of strings.
   extraArgs:
     - -v=4
-  # -- Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom.
+  # -- Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or
+  # valueFrom.
   extraEnvs: []
   service:
-    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
+    # -- Service type for vGPU monitor metrics. Empty uses `NodePort`; `ClusterIP` exposes metrics only within
+    # the cluster.
+    type: NodePort
+    # -- Monitor Service port. Also used as the nodePort when `service.type=NodePort`. Empty or zero uses
+    # 31992; the target port follows `monitor.metricsBindAddress`.
     httpPort: 31992
+    # -- Additional labels for the vGPU monitor Service, as a map of label names to string values.
     labels: {}
+    # -- Annotations for the vGPU monitor Service, as a map of annotation names to string values.
     annotations: {}
 
+  # -- Host kubelet device-plugin socket directory, mounted at `/var/lib/kubelet/device-plugins` inside the
+  # device plugin container.
   pluginPath: /var/lib/kubelet/device-plugins
+  # -- Host directory for HAMi-core library files, mounted at `<global.gpuHookPath>/vgpu` inside the device
+  # plugin container.
   libPath: /usr/local/vgpu
 
+  # -- Additional annotations for NVIDIA device plugin Pods, as a map of annotation names to string values.
   podAnnotations: {}
+  # -- Use the host PID namespace for NVIDIA device plugin Pods. Must be true when `hostPIDBroker.enabled` is
+  # true.
   hostPID: true
-  # Let HAMi core ask the device plugin for its host PID.
-  # This requires hostPID to be true.
   hostPIDBroker:
+    # -- Enable the host PID broker so HAMi-core can query the device plugin for its host PID. Requires
+    # `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`.
+    # See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker).
     enabled: false
+  # -- Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy:
+  # ClusterFirstWithHostNet` so the scheduler Service remains resolvable.
   hostNetwork: false
+  # -- Kubernetes container security context for the NVIDIA device plugin.
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true
     capabilities:
       drop: ["ALL"]
       add: ["SYS_ADMIN"]
+  # -- Node labels required for NVIDIA device plugin Pods, as a map of label names to string values.
   nvidiaNodeSelector:
     gpu: "on"
-  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  # -- Kubernetes tolerations for NVIDIA device plugin Pods, as a list of objects with key, operator, value,
+  # effect, and optional tolerationSeconds.
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists
       effect: NoSchedule
+  # -- Kubernetes DaemonSet update strategy: `RollingUpdate` or `OnDelete`. For RollingUpdate, configure
+  # `rollingUpdate.maxUnavailable` as a count or percentage.
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 1
 
+  # -- Kubernetes resource requests and limits for the NVIDIA device plugin container, for example `{requests:
+  # {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`.
   resources: {}
-    # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
-    # and remove the curly braces after 'resources:'.
-#    limits:
-#       cpu: 1000m
-#       memory: 1000Mi
-#    requests:
-#      cpu: 100m
-#      memory: 100Mi
 
 mockDevicePlugin:
   # -- Deploy the mock device plugin as a DaemonSet on all eligible nodes without node selectors.

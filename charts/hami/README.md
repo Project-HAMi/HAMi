@@ -280,35 +280,7 @@ listener is started.
 
 ## Device Plugin Configuration
 
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.image.registry` | Device plugin image registry | `"docker.io"` |
-| `devicePlugin.image.repository` | Device plugin image repository | `"projecthami/hami"` |
-| `devicePlugin.image.tag` | Device plugin image tag | `""` |
-| `devicePlugin.image.pullPolicy` | Device plugin image pull policy | `IfNotPresent` |
-| `devicePlugin.image.pullSecrets` | Device plugin image pull secrets | `[]` |
-
-### Monitor Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.monitor.image.registry` | Monitor image registry | `"docker.io"` |
-| `devicePlugin.monitor.image.repository` | Monitor image repository | `"projecthami/hami"` |
-| `devicePlugin.monitor.image.tag` | Monitor image tag | `""` |
-| `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
-| `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
-| `devicePlugin.monitor.ctrPath` | Shared per-container libvgpu cache path used by the Device Plugin and monitor | `/usr/local/vgpu/containers` |
-| `devicePlugin.monitor.probes.enabled` | Run the monitor liveness and readiness probes; disable to debug inside the container | `true` |
-| `devicePlugin.monitor.metricsBindAddress` | Address the monitor serves `/metrics` on; the container port, Service target port and probes follow it; loopback addresses are rejected | `":9394"` |
-| `devicePlugin.monitor.resyncInterval` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods; independent of directory GC and Prometheus scrape frequency | `"5m"` |
-| `devicePlugin.monitor.disableHAMiCoreForWholeGPU` | Skip the HAMi-core interception for whole-GPU workloads on non-oversubscribed nodes and read their metrics from NVML instead. Whole-GPU means: non-MIG device, full device memory allocated, cores unrequested or `gpucores=100` | `true` |
-| `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
-
 ### vGPU Cache Garbage Collection
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.vgpuCache.gracePeriod` | Minimum directory age (based on modification time) before the NVIDIA Device Plugin considers a stale libvgpu cache directory for deletion. Independent of monitor resync. | `"5m"` |
 
 The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
 `HAMI_VGPU_CACHE_GRACE_PERIOD`. Use a Go duration string such as `"30s"`, `"5m"`,
@@ -336,20 +308,7 @@ existing resync and mmap-release behavior and does not delete directories.
 This setting does not change the GC scan interval, confirmation retry backoff,
 or the five-failure limit for directory deletion.
 
-### Device Plugin Other Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
-| `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
-| `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `true` |
-| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root on the host. `auto` reads GPU Operator's `driver-ready` contract and defaults to `/` when it is absent | `"auto"` |
-| `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
-| `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
-| `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
-| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
-| `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
-| `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
+### NVIDIA driver discovery
 
 When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
 `/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
@@ -374,25 +333,6 @@ additionally mounts the host root read-only at `/host`; the device plugin uses
 that mount directly for host-installed drivers, or appends the GPU Operator
 path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
 `devicePlugin.nvidiaDriverRoot` explicitly to mount only the driver root instead.
-
-### Device Plugin Service Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.service.type` | Service type | `NodePort` |
-| `devicePlugin.service.httpPort` | HTTP port | `31992` |
-
-### Device Plugin Deployment Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devicePlugin.pluginPath` | Plugin path | `/var/lib/kubelet/device-plugins` |
-| `devicePlugin.libPath` | Library path | `/usr/local/vgpu` |
-| `devicePlugin.hostPID` | Use the host PID namespace for the device plugin | `true` |
-| `devicePlugin.hostPIDBroker.enabled` | Let HAMi core ask the device plugin for its host PID. This requires `devicePlugin.hostPID`. See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker) | `false` |
-| `devicePlugin.nvidiaNodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
-| `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
-| `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |
 
 ## Device Configuration
 
@@ -499,8 +439,63 @@ More values will be added in follow-up PRs.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | device-config.content | string | `""` | Full replacement of device-config.yaml; takes precedence over a bundled file and values. This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides. Please note that extender resources still use `devices.*`, keep resource names consistent. Values validation still applies. |
+| devicePlugin.deviceListStrategy | string | `"envvar"` | Comma-separated device list strategies passed to the container runtime: `envvar`, `volume-mounts`, `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires kubelet/CRI support for CDI devices. |
+| devicePlugin.enabled | bool | `true` | Deploy the NVIDIA device plugin DaemonSet, including the vGPU monitor container. |
+| devicePlugin.extraArgs | list | `["-v=4"]` | Additional NVIDIA device plugin command-line arguments as a list of strings. |
 | devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
+| devicePlugin.gdrcopyEnabled | bool | `nil` | Enable GDRCopy support for allocated GPU containers. A boolean sets `GDRCOPY_ENABLED`; null leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime support. |
+| devicePlugin.gdsEnabled | bool | `nil` | Enable GPUDirect Storage support for allocated GPU containers. A boolean sets `GDS_ENABLED`; null leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime support. |
+| devicePlugin.gpuOperatorToolkitReady.enabled | bool | `false` | Wait for `<hostPath>/toolkit-ready` in an init container before starting the device plugin and monitor. |
+| devicePlugin.gpuOperatorToolkitReady.hostPath | string | `"/run/nvidia/validations"` | Host directory containing `toolkit-ready`. Also supplies `driver-ready` when `devicePlugin.nvidiaDriverRoot=auto`. |
+| devicePlugin.gpuOperatorToolkitReady.securityContext | object | `{"privileged":true,"runAsUser":0}` | Security context for the toolkit-validation init container. |
+| devicePlugin.hostNetwork | bool | `false` | Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy: ClusterFirstWithHostNet` so the scheduler Service remains resolvable. |
+| devicePlugin.hostPID | bool | `true` | Use the host PID namespace for NVIDIA device plugin Pods. Must be true when `hostPIDBroker.enabled` is true. |
+| devicePlugin.hostPIDBroker.enabled | bool | `false` | Enable the host PID broker so HAMi-core can query the device plugin for its host PID. Requires `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`. See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker). |
+| devicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the NVIDIA device plugin and its enabled init containers: `Always`, `IfNotPresent`, or `Never`. |
+| devicePlugin.image.pullSecrets | list | `[]` | Image pull Secret names for the device plugin Pod, appended to `global.imagePullSecrets`, e.g. `[myRegistryKeySecretName]`. |
+| devicePlugin.image.registry | string | `"docker.io"` | NVIDIA device plugin image registry. Overridden by a non-empty `global.imageRegistry`. |
+| devicePlugin.image.repository | string | `"projecthami/hami"` | Image repository for the NVIDIA device plugin container and the `selinux-relabel` and `toolkit-validation` init containers when enabled. |
+| devicePlugin.image.tag | string | `""` | NVIDIA device plugin image tag. Empty uses `global.imageTag`. |
+| devicePlugin.libPath | string | `"/usr/local/vgpu"` | Host directory for HAMi-core library files, mounted at `<global.gpuHookPath>/vgpu` inside the device plugin container. |
+| devicePlugin.migStrategy | string | `"none"` | Strategy for exposing NVIDIA MIG devices: `none`, `single`, or `mixed`. `mixed` exposes MIG profiles as separate resources. Passed as `--mig-strategy`. |
+| devicePlugin.mofedEnabled | bool | `nil` | Enable MOFED support for allocated GPU containers. A boolean sets `MOFED_ENABLED`; null leaves the plugin default unchanged (disabled). Requires the corresponding host drivers and runtime support. |
+| devicePlugin.monitor.ctrPath | string | `"/usr/local/vgpu/containers"` | Shared per-container libvgpu cache path used by the device plugin and monitor. |
+| devicePlugin.monitor.disableHAMiCoreForWholeGPU | bool | `true` | Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1; the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full device memory allocated and cores unrequested or `gpucores=100`. |
+| devicePlugin.monitor.extraArgs | list | `["-v=4"]` | Additional monitor command-line arguments as a list of strings. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
+| devicePlugin.monitor.image.pullPolicy | string | `"IfNotPresent"` | Monitor image pull policy: `Always`, `IfNotPresent`, or `Never`. |
+| devicePlugin.monitor.image.pullSecrets | list | `[]` | Monitor image pull Secret names. Currently unused by the DaemonSet; configure `devicePlugin.image.pullSecrets` or `global.imagePullSecrets` for the shared Pod. |
+| devicePlugin.monitor.image.registry | string | `"docker.io"` | Monitor image registry. Overridden by a non-empty `global.imageRegistry`. |
+| devicePlugin.monitor.image.repository | string | `"projecthami/hami"` | Monitor image repository. |
+| devicePlugin.monitor.image.tag | string | `""` | Monitor image tag. Empty uses `global.imageTag`. |
+| devicePlugin.monitor.metricsBindAddress | string | `":9394"` | Address the monitor serves `/metrics` on. The container port, Service target port and probes follow it. Loopback addresses are rejected. Set it here, not in `extraArgs`. |
+| devicePlugin.monitor.probes.enabled | bool | `true` | Run the monitor liveness and readiness probes. Disable to debug inside the container. |
+| devicePlugin.monitor.resources | object | `{}` | Resource requests and limits for the monitor container. |
+| devicePlugin.monitor.resyncInterval | string | `"5m"` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods. Does not control directory GC or Prometheus scrape frequency. |
+| devicePlugin.monitor.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]}}` | Security context for the monitor container. |
+| devicePlugin.nodeConfiguration.config | string | Example node configuration; see [values.yaml](values.yaml). | JSON content for the generated device plugin ConfigMap key `config.json`; ignored when `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named `*`. For example, use `{"nodelabelselector":{"matchLabels":{"gpu.example.com/pool":"mig"}},"operatingmode":"mig"}`. Node labels are read at plugin startup; restart the plugin after changing them and use labels available when the node registers. Selected entries apply in list order; later overrides take precedence. For per-node resource settings, null, zero, or false does not replace an existing non-zero or true value. Empty `operatingmode` and `filterdevices` values are ignored. Entries with both or neither of `name` and `nodelabelselector`, or with an empty or invalid label selector, are skipped. |
+| devicePlugin.nodeConfiguration.externalConfigName | string | `""` | Existing ConfigMap containing a `config.json` key in the Pod namespace. When non-empty, the chart mounts it instead of creating a ConfigMap from `nodeConfiguration.config`. |
+| devicePlugin.numaRefit.caFile | string | `""` | Path to a CA bundle already present inside the device-plugin container. |
+| devicePlugin.numaRefit.caSecret | string | `""` | Name of a Secret (key ca.crt) to mount as the CA bundle instead; used when caFile is empty. |
+| devicePlugin.numaRefit.enabled | bool | `false` | NUMA alignment refit (#2080): when enabled, the device plugin asks the scheduler to re-run its fit over the NUMA-restricted device set kubelet allows, keeping scheduler accounting authoritative. Requires devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node configuration; pods opt in with the hami.io/numa-alignment annotation (best-effort or strict). Disabled by default: mismatches are only logged. |
+| devicePlugin.numaRefit.schedulerEndpoint | string | `""` | Scheduler base URL override. Defaults to the in-cluster scheduler service, `https://<release>-scheduler.<namespace>.svc:<scheduler.service.httpPort>`. |
+| devicePlugin.numaRefit.tlsInsecure | bool | `true` | The scheduler serves the admission webhook's self-signed certificate, so verification is skipped by default with the same posture as the extender configmap (tlsConfig.insecure). Set false to verify, and use caFile to point at a CA bundle mounted into the device plugin. |
+| devicePlugin.nvidiaDriverRoot | string | `"auto"` | Root of the NVIDIA driver on the host. Set to "auto" to read the driver and device roots from GPU Operator's driver-ready contract. If the contract is absent, both roots default to / for a host-installed driver. In auto mode the device plugin uses the driver injected by the NVIDIA Container Toolkit, so it must run with the NVIDIA runtime; the host root is mounted read-only only when deviceListStrategy uses a cdi-* strategy. |
+| devicePlugin.nvidiaHookPath | string | `nil` | Path for NVIDIA CDI hooks in generated CDI specifications. Null omits `NVIDIA_CDI_HOOK_PATH` and keeps the plugin default `/usr/bin/nvidia-ctk`. |
+| devicePlugin.nvidiaNodeSelector | object | `{"gpu":"on"}` | Node labels required for NVIDIA device plugin Pods, as a map of label names to string values. |
+| devicePlugin.passDeviceSpecsEnabled | bool | `true` | Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy` contains only CDI strategies. Null leaves the plugin default unchanged (disabled). |
+| devicePlugin.pluginPath | string | `"/var/lib/kubelet/device-plugins"` | Host kubelet device-plugin socket directory, mounted at `/var/lib/kubelet/device-plugins` inside the device plugin container. |
+| devicePlugin.podAnnotations | object | `{}` | Additional annotations for NVIDIA device plugin Pods, as a map of annotation names to string values. |
+| devicePlugin.reportNodeCapacity | bool | `false` | Report GPU memory and core resources in Node capacity and allocatable. The `reportnodecapacity` JSON field in `nodeConfiguration.config` overrides this setting for matching nodes. |
+| devicePlugin.resources | object | `{}` | Kubernetes resource requests and limits for the NVIDIA device plugin container, for example `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`. |
+| devicePlugin.securityContext | object | `{"allowPrivilegeEscalation":true,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]},"privileged":true}` | Kubernetes container security context for the NVIDIA device plugin. |
+| devicePlugin.service.annotations | object | `{}` | Annotations for the vGPU monitor Service, as a map of annotation names to string values. |
+| devicePlugin.service.httpPort | int | `31992` | Monitor Service port. Also used as the nodePort when `service.type=NodePort`. Empty or zero uses 31992; the target port follows `monitor.metricsBindAddress`. |
+| devicePlugin.service.labels | object | `{}` | Additional labels for the vGPU monitor Service, as a map of label names to string values. |
+| devicePlugin.service.type | string | `"NodePort"` | Service type for vGPU monitor metrics. Empty uses `NodePort`; `ClusterIP` exposes metrics only within the cluster. |
+| devicePlugin.tolerations | list | `[{"effect":"NoSchedule","key":"nvidia.com/gpu","operator":"Exists"}]` | Kubernetes tolerations for NVIDIA device plugin Pods, as a list of objects with key, operator, value, effect, and optional tolerationSeconds. |
+| devicePlugin.updateStrategy | object | `{"rollingUpdate":{"maxUnavailable":1},"type":"RollingUpdate"}` | Kubernetes DaemonSet update strategy: `RollingUpdate` or `OnDelete`. For RollingUpdate, configure `rollingUpdate.maxUnavailable` as a count or percentage. |
+| devicePlugin.vgpuCache.gracePeriod | string | `"5m"` | Minimum cache directory age, measured from its modification time, before garbage collection. Use Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent of monitor resync and the GC scan interval. |
 | devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
