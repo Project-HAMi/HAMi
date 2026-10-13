@@ -18,6 +18,7 @@ package kunlun
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -161,9 +162,7 @@ func Test_KunlunVDevices_CheckHealth(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{RegisterAnnos: "anno"}},
 			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		for k, v := range annos {
-			n.Annotations[k] = v
-		}
+		maps.Copy(n.Annotations, annos)
 		if allocatable > 0 {
 			n.Status.Allocatable[corev1.ResourceName(KunlunResourceVCount)] = *resource.NewQuantity(allocatable, resource.DecimalSI)
 		}
