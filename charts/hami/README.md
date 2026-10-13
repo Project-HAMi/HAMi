@@ -159,27 +159,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 ## Scheduler Configuration
 
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `schedulerName` | Scheduler name | `"hami-scheduler"` |
-| `scheduler.nodeName` | Define node name, scheduler will schedule to this node | `""` |
-| `scheduler.overwriteEnv` | Whether to overwrite environment variables | `"false"` |
-| `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` | Node scheduler policy | `binpack` |
-| `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` | GPU scheduler policy | `spread` |
-| `scheduler.metricsBindAddress` | Metrics bind address | `":9395"` |
-| `scheduler.profilingBindAddress` | Dedicated pprof HTTP bind address; only used when `--profiling` is enabled | `"127.0.0.1:6060"` |
-| `scheduler.kubeQPS` | QPS to use while talking with the kube-apiserver; empty keeps the binary default (`5`) | `""` |
-| `scheduler.kubeBurst` | Burst to use while talking with the kube-apiserver; empty keeps the binary default (`10`) | `""` |
-| `scheduler.kubeTimeout` | Timeout in seconds while talking with the kube-apiserver; empty keeps the binary default (`0`, no timeout) | `""` |
-| `scheduler.nodeLockRetryTimeout` | How long Bind retries LockNode when another PodGroup member holds the node lock; empty keeps the binary default (`28s`), `0` disables retry | `""` |
-| `scheduler.extenderHTTPTimeout` | `httpTimeout` given to the HAMi extender in the generated scheduler configuration, in seconds. Applies to both the KubeSchedulerConfiguration used on Kubernetes 1.22+ and the legacy Policy format used below it. Keep it above `scheduler.nodeLockRetryTimeout` | `30` |
-| `scheduler.forceOverwriteDefaultScheduler` | Whether to force overwrite default scheduler | `true` |
-| `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
-| `scheduler.leaderElect` | Whether to enable leader election | `true` |
-| `scheduler.replicas` | Number of replicas | `1` |
-| `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
-| `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
-
 ### Scheduler profiling
 
 Profiling is disabled by default. To enable it, include `--profiling` in the
@@ -216,67 +195,6 @@ Non-loopback binding logs a security warning: pprof has no authentication and
 can expose process diagnostics. Restrict network access if you choose to expose
 it. With profiling disabled, the bind address is ignored and no profiling
 listener is started.
-
-### Kube Scheduler Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `scheduler.kubeScheduler.enabled` | Whether to run kube-scheduler container in scheduler pod | `true` |
-| `scheduler.kubeScheduler.image.registry` | Kube scheduler image registry | `"registry.cn-hangzhou.aliyuncs.com"` |
-| `scheduler.kubeScheduler.image.repository` | Kube scheduler image repository | `"google_containers/kube-scheduler"` |
-| `scheduler.kubeScheduler.image.tag` | Kube scheduler image tag | `""` |
-| `scheduler.kubeScheduler.image.pullPolicy` | Kube scheduler image pull policy | `IfNotPresent` |
-| `scheduler.kubeScheduler.image.pullSecrets` | Kube scheduler image pull secrets | `[]` |
-| `scheduler.kubeScheduler.extraNewArgs` | Extra new arguments | `["--config=/config/config.yaml", "-v=4"]` |
-| `scheduler.kubeScheduler.extraArgs` | Extra arguments | `["--policy-config-file=/config/config.json", "-v=4"]` |
-
-### Extender Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `scheduler.extender.image.registry` | Scheduler extender image registry | `"docker.io"` |
-| `scheduler.extender.image.repository` | Scheduler extender image repository | `"projecthami/hami"` |
-| `scheduler.extender.image.tag` | Scheduler extender image tag | `""` |
-| `scheduler.extender.image.pullPolicy` | Scheduler extender image pull policy | `IfNotPresent` |
-| `scheduler.extender.image.pullSecrets` | Scheduler extender image pull secrets | `[]` |
-| `scheduler.extender.extraArgs` | Scheduler extender extra arguments | `["--debug", "-v=4"]` |
-
-### Admission Webhook Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `scheduler.admissionWebhook.enabled` | Whether to enable admission webhook | `true` |
-| `scheduler.admissionWebhook.customURL.enabled` | Whether to enable custom URL | `false` |
-| `scheduler.admissionWebhook.customURL.host` | Custom URL host | `127.0.0.1` |
-| `scheduler.admissionWebhook.customURL.port` | Custom URL port | `31998` |
-| `scheduler.admissionWebhook.customURL.path` | Custom URL path | `/webhook` |
-| `scheduler.admissionWebhook.manageNamespaceSelector` | Whether the chart renders and manages the webhook namespaceSelector field | `true` |
-| `scheduler.admissionWebhook.reinvocationPolicy` | Reinvocation policy | `Never` |
-| `scheduler.admissionWebhook.failurePolicy` | Failure policy | `Ignore` |
-
-### TLS Certificate Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `scheduler.certManager.enabled` | Whether to use cert-manager to generate self-signed certificates | `false` |
-| `scheduler.patch.enabled` | Whether to use kube-webhook-certgen to generate self-signed certificates | `true` |
-| `scheduler.patch.image.registry` | Certgen image registry | `"docker.io"` |
-| `scheduler.patch.image.repository` | Certgen image repository | `"jettech/kube-webhook-certgen"` |
-| `scheduler.patch.image.tag` | Certgen image tag | `"v1.5.2"` |
-| `scheduler.patch.image.pullPolicy` | Certgen image pull policy | `IfNotPresent` |
-| `scheduler.patch.imageNew.registry` | New certgen image registry | `"docker.io"` |
-| `scheduler.patch.imageNew.repository` | New certgen image repository | `"liangjw/kube-webhook-certgen"` |
-| `scheduler.patch.imageNew.tag` | New certgen image tag | `"v1.1.1"` |
-
-### Scheduler Service Configuration
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `scheduler.service.type` | Service type | `ClusterIP` |
-| `scheduler.service.httpPort` | HTTP port | `443` |
-| `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
-| `scheduler.service.monitorPort` | Monitor port | `31993` |
-| `scheduler.service.monitorTargetPort` | Monitor target port | `metrics` |
 
 ## Device Plugin Configuration
 
@@ -550,6 +468,81 @@ More values will be added in follow-up PRs.
 | platform.openshift | bool | `false` | Enable when deploying HAMi on OpenShift. Applies restricted security contexts to the scheduler extender and webhook jobs, and omits `scheduler.patch.runAsUser` so OpenShift can assign job UIDs. |
 | podSecurityPolicy.enabled | bool | `false` | Render a `policy/v1beta1` PodSecurityPolicy and its use RBAC rule for the webhook certificate creation and patch jobs. Only takes effect when `scheduler.admissionWebhook.enabled=true`, `scheduler.patch.enabled=true`, and `scheduler.certManager.enabled=false`. Keep disabled on Kubernetes 1.25 and later, where the PodSecurityPolicy API is removed. |
 | prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`. |
+| scheduler.admissionWebhook.customURL.enabled | bool | `false` | Have kube-apiserver call the webhook at `https://<host>:<port><path>`, such as a node port, instead of through the scheduler Service. |
+| scheduler.admissionWebhook.customURL.host | string | `"127.0.0.1"` | Host name or IP address in the custom webhook URL. The certificate from the `patch` Jobs includes it; the cert-manager certificate does not. |
+| scheduler.admissionWebhook.customURL.path | string | `"/webhook"` | Path in the custom webhook URL. The scheduler serves the webhook on `/webhook`. |
+| scheduler.admissionWebhook.customURL.port | int | `31998` | Port in the custom webhook URL. The default matches `scheduler.service.schedulerPort`. |
+| scheduler.admissionWebhook.enabled | bool | `true` | Install the mutating admission webhook. It rejects Pods that preset HAMi allocation annotations, and for Pods that request devices it applies each device backend's admission changes, sets `schedulerName`, checks ResourceQuota, and rejects privileged containers. When false, Pods that should use HAMi must set `schedulerName` and their device settings themselves, and the scheduler serves its HTTP port without TLS. |
+| scheduler.admissionWebhook.failurePolicy | string | `"Ignore"` | What kube-apiserver does when it cannot reach the webhook. `Ignore` admits the Pod without HAMi's changes and without an error. `Fail` rejects the request; because the webhook handles every Pod create and update in the selected namespaces, an unavailable scheduler then blocks them all. |
+| scheduler.admissionWebhook.manageNamespaceSelector | bool | `true` | Render the webhook's `namespaceSelector`. Set it to false on platforms that manage that field themselves, such as AKS, to avoid server-side apply conflicts. `whitelistNamespaces` and `namespaceSelector` then have no effect. |
+| scheduler.admissionWebhook.namespaceSelector.matchExpressions | list | `[]` | Extra namespace selector expressions, added after the built-in one that skips namespaces labeled `hami.io/webhook: ignore`. Applies only when `manageNamespaceSelector` is true. |
+| scheduler.admissionWebhook.namespaceSelector.matchLabels | object | unset | Labels a namespace must have for the webhook to apply to its Pods. Applies only when `manageNamespaceSelector` is true. |
+| scheduler.admissionWebhook.objectSelector.matchExpressions | list | `[]` | Extra Pod selector expressions, added after the built-in one that skips Pods labeled `hami.io/webhook: ignore`. Labels a Pod must have can also be set as `objectSelector.matchLabels`. |
+| scheduler.admissionWebhook.reinvocationPolicy | string | `"Never"` | Whether kube-apiserver calls the webhook again after a later mutating webhook changes the Pod: `Never` or `IfNeeded`. |
+| scheduler.admissionWebhook.whitelistNamespaces | list | unset | Names of namespaces whose Pods the webhook skips, such as `kube-system`. Applies only when `manageNamespaceSelector` is true. |
+| scheduler.certManager.enabled | bool | `false` | Use cert-manager for the admission webhook certificate. The chart creates a self-signed Issuer and a Certificate for `<scheduler Service>.<namespace>.svc` stored in Secret `<fullname>-scheduler-tls`, and annotates the webhook so cert-manager injects its CA. Requires cert-manager in the cluster and `admissionWebhook.enabled`. Takes precedence over `patch`. With both `certManager.enabled` and `patch.enabled` false, create that Secret with `tls.crt` and `tls.key` and set the webhook CA yourself. |
+| scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy | string | `"spread"` | Default device scoring policy within a node: `binpack`, `spread`, or `topology-aware`. `topology-aware` also makes the NVIDIA device plugin report GPU topology scores. The `hami.io/gpu-scheduler-policy` Pod annotation overrides it. |
+| scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy | string | `"binpack"` | Default node scoring policy: `binpack` fills busy nodes first, `spread` prefers idle ones. The `hami.io/node-scheduler-policy` Pod annotation overrides it. |
+| scheduler.extender.extraArgs | list | `["--debug","-v=4"]` | Extra command-line flags for the scheduler extender, appended after the flags the chart generates, such as `--profiling` to serve pprof on `scheduler.profilingBindAddress`. |
+| scheduler.extender.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of the scheduler extender image. |
+| scheduler.extender.image.pullSecrets | list | `[]` | Names of existing image pull Secrets for the scheduler Pod, added after `global.imagePullSecrets`. |
+| scheduler.extender.image.registry | string | `"docker.io"` | Registry of the scheduler extender image. `global.imageRegistry` overrides it. |
+| scheduler.extender.image.repository | string | `"projecthami/hami"` | Repository of the scheduler extender image. |
+| scheduler.extender.image.tag | string | `""` | Tag of the scheduler extender image. Empty uses `global.imageTag`. |
+| scheduler.extender.resources | object | `{}` | Resource requests and limits for the scheduler extender container. |
+| scheduler.extenderHTTPTimeout | int | `30` | Timeout in seconds that kube-scheduler gives each call to the HAMi extender. Keep it above `nodeLockRetryTimeout`, or kube-scheduler cancels Bind while the extender is still retrying a node lock. |
+| scheduler.extenderPort | int | `9444` | Loopback port the extender serves `/filter` and `/bind` on, for the kube-scheduler container in the same Pod. It must differ from `scheduler.service.httpTargetPort`. If kube-scheduler runs outside the Pod, change `--extender-bind` through `scheduler.extender.extraArgs`. |
+| scheduler.forceOverwriteDefaultScheduler | bool | `true` | Let the admission webhook replace `default-scheduler` with `schedulerName` on Pods that request devices. Kubernetes fills in `default-scheduler` for Pods that name no scheduler, so when false the webhook leaves every Pod that does not already name `schedulerName` unchanged. |
+| scheduler.kubeBurst | string | `""` | Request burst the scheduler may send to kube-apiserver. Empty keeps the client default of 10. |
+| scheduler.kubeQPS | string | `""` | Queries per second the scheduler may send to kube-apiserver. Empty keeps the client default of 5. Raise it, with `kubeBurst`, on large clusters. |
+| scheduler.kubeScheduler.enabled | bool | `true` | Run a kube-scheduler container in the scheduler Pod, configured with `schedulerName` and the HAMi extender. When false, provide a scheduler named `schedulerName` that calls the extender yourself; the extender listens on loopback, so also change `--extender-bind` through `scheduler.extender.extraArgs`. |
+| scheduler.kubeScheduler.extraArgs | list | `["--policy-config-file=/config/config.json","-v=4"]` | Extra kube-scheduler arguments on Kubernetes versions before 1.22, after the chart's `--scheduler-name` flag and before its leader election flags. Keep `--policy-config-file=/config/config.json`, the chart-generated Policy that adds the HAMi extender. |
+| scheduler.kubeScheduler.extraNewArgs | list | `["--config=/config/config.yaml","-v=4"]` | Complete kube-scheduler arguments on Kubernetes 1.22 and later. Keep `--config=/config/config.yaml`, the chart-generated KubeSchedulerConfiguration that sets `schedulerName`, leader election, and the HAMi extender. |
+| scheduler.kubeScheduler.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of the kube-scheduler image. |
+| scheduler.kubeScheduler.image.pullSecrets | list | `[]` | Names of existing image pull Secrets for the scheduler Pod, added after `global.imagePullSecrets`. Used only when `enabled` is true. |
+| scheduler.kubeScheduler.image.registry | string | `"registry.cn-hangzhou.aliyuncs.com"` | Registry of the kube-scheduler image. `global.imageRegistry` overrides it. |
+| scheduler.kubeScheduler.image.repository | string | `"google_containers/kube-scheduler"` | Repository of the kube-scheduler image. |
+| scheduler.kubeScheduler.image.tag | string | `""` | Tag of the kube-scheduler image. Empty uses the cluster's Kubernetes version without distribution suffixes, such as `v1.31.1` for `v1.31.1+k3s1`. `global.imageTag` does not apply to it. |
+| scheduler.kubeScheduler.resources | object | `{}` | Resource requests and limits for the kube-scheduler container. |
+| scheduler.kubeTimeout | string | `""` | Timeout in seconds for scheduler requests to kube-apiserver. Empty or `0` means no timeout. |
+| scheduler.leaderElect | bool | `true` | Enable leader election for the scheduler extender and kube-scheduler. Required for `replicas` above 1; it also adds a readiness probe, spreads replicas across nodes when possible, and allows the PodDisruptionBudget. Only the leader receives Service traffic. |
+| scheduler.livenessProbe | bool | `false` | Add liveness probes to the scheduler containers. |
+| scheduler.metricsBindAddress | string | `":9395"` | Address the scheduler serves Prometheus metrics on, as `[host]:port`. The chart also takes the port from it for the `metrics` container port. |
+| scheduler.networkPolicy.enabled | bool | `false` | Create a NetworkPolicy for the scheduler Pods. It admits traffic to the HTTP port (`scheduler.service.httpTargetPort`), which serves the admission webhook and the device plugin's `/refit` calls, only from this release's device plugin Pods and the `kube-system` namespace, leaves the metrics port open to all sources, and denies other ingress. Enable it only if your CNI matches kube-apiserver traffic against `namespaceSelector`: when kube-apiserver uses host networking, many CNIs do not, and with `admissionWebhook.failurePolicy: Ignore` Pods are then admitted without HAMi's changes and without an error. |
+| scheduler.nodeLockExpire | string | `"5m"` | Age after which a node lock is treated as expired, as a positive duration such as `5m`. An unparsable or non-positive value is ignored and `5m` is used. A `--node-lock-timeout` flag in `scheduler.extender.extraArgs` overrides it. |
+| scheduler.nodeLockRetryTimeout | string | `""` | How long Bind retries locking a node held by another member of the same PodGroup, as a duration such as `28s`. Empty keeps the default of `28s`, and `0` disables the retry. Keep it below `extenderHTTPTimeout`. |
+| scheduler.nodeName | string | `""` | Node to run the scheduler Pod on, bypassing scheduling, for example when HAMi replaces the default scheduler. Empty lets Kubernetes place it; `scheduler.nodeSelector` can also be set. |
+| scheduler.overwriteEnv | string | `"false"` | Default for whether the admission webhook hides devices from containers that request none: `NVIDIA_VISIBLE_DEVICES=none` for NVIDIA and an empty `ASCEND_VISIBLE_DEVICES` for Ascend. The Pod annotations `hami.io/overwrite-env` and `hami.io/overwrite-env-containers` override it. |
+| scheduler.patch.enabled | bool | `true` | Use kube-webhook-certgen Jobs for the admission webhook certificate when `certManager.enabled` is false. A pre-install and pre-upgrade hook Job writes a self-signed certificate to Secret `<fullname>-scheduler-tls`, and a post-install and post-upgrade hook Job sets its CA on the webhook. Requires `admissionWebhook.enabled`. |
+| scheduler.patch.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of the certgen image used on Kubernetes versions before 1.22. |
+| scheduler.patch.image.pullSecrets | list | `[]` | Names of existing image pull Secrets for the certgen Jobs on Kubernetes versions before 1.22, added after `global.imagePullSecrets`. |
+| scheduler.patch.image.registry | string | `"docker.io"` | Registry of the certgen image used on Kubernetes versions before 1.22. `global.imageRegistry` overrides it. |
+| scheduler.patch.image.repository | string | `"jettech/kube-webhook-certgen"` | Repository of the certgen image used on Kubernetes versions before 1.22. |
+| scheduler.patch.image.tag | string | `"v1.5.2"` | Tag of the certgen image used on Kubernetes versions before 1.22. |
+| scheduler.patch.imageNew.pullPolicy | string | `"IfNotPresent"` | Pull policy of the certgen image used on Kubernetes 1.22 and later. |
+| scheduler.patch.imageNew.pullSecrets | list | `[]` | Names of existing image pull Secrets for the certgen Jobs on Kubernetes 1.22 and later, added after `global.imagePullSecrets`. |
+| scheduler.patch.imageNew.registry | string | `"docker.io"` | Registry of the certgen image used on Kubernetes 1.22 and later. `global.imageRegistry` overrides it. |
+| scheduler.patch.imageNew.repository | string | `"liangjw/kube-webhook-certgen"` | Repository of the certgen image used on Kubernetes 1.22 and later. |
+| scheduler.patch.imageNew.tag | string | `"v1.1.1"` | Tag of the certgen image used on Kubernetes 1.22 and later. |
+| scheduler.patch.nodeSelector | object | `{}` | Node selector for the certgen Job Pods. |
+| scheduler.patch.podAnnotations | object | `{}` | Annotations for the certgen Job Pods. |
+| scheduler.patch.priorityClassName | string | `""` | PriorityClass for the certgen Job Pods. Empty sets none. |
+| scheduler.patch.runAsUser | int | `2000` | User ID the certgen Job Pods run as. They always run as non-root. Not set when `platform.openshift` is true, so the OpenShift SCC can assign an allowed UID, or when this value is `0` or empty. |
+| scheduler.patch.tolerations | list | `[]` | Tolerations for the certgen Job Pods. |
+| scheduler.podAnnotations | object | `{}` | Annotations for the scheduler Pods. |
+| scheduler.podDisruptionBudget.minAvailable | int | `1` | Minimum available scheduler Pods for the PodDisruptionBudget, which is created only when `leaderElect` is true and `replicas` is above 1. Setting `podDisruptionBudget.maxUnavailable` uses that instead. |
+| scheduler.profilingBindAddress | string | `"127.0.0.1:6060"` | Address of the pprof server, used only when `--profiling` is added to `scheduler.extender.extraArgs`. Keep it on loopback and reach it with `kubectl port-forward`. |
+| scheduler.replicas | int | `1` | Number of scheduler replicas. Used only when `leaderElect` is true; otherwise one replica runs. |
+| scheduler.service.annotations | object | `{}` | Annotations for the scheduler Service. |
+| scheduler.service.httpPort | int | `443` | Service port for the scheduler's HTTP port. The admission webhook and the device plugin's default NUMA refit endpoint reach the scheduler through it. |
+| scheduler.service.httpTargetPort | int | `9443` | Container port the scheduler serves the admission webhook, `/refit`, and probes on. It must differ from `scheduler.extenderPort`. |
+| scheduler.service.labels | object | `{}` | Extra labels for the scheduler Service. |
+| scheduler.service.monitorPort | int | `31993` | Service port for scheduler metrics. When `type` is `NodePort`, it is also used as the node port, so it must be in the cluster's node port range. |
+| scheduler.service.monitorTargetPort | string | `"metrics"` | Container port the metrics Service port targets, by number or name. The default `metrics` names the container port taken from `scheduler.metricsBindAddress`. |
+| scheduler.service.schedulerPort | int | `31998` | Node port for the HTTP port when `type` is `NodePort`. |
+| scheduler.service.type | string | `"ClusterIP"` | Type of the scheduler Service, which routes only to the scheduler Pod holding leadership. With `NodePort`, the chart also sets the node ports from `schedulerPort` and `monitorPort`. Empty uses `ClusterIP`. |
+| scheduler.tolerations | list | `[]` | Tolerations for the scheduler Pods. |
+| schedulerName | string | `"hami-scheduler"` | Name of the HAMi scheduler. The admission webhook sets it as `schedulerName` on Pods that request devices, the kube-scheduler container serves it, and the scheduler extender and kube-scheduler use it as their leader election lease name. |
 | selinux.enabled | bool | `false` | Add a privileged NVIDIA device-plugin init container to recursively relabel host directories `devicePlugin.libPath`, `devicePlugin.monitor.ctrPath`, and `/tmp/vgpulock`. Creates missing directories and sets permissions to `0777` on `devicePlugin.monitor.ctrPath` and `1777` on `/tmp/vgpulock`. Requires `devicePlugin.enabled=true`. Available on any SELinux-enabled Kubernetes distribution, independently of `platform.openshift`. Uninstalling does not restore host labels or permissions. |
 | selinux.level | string | `"s0"` | SELinux security level or range passed to `chcon -l` for the shared vGPU host directories when `selinux.enabled=true`, for example `s0` or `s0:c123,c456`. |
 | selinux.type | string | `"container_file_t"` | SELinux file type passed to `chcon -t` for the shared vGPU host directories when `selinux.enabled=true`. Must be a type supported by the node's SELinux policy. |
