@@ -54,24 +54,24 @@ func Test_InitDevices(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					AICore:             int32(30),
+					AICore:             int64(30),
 					Templates: []Template{
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
@@ -85,24 +85,24 @@ func Test_InitDevices(t *testing.T) {
 						ResourceMemoryName: "huawei.com/Ascend910A-memory",
 						MemoryAllocatable:  int64(32768),
 						MemoryCapacity:     int64(32768),
-						AICore:             int32(30),
+						AICore:             int64(30),
 						Templates: []Template{
 							{
 								Name:   "vir02",
 								Memory: int64(2184),
-								AICore: int32(2),
+								AICore: int64(2),
 							}, {
 								Name:   "vir04",
 								Memory: int64(4369),
-								AICore: int32(4),
+								AICore: int64(4),
 							}, {
 								Name:   "vir08",
 								Memory: int64(8738),
-								AICore: int32(8),
+								AICore: int64(8),
 							}, {
 								Name:   "vir16",
 								Memory: int64(17476),
-								AICore: int32(16),
+								AICore: int64(16),
 							},
 						},
 					},
@@ -124,24 +124,24 @@ func Test_InitDevices(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					AICore:             int32(30),
+					AICore:             int64(30),
 					Templates: []Template{
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
@@ -163,8 +163,8 @@ func Test_InitDevices(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					AICore:             int32(30),
-					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+					AICore:             int64(30),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 				},
 				{
 					ChipName:           "910B4",
@@ -173,13 +173,13 @@ func Test_InitDevices(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910B4-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					AICore:             int32(20),
-					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+					AICore:             int64(20),
+					Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 				},
 			},
 			want: []*Devices{
-				{config: VNPUConfig{ChipName: "910A", CommonWord: "Ascend910A", ResourceName: "huawei.com/Ascend910A", ResourceMemoryName: "huawei.com/Ascend910A-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(30), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
-				{config: VNPUConfig{ChipName: "910B4", CommonWord: "Ascend910B4", ResourceName: "huawei.com/Ascend910B4", ResourceMemoryName: "huawei.com/Ascend910B4-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int32(20), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}}}},
+				{config: VNPUConfig{ChipName: "910A", CommonWord: "Ascend910A", ResourceName: "huawei.com/Ascend910A", ResourceMemoryName: "huawei.com/Ascend910A-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int64(30), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}}}},
+				{config: VNPUConfig{ChipName: "910B4", CommonWord: "Ascend910B4", ResourceName: "huawei.com/Ascend910B4", ResourceMemoryName: "huawei.com/Ascend910B4-memory", MemoryAllocatable: int64(32768), MemoryCapacity: int64(32768), AICore: int64(20), Templates: []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}}}},
 			},
 		},
 	}
@@ -233,9 +233,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:      "GPU-0",
-					Count:   int32(4),
-					Devcore: int32(8),
-					Devmem:  int32(8738),
+					Count:   int64(4),
+					Devcore: int64(8),
+					Devmem:  int64(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
 					Health:  true,
@@ -258,9 +258,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:      "GPU-0",
-					Count:   int32(4),
-					Devcore: int32(100),
-					Devmem:  int32(8738),
+					Count:   int64(4),
+					Devcore: int64(100),
+					Devmem:  int64(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
 					Health:  true,
@@ -283,9 +283,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:      "GPU-0",
-					Count:   int32(4),
-					Devcore: int32(150),
-					Devmem:  int32(8738),
+					Count:   int64(4),
+					Devcore: int64(150),
+					Devmem:  int64(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
 					Health:  true,
@@ -308,9 +308,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:      "GPU-0",
-					Count:   int32(4),
-					Devcore: int32(20),
-					Devmem:  int32(8738),
+					Count:   int64(4),
+					Devcore: int64(20),
+					Devmem:  int64(8738),
 					Type:    "huawei.com/Ascend910",
 					Numa:    0,
 					Health:  true,
@@ -391,19 +391,19 @@ func Test_PatchAnnotations(t *testing.T) {
 				{
 					Name:   "vir02",
 					Memory: int64(2184),
-					AICore: int32(2),
+					AICore: int64(2),
 				}, {
 					Name:   "vir04",
 					Memory: int64(4369),
-					AICore: int32(4),
+					AICore: int64(4),
 				}, {
 					Name:   "vir08",
 					Memory: int64(8738),
-					AICore: int32(8),
+					AICore: int64(8),
 				}, {
 					Name:   "vir16",
 					Memory: int64(17476),
-					AICore: int32(16),
+					AICore: int64(16),
 				},
 			},
 		},
@@ -562,19 +562,19 @@ func Test_PatchAnnotations_ZeroCore(t *testing.T) {
 				{
 					Name:   "vir02",
 					Memory: int64(2184),
-					AICore: int32(2),
+					AICore: int64(2),
 				}, {
 					Name:   "vir04",
 					Memory: int64(4369),
-					AICore: int32(4),
+					AICore: int64(4),
 				}, {
 					Name:   "vir08",
 					Memory: int64(8738),
-					AICore: int32(8),
+					AICore: int64(8),
 				}, {
 					Name:   "vir16",
 					Memory: int64(17476),
-					AICore: int32(16),
+					AICore: int64(16),
 				},
 			},
 		},
@@ -803,19 +803,19 @@ func Test_MutateAdmission(t *testing.T) {
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
@@ -874,19 +874,19 @@ func Test_MutateAdmission_NilRequests(t *testing.T) {
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
@@ -962,7 +962,7 @@ func Test_MutateAdmission_OverwriteEnvDoesNotOverrideAscendContainer(t *testing.
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
 			Templates: []Template{
-				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
+				{Name: "vir08", Memory: int64(8738), AICore: int64(8)},
 			},
 		},
 		overwriteEnv:           true,
@@ -1001,7 +1001,7 @@ func Test_MutateAdmission_OverwriteEnvInjectsEmptyForNonAscendContainer(t *testi
 				ResourceMemoryName: resourceName + "-memory",
 				MemoryAllocatable:  int64(32768),
 				MemoryCapacity:     int64(32768),
-				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 			},
 			overwriteEnv:           true,
 			allAscendResourceNames: allResNames,
@@ -1042,7 +1042,7 @@ func Test_MutateAdmission_OverwriteEnvLastWinsInjectsAfterRealValue(t *testing.T
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 		},
 		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
@@ -1077,7 +1077,7 @@ func Test_MutateAdmission_OverwriteEnvIgnoresValueFromEntry(t *testing.T) {
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
 			MemoryAllocatable:  int64(32768),
 			MemoryCapacity:     int64(32768),
-			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+			Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 		},
 		overwriteEnv:           true,
 		allAscendResourceNames: allResNames,
@@ -1135,7 +1135,7 @@ func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
 				ResourceMemoryName: "huawei.com/Ascend910A-memory",
 				MemoryAllocatable:  int64(32768),
 				MemoryCapacity:     int64(32768),
-				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int32(8)}},
+				Templates:          []Template{{Name: "vir08", Memory: int64(8738), AICore: int64(8)}},
 			},
 			overwriteEnv:           overwriteEnv,
 			allAscendResourceNames: allResNames,
@@ -1680,11 +1680,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int64(2),
 				Type:             "Ascend910A",
-				Memreq:           int32(8738),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(8738),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -1700,11 +1700,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int64(2),
 				Type:             "Ascend910A",
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
 		},
 	}
@@ -1721,19 +1721,19 @@ func Test_GenerateResourceRequests(t *testing.T) {
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
@@ -1763,11 +1763,11 @@ func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "Ascend910B3",
-				Memreq:           int32(15360),
-				Coresreq:         int32(10),
-				MemPercentagereq: int32(0),
+				Memreq:           int64(15360),
+				Coresreq:         int64(10),
+				MemPercentagereq: int64(0),
 			},
 		},
 	}
@@ -1822,34 +1822,34 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					MemoryFactor:       int32(10),
+					MemoryFactor:       int64(10),
 					Templates: []Template{
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(1280),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(1280),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -1861,34 +1861,34 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					MemoryFactor:       int32(100),
+					MemoryFactor:       int64(100),
 					Templates: []Template{
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(12800),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(12800),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -1900,34 +1900,34 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					MemoryFactor:       int32(0),
+					MemoryFactor:       int64(0),
 					Templates: []Template{
 						{
 							Name:   "vir02",
 							Memory: int64(2184),
-							AICore: int32(2),
+							AICore: int64(2),
 						}, {
 							Name:   "vir04",
 							Memory: int64(4369),
-							AICore: int32(4),
+							AICore: int64(4),
 						}, {
 							Name:   "vir08",
 							Memory: int64(8738),
-							AICore: int32(8),
+							AICore: int64(8),
 						}, {
 							Name:   "vir16",
 							Memory: int64(17476),
-							AICore: int32(16),
+							AICore: int64(16),
 						},
 					},
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(128),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(128),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 	}
@@ -1957,8 +1957,8 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 		want device.ContainerDeviceRequest
 	}{
 		{
-			// 16Gi in bytes wraps to 0 when narrowed to int32; Ascend memory is counted in MB.
-			name: "memory requested in bytes exceeds int32 range on soft-partitioning path",
+			// 16Gi in bytes wraps to 0 when narrowed to int64; Ascend memory is counted in MB.
+			name: "memory requested in bytes exceeds int64 range on soft-partitioning path",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -1972,7 +1972,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "memory requested in bytes exceeds int32 range on trim path",
+			name: "memory requested in bytes exceeds int64 range on trim path",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -1999,7 +1999,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// A plain whole -100 passes AsInt64 (ok=true), so it must be rejected by sign before the int32 narrowing.
+			// A plain whole -100 passes AsInt64 (ok=true), so it must be rejected by sign before the int64 narrowing.
 			name: "negative whole memory request",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
@@ -2007,18 +2007,6 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"huawei.com/Ascend910B3":        resource.MustParse("1"),
 						"huawei.com/Ascend910B3-memory": resource.MustParse("-100"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "oversized device count exceeds int32 range",
-			dev:  Devices{config: coreModeConfig},
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"huawei.com/Ascend910B3": resource.MustParse("2200000000"),
 					},
 				},
 			},
@@ -2038,7 +2026,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "oversized core request exceeds int32 range",
+			name: "oversized core request exceeds int64 range",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -2059,7 +2047,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 	}
 }
 
-// Test_GenerateResourceRequests_MemoryFactorOverflow covers a value that fits int32 but overflows after MemoryFactor.
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a value that passes the MB check but overflows int64 after MemoryFactor.
 func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2067,7 +2055,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 		args corev1.Container
 	}{
 		{
-			name: "scaled memory overflows int32 on soft-partitioning path",
+			name: "scaled memory overflows int64 on soft-partitioning path",
 			dev: Devices{
 				config: VNPUConfig{
 					CommonWord:         "Ascend910B3",
@@ -2076,7 +2064,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
 					MemoryAllocatable:  int64(65536),
 					MemoryCapacity:     int64(65536),
-					MemoryFactor:       int32(10),
+					MemoryFactor:       int64(1) << 40,
 				},
 			},
 			args: corev1.Container{
@@ -2090,7 +2078,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 			},
 		},
 		{
-			name: "scaled memory overflows int32 on trim path",
+			name: "scaled memory overflows int64 on trim path",
 			dev: Devices{
 				config: VNPUConfig{
 					CommonWord:         "Ascend910A",
@@ -2098,7 +2086,7 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
 					MemoryAllocatable:  int64(32768),
 					MemoryCapacity:     int64(32768),
-					MemoryFactor:       int32(10),
+					MemoryFactor:       int64(1) << 40,
 				},
 			},
 			args: corev1.Container{
@@ -3170,17 +3158,17 @@ func TestDevices_ModeAgnosticMemoryIsResolvedPerCandidateNode(t *testing.T) {
 	templateNode := &device.NodeInfo{Node: &corev1.Node{}}
 	fit, allocation, reason := dev.Fit(devices, request, pod, templateNode, &device.PodDevices{})
 	assert.Assert(t, fit, reason)
-	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int32(16384))
+	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int64(16384))
 	templateAllocation := allocation
 	// Fit must not mutate the request reused for another candidate node.
-	assert.Equal(t, request.Memreq, int32(10000))
+	assert.Equal(t, request.Memreq, int64(10000))
 
 	hamiCoreNode := &device.NodeInfo{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 		VNPUNodeSelectorAnnotation: "true",
 	}}}}
 	fit, allocation, reason = dev.Fit(devices, request, pod, hamiCoreNode, &device.PodDevices{})
 	assert.Assert(t, fit, reason)
-	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int32(10000))
+	assert.Equal(t, allocation[dev.CommonWord()][0].Usedmem, int64(10000))
 	hamiCoreAllocation := allocation
 
 	for _, test := range []struct {
@@ -3207,7 +3195,7 @@ func TestDevices_ModeAgnosticMemoryIsResolvedPerCandidateNode(t *testing.T) {
 			assert.Equal(t, fit, test.want, reason)
 			if test.want {
 				assert.Equal(t, len(result[dev.CommonWord()]), 2)
-				assert.Equal(t, result[dev.CommonWord()][0].Usedmem, int32(8000))
+				assert.Equal(t, result[dev.CommonWord()][0].Usedmem, int64(8000))
 			}
 		})
 	}
@@ -3223,7 +3211,7 @@ func TestDevices_ModeAgnosticMemoryIsResolvedPerCandidateNode(t *testing.T) {
 	}}
 	fit, emptyTemplateAllocation, reason := emptyTemplateDev.Fit(devices, request, pod, templateNode, &device.PodDevices{})
 	assert.Assert(t, fit, reason)
-	assert.Equal(t, emptyTemplateAllocation[dev.CommonWord()][0].Usedmem, int32(16384))
+	assert.Equal(t, emptyTemplateAllocation[dev.CommonWord()][0].Usedmem, int64(16384))
 
 	for _, test := range []struct {
 		name       string
@@ -3517,8 +3505,8 @@ func TestDevices_Fit_HamiCoreMemoryOversell(t *testing.T) {
 
 func TestHamiCorePercentBudget(t *testing.T) {
 	cases := []struct {
-		in   int32
-		want int32
+		in   int64
+		want int64
 	}{
 		{0, 100},
 		{20, 100},
@@ -3816,8 +3804,8 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
-				assert.Equal(t, int32(1), req.Nums)
-				assert.Equal(t, int32(tt.cores), req.Coresreq)
+				assert.Equal(t, int64(1), req.Nums)
+				assert.Equal(t, int64(tt.cores), req.Coresreq)
 			} else {
 				assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
 			}
@@ -3854,7 +3842,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -4095,7 +4083,7 @@ func TestDevices_Fit_HamiCoreOversellIncomingPodTotalExclusivity(t *testing.T) {
 			}
 		}
 	}
-	collapsedOn := func(pod *corev1.Pod, cores int32) device.PodDevices {
+	collapsedOn := func(pod *corev1.Pod, cores int64) device.PodDevices {
 		return device.CollapseInitContainerUsage(pod, device.PodDevices{
 			"Ascend910B3": device.PodSingleDevice{
 				{{UUID: "dev-0", Type: "Ascend910B3", Usedmem: 4096, Usedcores: cores}},
@@ -4272,7 +4260,7 @@ func TestDevices_Fit_HamiCoreOversellSequentialInitConcurrency(t *testing.T) {
 		Nums: 1, Type: "Ascend910B3",
 		Memreq: 8192, MemPercentagereq: 0, Coresreq: 50,
 	}
-	applyTenant := func(dev *device.DeviceUsage, cores int32) {
+	applyTenant := func(dev *device.DeviceUsage, cores int64) {
 		tenant := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "default", UID: "tenant-uid"},
 			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
@@ -4448,7 +4436,7 @@ func TestDevices_Fit_HamiCoreOversellLegacyFullCore(t *testing.T) {
 		Memreq: 8192, MemPercentagereq: 0, Coresreq: 100,
 	}
 
-	partial := func(totalcore int32) []*device.DeviceUsage {
+	partial := func(totalcore int64) []*device.DeviceUsage {
 		return []*device.DeviceUsage{{
 			ID: "dev-0", Index: 0, Type: "Ascend910B3",
 			Used: 1, Count: 8,

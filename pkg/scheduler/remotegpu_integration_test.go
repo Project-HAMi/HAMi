@@ -156,7 +156,7 @@ func gpulessNode(name string) *corev1.Node {
 
 // A lupine node's device plugin registers in remote mode, which is what tells
 // both backends the card belongs to the fleet rather than to the node.
-func fleetGPU(uuid string, mem int32) *device.DeviceInfo {
+func fleetGPU(uuid string, mem int64) *device.DeviceInfo {
 	return &device.DeviceInfo{
 		ID: uuid, Count: 10, Devmem: mem, Devcore: 100,
 		Type: "NVIDIA-A100-SXM4-40GB", Health: true, Mode: nvidia.RemoteMode,
@@ -223,7 +223,7 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 
 	reqs, err := device.Resourcereqs(task)
 	assert.NilError(t, err)
-	assert.Equal(t, reqs[0]["RemoteGPU"].Nums, int32(2), "GenerateResourceRequests must reach Resourcereqs")
+	assert.Equal(t, reqs[0]["RemoteGPU"].Nums, int64(2), "GenerateResourceRequests must reach Resourcereqs")
 
 	s := NewScheduler()
 	failed := map[string]string{}
@@ -236,7 +236,7 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 	assert.Equal(t, len(allocated), 1, "one container")
 	assert.Equal(t, len(allocated[0]), 2, "two whole cards")
 	assert.Equal(t, allocated[0][0].UUID, "gpu-a/GPU-aaa")
-	assert.Equal(t, allocated[0][0].Usedmem, int32(40000), "whole card, not the 2000 requested")
+	assert.Equal(t, allocated[0][0].Usedmem, int64(40000), "whole card, not the 2000 requested")
 
 	annos := map[string]string{}
 	dev.PatchAnnotations(task, &annos, best.Devices)

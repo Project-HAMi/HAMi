@@ -227,7 +227,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 
 	// Preserve the reservation's accounted amounts; only the device moves.
 	requests := device.ContainerDeviceRequests{req.DeviceType: {
-		Nums:     int32(len(current)),
+		Nums:     int64(len(current)),
 		Type:     req.DeviceType,
 		Memreq:   current[0].Usedmem,
 		Coresreq: current[0].Usedcores,
@@ -371,7 +371,7 @@ func aggregateDeviceUsage(single device.PodSingleDevice) map[string]device.Conta
 // effectiveUsageOnCandidate evaluates only one physical device. Init/app
 // collapsing is independent per UUID, so filtering the raw rows first avoids
 // copying and collapsing the pod's complete allocation for every candidate.
-func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDevice, deviceType string, containerIndex int, movedMemory, movedCores int32, candidateID string, initReleased bool) device.ContainerDevice {
+func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDevice, deviceType string, containerIndex int, movedMemory, movedCores int64, candidateID string, initReleased bool) device.ContainerDevice {
 	candidateRows := make(device.PodSingleDevice, len(withoutMoved))
 	for index, containerDevices := range withoutMoved {
 		for _, d := range containerDevices {
@@ -399,7 +399,7 @@ func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDev
 // resulting per-device usage equals the pod's effective init/app usage on that
 // candidate. Computing the full hypothetical through the shared collapse
 // helpers also preserves native-sidecar ordering.
-func preparePhaseAwareRefitUsage(node *NodeUsage, pod *corev1.Pod, cached, raw device.PodDevices, deviceType string, containerIndex int, movedMemory, movedCores int32, allowed map[string]struct{}, initReleased bool) {
+func preparePhaseAwareRefitUsage(node *NodeUsage, pod *corev1.Pod, cached, raw device.PodDevices, deviceType string, containerIndex int, movedMemory, movedCores int64, allowed map[string]struct{}, initReleased bool) {
 	for _, containerDevices := range cached[deviceType] {
 		releaseContainerUsage(node, containerDevices)
 	}

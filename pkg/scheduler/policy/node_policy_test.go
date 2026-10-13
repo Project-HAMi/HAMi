@@ -320,7 +320,7 @@ func TestOverrideScore(t *testing.T) {
 								UUID:      "GPU-3",
 								Usedcores: 100,
 								CustomInfo: map[string]any{
-									"LinkZone": int32(1),
+									"LinkZone": int64(1),
 									"Pod.Annotations": map[string]string{
 										"metax-tech.com/sgpu-topology-aware": "true",
 									},
@@ -330,7 +330,7 @@ func TestOverrideScore(t *testing.T) {
 								UUID:      "GPU-4",
 								Usedcores: 100,
 								CustomInfo: map[string]any{
-									"LinkZone": int32(1),
+									"LinkZone": int64(1),
 									"Pod.Annotations": map[string]string{
 										"metax-tech.com/sgpu-topology-aware": "true",
 									},
@@ -342,10 +342,10 @@ func TestOverrideScore(t *testing.T) {
 				Score: 0,
 			},
 			devices: []*device.DeviceUsage{
-				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
 			},
 			policy:    "binpack",
 			wantScore: 600000,
@@ -370,7 +370,7 @@ func TestOverrideScore(t *testing.T) {
 								UUID:      "GPU-3",
 								Usedcores: 100,
 								CustomInfo: map[string]any{
-									"LinkZone": int32(1),
+									"LinkZone": int64(1),
 									"Pod.Annotations": map[string]string{
 										"metax-tech.com/sgpu-topology-aware": "true",
 									},
@@ -380,7 +380,7 @@ func TestOverrideScore(t *testing.T) {
 								UUID:      "GPU-4",
 								Usedcores: 100,
 								CustomInfo: map[string]any{
-									"LinkZone": int32(1),
+									"LinkZone": int64(1),
 									"Pod.Annotations": map[string]string{
 										"metax-tech.com/sgpu-topology-aware": "true",
 									},
@@ -392,10 +392,10 @@ func TestOverrideScore(t *testing.T) {
 				Score: 0,
 			},
 			devices: []*device.DeviceUsage{
-				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
-				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int64(1)}},
 			},
 			policy:    "spread",
 			wantScore: -600000,

@@ -29,8 +29,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/ccoveille/go-safecast/v2"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -375,21 +373,12 @@ func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 		// invalid. See the nvidia backend.
 		return device.ContainerDeviceRequest{}, nil
 	}
-	nums, err := safecast.Convert[int32](count)
-	if err != nil {
-		klog.ErrorS(err, "remotegpu: device count out of range", "value", count)
-		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "remotegpu", Reason: fmt.Sprintf("device count %d is out of range", count)}
-	}
-	var memreq int32
+	var memreq int64
 	if mem, ok := resourceValue(ctr, RemoteGPUResourceMemory); ok && mem > 0 {
-		memreq, err = safecast.Convert[int32](mem)
-		if err != nil {
-			klog.ErrorS(err, "remotegpu: memory request out of range", "value", mem)
-			return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "remotegpu", Reason: fmt.Sprintf("memory request %d is out of range", mem)}
-		}
+		memreq = mem
 	}
 	return device.ContainerDeviceRequest{
-		Nums: nums,
+		Nums: count,
 		Type: RemoteGPUCommonWord,
 		// ponytail: whole-server allocation for the first cut. Memreq filters
 		// candidate cards but never splits one, so cores are always the whole
@@ -719,7 +708,7 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 // synthetic 2x large-memory request.
 func firstRequestFailure(cards []*device.DeviceUsage, requests []device.ContainerDeviceRequest) (int, bool) {
 	for _, request := range requests {
-		var usable int32
+		var usable int64
 		smallCards := 0
 		for _, d := range cards {
 			if request.Memreq <= 0 || d.Totalmem >= request.Memreq {

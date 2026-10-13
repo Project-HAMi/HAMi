@@ -31,7 +31,7 @@ import (
 
 // drsCard returns a DRS card with 6 slices and a 3-profile menu. Totalmem and
 // Totalcore are parameterised so callers pick which constraint is binding.
-func drsCard(totalmem, totalcore int32) *device.DeviceUsage {
+func drsCard(totalmem, totalcore int64) *device.DeviceUsage {
 	return &device.DeviceUsage{
 		ID:        "GPU-enflame-drs-0",
 		Index:     0,
@@ -68,12 +68,12 @@ func TestDRSSlice_SlotCountSurvivesReconstruction(t *testing.T) {
 	assert.Equal(t, reason, "")
 	ctrDevs := result[EnflameVGCUDevice]
 	assert.Equal(t, len(ctrDevs), 1)
-	assert.Equal(t, ctrDevs[0].Slots, int32(3))
+	assert.Equal(t, ctrDevs[0].Slots, int64(3))
 
 	// Live path: AddResourceUsage consumes profile.Size slices.
 	liveCard := drsCard(40960, 100)
 	assert.NilError(t, enf.AddResourceUsage(pod, liveCard, &ctrDevs[0]))
-	assert.Equal(t, liveCard.Used, int32(3))
+	assert.Equal(t, liveCard.Used, int64(3))
 
 	// Reconstruction path: persist to the annotation and read it back the way
 	// getNodesUsage does.
@@ -106,7 +106,7 @@ func TestDRSSlice_PartialCapacityRejectsFullProfile(t *testing.T) {
 	fit, result, reason := enf.Fit([]*device.DeviceUsage{card}, oneSlice, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true)
 	assert.Equal(t, reason, "")
-	assert.Equal(t, result[EnflameVGCUDevice][0].Slots, int32(1))
+	assert.Equal(t, result[EnflameVGCUDevice][0].Slots, int64(1))
 }
 
 // TestDRSSlice_SliceCountPrefersSlots checks that Slots is authoritative and
@@ -119,7 +119,7 @@ func TestDRSSlice_SliceCountPrefersSlots(t *testing.T) {
 	tests := []struct {
 		name string
 		ctr  device.ContainerDevice
-		want int32
+		want int64
 	}{
 		{"slots wins over a stale CustomInfo", device.ContainerDevice{Slots: 3, CustomInfo: map[string]any{"drsSlice": 1}}, 3},
 		{"custominfo fills in when slots is unset", device.ContainerDevice{CustomInfo: map[string]any{"drsSlice": 3}}, 3},
@@ -162,7 +162,7 @@ func TestDRSSlice_ReconstructionRejectsSliceOversubscription(t *testing.T) {
 		assert.NilError(t, enf.AddResourceUsage(pod, liveCard, &ctr))
 		persisted = append(persisted, ctr)
 	}
-	assert.Equal(t, liveCard.Used, int32(6))
+	assert.Equal(t, liveCard.Used, int64(6))
 
 	fitFull, _, _ := enf.Fit([]*device.DeviceUsage{liveCard}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fitFull, false)

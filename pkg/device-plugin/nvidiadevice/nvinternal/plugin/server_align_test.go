@@ -42,11 +42,11 @@ func TestAlignContainerDevicesWithAllocatedIDsMatchesByUUID(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[0].UUID)
-	require.Equal(t, int32(12000), aligned[0].Usedmem)
-	require.Equal(t, int32(30), aligned[0].Usedcores)
+	require.Equal(t, int64(12000), aligned[0].Usedmem)
+	require.Equal(t, int64(30), aligned[0].Usedcores)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[1].UUID)
-	require.Equal(t, int32(40000), aligned[1].Usedmem)
-	require.Equal(t, int32(50), aligned[1].Usedcores)
+	require.Equal(t, int64(40000), aligned[1].Usedmem)
+	require.Equal(t, int64(50), aligned[1].Usedcores)
 }
 
 // When kubelet picks devices the annotation does not mention, the previous
@@ -64,9 +64,9 @@ func TestAlignContainerDevicesWithAllocatedIDsFallsBackPositionally(t *testing.T
 	})
 	require.NoError(t, err)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67c", aligned[0].UUID)
-	require.Equal(t, int32(40000), aligned[0].Usedmem)
+	require.Equal(t, int64(40000), aligned[0].Usedmem)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67d", aligned[1].UUID)
-	require.Equal(t, int32(12000), aligned[1].Usedmem)
+	require.Equal(t, int64(12000), aligned[1].Usedmem)
 }
 
 // A mix of matched and unmatched devices keeps matched limits on their own
@@ -84,9 +84,9 @@ func TestAlignContainerDevicesWithAllocatedIDsPartialMatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67e", aligned[0].UUID)
-	require.Equal(t, int32(12000), aligned[0].Usedmem)
+	require.Equal(t, int64(12000), aligned[0].Usedmem)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[1].UUID)
-	require.Equal(t, int32(40000), aligned[1].Usedmem)
+	require.Equal(t, int64(40000), aligned[1].Usedmem)
 }
 
 // Annotated UUIDs may carry a replica suffix themselves; matching must
@@ -104,7 +104,7 @@ func TestAlignContainerDevicesWithAllocatedIDsMatchesAnnotatedReplicaUUIDs(t *te
 	})
 	require.NoError(t, err)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[0].UUID)
-	require.Equal(t, int32(12000), aligned[0].Usedmem)
+	require.Equal(t, int64(12000), aligned[0].Usedmem)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[1].UUID)
-	require.Equal(t, int32(40000), aligned[1].Usedmem)
+	require.Equal(t, int64(40000), aligned[1].Usedmem)
 }

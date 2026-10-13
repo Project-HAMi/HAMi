@@ -202,7 +202,7 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		ds.Score = 0
 		return
 	}
-	request, core, mem := int32(0), int32(0), int32(0)
+	request, core, mem := int64(0), int64(0), int64(0)
 	// Here we are required to use the same type device. Compare against the
 	// vendor rather than the registered type: backends such as NVIDIA and
 	// Cambricon register a model name ("NVIDIA A100-SXM4-40GB", "MLU370-X8")
@@ -222,7 +222,7 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		// Fit books Memreq makes the device look emptier than the allocation
 		// it is about to receive.
 		if container.Memreq == 0 && container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
-			mem += int32((int64(ds.Device.Totalmem) * int64(container.MemPercentagereq)) / 100)
+			mem += int64((int64(ds.Device.Totalmem) * int64(container.MemPercentagereq)) / 100)
 			continue
 		}
 		mem += container.Memreq

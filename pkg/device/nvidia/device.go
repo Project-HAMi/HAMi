@@ -76,7 +76,7 @@ const (
 	// WholeGPUUsedCores is the cores percentage recorded in the
 	// vgpu-devices-allocated annotation when a container holds the entire GPU.
 	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
-	WholeGPUUsedCores int32 = 100
+	WholeGPUUsedCores int64 = 100
 )
 
 var (
@@ -86,7 +86,7 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
-	MemoryFactor             int32 = 1
+	MemoryFactor             int64 = 1
 )
 
 // GPUCoreUtilizationPolicy is set nvidia gpu core isolation policy.
@@ -116,10 +116,10 @@ type NvidiaConfig struct {
 	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
 	ResourcePriority             string `yaml:"resourcePriorityName"`
 	OverwriteEnv                 bool   `yaml:"overwriteEnv"`
-	DefaultMemory                int32  `yaml:"defaultMemory"`
-	DefaultCores                 int32  `yaml:"defaultCores"`
-	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
-	MemoryFactor                 int32  `yaml:"memoryFactor"`
+	DefaultMemory                int64  `yaml:"defaultMemory"`
+	DefaultCores                 int64  `yaml:"defaultCores"`
+	DefaultGPUNum                int64  `yaml:"defaultGPUNum"`
+	MemoryFactor                 int64  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit    bool                        `yaml:"disableCoreLimit"`
 	MigProfileAllowlist []device.AllowedMigProfiles `yaml:"migProfileAllowlist"`
@@ -644,7 +644,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				// pod that templates its count down to 0.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "nvidia device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
@@ -656,10 +656,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			if ok {
 				memnums, parsed := mem.AsInt64()
 				factor := max(int64(dev.config.MemoryFactor), 1)
-				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/factor {
-					klog.ErrorS(nil, "nvidia memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+				if !parsed || memnums < 0 || memnums > math.MaxInt64/factor {
+					klog.ErrorS(nil, "nvidia memory request is not a non-negative integer or overflows after applying the memory factor",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("memory request %s is not a non-negative integer or overflows after applying the memory factor", mem.String())}
 				}
 				if factor > 1 {
 					rawMemnums := memnums
@@ -668,7 +668,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				}
 				memnum = int(memnums)
 			}
-			mempnum := int32(101)
+			mempnum := int64(101)
 			// Check both lists so a valid limit cannot hide an invalid request.
 			for _, list := range []corev1.ResourceList{ctr.Resources.Limits, ctr.Resources.Requests} {
 				if q, found := list[resourceMemPercentage]; found && !validPercentage(q) {
@@ -684,7 +684,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				mempnums, _ := mem.AsInt64()
 				// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
 				if mempnums > 0 {
-					mempnum = int32(mempnums)
+					mempnum = int64(mempnums)
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
@@ -705,12 +705,12 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 					klog.ErrorS(nil, "nvidia core request is out of range", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "nvidia", Reason: fmt.Sprintf("core request %s is out of range (must be an integer between 0 and 100)", core.String())}
 				}
-				corenum = int32(corenums)
+				corenum = int64(corenums)
 			}
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             int64(n),
 				Type:             NvidiaGPUDevice,
-				Memreq:           int32(memnum),
+				Memreq:           int64(memnum),
 				MemPercentagereq: mempnum,
 				Coresreq:         corenum,
 			}, nil
@@ -738,8 +738,8 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 }
 
 // queuedMigMemories returns the memory requests already queued for this container on the given card.
-func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int32 {
-	memories := make([]int32, 0, len(toAllocate)+1)
+func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int64 {
+	memories := make([]int64, 0, len(toAllocate)+1)
 	for _, existing := range toAllocate {
 		if existing.UUID == uuid {
 			memories = append(memories, existing.Usedmem)
@@ -750,7 +750,7 @@ func queuedMigMemories(toAllocate device.ContainerDevices, uuid string) []int32 
 
 // plannedMigProfile returns the profile a new slice of memory MB gets on dev when planned
 // together with the slices this container has already queued on it.
-func plannedMigProfile(dev *device.DeviceUsage, queued device.ContainerDevices, memory int32, preferred []string) (device.MigProfile, bool) {
+func plannedMigProfile(dev *device.DeviceUsage, queued device.ContainerDevices, memory int64, preferred []string) (device.MigProfile, bool) {
 	memories := queuedMigMemories(queued, dev.ID)
 	memories = append(memories, memory)
 	profiles, _, ok := planMigContainer(dev.MigProfiles, occupiedMigPlacements(dev.MigAllocationsInUse), memories, preferred)
@@ -773,7 +773,7 @@ func migProfilesByMemory(profiles []device.MigProfile) []device.MigProfile {
 }
 
 // migProfileForMemory returns the smallest profile whose memory covers the request.
-func migProfileForMemory(profiles []device.MigProfile, memory int32, preferred []string) (device.MigProfile, bool) {
+func migProfileForMemory(profiles []device.MigProfile, memory int64, preferred []string) (device.MigProfile, bool) {
 	for _, profile := range migProfileCandidates(profiles, preferred) {
 		if profile.MemoryMB >= memory {
 			return profile, true
@@ -783,7 +783,7 @@ func migProfileForMemory(profiles []device.MigProfile, memory int32, preferred [
 }
 
 // selectMigCandidate picks the smallest covering profile that still has a free placement, and its best placement.
-func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32, preferred []string) (device.MigProfile, device.MigPlacement, bool) {
+func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int64, preferred []string) (device.MigProfile, device.MigPlacement, bool) {
 	for _, profile := range migProfileCandidates(profiles, preferred) {
 		if profile.MemoryMB < memory {
 			continue
@@ -798,7 +798,7 @@ func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlace
 
 // planMigAllocations maps each request to its smallest covering profile and places them all jointly.
 // The returned slices are aligned with memories.
-func planMigAllocations(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+func planMigAllocations(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int64, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
 	chosen := make([]device.MigProfile, len(memories))
 	requested := make([]string, len(memories))
 	for i, memory := range memories {
@@ -816,7 +816,7 @@ func planMigAllocations(profiles []device.MigProfile, occupied []device.MigPlace
 	return chosen, placements, true
 }
 
-func planMigSequentially(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+func planMigSequentially(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int64, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
 	occupied = slices.Clone(occupied)
 	chosen := make([]device.MigProfile, len(memories))
 	placements := make([]device.MigPlacement, len(memories))
@@ -831,7 +831,7 @@ func planMigSequentially(profiles []device.MigProfile, occupied []device.MigPlac
 	return chosen, placements, true
 }
 
-func planMigContainer(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int32, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
+func planMigContainer(profiles []device.MigProfile, occupied []device.MigPlacement, memories []int64, preferred []string) ([]device.MigProfile, []device.MigPlacement, bool) {
 	orders := [][]string{nil}
 	if len(preferred) > 0 {
 		orders = [][]string{preferred, nil}
@@ -871,7 +871,7 @@ func recordMigPlans(devices []*device.DeviceUsage, tentative device.ContainerDev
 	for _, id := range order {
 		indices := grouped[id]
 		usage := usageByID[id]
-		memories := make([]int32, len(indices))
+		memories := make([]int64, len(indices))
 		for i, idx := range indices {
 			memories[i] = tentative[idx].Usedmem
 		}
@@ -954,8 +954,8 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	cur = append(cur, device.ContainerDevice{
 		UUID:      devUUID,
 		Type:      NvidiaGPUDevice,
-		Usedmem:   int32(memreq),
-		Usedcores: int32(coresreq),
+		Usedmem:   int64(memreq),
+		Usedcores: int64(coresreq),
 	})
 	hypo[NvidiaGPUDevice] = append(hypo[NvidiaGPUDevice], cur)
 
@@ -1042,7 +1042,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

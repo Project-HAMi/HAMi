@@ -268,9 +268,9 @@ func Test_GetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:           "test-0",
-					Count:        int32(1),
-					Devmem:       int32(1024),
-					Devcore:      int32(100),
+					Count:        int64(1),
+					Devmem:       int64(1024),
+					Devcore:      int64(100),
 					Type:         dev.CommonWord(),
 					Numa:         0,
 					Health:       true,
@@ -462,8 +462,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       1,
 								UUID:      "test1",
 								Type:      HygonHCUDevice,
-								Usedmem:   int32(2048),
-								Usedcores: int32(1),
+								Usedmem:   int64(2048),
+								Usedcores: int64(1),
 							},
 						},
 					},
@@ -528,11 +528,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             HygonHCUDevice,
-				Memreq:           int32(1024),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(1),
+				Memreq:           int64(1024),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(1),
 			},
 		},
 		{
@@ -550,11 +550,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             HygonHCUDevice,
-				Memreq:           int32(1024),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(1),
+				Memreq:           int64(1024),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(1),
 			},
 		},
 		{
@@ -571,24 +571,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             HygonHCUDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(1),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(1),
 			},
-		},
-		{
-			name: "oversized hcu memory request exceeds int32 range",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"hygon.com/hcunum": resource.MustParse("1"),
-						"hygon.com/hcumem": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {
@@ -608,17 +596,6 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 		args *corev1.Container
 		want device.ContainerDeviceRequest
 	}{
-		{
-			name: "oversized hcu count exceeds int32 range",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"hygon.com/hcunum": resource.MustParse("2200000000"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
 		{
 			name: "negative hcu cores",
 			args: &corev1.Container{
@@ -680,7 +657,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 }
 
 // Test_GenerateResourceRequests_MemoryFactorOverflow covers the case where the
-// raw memory request fits in int32 but overflows once MemoryFactor is applied.
+// raw memory request fits in int64 but overflows once MemoryFactor is applied.
 func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	origFactor := MemoryFactor
 	MemoryFactor = 1024
@@ -690,12 +667,12 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	fs := flag.FlagSet{}
 	ParseConfig(&fs)
 
-	// 3000000 fits in int32, but 3000000 * 1024 exceeds math.MaxInt32.
+	// 9100000000000000 fits in int64, but 9100000000000000 * 1024 does not.
 	ctr := &corev1.Container{
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{
 				"hygon.com/hcunum": resource.MustParse("1"),
-				"hygon.com/hcumem": resource.MustParse("3000000"),
+				"hygon.com/hcumem": resource.MustParse("9100000000000000"),
 			},
 		},
 	}
@@ -1452,7 +1429,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -1539,7 +1516,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 		name    string
 		cores   string
 		wantOk  bool
-		wantVal int32
+		wantVal int64
 	}{
 		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
 		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
@@ -1562,10 +1539,10 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantOk {
-				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Nums, int64(1))
 				assert.Equal(t, req.Coresreq, tt.wantVal)
 			} else {
-				assert.Equal(t, req.Nums, int32(0))
+				assert.Equal(t, req.Nums, int64(0))
 			}
 		})
 	}
@@ -1593,12 +1570,10 @@ func Test_MutateAdmission_InvalidValues(t *testing.T) {
 		{"count only in requests", ctr(nil, list("hygon.com/hcunum", "1")), true, false},
 		{"no hcu resource", ctr(list("cpu", "1"), nil), false, false},
 		{"cores above 100", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "101"), nil), false, true},
-		{"cores wrap int32", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "4294967296"), nil), false, true},
+		{"cores wrap int64", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "4294967296"), nil), false, true},
 		{"negative cores", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "-1"), nil), false, true},
 		{"fractional cores", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "50m"), nil), false, true},
-		{"count above int32", ctr(list("hygon.com/hcunum", "2200000000"), nil), false, true},
 		{"negative count", ctr(list("hygon.com/hcunum", "-1"), nil), false, true},
-		{"memory above int32", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcumem", "2200000000"), nil), false, true},
 		{"fractional memory", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcumem", "1500m"), nil), false, true},
 		{"valid limit hides invalid request", ctr(list("hygon.com/hcunum", "1", "hygon.com/hcucores", "50"), list("hygon.com/hcucores", "150")), false, true},
 	}

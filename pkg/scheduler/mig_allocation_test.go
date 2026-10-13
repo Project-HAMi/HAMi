@@ -133,9 +133,9 @@ func twoNvidiaDeviceRequest(mode string) (*corev1.Pod, device.ContainerDeviceReq
 	gpuCount := pod.Spec.Containers[0].Resources.Limits["nvidia.com/gpu"]
 	gpuMemory := pod.Spec.Containers[0].Resources.Limits["nvidia.com/gpumem"]
 	request := device.ContainerDeviceRequest{
-		Nums:   int32(gpuCount.Value()),
+		Nums:   int64(gpuCount.Value()),
 		Type:   nvidia.NvidiaGPUDevice,
-		Memreq: int32(gpuMemory.Value()),
+		Memreq: int64(gpuMemory.Value()),
 	}
 	return pod, request, device.ContainerDeviceRequests{
 		device.InRequestDevices[nvidia.NvidiaGPUDevice]: request,

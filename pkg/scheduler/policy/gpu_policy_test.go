@@ -858,7 +858,7 @@ func TestComputeScoreWithResourceWeights(t *testing.T) {
 			Coresreq:         0,
 		},
 	}
-	newDeviceScore := func(id string, used, usedCores, usedMemory int32) *DeviceListsScore {
+	newDeviceScore := func(id string, used, usedCores, usedMemory int64) *DeviceListsScore {
 		return &DeviceListsScore{Device: &device.DeviceUsage{
 			ID: id, Type: "type1", DeviceVendor: "type1", Count: 10, Totalcore: 100, Totalmem: 100,
 			Used: used, Usedcores: usedCores, Usedmem: usedMemory,

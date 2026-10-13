@@ -686,7 +686,7 @@ func TestGetScheduledPodsCopiesEntries(t *testing.T) {
 			Namespace: "default",
 		},
 	}
-	devices := func(mem int32) PodDevices {
+	devices := func(mem int64) PodDevices {
 		return PodDevices{
 			"NVIDIA": PodSingleDevice{{{UUID: "dev-0", Usedmem: mem, Usedcores: 10}}},
 		}
@@ -697,7 +697,7 @@ func TestGetScheduledPodsCopiesEntries(t *testing.T) {
 	stop := make(chan struct{})
 
 	wg.Go(func() {
-		for i := int32(0); ; i++ {
+		for i := int64(0); ; i++ {
 			select {
 			case <-stop:
 				return
@@ -743,7 +743,7 @@ func TestGetScheduledPodsReturnsDetachedEntries(t *testing.T) {
 	scheduled["detach-uid"].NodeID = "tampered"
 
 	again, _ := pm.GetScheduledPods()
-	assert.Equal(t, int32(100), again["detach-uid"].Devices["NVIDIA"][0][0].Usedmem)
+	assert.Equal(t, int64(100), again["detach-uid"].Devices["NVIDIA"][0][0].Usedmem)
 	assert.Equal(t, "node1", again["detach-uid"].NodeID)
 }
 
@@ -763,7 +763,7 @@ func TestGetPodReturnsDetachedCopy(t *testing.T) {
 
 	again, ok := pm.GetPod(pod)
 	assert.True(t, ok)
-	assert.Equal(t, int32(100), again.Devices["NVIDIA"][0][0].Usedmem)
+	assert.Equal(t, int64(100), again.Devices["NVIDIA"][0][0].Usedmem)
 	assert.Equal(t, "node1", again.NodeID)
 
 	missing, ok := pm.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "nope"}})

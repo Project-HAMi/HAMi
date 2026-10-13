@@ -161,9 +161,9 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 			continue
 		}
 
-		registeredmem := int32(memoryTotal / 1024 / 1024)
+		registeredmem := int64(memoryTotal / 1024 / 1024)
 		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
-			registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
+			registeredmem = int64(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
 			klog.V(3).Infof("Device id=%v: MemoryScaling=%v, registeredmem=%v", idx, *plugin.schedulerConfig.DeviceMemoryScaling, registeredmem)
 		}
 		health := true
@@ -184,14 +184,14 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
 		}
 		Model = nvidia.NormalizeDeviceModel(Model)
-		devcore := int32(100)
+		devcore := int64(100)
 		if !isMigMode {
-			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
+			devcore = int64(*plugin.schedulerConfig.DeviceCoreScaling * 100)
 		}
 		info := &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
-			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
+			Count:   int64(*plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: devcore,
 			Type:    Model,
@@ -207,8 +207,8 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 			}
 			info.Count = 0
 			for _, profile := range info.MIGProfiles {
-				if int32(profile.InstanceCount) > info.Count {
-					info.Count = int32(profile.InstanceCount)
+				if int64(profile.InstanceCount) > info.Count {
+					info.Count = int64(profile.InstanceCount)
 				}
 			}
 		}
@@ -248,11 +248,11 @@ func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model str
 				continue
 			}
 			profile := device.MigProfile{
-				Name: profileName, MemoryMB: int32(profileInfo.MemorySizeMB),
+				Name: profileName, MemoryMB: int64(profileInfo.MemorySizeMB),
 				SliceCount: profileInfo.SliceCount, InstanceCount: profileInfo.InstanceCount,
 			}
 			if fullGPUMultiprocessors > 0 {
-				profile.Core = int32((profileInfo.MultiprocessorCount*100 + fullGPUMultiprocessors - 1) / fullGPUMultiprocessors)
+				profile.Core = int64((profileInfo.MultiprocessorCount*100 + fullGPUMultiprocessors - 1) / fullGPUMultiprocessors)
 			}
 			for _, placement := range placements {
 				profile.Placements = append(profile.Placements, device.MigPlacement{Start: placement.Start, Size: placement.Size})

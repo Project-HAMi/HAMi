@@ -64,9 +64,9 @@ func TestGetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:           "GPU-bad51c5a-ed4c-591d-91bf-c04a12e19eae",
-					Count:        int32(10),
-					Devcore:      int32(100),
-					Devmem:       int32(8192),
+					Count:        int64(10),
+					Devcore:      int64(100),
+					Devmem:       int64(8192),
 					Type:         "MR-V100",
 					Numa:         0,
 					Health:       true,
@@ -340,11 +340,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(100),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -359,11 +359,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(50),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(50),
 			},
 		},
 		{
@@ -378,11 +378,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -456,36 +456,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
-		},
-		{
-			name: "memory overflowing int32 is rejected, not truncated to zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
-						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
-						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16.0Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "device count zero is rejected",
@@ -504,17 +480,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("-1"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "device count above int32 max is rejected",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("2147483648"),
 					},
 				},
 			},
@@ -980,7 +945,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -1097,7 +1062,7 @@ func Test_GenerateResourceRequests_MutatedMultiCard(t *testing.T) {
 			t.Fatalf("MutateAdmission(count=%d): %v", count, err)
 		}
 		got, _ := dev.GenerateResourceRequests(ctr)
-		if got.Nums != int32(count) {
+		if got.Nums != int64(count) {
 			t.Errorf("count=%d: Nums = %d, want %d", count, got.Nums, count)
 		}
 		if count > 1 && got.Coresreq != 100 {
@@ -1117,8 +1082,8 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 		name     string
 		count    int64
 		cores    int64
-		wantCore int32
-		wantNums int32
+		wantCore int64
+		wantNums int64
 	}{
 		{name: "scaled by the webhook", count: 2, cores: 200, wantCore: 100, wantNums: 2},
 		{name: "scaled by the webhook, eight cards", count: 8, cores: 800, wantCore: 100, wantNums: 8},

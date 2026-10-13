@@ -146,7 +146,7 @@ func tokenReviewStatusFor(token string) authenticationv1.TokenReviewStatus {
 
 // refitFixture builds a cache-only scheduler tracking one pod that reserves
 // GPU-a, on a node carrying GPU-a (NUMA 1) and GPU-b (NUMA 0).
-func refitFixture(t *testing.T, gpuBDevmem int32) (*Scheduler, *corev1.Pod) {
+func refitFixture(t *testing.T, gpuBDevmem int64) (*Scheduler, *corev1.Pod) {
 	t.Helper()
 	nodes := newNodeManager()
 	nodes.addNode(refitNode, &device.NodeInfo{
@@ -177,7 +177,7 @@ func refitFixture(t *testing.T, gpuBDevmem int32) (*Scheduler, *corev1.Pod) {
 	return s, pod
 }
 
-func phaseAwareRefitFixture(t *testing.T, initContainers, containers []corev1.Container, reserved device.PodSingleDevice, gpuBDevmem, externalGPUBMemory int32) (*Scheduler, *corev1.Pod) {
+func phaseAwareRefitFixture(t *testing.T, initContainers, containers []corev1.Container, reserved device.PodSingleDevice, gpuBDevmem, externalGPUBMemory int64) (*Scheduler, *corev1.Pod) {
 	t.Helper()
 	if len(containers) == 0 {
 		containers = []corev1.Container{{Name: "main"}}
@@ -346,8 +346,8 @@ func TestRefitNumaAllocationMovesReservation(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(devices), 1)
 	assert.Equal(t, devices[0].UUID, "GPU-b")
-	assert.Equal(t, devices[0].Usedmem, int32(20000))
-	assert.Equal(t, devices[0].Usedcores, int32(30))
+	assert.Equal(t, devices[0].Usedmem, int64(20000))
+	assert.Equal(t, devices[0].Usedcores, int64(30))
 
 	// Both annotations were patched together onto the new device, with the
 	// value shape preserved byte for byte (no phantom container entries).
@@ -398,13 +398,13 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 		initContainers    []corev1.Container
 		containers        []corev1.Container
 		reserved          device.PodSingleDevice
-		gpuBMemory        int32
-		externalGPUMemory int32
+		gpuBMemory        int64
+		externalGPUMemory int64
 		containerIndex    int
 		containerName     string
 		wantSucceeded     bool
-		wantMemory        int32
-		wantSlots         int32
+		wantMemory        int64
+		wantSlots         int64
 	}{
 		{
 			name:           "regular init and app use the phase peak",
@@ -502,7 +502,7 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 
 			pi, ok := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
 			assert.Equal(t, ok, true)
-			var usedMemory, usedSlots int32
+			var usedMemory, usedSlots int64
 			for _, containerDevices := range pi.Devices[nvidia.NvidiaGPUDevice] {
 				for _, d := range containerDevices {
 					if d.UUID == "GPU-b" {
@@ -690,8 +690,8 @@ func TestRefitNumaAllocationSeedsExistingAllocations(t *testing.T) {
 	for _, d := range collapsed[0] {
 		byUUID[d.UUID] = d
 	}
-	assert.Equal(t, byUUID["GPU-a"].Usedmem, int32(5000))
-	assert.Equal(t, byUUID["GPU-b"].Usedmem, int32(20000))
+	assert.Equal(t, byUUID["GPU-a"].Usedmem, int64(5000))
+	assert.Equal(t, byUUID["GPU-b"].Usedmem, int64(20000))
 }
 
 func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
@@ -891,14 +891,14 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 	assert.Equal(t, pi.InitContainerResourceReleased, true)
 	// Steady state is app-only: the refitted GPU-b at the app amount, with no
 	// re-inflated init-container reservation on GPU-a.
-	total := int32(0)
+	total := int64(0)
 	for _, containerDevices := range pi.Devices[nvidia.NvidiaGPUDevice] {
 		for _, d := range containerDevices {
 			total += d.Usedmem
 			assert.Equal(t, d.UUID, "GPU-b", "unexpected device %s after refit", d.UUID)
 		}
 	}
-	assert.Equal(t, total, int32(20000))
+	assert.Equal(t, total, int64(20000))
 }
 
 func TestRefitNumaAllocationCallerAuthentication(t *testing.T) {
@@ -941,10 +941,10 @@ func TestEffectivePodDeviceUsageHonorsInitRelease(t *testing.T) {
 	beforeRelease := effectivePodDeviceUsage(pod, raw, false)[nvidia.NvidiaGPUDevice][0][0]
 	afterRelease := effectivePodDeviceUsage(pod, raw, true)[nvidia.NvidiaGPUDevice][0][0]
 
-	assert.Equal(t, beforeRelease.Usedmem, int32(30000))
-	assert.Equal(t, beforeRelease.Usedcores, int32(60))
-	assert.Equal(t, afterRelease.Usedmem, int32(20000))
-	assert.Equal(t, afterRelease.Usedcores, int32(30))
+	assert.Equal(t, beforeRelease.Usedmem, int64(30000))
+	assert.Equal(t, beforeRelease.Usedcores, int64(60))
+	assert.Equal(t, afterRelease.Usedmem, int64(20000))
+	assert.Equal(t, afterRelease.Usedcores, int64(30))
 }
 
 // TestRefitNumaAllocationSerializesInitRelease verifies that the informer
@@ -1053,7 +1053,7 @@ func TestRefitNumaAllocationSerializesInitRelease(t *testing.T) {
 	assert.Equal(t, pi.InitContainerResourceReleased, true)
 	steady := pi.Devices[nvidia.NvidiaGPUDevice][0][0]
 	assert.Equal(t, steady.UUID, "GPU-a")
-	assert.Equal(t, steady.Usedmem, int32(20000))
+	assert.Equal(t, steady.Usedmem, int64(20000))
 	resourceNames := device.GetDevices()[nvidia.NvidiaGPUDevice].GetResourceNames()
 	dq := s.quotaManager.GetResourceQuota()[pod.Namespace]
 	assert.Equal(t, (*dq)[resourceNames.ResourceMemoryName].Used, int64(20000))
@@ -1173,8 +1173,8 @@ func TestRefitNumaAllocationInitContainerRefitRecordsCollapsedUsage(t *testing.T
 	for _, d := range collapsed[0] {
 		byUUID[d.UUID] = d
 	}
-	assert.Equal(t, byUUID["GPU-a"].Usedmem, int32(10000))
-	assert.Equal(t, byUUID["GPU-b"].Usedmem, int32(5000))
+	assert.Equal(t, byUUID["GPU-a"].Usedmem, int64(10000))
+	assert.Equal(t, byUUID["GPU-b"].Usedmem, int64(5000))
 	// Namespace usage reflects the true 15000 total, not the undercounted 10000.
 	dq := s.quotaManager.GetResourceQuota()["default"]
 	assert.Equal(t, (*dq)[memoryResource].Used, int64(15000))

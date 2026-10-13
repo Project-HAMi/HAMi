@@ -1432,7 +1432,7 @@ func TestResourcereqs_OnlyRegularContainers(t *testing.T) {
 
 	// No init containers, so length == number of regular containers
 	assert.Equal(t, len(counts), 1)
-	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(1))
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int64(1))
 }
 
 func TestResourcereqs_WithInitContainers(t *testing.T) {
@@ -1495,17 +1495,17 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 	t.Run("Check Init Container GPU reqs", func(t *testing.T) {
 		req, ok := counts[1]["NVIDIA"]
 		assert.Assert(t, ok, "Container 1 should have NVIDIA requests")
-		assert.Equal(t, req.Nums, int32(1))
-		assert.Equal(t, req.Memreq, int32(1000))
-		assert.Equal(t, req.Coresreq, int32(10))
+		assert.Equal(t, req.Nums, int64(1))
+		assert.Equal(t, req.Memreq, int64(1000))
+		assert.Equal(t, req.Coresreq, int64(10))
 	})
 
 	t.Run("Check Main Container GPU reqs", func(t *testing.T) {
 		req, ok := counts[2]["NVIDIA"]
 		assert.Assert(t, ok, "Container 2 should have NVIDIA requests")
-		assert.Equal(t, req.Nums, int32(1))
-		assert.Equal(t, req.Memreq, int32(1000))
-		assert.Equal(t, req.Coresreq, int32(10))
+		assert.Equal(t, req.Nums, int64(1))
+		assert.Equal(t, req.Memreq, int64(1000))
+		assert.Equal(t, req.Coresreq, int64(10))
 	})
 }
 
@@ -1630,17 +1630,17 @@ func TestResourcereqs_MultipleInitAndRegularContainers(t *testing.T) {
 	assert.Equal(t, len(counts), 4)
 
 	// Index 0: init1 with GPU
-	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int64(2))
 
 	// Index 1: init2 without GPU
 	_, hasNvidia1 := counts[1]["NVIDIA"]
 	assert.Equal(t, hasNvidia1, false)
 
 	// Index 2: main1 with GPU (offset=2)
-	assert.Equal(t, counts[2]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[2]["NVIDIA"].Nums, int64(2))
 
 	// Index 3: main2 with GPU (offset=2)
-	assert.Equal(t, counts[3]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[3]["NVIDIA"].Nums, int64(2))
 }
 
 func TestCheckUUID(t *testing.T) {
@@ -2002,10 +2002,10 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 }
 
 func FuzzEncodeDecodeContainerDevices(f *testing.F) {
-	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10), int32(0))
-	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0), int32(1))
-	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647), int32(2147483647))
-	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int32) {
+	f.Add("GPU-uuid", "NVIDIA", int64(1024), int64(10), int64(0))
+	f.Add("GPU-uuid2", "Cambricon", int64(0), int64(0), int64(1))
+	f.Add("GPU-boundary", "NVIDIA", int64(2147483647), int64(2147483647), int64(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int64) {
 		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
 			t.Skip()
 		}

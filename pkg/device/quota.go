@@ -61,7 +61,7 @@ func NewQuotaManager() *QuotaManager {
 	return &localCache
 }
 
-func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, coresreq int64, deviceName string) bool {
+func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int64, coresreq int64, deviceName string) bool {
 	devs, ok := GetDevices()[deviceName]
 	if !ok {
 		return true

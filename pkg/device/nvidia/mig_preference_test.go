@@ -142,7 +142,7 @@ func TestPlanMigContainerNeverRejectsForAPreference(t *testing.T) {
 	profiles := a100MigProfilesWith4g()
 	// 20GB + 10GB + 10GB fill an empty A100 as 3g + 2g + 2g, but a 4g at slot 0
 	// leaves room for only one 2g. The preference must yield, not reject the card.
-	memories := []int32{20000, 10000, 10000}
+	memories := []int64{20000, 10000, 10000}
 	chosen, placements, ok := planMigContainer(profiles, nil, memories, []string{"4g"})
 	if !ok {
 		t.Fatal("a preference that does not fit should fall back to the default layout, not reject the card")
@@ -153,7 +153,7 @@ func TestPlanMigContainerNeverRejectsForAPreference(t *testing.T) {
 	if len(placements) != 3 {
 		t.Fatalf("placements = %+v, want one per request", placements)
 	}
-	if _, _, ok := planMigContainer(profiles, nil, []int32{20000, 20000, 20000}, []string{"4g"}); ok {
+	if _, _, ok := planMigContainer(profiles, nil, []int64{20000, 20000, 20000}, []string{"4g"}); ok {
 		t.Fatal("three 20GB slices cannot fit an A100 in any order")
 	}
 }
@@ -162,7 +162,7 @@ func TestPlanMigContainerFallsBackSequentiallyWhenJointFails(t *testing.T) {
 	profiles := a100MigProfilesWith4g()
 	// Two 20GB slices cannot both be 4g. Placed sequentially the first keeps the
 	// preference and the second takes the remaining 3g span.
-	chosen, placements, ok := planMigContainer(profiles, nil, []int32{20000, 20000}, []string{"4g"})
+	chosen, placements, ok := planMigContainer(profiles, nil, []int64{20000, 20000}, []string{"4g"})
 	if !ok {
 		t.Fatal("4g + 3g should fit an empty A100")
 	}

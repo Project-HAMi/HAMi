@@ -19,7 +19,6 @@ package vastai
 import (
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -141,20 +140,20 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) (devic
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "vastai device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "vastai", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found vastai devices")
 			memnum := 0
-			corenum := int32(0)
+			corenum := int64(0)
 			mempnum := 100
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             int64(n),
 				Type:             VastaiDevice,
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}

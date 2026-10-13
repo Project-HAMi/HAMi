@@ -56,9 +56,9 @@ const (
 	SharedResourceName = "enflame.com/shared-gcu"
 	CountNoSharedName  = "enflame.com/gcu-count"
 
-	enflameRequestModeDirect  int32 = 0
-	enflameRequestModeBySpec  int32 = -1
-	enflameUnknownCoreRequest int32 = 0
+	enflameRequestModeDirect  int64 = 0
+	enflameRequestModeBySpec  int64 = -1
+	enflameUnknownCoreRequest int64 = 0
 )
 
 type drsCapacitySpec struct {
@@ -74,7 +74,7 @@ type drsDeviceSpec struct {
 
 type assignedContainerInfo struct {
 	Allocated    bool   `json:"allocated"`
-	Request      int32  `json:"request"`
+	Request      int64  `json:"request"`
 	ProfileID    string `json:"profileID,omitempty"`
 	ProfileName  string `json:"profileName,omitempty"`
 	InstanceID   string `json:"instanceID,omitempty"`
@@ -222,7 +222,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 			Index:        uint(devIndex),
 			ID:           fmt.Sprintf("%s-enflame-drs-%d", n.Name, devIndex),
 			Count:        capacity,
-			Devmem:       int32(maxMemGB * 1024),
+			Devmem:       int64(maxMemGB * 1024),
 			Devcore:      100,
 			Type:         EnflameVGCUDevice,
 			Numa:         0,
@@ -334,14 +334,10 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 		}
 		if n > 0 {
 			klog.Info("Found enflame devices")
-			if n > math.MaxInt32 {
-				klog.ErrorS(nil, "drs request is too large", "container", ctr.Name, "request", n)
-				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("drs request %d is too large", n)}
-			}
 			return device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             EnflameVGCUDevice,
-				Memreq:           int32(n),
+				Memreq:           int64(n),
 				MemPercentagereq: enflameRequestModeDirect,
 				Coresreq:         enflameUnknownCoreRequest,
 			}, nil
@@ -352,10 +348,6 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	if !hasMem && !hasCore {
 		return device.ContainerDeviceRequest{}, nil
 	}
-	if hasMem && memReq > math.MaxInt32 {
-		klog.ErrorS(nil, "gcu memory request is too large", "container", ctr.Name, "request", memReq)
-		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("gcu memory request %d is too large", memReq)}
-	}
 	if hasCore && (coreReq < 0 || coreReq > 100) {
 		klog.ErrorS(nil, "gcu core request is out of range (must be 0-100)", "container", ctr.Name, "request", coreReq)
 		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "enflame", Reason: fmt.Sprintf("gcu core request %d is out of range (must be 0-100)", coreReq)}
@@ -364,9 +356,9 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	return device.ContainerDeviceRequest{
 		Nums:             1,
 		Type:             EnflameVGCUDevice,
-		Memreq:           int32(memReq),
+		Memreq:           int64(memReq),
 		MemPercentagereq: enflameRequestModeBySpec,
-		Coresreq:         int32(coreReq),
+		Coresreq:         int64(coreReq),
 	}, nil
 }
 
@@ -376,13 +368,13 @@ func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 
 // sliceCount returns the DRS slices an entry occupies. Slots is authoritative;
 // CustomInfo is the fallback for entries built before Fit recorded Slots.
-func sliceCount(ctr *device.ContainerDevice) int32 {
+func sliceCount(ctr *device.ContainerDevice) int64 {
 	if ctr == nil {
 		return 1
 	}
 	slice := ctr.Slots
 	if slice <= 0 {
-		slice = clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
+		slice = int64(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
 	}
 	if slice <= 0 {
 		return 1
@@ -391,7 +383,7 @@ func sliceCount(ctr *device.ContainerDevice) int32 {
 }
 
 func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	n.Used = clampToInt32(int(n.Used) + int(sliceCount(ctr)))
+	n.Used += sliceCount(ctr)
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
@@ -413,23 +405,13 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	if profile.Size <= 0 || profile.Size > math.MaxInt32 {
+	if profile.Size <= 0 || profile.MemoryGB <= 0 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	if profile.MemoryGB <= 0 || profile.MemoryGB > math.MaxInt32/1024 {
-		reason[common.ModeNotFit]++
-		return false, tmpDevs, common.GenReason(reason, len(devices))
-	}
-	if profile.CorePercent > math.MaxInt32 {
-		reason[common.ModeNotFit]++
-		return false, tmpDevs, common.GenReason(reason, len(devices))
-	}
-	profileMemoryMiB := int32(profile.MemoryGB * 1024)
-	profileCorePercent := int32(profile.CorePercent)
-	// profile.Size is already range checked above, so this is the single
-	// bounded conversion reused by the slice guard and the allocation.
-	profileSlices := int32(profile.Size)
+	profileMemoryMiB := int64(profile.MemoryGB) * 1024
+	profileCorePercent := int64(profile.CorePercent)
+	profileSlices := int64(profile.Size)
 
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -660,7 +642,7 @@ func parseProfile(profileName string) (int, int) {
 	return size, memGB
 }
 
-func normalizeMemoryRequestToGB(rawMemory int32, maxProfileMemoryGB int) int {
+func normalizeMemoryRequestToGB(rawMemory int64, maxProfileMemoryGB int) int {
 	if rawMemory <= 0 {
 		return 0
 	}
@@ -674,38 +656,25 @@ func normalizeMemoryRequestToGB(rawMemory int32, maxProfileMemoryGB int) int {
 	return int(rawMemory)
 }
 
-func parseDRSCapacity(raw any) (int32, error) {
+func parseDRSCapacity(raw any) (int64, error) {
 	switch typed := raw.(type) {
 	case float64:
-		if math.IsNaN(typed) || typed > math.MaxInt32 || typed < math.MinInt32 {
+		// Converting a float outside the int64 range is implementation-defined in Go.
+		if math.IsNaN(typed) || typed >= math.MaxInt64 || typed < math.MinInt64 {
 			return 0, fmt.Errorf("invalid capacity value: %v", typed)
 		}
-		return int32(typed), nil
+		return int64(typed), nil
 	case int:
-		return clampToInt32(typed), nil
+		return int64(typed), nil
 	case int32:
-		return typed, nil
+		return int64(typed), nil
 	case int64:
-		return clampToInt32(int(typed)), nil
+		return typed, nil
 	case string:
-		capacity, err := strconv.Atoi(strings.TrimSpace(typed))
-		if err != nil {
-			return 0, err
-		}
-		return clampToInt32(capacity), nil
+		return strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
 	default:
 		return 0, fmt.Errorf("unknown capacity type: %T", raw)
 	}
-}
-
-func clampToInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v)
 }
 
 func containerNameByIndex(pod *corev1.Pod, index int) string {
@@ -737,7 +706,7 @@ func readCustomInfoString(customInfo map[string]any, key string) string {
 	case int:
 		return strconv.Itoa(typed)
 	case int32:
-		return strconv.Itoa(int(typed))
+		return strconv.FormatInt(int64(typed), 10)
 	case int64:
 		return strconv.FormatInt(typed, 10)
 	case float64:
@@ -763,7 +732,7 @@ func readCustomInfoInt(customInfo map[string]any, key string) int {
 	case int64:
 		return int(typed)
 	case float64:
-		if math.IsNaN(typed) || typed > math.MaxInt32 || typed < math.MinInt32 {
+		if math.IsNaN(typed) || typed >= math.MaxInt64 || typed < math.MinInt64 {
 			return 0
 		}
 		return int(typed)

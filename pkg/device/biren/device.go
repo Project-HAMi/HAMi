@@ -19,7 +19,6 @@ package biren
 import (
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -139,20 +138,20 @@ func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) (device
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "biren device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "biren", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found biren devices")
 			memnum := 0
-			corenum := int32(0)
+			corenum := int64(0)
 			mempnum := 100
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             int64(n),
 				Type:             BirenDevice,
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
