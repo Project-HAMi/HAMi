@@ -18,7 +18,6 @@ package awsneuron
 
 import (
 	"fmt"
-	"math"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -75,24 +74,6 @@ func Test_MutateAdmission(t *testing.T) {
 				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
 			},
 			want: true,
-		},
-		{
-			name: "reject request-only neuron number that overflows device count",
-			args: struct {
-				ctr *corev1.Container
-				p   *corev1.Pod
-			}{
-				ctr: &corev1.Container{
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							"aws.amazon.com/neuron": *resource.NewQuantity(int64(math.MaxInt32)+1, resource.DecimalSI),
-						},
-					},
-				},
-				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
-			},
-			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuron must not exceed 2147483647"),
 		},
 		{
 			name: "set neuron cores",
@@ -186,24 +167,6 @@ func Test_MutateAdmission(t *testing.T) {
 			err:  fmt.Errorf("aws.amazon.com/neuroncore must be greater than 0"),
 		},
 		{
-			name: "reject neuron core count that exceeds the supported maximum",
-			args: struct {
-				ctr *corev1.Container
-				p   *corev1.Pod
-			}{
-				ctr: &corev1.Container{
-					Resources: corev1.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*4+4, resource.DecimalSI),
-						},
-					},
-				},
-				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
-			},
-			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuroncore must not exceed 8589934588"),
-		},
-		{
 			name: "no neuron devices",
 			args: struct {
 				ctr *corev1.Container
@@ -265,15 +228,15 @@ func Test_GetNodeDevices(t *testing.T) {
 				{
 					Index:   uint(0),
 					ID:      "test-AWSNeuron-0",
-					Count:   int32(2),
-					Devmem:  int32(0),
-					Devcore: int32(3),
+					Count:   int64(2),
+					Devmem:  int64(0),
+					Devcore: int64(3),
 					Type:    AWSNeuronDevice,
 					Numa:    0,
 					Health:  true,
 					CustomInfo: map[string]any{
 						AWSNodeType:             string("inf2"),
-						AWSCoresPerNeuronDevice: int32(2),
+						AWSCoresPerNeuronDevice: int64(2),
 					},
 					DeviceVendor: AWSNeuronCommonWord,
 				},
@@ -331,8 +294,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       0,
 								UUID:      "test1",
 								Type:      AWSNeuronDevice,
-								Usedmem:   int32(0),
-								Usedcores: int32(3),
+								Usedmem:   int64(0),
+								Usedcores: int64(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -341,8 +304,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       1,
 								UUID:      "test2",
 								Type:      AWSNeuronDevice,
-								Usedmem:   int32(0),
-								Usedcores: int32(3),
+								Usedmem:   int64(0),
+								Usedcores: int64(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -385,8 +348,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       0,
 								UUID:      "test1",
 								Type:      AWSNeuronDevice,
-								Usedmem:   int32(0),
-								Usedcores: int32(3),
+								Usedmem:   int64(0),
+								Usedcores: int64(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -433,8 +396,8 @@ func Test_PatchAnnotations(t *testing.T) {
 								Idx:       0,
 								UUID:      "test1",
 								Type:      AWSNeuronDevice,
-								Usedmem:   int32(0),
-								Usedcores: int32(3),
+								Usedmem:   int64(0),
+								Usedcores: int64(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -545,24 +508,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             AWSNeuronDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
-		},
-		{
-			name: "reject request-only neuron number that overflows device count when admission is bypassed",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						"aws.amazon.com/neuron": *resource.NewQuantity(int64(math.MaxInt32)+1, resource.DecimalSI),
-					},
-				},
-			},
-			want:    device.ContainerDeviceRequest{},
-			wantErr: true,
 		},
 		{
 			name: "allocate neuron core",
@@ -577,10 +528,10 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             AWSNeuronDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(0),
 				TotalCoresreq:    1,
 			},
 		},
@@ -641,18 +592,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want:    device.ContainerDeviceRequest{},
 			wantErr: true,
 		},
-		{
-			name: "reject neuron core request that exceeds the supported maximum when admission is bypassed",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*4+4, resource.DecimalSI),
-					},
-				},
-			},
-			want:    device.ContainerDeviceRequest{},
-			wantErr: true,
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -675,28 +614,28 @@ func Test_GenerateResourceRequests(t *testing.T) {
 func Test_countMaskAvailable(t *testing.T) {
 	tests := []struct {
 		name string
-		args int32
-		want int32
+		args int64
+		want int64
 	}{
 		{
 			name: "test 3",
-			args: int32(3),
-			want: int32(2),
+			args: int64(3),
+			want: int64(2),
 		},
 		{
 			name: "test 2",
-			args: int32(2),
-			want: int32(1),
+			args: int64(2),
+			want: int64(1),
 		},
 		{
 			name: "test 1",
-			args: int32(1),
-			want: int32(1),
+			args: int64(1),
+			want: int64(1),
 		},
 		{
 			name: "test 0",
-			args: int32(0),
-			want: int32(0),
+			args: int64(0),
+			want: int64(0),
 		},
 	}
 	for _, test := range tests {
@@ -711,7 +650,7 @@ func Test_countMaskAvailable(t *testing.T) {
 // Test_graphSelect. nodeType is stored in index 0's CustomInfo under AWSNodeType.
 // usedOverrides maps device index to its Used value; all other indices default to 0.
 // health sets the Health field on every entry.
-func makeDeviceUsages(nodeType string, usedOverrides map[int]int32, health bool) []*device.DeviceUsage {
+func makeDeviceUsages(nodeType string, usedOverrides map[int]int64, health bool) []*device.DeviceUsage {
 	devices := make([]*device.DeviceUsage, 16)
 	for i := range 16 {
 		du := &device.DeviceUsage{Index: uint(i), Health: health}
@@ -730,7 +669,7 @@ func makeDeviceUsages(nodeType string, usedOverrides map[int]int32, health bool)
 // id is the device UUID, index is the device index, used/count are the sharing-slot
 // fields, totalcore/usedcores are the core-mask fields, nodeType goes into
 // CustomInfo[AWSNodeType], and health marks whether the device is schedulable.
-func makeAWSDeviceUsage(id string, index uint, used, count, totalcore, usedcores int32, nodeType string, health bool) *device.DeviceUsage {
+func makeAWSDeviceUsage(id string, index uint, used, count, totalcore, usedcores int64, nodeType string, health bool) *device.DeviceUsage {
 	return &device.DeviceUsage{
 		ID:        id,
 		Index:     index,
@@ -775,7 +714,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: makeDeviceUsages("trn", map[int]int32{7: 1, 13: 1}, true),
+				d: makeDeviceUsages("trn", map[int]int64{7: 1, 13: 1}, true),
 				c: 8,
 			},
 			want1: []int{},
@@ -786,7 +725,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: makeDeviceUsages("trn", map[int]int32{7: 1}, true),
+				d: makeDeviceUsages("trn", map[int]int64{7: 1}, true),
 				c: 8,
 			},
 			want1: []int{8, 9, 10, 11, 12, 13, 14, 15},
@@ -797,7 +736,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: makeDeviceUsages("inf", map[int]int32{5: 1, 14: 1}, true),
+				d: makeDeviceUsages("inf", map[int]int64{5: 1, 14: 1}, true),
 				c: 8,
 			},
 			want1: []int{6, 7, 8, 9, 10, 11, 12, 13},
@@ -1048,7 +987,7 @@ func TestDevices_Fit(t *testing.T) {
 // against DeviceUsage.Index. Every device carries the node type here, as
 // GetNodeDevices sets CustomInfo on all of them.
 func Test_graphSelect_ScoreSortedInput(t *testing.T) {
-	devices := makeDeviceUsages("trn", map[int]int32{5: 1}, true)
+	devices := makeDeviceUsages("trn", map[int]int64{5: 1}, true)
 	for _, d := range devices {
 		d.CustomInfo = map[string]any{AWSNodeType: "trn"}
 	}
@@ -1079,7 +1018,7 @@ func Test_graphSelect_ScoreSortedInput(t *testing.T) {
 // makeOffsetDeviceUsages builds devices whose Index deliberately does not equal
 // its slice position, so a result made of positions is distinguishable from one
 // made of indexes.
-func makeOffsetDeviceUsages(nodeType string, base uint, n int, used map[uint]int32) []*device.DeviceUsage {
+func makeOffsetDeviceUsages(nodeType string, base uint, n int, used map[uint]int64) []*device.DeviceUsage {
 	devices := make([]*device.DeviceUsage, n)
 	for i := range n {
 		idx := base + uint(i)
@@ -1119,7 +1058,7 @@ func Test_graphSelect_ReturnsIndexesNotPositions(t *testing.T) {
 // Test_graphSelect_BusyDeviceWithOffsetIndexes checks the same contract when a
 // device is taken, which is the case that used to hand out an in-use device.
 func Test_graphSelect_BusyDeviceWithOffsetIndexes(t *testing.T) {
-	devices := makeOffsetDeviceUsages("trn", 100, 16, map[uint]int32{101: 1})
+	devices := makeOffsetDeviceUsages("trn", 100, 16, map[uint]int64{101: 1})
 
 	got := graphSelect(devices, 4)
 	assert.DeepEqual(t, got, []int{104, 105, 106, 107})

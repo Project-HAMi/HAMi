@@ -25,7 +25,7 @@ const DirectLinkScore = 10
 
 type LinkDevice struct {
 	uuid     string
-	linkZone int32
+	linkZone int64
 }
 
 func (from *LinkDevice) score(to *LinkDevice) int {

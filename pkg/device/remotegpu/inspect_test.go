@@ -58,6 +58,6 @@ func TestInspect_ReportsEachCardOnceByServer(t *testing.T) {
 	assert.Equal(t, byID["gpu-a/GPU-2"].Reserved, false)
 	assert.Equal(t, byID["gpu-b/GPU-3"].Endpoint, "10.0.0.6:15000")
 	assert.Assert(t, byID["gpu-b/GPU-3"].Reserved, "a booking counts until the pod list catches up")
-	assert.Equal(t, byID["gpu-a/GPU-1"].Device.Devmem, int32(40000))
+	assert.Equal(t, byID["gpu-a/GPU-1"].Device.Devmem, int64(40000))
 	assert.Equal(t, byID["gpu-a/GPU-1"].Device.Type, RemoteGPUCommonWord)
 }

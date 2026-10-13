@@ -51,7 +51,9 @@ const (
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	// AMDNumaBind asks for every GPU of a multi-GPU request to sit on one NUMA node.
-	AMDNumaBind     = "amd.com/numa-bind"
+	AMDNumaBind = "amd.com/numa-bind"
+	// AMDLinkBind asks for every GPU of a multi-GPU request to be linked to all the others over XGMI.
+	AMDLinkBind     = "amd.com/link-bind"
 	AMDAssignedNode = "amd.com/predicate-node"
 	NodeLockAMD     = "hami.io/mutex.lock"
 	RegisterAnnos   = "hami.io/node-amd-register"
@@ -125,7 +127,7 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 // memoryPercentage returns the requested share of device memory, 0 when unset.
-func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
+func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int64, error) {
 	if dev.resourceMemoryPercentageName == "" {
 		return 0, nil
 	}
@@ -141,7 +143,7 @@ func (dev *AMDDevices) memoryPercentage(ctr *corev1.Container) (int32, error) {
 	if !isInt || pct < 0 || pct > 100 {
 		return 0, fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.resourceMemoryPercentageName, q.String(), ctr.Name)
 	}
-	return int32(pct), nil
+	return pct, nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -160,6 +162,12 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = AMDCommonWord
+		// The scheduler picks a node's devices for a request by a substring of
+		// the registered type, so a registration without a type would never
+		// match and the node would be rejected as having no device.
+		if nodedevices[idx].Type == "" {
+			nodedevices[idx].Type = AMDDevice
+		}
 	}
 	return nodedevices, nil
 }
@@ -218,6 +226,35 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 	return true
 }
 
+func assertLinkBind(annos map[string]string) bool {
+	enforce, err := strconv.ParseBool(annos[AMDLinkBind])
+	return err == nil && enforce
+}
+
+// xgmiLinked reports whether two GPUs list each other as XGMI peers in the
+// registration (custominfo.xgmiPeers, published by amd-device-plugin).
+func xgmiLinked(a, b *device.DeviceUsage) bool {
+	return hasPeer(a, b) && hasPeer(b, a)
+}
+
+func hasPeer(from, to *device.DeviceUsage) bool {
+	bdf, _ := to.CustomInfo["pciBDF"].(string)
+	if bdf == "" {
+		return false
+	}
+	switch peers := from.CustomInfo["xgmiPeers"].(type) {
+	case []string:
+		return slices.Contains(peers, bdf)
+	case []any:
+		for _, p := range peers {
+			if s, ok := p.(string); ok && s == bdf {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func assertNuma(annos map[string]string) bool {
 	enforce, err := strconv.ParseBool(annos[AMDNumaBind])
 	return err == nil && enforce
@@ -268,19 +305,19 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "amd device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
-			memnum := int32(0)
+			memnum := int64(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
 			if memOK {
 				memnums, ok := mem.AsInt64()
-				if !ok || memnums < 0 || memnums > math.MaxInt32 {
+				if !ok || memnums < 0 {
 					klog.ErrorS(nil, "amd device memory request is out of range", "container", ctr.Name, "request", mem.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("memory request %s is out of range", mem.String())}
 				}
-				memnum = int32(memnums)
+				memnum = memnums
 			}
 
 			memPercentage, err := dev.memoryPercentage(ctr)
@@ -291,7 +328,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 
 			// An omitted core limit means the container receives all CUs on each
 			// allocated GPU. This also keeps memory-only AMD requests valid.
-			corePercentageNum := int32(100)
+			corePercentageNum := int64(100)
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
 			if !corePercentageOK {
 				corePercentage, corePercentageOK = ctr.Resources.Requests[amdResourceCore]
@@ -302,14 +339,14 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "amd", Reason: fmt.Sprintf("core percentage request %s is out of range (must be an integer between 1 and 100)", corePercentage.String())}
 				}
-				corePercentageNum = int32(corePercentageNums)
+				corePercentageNum = corePercentageNums
 			}
 
 			klog.InfoS("Detected AMD device request",
 				"container", ctr.Name,
 				"deviceCount", n)
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             AMDDevice,
 				Memreq:           memnum,
 				MemPercentagereq: memPercentage,
@@ -340,7 +377,7 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 // fitQuota checks the pod's total AMD memory, this candidate card included,
 // against the namespace ResourceQuota. Only memory is checked: the core quota
 // counts the CUs the plugin masks while a request is a percentage.
-func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int32) bool {
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int64) bool {
 	hypo := device.PodDevices{}
 	if allocated != nil {
 		for devType, podSingle := range *allocated {
@@ -354,13 +391,35 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	var mem int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
+			mem += val.Usedmem
 		}
 	}
 	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
 }
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	if !assertLinkBind(pod.GetAnnotations()) || request.Nums < 2 {
+		return amddevice.fit(devices, request, pod, nodeinfo, allocated, false)
+	}
+	// link-bind: the group has to be a clique of XGMI links. A greedy pass can
+	// be led astray by its first pick, so try each GPU as the starting point.
+	// ponytail: greedy per start, fine for 4 or 8 GPU hives; exact clique search if hives grow.
+	var firstReason string
+	var firstDevs map[string]device.ContainerDevices
+	for start := range devices {
+		ordered := append(slices.Clone(devices[start:]), devices[:start]...)
+		ok, devs, reason := amddevice.fit(ordered, request, pod, nodeinfo, allocated, true)
+		if ok {
+			return true, devs, ""
+		}
+		if start == 0 {
+			firstDevs, firstReason = devs, reason
+		}
+	}
+	return false, firstDevs, firstReason
+}
+
+func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices, linkBind bool) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -371,7 +430,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
 		return false, tmpDevs, "core limit out of range"
 	}
-	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
+	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
+	// topology-aware: collect every GPU that fits and take the best linked combination,
+	// instead of the first ones found. A hard link-bind already demands a clique.
+	topology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology) && originReq > 1 && !linkBind
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -388,7 +451,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 		// numa-bind: a run of GPUs must share one NUMA node, so a new node starts the run over.
-		if numa && prevnuma != dev.Numa {
+		if numa && !topology && prevnuma != dev.Numa {
 			if k.Nums != originReq {
 				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "prevnuma", prevnuma, "device numa", dev.Numa)
@@ -415,12 +478,18 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		}
 		memReq := k.Memreq
 		if memReq <= 0 && k.MemPercentagereq > 0 && dev.Totalmem > 0 {
-			memReq = max(int32(int64(dev.Totalmem)*int64(k.MemPercentagereq)/100), 1)
+			memReq = max(dev.Totalmem*k.MemPercentagereq/100, 1)
 		}
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memReq) {
+		// topology mode collects more candidates than it allocates, so a candidate is
+		// checked alone here and the chosen combination is checked as a whole below
+		quotaDevs := tmpDevs
+		if topology {
+			quotaDevs = nil
+		}
+		if !fitQuota(pod, quotaDevs, allocated, pod.Namespace, dev.ID, memReq) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memReq)
 			continue
@@ -431,7 +500,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 
-		coreReq := int32(0)
+		coreReq := int64(0)
 		if k.Coresreq > 0 {
 			if dev.Totalcore <= 0 {
 				reason[common.CardInsufficientCore]++
@@ -442,7 +511,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			// RDNA applies the CU mask per WGP, so the device plugin hands out
 			// whole WGPs; account for the same count.
 			if unit := cuPerWGP(dev.CustomInfo); unit > 1 {
-				coreReq = int32(min((int64(coreReq)+int64(unit)-1)/int64(unit)*int64(unit), int64(dev.Totalcore)))
+				coreReq = min((coreReq+unit-1)/unit*unit, dev.Totalcore)
 			}
 			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {
@@ -455,10 +524,27 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 
+		if linkBind {
+			linked := true
+			for _, c := range tmpDevs[k.Type] {
+				if i := slices.IndexFunc(devices, func(d *device.DeviceUsage) bool { return d.ID == c.UUID }); i < 0 || !xgmiLinked(devices[i], dev) {
+					linked = false
+					break
+				}
+			}
+			if !linked {
+				reason[common.GPULinkNotFit]++
+				klog.V(5).InfoS(common.GPULinkNotFit, "pod", klog.KObj(pod), "device", dev.ID)
+				continue
+			}
+		}
+
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 
 		if k.Nums > 0 {
-			k.Nums--
+			if !topology {
+				k.Nums--
+			}
 			// Keep the map keyed by the logical AMD device type, but retain the
 			// registered product type in the allocation annotation. Consumers of
 			// the annotation (for example workload GPU reporting) need the latter
@@ -478,10 +564,24 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 				Usedcores: coreReq,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && !topology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
+	}
+	if topology && len(tmpDevs[k.Type]) >= int(originReq) {
+		if best, ok := bestLinkedCombination(devices, tmpDevs[k.Type], int(originReq), assertNuma(pod.GetAnnotations())); ok {
+			for i, c := range best {
+				if !fitQuota(pod, map[string]device.ContainerDevices{AMDDevice: best[:i]}, allocated, pod.Namespace, c.UUID, c.Usedmem) {
+					reason[common.ResourceQuotaNotFit]++
+					return false, tmpDevs, common.GenReason(reason, len(devices))
+				}
+			}
+			tmpDevs[k.Type] = best
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs, ""
+		}
+		reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 	}
 	if len(tmpDevs[k.Type]) > 0 {
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
@@ -490,11 +590,116 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
+const (
+	xgmiPairScore = 4 // an XGMI link outweighs sharing a NUMA node
+	numaPairScore = 1
+	// Past this many candidates the number of combinations is no longer small; take the first ones.
+	maxCombinationCandidates = 16
+)
+
+// bestLinkedCombination picks n of the candidate GPUs that are most tightly
+// connected: each XGMI-linked pair counts xgmiPairScore and each pair on one
+// known NUMA node numaPairScore. With numaBind every pick has to share a NUMA
+// node, so each NUMA node is searched on its own. A group of more than
+// maxCombinationCandidates takes its first n. Ties keep the earliest candidates.
+func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.ContainerDevices, n int, numaBind bool) (device.ContainerDevices, bool) {
+	byID := make(map[string]*device.DeviceUsage, len(devices))
+	for _, d := range devices {
+		byID[d.ID] = d
+	}
+	groups := []device.ContainerDevices{candidates}
+	if numaBind {
+		groups = groups[:0]
+		index := map[int]int{}
+		for _, c := range candidates {
+			numa := -1
+			if d := byID[c.UUID]; d != nil {
+				numa = d.Numa
+			}
+			g, ok := index[numa]
+			if !ok {
+				g = len(groups)
+				index[numa] = g
+				groups = append(groups, nil)
+			}
+			groups[g] = append(groups[g], c)
+		}
+	}
+	var out device.ContainerDevices
+	bestScore := -1
+	for _, group := range groups {
+		if len(group) < n {
+			continue
+		}
+		picked, score := bestInGroup(byID, group, n)
+		if score > bestScore {
+			bestScore, out = score, picked
+		}
+	}
+	return out, out != nil
+}
+
+func pairScore(a, b *device.DeviceUsage) int {
+	score := 0
+	if a != nil && b != nil && xgmiLinked(a, b) {
+		score += xgmiPairScore
+	}
+	if a != nil && b != nil && a.Numa >= 0 && a.Numa == b.Numa {
+		score += numaPairScore
+	}
+	return score
+}
+
+func groupScore(byID map[string]*device.DeviceUsage, group device.ContainerDevices) int {
+	score := 0
+	for i := range group {
+		for j := i + 1; j < len(group); j++ {
+			score += pairScore(byID[group[i].UUID], byID[group[j].UUID])
+		}
+	}
+	return score
+}
+
+// bestInGroup returns the n devices of group with the best score.
+func bestInGroup(byID map[string]*device.DeviceUsage, group device.ContainerDevices, n int) (device.ContainerDevices, int) {
+	if len(group) > maxCombinationCandidates {
+		first := slices.Clone(group[:n])
+		return first, groupScore(byID, first)
+	}
+	var best []int
+	bestScore := -1
+	pick := make([]int, 0, n)
+	var walk func(start int)
+	walk = func(start int) {
+		if len(pick) == n {
+			chosen := make(device.ContainerDevices, 0, n)
+			for _, i := range pick {
+				chosen = append(chosen, group[i])
+			}
+			if score := groupScore(byID, chosen); score > bestScore {
+				bestScore, best = score, slices.Clone(pick)
+			}
+			return
+		}
+		for i := start; i <= len(group)-(n-len(pick)); i++ {
+			pick = append(pick, i)
+			walk(i + 1)
+			pick = pick[:len(pick)-1]
+		}
+	}
+	walk(0)
+	out := make(device.ContainerDevices, 0, n)
+	for _, i := range best {
+		out = append(out, group[i])
+	}
+	return out, bestScore
+}
+
 // cuPerWGP returns how many CUs the device plugin allocates together, as
 // published in the registration custominfo; 1 when absent.
-func cuPerWGP(info map[string]any) int32 {
-	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v <= math.MaxInt32 && v == math.Trunc(v) {
-		return int32(v)
+func cuPerWGP(info map[string]any) int64 {
+	if v, ok := info["cuPerWGP"].(float64); ok && v > 1 && v < math.MaxInt64 && v == math.Trunc(v) {
+		return int64(v)
 	}
 	return 1
 }

@@ -18,7 +18,6 @@ package remotegpu
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +40,7 @@ func testConfig() RemoteGPUConfig {
 }
 
 // card builds a free device on the named lupine server.
-func card(server, uuid string, mem int32) *device.DeviceUsage {
+func card(server, uuid string, mem int64) *device.DeviceUsage {
 	return &device.DeviceUsage{
 		ID:        deviceID(server, uuid),
 		Type:      RemoteGPUCommonWord,
@@ -52,7 +51,7 @@ func card(server, uuid string, mem int32) *device.DeviceUsage {
 	}
 }
 
-func request(nums, mem int32) device.ContainerDeviceRequest {
+func request(nums, mem int64) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{
 		Nums:     nums,
 		Type:     RemoteGPUCommonWord,
@@ -193,45 +192,6 @@ func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
 }
 
-func TestFit_RejectsInvalidRequestInAnyPodContainer(t *testing.T) {
-	valid := requestingContainer("valid", 1, 0)
-	invalid := requestingContainer("invalid", 1<<31, 0)
-	tests := []struct {
-		name string
-		spec corev1.PodSpec
-	}{
-		{
-			name: "init container",
-			spec: corev1.PodSpec{
-				InitContainers: []corev1.Container{invalid},
-				Containers:     []corev1.Container{valid},
-			},
-		},
-		{
-			name: "app container",
-			spec: corev1.PodSpec{
-				Containers: []corev1.Container{valid, invalid},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dev := InitRemoteGPUDevice(testConfig())
-			fit, allocated, reason := dev.Fit(
-				[]*device.DeviceUsage{card("gpu-a", "GPU-1", 80000)},
-				request(1, 0),
-				&corev1.Pod{Spec: tt.spec},
-				nil,
-				nil,
-			)
-			assert.Equal(t, fit, false)
-			assert.Equal(t, len(allocated), 0)
-			assert.Assert(t, strings.Contains(reason, `container "invalid"`), reason)
-		})
-	}
-}
-
 func TestFit_FailureReasonsCountCardsAndServers(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{
@@ -296,8 +256,8 @@ func TestFit_AllocatesWholeCard(t *testing.T) {
 	fit, allocated, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	got := allocated[RemoteGPUCommonWord][0]
-	assert.Equal(t, got.Usedmem, int32(40000))
-	assert.Equal(t, got.Usedcores, int32(100))
+	assert.Equal(t, got.Usedmem, int64(40000))
+	assert.Equal(t, got.Usedcores, int64(100))
 }
 
 func TestFit_RejectsUnfitCards(t *testing.T) {
@@ -561,14 +521,14 @@ func TestGenerateResourceRequests(t *testing.T) {
 
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, req.Nums, int32(2))
-	assert.Equal(t, req.Memreq, int32(2000))
-	assert.Equal(t, req.Coresreq, int32(100))
+	assert.Equal(t, req.Nums, int64(2))
+	assert.Equal(t, req.Memreq, int64(2000))
+	assert.Equal(t, req.Coresreq, int64(100))
 	assert.Equal(t, req.Type, RemoteGPUCommonWord)
 
 	empty, err := dev.GenerateResourceRequests(&corev1.Container{})
 	assert.NilError(t, err)
-	assert.Equal(t, empty.Nums, int32(0))
+	assert.Equal(t, empty.Nums, int64(0))
 }
 
 func TestPatchAnnotations_WritesResolvedEndpoint(t *testing.T) {

@@ -217,7 +217,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 		// invalid request. See the nvidia backend.
 		return device.ContainerDeviceRequest{}, nil
 	}
-	if count < 0 || count > math.MaxInt32 {
+	if count < 0 {
 		klog.ErrorS(nil, "metax sgpu device count request is out of range", "container", ctr.Name, "request", count)
 		return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("device count %d is out of range", count)}
 	}
@@ -248,13 +248,13 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 			if hasUnit {
 				mem = v / 1024 / 1024
 			} else {
-				if v < 0 || v > int64(math.MaxInt32)/int64(MemoryFactor) {
+				if v < 0 || v > math.MaxInt64/int64(MemoryFactor) {
 					klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("memory request %s is out of range", memQuantity.String())}
 				}
 				mem = v * int64(MemoryFactor)
 			}
-			if mem < 0 || mem > math.MaxInt32 {
+			if mem < 0 {
 				klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "metax sgpu", Reason: fmt.Sprintf("memory request %s is out of range", memQuantity.String())}
 			}
@@ -269,11 +269,11 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (devi
 	klog.Infof("container<%s> request<count:%d, mem:%d, memPercent:%d, core:%d>",
 		ctr.Name, count, mem, memPercent, core)
 	return device.ContainerDeviceRequest{
-		Nums:             int32(count),
+		Nums:             count,
 		Type:             MetaxSGPUDevice,
-		Memreq:           int32(mem),
-		MemPercentagereq: int32(memPercent),
-		Coresreq:         int32(core),
+		Memreq:           mem,
+		MemPercentagereq: int64(memPercent),
+		Coresreq:         core,
 	}, nil
 }
 
@@ -376,7 +376,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if request.Memreq > 0 {
 			memreq = request.Memreq
 		} else {
@@ -458,7 +458,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	}
 
 	for _, dev := range bestDevices {
-		memreq := int32(0)
+		memreq := int64(0)
 		if request.Memreq > 0 {
 			memreq = request.Memreq
 		} else {
@@ -574,11 +574,11 @@ func prioritizeExclusiveDevices(candidateDevices []*device.DeviceUsage, require 
 		return candidateDevices
 	}
 
-	linkDevicesMap := map[int32][]*device.DeviceUsage{}
+	linkDevicesMap := map[int64][]*device.DeviceUsage{}
 	for _, device := range candidateDevices {
-		linkZone := int32(0)
+		linkZone := int64(0)
 		if v, ok := device.CustomInfo["LinkZone"]; ok {
-			if v, ok := v.(int32); ok {
+			if v, ok := v.(int64); ok {
 				linkZone = v
 			}
 		}
@@ -667,9 +667,9 @@ func scoreExclusiveDevices(podDevices device.PodSingleDevice, previous []*device
 	for _, ctrDevices := range podDevices {
 		for _, device := range ctrDevices {
 			if device.Usedcores == 100 {
-				linkZone := int32(0)
+				linkZone := int64(0)
 				if v, ok := device.CustomInfo["LinkZone"]; ok {
-					if v, ok := v.(int32); ok {
+					if v, ok := v.(int64); ok {
 						linkZone = v
 					}
 				}
@@ -684,9 +684,9 @@ func scoreExclusiveDevices(podDevices device.PodSingleDevice, previous []*device
 
 	for _, dev := range previous {
 		if dev.Used == 0 {
-			linkZone := int32(0)
+			linkZone := int64(0)
 			if v, ok := dev.CustomInfo["LinkZone"]; ok {
-				if v, ok := v.(int32); ok {
+				if v, ok := v.(int64); ok {
 					linkZone = v
 				}
 			}

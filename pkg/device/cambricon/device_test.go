@@ -66,9 +66,9 @@ func Test_GetNodeDevices(t *testing.T) {
 				{
 					Index:        0,
 					ID:           "test-cambricon-mlu-0",
-					Count:        int32(100),
-					Devmem:       int32(25600),
-					Devcore:      int32(100),
+					Count:        int64(100),
+					Devmem:       int64(25600),
+					Devcore:      int64(100),
 					Type:         CambriconMLUDevice,
 					Numa:         0,
 					Health:       true,
@@ -96,9 +96,9 @@ func Test_GetNodeDevices(t *testing.T) {
 				{
 					Index:        0,
 					ID:           "test-cambricon-mlu-0",
-					Count:        int32(100),
-					Devmem:       int32(25600),
-					Devcore:      int32(100),
+					Count:        int64(100),
+					Devmem:       int64(25600),
+					Devcore:      int64(100),
 					Type:         "MLU370-X4",
 					Numa:         0,
 					Health:       true,
@@ -126,9 +126,9 @@ func Test_GetNodeDevices(t *testing.T) {
 				{
 					Index:        0,
 					ID:           "test-cambricon-mlu-0",
-					Count:        int32(100),
-					Devmem:       int32(25600),
-					Devcore:      int32(100),
+					Count:        int64(100),
+					Devmem:       int64(25600),
+					Devcore:      int64(100),
 					Type:         CambriconMLUDevice,
 					Numa:         0,
 					Health:       true,
@@ -457,11 +457,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(2),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(2),
 			},
 		},
 		{
@@ -476,11 +476,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int64(2),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(100),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -489,17 +489,17 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("2"),
-						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("2147483647"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("36028797018963968"),
 						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("101"),
 					},
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int64(2),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(100),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -517,11 +517,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(100),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -539,26 +539,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(2),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(2),
 			},
-		},
-		{
-			name: "memory overflowing int32 is rejected, not truncated to zero",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu":              resource.MustParse("1"),
-						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "not a plain integer",
 		},
 		{
 			name: "zero count is device-less, not invalid",
@@ -570,20 +556,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu":              resource.MustParse("1"),
-						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "not a plain integer",
 		},
 		{
 			name: "negative count must be rejected",
@@ -599,7 +571,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			errContains: "out of range",
 		},
 		{
-			name: "max int32 count is accepted",
+			name: "max int64 count is accepted",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -616,33 +588,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "count above max int32 is rejected",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu": resource.MustParse("2147483648"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "out of range",
-		},
-		{
-			name: "memory overflowing int32 is rejected, not truncated to zero",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu":              resource.MustParse("1"),
-						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "not a plain integer",
-		},
-		{
 			name: "zero count is device-less, not invalid",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -652,20 +597,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu":              resource.MustParse("1"),
-						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "not a plain integer",
 		},
 		{
 			name: "negative count must be rejected",
@@ -681,7 +612,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			errContains: "out of range",
 		},
 		{
-			name: "max int32 count is accepted",
+			name: "max int64 count is accepted",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -696,19 +627,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: 100,
 				Coresreq:         100,
 			},
-		},
-		{
-			name: "count above max int32 is rejected",
-			args: corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"cambricon.com/mlu": resource.MustParse("2147483648"),
-					},
-				},
-			},
-			want:        device.ContainerDeviceRequest{},
-			wantErr:     true,
-			errContains: "out of range",
 		},
 	}
 	for _, test := range tests {
@@ -2033,10 +1951,10 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 			req, _ := dev.GenerateResourceRequests(ctr)
 			if tt.wantReq {
-				assert.Equal(t, int32(1), req.Nums)
-				assert.Equal(t, int32(tt.cores), req.Coresreq)
+				assert.Equal(t, int64(1), req.Nums)
+				assert.Equal(t, tt.cores, req.Coresreq)
 			} else {
-				assert.Equal(t, int32(0), req.Nums)
+				assert.Equal(t, int64(0), req.Nums)
 			}
 		})
 	}
@@ -2067,7 +1985,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{

@@ -62,7 +62,7 @@ func TestFit_AllAdvertisedSlicesSchedulable(t *testing.T) {
 		cd := result[EnflameVGCUDevice][0]
 		assert.NilError(t, dev.AddResourceUsage(pod, du, &cd))
 	}
-	assert.Equal(t, du.Used, int32(6))
+	assert.Equal(t, du.Used, int64(6))
 
 	// The device is now genuinely full: a seventh slice must be rejected.
 	fit, _, _ := dev.Fit([]*device.DeviceUsage{du}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
@@ -88,5 +88,5 @@ func TestFit_MixedProfilesFillDevice(t *testing.T) {
 		cd := result[EnflameVGCUDevice][0]
 		assert.NilError(t, dev.AddResourceUsage(pod, du, &cd))
 	}
-	assert.Equal(t, du.Used, int32(6))
+	assert.Equal(t, du.Used, int64(6))
 }

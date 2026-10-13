@@ -25,14 +25,14 @@ import (
 )
 
 type usage struct {
-	mem   int32
-	cores int32
-	slots int32
+	mem   int64
+	cores int64
+	slots int64
 }
 
 // slotsOf returns the concurrent-task count an entry occupies on its device.
 // Raw allocations leave Slots unset, which means a single slot.
-func slotsOf(dev ContainerDevice) int32 {
+func slotsOf(dev ContainerDevice) int64 {
 	return max(dev.Slots, 1)
 }
 

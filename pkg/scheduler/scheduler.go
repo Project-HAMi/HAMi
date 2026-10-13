@@ -405,10 +405,8 @@ func (s *Scheduler) onDelNode(obj any) {
 	nodelockutil.CleanupNodeLock(nodeName)
 	s.rmNode(nodeName)
 	s.cleanupNodeUsage(nodeName)
-	// Clear per-device health bookkeeping for the deleted node.
-	// Devices that track per-node state (e.g. NvidiaGPUDevices) implement
-	// NodeDeleted to prune their internal maps; others are a no-op.
-	for _, devInstance := range device.GetDevices() {
+	for devType, devInstance := range device.GetDevices() {
+		device.ForgetRegisteredDevices(devType, nodeName)
 		if nd, ok := devInstance.(*nvidia.NvidiaGPUDevices); ok {
 			nd.NodeDeleted(nodeName)
 		}
@@ -612,13 +610,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				// klog.Warning does plain fmt.Print-style concatenation of its arguments -
-				// klog v2 has no structured WarningS variant. Passing alternating
-				// "key", value pairs to it (as if it were InfoS/ErrorS) produces a garbled,
-				// unstructured log line instead of the intended structured fields. Use
-				// ErrorS (nil error is fine here; this is a detected condition, not a Go
-				// error) to match the structured logging used throughout the rest of this
-				// file.
+
 				klog.ErrorS(nil, "Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
@@ -629,12 +621,10 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 				continue
 			}
 			if err != nil {
+				device.ForgetRegisteredDevices(devhandsk, val.Name)
 				continue
 			}
-			// GetNodeDevices succeeded but reported zero devices: the vendor plugin
-			// is healthy but no longer advertising devices on this node. Remove any
-			// stale entry so the scheduler does not keep offering capacity that no
-			// longer exists.
+
 			if len(nodedevices) == 0 {
 				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
 					if _, ok := existingNode.Devices[devhandsk]; ok {
@@ -675,20 +665,12 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	}
 	s.overviewstatus = *overallnodeMap
 
-	// The lupine fleet keeps a relay pod on each of its servers so a user can
-	// port-forward to something other than the server. Reconciled here because
-	// this is the loop that already runs only on the leader.
-	// Bounded, because register holds s.lock for its whole body and this
-	// issues List, Delete and Create calls: a stalled apiserver would
-	// otherwise keep every reader of that lock waiting for as long as it takes
-	// to answer.
 	if dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), sessionReconcileTimeout)
 		dev.ReconcileSessionStubs(ctx)
 		cancel()
 	}
 
-	// Set synced to true only after getNodeUsage() succeeds
 	s.synced.Store(true)
 }
 

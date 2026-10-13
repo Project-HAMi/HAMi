@@ -54,7 +54,7 @@ func newNeuronNode(name, instanceType string, deviceCount, coreCount int64) core
 	}
 }
 
-func assertNeuronGeometry(t *testing.T, devices []*device.DeviceInfo, wantCount, wantMask, wantCoresPerDevice int32) {
+func assertNeuronGeometry(t *testing.T, devices []*device.DeviceInfo, wantCount, wantMask, wantCoresPerDevice int64) {
 	t.Helper()
 	assert.Assert(t, len(devices) > 0)
 	for _, dev := range devices {
@@ -72,8 +72,8 @@ func TestGetNodeDevicesKeepsGeometryPerNode(t *testing.T) {
 		name        string
 		first       corev1.Node
 		second      corev1.Node
-		firstCores  int32
-		secondCores int32
+		firstCores  int64
+		secondCores int64
 	}{
 		{
 			name:        "four-core node followed by two-core node",
@@ -117,7 +117,7 @@ func TestGenerateResourceRequestsDoesNotDependOnRegisteredNode(t *testing.T) {
 
 	want, err := dev.GenerateResourceRequests(container)
 	assert.NilError(t, err)
-	assert.Equal(t, want.Coresreq, int32(0))
+	assert.Equal(t, want.Coresreq, int64(0))
 
 	_, err = dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.xlarge", 1, 4))
 	assert.NilError(t, err)
@@ -220,7 +220,7 @@ func TestGetNodeDevicesConcurrentMixedGeometry(t *testing.T) {
 		newNeuronNode("inf1-node", "inf1.6xlarge", 2, 8),
 		newNeuronNode("inf2-node", "inf2.8xlarge", 2, 4),
 	}
-	wantCores := []int32{4, 2}
+	wantCores := []int64{4, 2}
 
 	const iterations = 100
 	errCh := make(chan error, iterations*len(nodes))
@@ -228,7 +228,7 @@ func TestGetNodeDevicesConcurrentMixedGeometry(t *testing.T) {
 	for range iterations {
 		for nodeIndex := range nodes {
 			wg.Add(1)
-			go func(node corev1.Node, want int32) {
+			go func(node corev1.Node, want int64) {
 				defer wg.Done()
 				devices, err := dev.GetNodeDevices(node)
 				if err != nil {

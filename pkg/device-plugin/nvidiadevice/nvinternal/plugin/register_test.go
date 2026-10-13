@@ -298,7 +298,7 @@ func TestGetAPIDevicesRegistersHealthyDevice(t *testing.T) {
 		t.Fatalf("getAPIDevices() = %v, want exactly one device", devices)
 	}
 	got := (*devices)[0]
-	wantDevmem := int32(8 * 1024)
+	wantDevmem := int64(8 * 1024)
 	if got.ID != testUUID || got.Index != 3 || got.Count != 2 ||
 		got.Devmem != wantDevmem || got.Devcore != 100 ||
 		got.Type != "NVIDIA-Tesla T4" || !got.Health {

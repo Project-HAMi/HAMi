@@ -44,7 +44,7 @@ import (
 // test helpers
 // ---------------------------------------------------------------------------
 
-func cd(uuid, typ string, usedmem, usedcores int32) device.ContainerDevice {
+func cd(uuid, typ string, usedmem, usedcores int64) device.ContainerDevice {
 	return device.ContainerDevice{
 		UUID:      uuid,
 		Type:      typ,

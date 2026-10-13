@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +28,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var inRequestDevices map[string]string
@@ -1033,151 +1036,91 @@ func Test_EncodeNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
-	util.HandshakeAnnos["huawei.com/Ascend910"] = "hami.io/node-handshake-ascend"
-	tests := []struct {
-		name string
-		args struct {
-			devType           string
-			resourceCountName string
-			n                 corev1.Node
+	const (
+		devType      = "huawei.com/Ascend910"
+		resourceName = "huawei.com/Ascend910"
+		registerKey  = "hami.io/node-register-Ascend910"
+	)
+
+	node := func(name string, allocatable int64, registerAnno string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
 		}
-		want1 bool
-		want2 bool
-	}{
-		{
-			name: "Requesting state",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			name: "Requesting state without timestamp",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			name: "Requesting state with unparsable timestamp",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_not-a-timestamp",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			name: "Unknown state",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			// Expired Requesting_ and no Allocatable resources: the device-plugin
-			// is truly gone, so NodeCleanUp should be triggered → (false, false).
-			name: "Requesting state expired, no allocatable",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType:           "huawei.com/Ascend910",
-				resourceCountName: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: false,
-			want2: false,
-		},
-		{
-			// Expired Requesting_ but Allocatable still has the resource: the
-			// device-plugin gRPC stream is alive. Handshake is refreshed and the
-			// node stays healthy → (true, false).
-			name: "Requesting state expired, allocatable present",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType:           "huawei.com/Ascend910",
-				resourceCountName: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
-						},
-					},
-					Status: corev1.NodeStatus{
-						Allocatable: corev1.ResourceList{
-							"huawei.com/Ascend910": resource.MustParse("8"),
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
+		if allocatable > 0 {
+			n.Status.Allocatable[resourceName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if registerAnno != "" {
+			n.Annotations[registerKey] = registerAnno
+		}
+		return n
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result1, result2 := CheckHealth(test.args.devType, test.args.resourceCountName, &test.args.n)
-			assert.Equal(t, result1, test.want1)
-			assert.Equal(t, result2, test.want2)
-		})
-	}
+
+	t.Run("no allocatable is unhealthy even with a register annotation", func(t *testing.T) {
+		healthy, needUpdate := CheckHealth(devType, resourceName, node("absent", 0, "anno"), "anno")
+		assert.Equal(t, healthy, false)
+		assert.Equal(t, needUpdate, false)
+	})
+
+	t.Run("unknown resource name keeps the node", func(t *testing.T) {
+		healthy, needUpdate := CheckHealth(devType, "", node("no-resource-name", 0, ""), "")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
+
+	t.Run("unchanged register annotation needs no update", func(t *testing.T) {
+		n := node("cached", 8, "anno-v1")
+		healthy, needUpdate := CheckHealth(devType, resourceName, n, "anno-v1")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+
+		healthy, needUpdate = CheckHealth(devType, resourceName, n, "anno-v1")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, false)
+
+		healthy, needUpdate = CheckHealth(devType, resourceName, n, "anno-v2")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
+
+	t.Run("devices returning after an outage are registered afresh", func(t *testing.T) {
+		const nodeName = "flapping"
+		healthy, needUpdate := CheckHealth(devType, resourceName, node(nodeName, 8, "anno"), "anno")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+
+		healthy, _ = CheckHealth(devType, resourceName, node(nodeName, 0, "anno"), "anno")
+		assert.Equal(t, healthy, false)
+
+		// Same annotation as before the outage: the node must still be re-read.
+		healthy, needUpdate = CheckHealth(devType, resourceName, node(nodeName, 8, "anno"), "anno")
+		assert.Equal(t, healthy, true)
+		assert.Equal(t, needUpdate, true)
+	})
+
+	t.Run("obsolete handshake annotation is removed", func(t *testing.T) {
+		const nodeName = "stale-handshake"
+		handshakeKey := "hami.io/node-handshake-ascend"
+		previous := util.HandshakeAnnos[devType]
+		t.Cleanup(func() { util.HandshakeAnnos[devType] = previous })
+		util.HandshakeAnnos[devType] = handshakeKey
+
+		prevClient := client.KubeClient
+		t.Cleanup(func() { client.KubeClient = prevClient })
+		client.KubeClient = fake.NewClientset()
+
+		n := node(nodeName, 8, "anno")
+		n.Annotations[handshakeKey] = "Requesting_2024-01-02 00:00:00"
+		_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), n, metav1.CreateOptions{})
+		assert.NilError(t, err)
+
+		CheckHealth(devType, resourceName, n, "anno")
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+		assert.NilError(t, err)
+		_, present := updated.Annotations[handshakeKey]
+		assert.Equal(t, present, false)
+	})
 }
 func TestDecodeNodeDevices(t *testing.T) {
 	pairScore := "[{\"uuid\":\"GPU-0\",\"score\":{\"GPU-1\":50,\"GPU-2\":20,\"GPU-3\":20}}]"
@@ -1347,6 +1290,16 @@ func TestEncodeDecodeContainerDevicesSlots(t *testing.T) {
 			wantDecoded: ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10}},
 		},
 		{
+			name: "values above MaxInt32 survive the round trip",
+			cd: ContainerDevices{{
+				UUID: "GPU-1", Type: "Enflame", Usedmem: 1 << 32, Usedcores: 1 << 32, Slots: 1 << 32,
+			}},
+			wantEncoded: "GPU-1,Enflame,4294967296,4294967296,4294967296:",
+			wantDecoded: ContainerDevices{{
+				UUID: "GPU-1", Type: "Enflame", Usedmem: 1 << 32, Usedcores: 1 << 32, Slots: 1 << 32,
+			}},
+		},
+		{
 			name: "mixed entries in one container",
 			cd: ContainerDevices{
 				{UUID: "GPU-1", Type: "Enflame", Usedmem: 20480, Usedcores: 50, Slots: 3},
@@ -1489,7 +1442,7 @@ func TestResourcereqs_OnlyRegularContainers(t *testing.T) {
 
 	// No init containers, so length == number of regular containers
 	assert.Equal(t, len(counts), 1)
-	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(1))
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int64(1))
 }
 
 func TestResourcereqs_WithInitContainers(t *testing.T) {
@@ -1552,17 +1505,17 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 	t.Run("Check Init Container GPU reqs", func(t *testing.T) {
 		req, ok := counts[1]["NVIDIA"]
 		assert.Assert(t, ok, "Container 1 should have NVIDIA requests")
-		assert.Equal(t, req.Nums, int32(1))
-		assert.Equal(t, req.Memreq, int32(1000))
-		assert.Equal(t, req.Coresreq, int32(10))
+		assert.Equal(t, req.Nums, int64(1))
+		assert.Equal(t, req.Memreq, int64(1000))
+		assert.Equal(t, req.Coresreq, int64(10))
 	})
 
 	t.Run("Check Main Container GPU reqs", func(t *testing.T) {
 		req, ok := counts[2]["NVIDIA"]
 		assert.Assert(t, ok, "Container 2 should have NVIDIA requests")
-		assert.Equal(t, req.Nums, int32(1))
-		assert.Equal(t, req.Memreq, int32(1000))
-		assert.Equal(t, req.Coresreq, int32(10))
+		assert.Equal(t, req.Nums, int64(1))
+		assert.Equal(t, req.Memreq, int64(1000))
+		assert.Equal(t, req.Coresreq, int64(10))
 	})
 }
 
@@ -1687,17 +1640,17 @@ func TestResourcereqs_MultipleInitAndRegularContainers(t *testing.T) {
 	assert.Equal(t, len(counts), 4)
 
 	// Index 0: init1 with GPU
-	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int64(2))
 
 	// Index 1: init2 without GPU
 	_, hasNvidia1 := counts[1]["NVIDIA"]
 	assert.Equal(t, hasNvidia1, false)
 
 	// Index 2: main1 with GPU (offset=2)
-	assert.Equal(t, counts[2]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[2]["NVIDIA"].Nums, int64(2))
 
 	// Index 3: main2 with GPU (offset=2)
-	assert.Equal(t, counts[3]["NVIDIA"].Nums, int32(2))
+	assert.Equal(t, counts[3]["NVIDIA"].Nums, int64(2))
 }
 
 func TestCheckUUID(t *testing.T) {
@@ -2059,10 +2012,10 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 }
 
 func FuzzEncodeDecodeContainerDevices(f *testing.F) {
-	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10), int32(0))
-	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0), int32(1))
-	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647), int32(2147483647))
-	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int32) {
+	f.Add("GPU-uuid", "NVIDIA", int64(1024), int64(10), int64(0))
+	f.Add("GPU-uuid2", "Cambricon", int64(0), int64(0), int64(1))
+	f.Add("GPU-boundary", "NVIDIA", int64(2147483647), int64(2147483647), int64(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores, slots int64) {
 		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
 			t.Skip()
 		}
@@ -2172,6 +2125,22 @@ func TestEncodeDecodeNodeDevicesRoundtrip(t *testing.T) {
 					Devmem:  32768,
 					Devcore: 100,
 					Type:    "NVIDIA-Tesla V100-PCIE-32GB",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+		},
+		{
+			name: "values above MaxInt32 survive the round trip",
+			dlist: []*DeviceInfo{
+				{
+					ID:      "GPU-wide",
+					Index:   0,
+					Count:   1 << 32,
+					Devmem:  1 << 32,
+					Devcore: 1 << 32,
+					Type:    "NVIDIA",
 					Mode:    "hami-core",
 					Numa:    0,
 					Health:  true,

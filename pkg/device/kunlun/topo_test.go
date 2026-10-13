@@ -33,7 +33,7 @@ func newDevices(usedMask ...int) []*device.DeviceUsage {
 	}
 	devices := make([]*device.DeviceUsage, 0, 8)
 	for i := range 8 {
-		u := int32(0)
+		u := int64(0)
 		if used[i] {
 			u = 1
 		}
@@ -54,7 +54,7 @@ func fitAvailable(d *device.DeviceUsage, _ device.ContainerDeviceRequest) bool {
 	return d.Used < d.Count
 }
 
-func req(nums int32) device.ContainerDeviceRequest {
+func req(nums int64) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{Nums: nums}
 }
 
