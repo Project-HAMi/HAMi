@@ -64,6 +64,9 @@ const (
 	// unlike FilterDeviceToRegister, it takes effect immediately and needs no
 	// device-plugin restart.
 	DeviceCordonAnnotation = "hami.io/device-cordon"
+	// LimitDeliveryAnnotation lets a pod choose how its containers' limits reach
+	// HAMi-core, "file" or "env", overriding the device configuration.
+	LimitDeliveryAnnotation = "hami.io/limit-delivery"
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
@@ -107,6 +110,16 @@ const (
 	Debugs   LibCudaLogLevel = "4"
 )
 
+// LimitDelivery is how the device plugin hands a container's limits to HAMi-core.
+type LimitDelivery string
+
+const (
+	// LimitDeliveryFile also writes the limits to a read-only file at /overrideEnv.
+	LimitDeliveryFile LimitDelivery = "file"
+	// LimitDeliveryEnv hands the limits over in environment variables only.
+	LimitDeliveryEnv LimitDelivery = "env"
+)
+
 type NvidiaConfig struct {
 	// These configs are shared and can be overwritten by Nodeconfig.
 	NodeDefaultConfig            `yaml:",inline"`
@@ -141,6 +154,8 @@ type NodeDefaultConfig struct {
 	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
+	// LimitDelivery is how containers get their limits: file (default) or env.
+	LimitDelivery *LimitDelivery `yaml:"limitDelivery" json:"limitdelivery"`
 	// EnableNUMATopology advertises the physical GPU's NUMA node on each vGPU
 	// replica so kubelet's TopologyManager can align CPU and GPU NUMA nodes.
 	// Defaults to false to preserve existing admission behavior.

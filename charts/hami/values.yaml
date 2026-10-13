@@ -718,6 +718,13 @@ devices:
     # HAMi-core itself defaults to `2` when the variable is unset.
     # Not applied in the `mig` operating mode. A device-plugin `nodeconfig` entry can override it per node with `libcudaloglevel`.
     libCudaLogLevel: 1
+    # -- How the device plugin passes a container's GPU limits to HAMi-core.
+    # `file` sets the limit environment variables and also mounts the limits read-only at `/overrideEnv`,
+    # so HAMi-core can apply them to processes started without the container's environment, such as from SSH, `su -`, `sudo` or cron.
+    # `env` sets the environment variables only.
+    # A device-plugin `nodeconfig` entry can override it per node with `limitdelivery`, and a Pod with the `hami.io/limit-delivery` annotation.
+    # An unknown value is ignored, and `file` is used when no valid value is set. Not applied in the `mig` operating mode.
+    limitDelivery: file
   remotegpu:
     # Schedule pods onto GPUs served over the network by a lupine server.
     # Label each lupine node with hami.io/lupine-server, optionally setting the
