@@ -477,15 +477,14 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		quotaMem := memreq
 		if originReq > 1 {
-			// The plugin gives a count above 1 whole MLUs, so the allocation
-			// takes the whole card while quota keeps the declared memory.
+			// The plugin gives a count above 1 whole MLUs, so both the
+			// allocation and the quota take the whole card.
 			memreq = dev.Totalmem
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, quotaMem, k.Coresreq) {
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, k.Coresreq) {
 			reason[common.ResourceQuotaNotFit]++
-			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", quotaMem, "coresreq", k.Coresreq)
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
