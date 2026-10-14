@@ -535,8 +535,17 @@ devices:
     resourceMemoryName: "hygon.com/hcumem"
     resourceCoreName: "hygon.com/hcucores"
   cambricon:
+    # -- Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin.
+    # A zero count requests no device; HAMi reads memory and core requests only for a positive count.
+    # Sharing needs one MLU and the plugin in `dynamic-smlu` mode; a count above 1 allocates whole MLUs and ignores the memory and core values.
+    # A non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration, so set the name there too.
     resourceCountName: "cambricon.com/vmlu"
+    # -- Resource name for MLU memory, requested in integer units of 256 MiB (`20` is 5120 MiB); run the plugin with `min-dsmlu-unit=256`.
+    # Omitted or 0 reserves the whole MLU memory.
+    # Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration.
     resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
+    # -- Resource name for MLU compute, requested as an integer percentage from 0 to 100; omitted requests 100.
+    # Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration.
     resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
     resourceCountName: "amd.com/gpu"

@@ -277,6 +277,25 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found cambricon devices")
+			if n > 1 {
+				// The plugin gives a count above 1 whole MLUs and ignores the
+				// memory and core values, so skip validating them and take the
+				// whole device. A declared memory still counts toward quota.
+				req := device.ContainerDeviceRequest{
+					Nums:             n,
+					Type:             CambriconMLUDevice,
+					MemPercentagereq: 100,
+					Coresreq:         100,
+				}
+				mem, ok := ctr.Resources.Limits[mluResourceMem]
+				if !ok {
+					mem, ok = ctr.Resources.Requests[mluResourceMem]
+				}
+				if memnums, parsed := mem.AsInt64(); ok && parsed && memnums > 0 && memnums <= math.MaxInt64/int64(MemoryFactor) {
+					req.Memreq = memnums * int64(MemoryFactor)
+				}
+				return req, nil
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
@@ -457,6 +476,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if originReq > 1 {
+			// The plugin gives a count above 1 whole MLUs, so both the
+			// allocation and the quota take the whole card.
+			memreq = dev.Totalmem
 		}
 		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, k.Coresreq) {
 			reason[common.ResourceQuotaNotFit]++
