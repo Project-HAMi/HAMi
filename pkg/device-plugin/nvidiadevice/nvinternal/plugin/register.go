@@ -99,7 +99,8 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	getHandle := nvml.DeviceGetHandleByUUID
-	if plugin.migMgr != nil {
+	// Remote Start leaves the MIG manager inactive; registration uses its own NVML session.
+	if plugin.migMgr != nil && plugin.operatingMode != nvidia.RemoteMode {
 		done, err := plugin.migMgr.beginOperation()
 		if err != nil {
 			return nil, err
@@ -410,7 +411,7 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 }
 
 func (plugin *NvidiaDevicePlugin) topologyScore(available []string) (nvidia.ListDeviceScore, bool, error) {
-	if plugin.migMgr != nil {
+	if plugin.migMgr != nil && plugin.operatingMode != nvidia.RemoteMode {
 		done, err := plugin.migMgr.beginOperation()
 		if err != nil {
 			return nil, false, err
