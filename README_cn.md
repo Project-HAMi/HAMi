@@ -145,8 +145,8 @@ kubectl apply -f examples/nvidia/default_use.yaml
 
 - **高可用**：设置 `scheduler.leaderElect=true` 并将 `scheduler.replicas` 设为大于 1，即可运行多个调度器副本并由一个 leader 对外服务，同时会创建 PodDisruptionBudget。
 - **OpenShift 与 SELinux**：在 OpenShift 上设置 `platform.openshift=true`，在启用 SELinux 的节点上设置 `selinux.enabled=true`。
-- **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` 会限制对调度器 webhook 与 `/refit` 端口的访问。
-- **Prometheus Operator**：`prometheus.enabled=true` 会为调度器和设备插件创建 ServiceMonitor。
+- **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` 会限制对调度器 webhook 与 `/refit` 端口的访问。部分 CNI 不会按 `namespaceSelector` 匹配使用主机网络的 kube-apiserver 流量，可能导致 webhook 无法访问；当 `scheduler.admissionWebhook.failurePolicy=Ignore` 时，Pod 将在没有 HAMi 修改的情况下被放行。
+- **Prometheus Operator**：`prometheus.enabled=true` 会在 ServiceMonitor API 可用时为调度器和设备插件创建 ServiceMonitor；设备插件的 ServiceMonitor 还要求 `devicePlugin.enabled`。
 
 ## 调度策略
 

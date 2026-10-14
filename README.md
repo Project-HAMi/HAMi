@@ -145,8 +145,8 @@ For the complete installation guide and configuration options, see the [HAMi doc
 
 - **High availability**: set `scheduler.leaderElect=true` and `scheduler.replicas` above 1 to run several scheduler replicas behind one leader. A PodDisruptionBudget is created for them.
 - **OpenShift and SELinux**: set `platform.openshift=true` for OpenShift, and `selinux.enabled=true` on SELinux-enabled nodes.
-- **NetworkPolicy**: `scheduler.networkPolicy.enabled=true` restricts access to the scheduler's webhook and `/refit` port.
-- **Prometheus Operator**: `prometheus.enabled=true` creates ServiceMonitors for the scheduler and the device plugin.
+- **NetworkPolicy**: `scheduler.networkPolicy.enabled=true` restricts access to the scheduler's webhook and `/refit` port. Some CNIs do not match host-networked kube-apiserver traffic against the `namespaceSelector`, which can make the webhook unreachable; with `scheduler.admissionWebhook.failurePolicy=Ignore`, Pods are then admitted without HAMi's changes.
+- **Prometheus Operator**: `prometheus.enabled=true` creates ServiceMonitors for the scheduler and the device plugin when the ServiceMonitor API is available; the device-plugin one also requires `devicePlugin.enabled`.
 
 ## Scheduling Policies
 
