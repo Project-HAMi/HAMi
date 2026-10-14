@@ -468,10 +468,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	}
 
 	if plugin.migMgr == nil {
-		return fmt.Errorf("MIG manager is not configured")
+		return fmt.Errorf("device-plugin NVML session manager is not configured (operating mode %q)", plugin.operatingMode)
 	}
 	if err := plugin.migMgr.Init(); err != nil {
-		return fmt.Errorf("init MIG instance manager: %w", err)
+		return fmt.Errorf("initialize device-plugin NVML session (operating mode %q): %w", plugin.operatingMode, err)
 	}
 
 	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()
