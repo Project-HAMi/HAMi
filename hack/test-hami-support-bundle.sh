@@ -41,11 +41,21 @@ if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   fi
   exit 0
 fi
+if [[ " $* " == *"jsonpath="*"restartCount"* ]]; then
+  if [[ " $* " == *"scheduler-"* || " $* " == *"device-plugin-1 "* ]]; then echo 0; else echo 1; fi
+  exit 0
+fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
 if [[ " $* " == *" logs "* && " $* " == *" --previous "* ]]; then echo 'previous container diagnostics'; exit 0; fi
 if [[ " $* " == *" logs pod/device-plugin-3 "* ]]; then echo 'one Pod log failed' >&2; exit 1; fi
 if [[ "${MOCK_MODE:-}" == large ]]; then
   head -c "${MOCK_BYTES:-4096}" /dev/zero | tr '\0' x
+  exit 0
+fi
+if [[ "${MOCK_MODE:-}" == oversized-json && " $* " == *" get pods "* && " $* " == *" -o yaml "* ]]; then
+  printf '{"normal":"'
+  head -c 1048576 /dev/zero | tr '\0' x
+  printf '"}\n'
   exit 0
 fi
 cat <<'OUT'
@@ -64,7 +74,18 @@ api_key="quoted equals api key"
 endpoint: https://url-user:url-pass@service.example/path
 command: tool --password space-separated-password --verbose
 args: ["--token=json-array-token","--normal=visible"]
+separateArgs:
+  - --password
+  - yaml-list-password
+  - --normal
+  - visible-setting
 inline_json: {"name":"HF_TOKEN","value":"inline-json-secret"}
+eventMessage: Failed to pull image private.event.example/team/image:v1 after resolving reference private.reference.example/team/image:v1
+session: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signaturevalue123
+pem: |
+  -----BEGIN PRIVATE KEY-----
+  pem-private-key-material
+  -----END PRIVATE KEY-----
 apiVersion: v1
 kind: Pod
 metadata:
@@ -112,6 +133,22 @@ spec:
         - name: NORMAL_SETTING
           value: keep-this-value
       flowProbe: {name: HF_TOKEN, value: flow-style-secret}
+    - env:
+      - name: DB_PASS
+        value: compact-db-password
+      - name: PLAIN_SETTING
+        value: compact-plain-private-value
+      image: compact.private.example/team/image:v1
+      name: retained-container-name
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+      tolerations:
+        - key: retained-toleration-key
+      matchExpressions:
+        - key: retained-selector-key
+          values:
+            - retained-selector-value
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -187,6 +224,9 @@ sensitive_fragments=(
   database-password multiline-password custom-secret secret-key-value
   jwt-signing-key-value flow-style-secret last-applied-secret url-user url-pass
   space-separated-password json-array-token inline-json-secret private.node.example
+  yaml-list-password compact-db-password compact-plain-private-value
+  private.event.example private.reference.example pem-private-key-material signaturevalue123
+  compact.private.example
 )
 for fragment in "${sensitive_fragments[@]}"; do
   if grep -R -F -- "$fragment" "$bundle" >/dev/null; then
@@ -207,6 +247,15 @@ assert_contains "$bundle/artifacts/workloads/pod.yaml" 'endpoint: https://<redac
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'command: tool --password <redacted-credential> --verbose'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'args: \["--token=<redacted-credential>","--normal=visible"\]'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'inline_json: \{"name":"HF_TOKEN","value":"<redacted-credential>"\}'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" '- <redacted-credential>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'eventMessage: Failed to pull image <redacted-image> after resolving reference <redacted-image>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'session: <redacted-jwt>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" '^[[:space:]]*<redacted-private-key>$'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'name: retained-container-name'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'resources:'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'key: retained-toleration-key'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'key: retained-selector-key'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'retained-selector-value'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'images: <redacted-image-inventory>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'ordinary multiline text'
 assert_contains "$bundle/artifacts/config/scheduler.yaml" 'password: <redacted-credential>'
@@ -216,15 +265,18 @@ assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
 assert_contains "$KUBECTL_LOG" ' get daemonsets -l app.kubernetes.io/component=hami-device-plugin '
 test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -vc -- '--previous')" -eq 7 || fail 'did not collect all seven current device-plugin Pod logs'
-test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -c -- '--previous')" -eq 7 || fail 'did not collect all seven previous device-plugin Pod logs'
+test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -c -- '--previous')" -eq 6 || fail 'did not limit previous logs to restarted device-plugin Pods'
 device_plugin_log_order=$(grep -v -- '--previous' "$KUBECTL_LOG" | sed -n 's/.*logs pod\/device-plugin-\([0-9][0-9]*\).*/\1/p' | paste -sd ' ' -)
 test "$device_plugin_log_order" = '1 2 3 4 5 6 7' || fail "device-plugin logs were not collected deterministically: $device_plugin_log_order"
 assert_not_contains "$KUBECTL_LOG" 'logs -l '
 assert_not_contains "$KUBECTL_LOG" ' get nodes '
 assert_contains "$KUBECTL_LOG" ' get node gpu-node-a -o yaml'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--tail=3 --since=1h'
-assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 --previous .*--tail=3 --since=1h'
+assert_not_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 --previous'
+assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-2 --previous .*--tail=3 --since=1h'
 assert_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-logs-device-plugin-3"'
+assert_contains "$bundle/manifest.json" '"status":"skipped","collector":"device-plugin-previous-logs-device-plugin-1".*no-restarted-containers'
+assert_not_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-previous-logs-device-plugin-1"'
 test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.txt" || fail 'a Pod log failure stopped later Pod collection'
 test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.previous.txt" || fail 'previous container logs were not collected'
 assert_no_secret_requests "$KUBECTL_LOG" || fail 'collector requested a Secret resource'
@@ -248,6 +300,13 @@ fi
 : >"$KUBECTL_LOG"
 timeout 15s "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --redact-pattern e --output-dir "$tmp/literal-out" >/dev/null
 test -f "$tmp/literal-out/hami-support-bundle.tar.gz"
+
+# Oversized single-line structured output is suppressed without quadratic parsing.
+: >"$KUBECTL_LOG"
+timeout 15s env MOCK_MODE=oversized-json "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/oversized-line-out" >/dev/null
+mkdir "$tmp/oversized-line-bundle"
+tar -xzf "$tmp/oversized-line-out/hami-support-bundle.tar.gz" -C "$tmp/oversized-line-bundle"
+assert_contains "$tmp/oversized-line-bundle/hami-support-bundle/artifacts/workloads/pods.yaml" '^<redacted-oversized-line>$'
 
 # Namespace and cluster-wide modes must issue different workload/event commands.
 kubectl_calls_before_dry_run=$(wc -l <"$KUBECTL_LOG")
@@ -309,13 +368,6 @@ overall="$tmp/overall-bundle/hami-support-bundle"
 assert_contains "$overall/manifest.json" '"status":"limited"'
 test "$(du -sb "$overall" | awk '{print $1}')" -le 131072 || fail 'uncompressed bundle exceeds overall limit'
 
-# A reservation left by a dead process is reclaimed without overwriting output.
-mkdir -p "$tmp/stale-out/.hami-support-bundle.lock"
-printf '999999 1\n' >"$tmp/stale-out/.hami-support-bundle.lock/owner"
-"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/stale-out" >/dev/null
-test -f "$tmp/stale-out/hami-support-bundle.tar.gz" || fail 'stale reservation was not reclaimed'
-test ! -e "$tmp/stale-out/.hami-support-bundle.lock" || fail 'reclaimed reservation was not released'
-
 # Private staging exists with mode 700 and is removed after interruption.
 mkdir "$tmp/private-staging"
 : >"$KUBECTL_LOG"
@@ -335,6 +387,20 @@ assert_contains "$tmp/concurrent.out" 'already reserved by another collector'
 kill -TERM "$collector_pid"
 if wait "$collector_pid"; then fail 'interrupted collector unexpectedly succeeded'; fi
 test -z "$(find "$tmp/private-staging" -mindepth 1 -maxdepth 1 -name 'hami-support-bundle.*' -print -quit)" || fail 'staging data remained after interruption'
-test ! -e "$tmp/interrupted-out/.hami-support-bundle.lock" || fail 'reservation remained after interruption'
+
+# An untrappable termination still releases the kernel-managed destination lock.
+mkdir "$tmp/kill9-staging"
+TMPDIR="$tmp/kill9-staging" MOCK_MODE=sleep "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/kill9-out" >/dev/null 2>&1 &
+collector_pid=$!
+for _ in {1..50}; do
+  staging_path=$(find "$tmp/kill9-staging" -mindepth 1 -maxdepth 1 -type d -name 'hami-support-bundle.*' -print -quit)
+  [[ -n "$staging_path" ]] && break
+  sleep 0.1
+done
+[[ -n "${staging_path:-}" ]] || fail 'kill -9 collector did not start'
+kill -KILL "$collector_pid"
+if wait "$collector_pid" 2>/dev/null; then fail 'kill -9 collector unexpectedly succeeded'; fi
+"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/kill9-out" >/dev/null
+test -f "$tmp/kill9-out/hami-support-bundle.tar.gz" || fail 'kernel-managed lock was not released after kill -9'
 
 echo 'support bundle tests passed'

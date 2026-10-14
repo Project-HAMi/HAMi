@@ -11,6 +11,7 @@ readonly DEFAULT_MAX_COLLECTOR_BYTES=$((4 * 1024 * 1024))
 readonly DEFAULT_MAX_BUNDLE_BYTES=$((64 * 1024 * 1024))
 readonly MANIFEST_RESERVE_BYTES=$((64 * 1024))
 readonly MAX_COMPONENT_PODS=100
+readonly MAX_REDACTION_LINE_BYTES=$((64 * 1024))
 readonly KUBECTL_REQUEST_TIMEOUT=30s
 readonly VENDOR_TOOL_TIMEOUT=30s
 
@@ -60,6 +61,7 @@ for pattern in "${patterns[@]}"; do
   [[ "$pattern" != *$'\n'* && "$pattern" != *$'\r'* ]] || die '--redact-pattern must not contain newlines'
 done
 command -v kubectl >/dev/null || die 'kubectl is required'
+command -v flock >/dev/null || die 'flock is required'
 
 max_collector_bytes="${HAMI_SUPPORT_MAX_COLLECTOR_BYTES:-$DEFAULT_MAX_COLLECTOR_BYTES}"
 max_bundle_bytes="${HAMI_SUPPORT_MAX_BUNDLE_BYTES:-$DEFAULT_MAX_BUNDLE_BYTES}"
@@ -73,31 +75,7 @@ bundle_path="$output_dir/$bundle_name"
 
 umask 077
 mkdir -p "$output_dir"
-staging_dir=''; archive_tmp=''; reservation_dir="$output_dir/.$bundle_name.lock"; reservation_acquired=false
-reservation_owner="$reservation_dir/owner"
-
-# Return the Linux process start time when available so a recycled PID is not
-# mistaken for the collector that created a stale reservation.
-process_start_time() {
-  local pid="$1"
-  if [[ -r "/proc/$pid/stat" ]]; then
-    awk '{print $22}' "/proc/$pid/stat"
-  else
-    printf 'unknown\n'
-  fi
-}
-
-# Check whether the process recorded in the reservation still owns that PID.
-reservation_owner_alive() {
-  local owner_pid owner_start current_start
-  [[ -f "$reservation_owner" ]] || return 1
-  read -r owner_pid owner_start <"$reservation_owner" || return 1
-  [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  kill -0 "$owner_pid" 2>/dev/null || return 1
-  [[ "$owner_start" == unknown ]] && return 0
-  current_start=$(process_start_time "$owner_pid")
-  [[ "$current_start" == "$owner_start" ]]
-}
+staging_dir=''; archive_tmp=''; reservation_acquired=false
 
 # Remove only paths created and recorded by this invocation.
 cleanup() {
@@ -107,36 +85,19 @@ cleanup() {
   if [[ -n "$archive_tmp" && -e "$archive_tmp" ]]; then
     rm -f -- "$archive_tmp"
   fi
-  if [[ "$reservation_acquired" == true && -d "$reservation_dir" && -f "$reservation_owner" ]]; then
-    if read -r owner_pid _ <"$reservation_owner" && [[ "$owner_pid" == "$$" ]]; then
-      rm -f -- "$reservation_owner"
-      rmdir -- "$reservation_dir"
-    fi
+  if [[ "$reservation_acquired" == true ]]; then
+    flock -u "$reservation_fd" || true
+    exec {reservation_fd}<&-
+    reservation_acquired=false
   fi
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-if ! mkdir "$reservation_dir" 2>/dev/null; then
-  if reservation_owner_alive; then
-    die 'support bundle output is already reserved by another collector'
-  fi
-  reservation_claim="$reservation_dir/.reclaim"
-  if ! mkdir "$reservation_claim" 2>/dev/null; then
-    die 'support bundle output is already reserved by another collector'
-  fi
-  if reservation_owner_alive; then
-    rmdir -- "$reservation_claim"
-    die 'support bundle output is already reserved by another collector'
-  fi
-  stale_reservation="$output_dir/.$bundle_name.lock.stale.$$"
-  if ! mv -- "$reservation_dir" "$stale_reservation" 2>/dev/null || ! mkdir "$reservation_dir" 2>/dev/null; then
-    [[ ! -d "$stale_reservation" ]] || rm -rf -- "$stale_reservation"
-    die 'support bundle output is already reserved by another collector'
-  fi
-  rm -rf -- "$stale_reservation"
-fi
-printf '%s %s\n' "$$" "$(process_start_time "$$")" >"$reservation_owner"
+# Lock the destination directory itself. The kernel releases this lock even if
+# the collector is killed, and no owner-file publication window is involved.
+exec {reservation_fd}<"$output_dir"
+flock -n "$reservation_fd" || die 'support bundle output is already reserved by another collector'
 reservation_acquired=true
 [[ ! -e "$bundle_path" && ! -e "$archive" ]] || die 'refusing to overwrite existing bundle output'
 
@@ -172,7 +133,7 @@ append_detail() {
 # Environment subtrees are suppressed because even innocently named variables
 # can contain private tenant data; unrelated fields and HAMi annotations remain.
 redact() {
-  awk -v pfile="$pattern_file" '
+  awk -v pfile="$pattern_file" -v max_line_bytes="$MAX_REDACTION_LINE_BYTES" '
   function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
   function normalized_key(v) {
     v=trim(v); gsub(/^"|"$/, "", v); v=tolower(v); gsub(/[-.]/, "_", v)
@@ -180,7 +141,7 @@ redact() {
   }
   function sensitive_key(v, compact) {
     v=normalized_key(v); compact=v; gsub(/_/, "", compact)
-    return v ~ /^(auth|authorization)$/ || v ~ /(^|_)(auth|token|password|passwd|secret|key|credential|credentials)(_|$)/ || compact ~ /(token|password|passwd|secret|apikey|accesskey|privatekey|clientsecret|credential|credentials)$/
+    return v ~ /^(auth|authorization)$/ || v ~ /(^|_)(auth|token|password|passwd|secret|credential|credentials)(_|$)/ || v ~ /(^|_)(api|access|private|secret|signing)_key(_|$)/ || compact ~ /(token|password|passwd|secret|apikey|accesskey|privatekey|secretkey|signingkey|clientsecret|credential|credentials)$/
   }
   function sensitive_env_name(v) {
     v=trim(v); gsub(/^['\''"]|['\''"]$/, "", v); v=toupper(v)
@@ -207,6 +168,18 @@ redact() {
     c=index(s, ":"); return substr(s, 1, c) " " replacement
   }
   function leading_spaces(s, t) { t=s; sub(/[^[:space:]].*$/, "", t); return length(t) }
+  function yaml_key_indent(s, indent, t) {
+    indent=leading_spaces(s); t=substr(s,indent+1)
+    if (match(t,/^-[[:space:]]+/)) indent+=RLENGTH
+    return indent
+  }
+  function inside_yaml_tree(s, indent, current, t) {
+    if (s ~ /^[[:space:]]*$/) return 1
+    current=leading_spaces(s)
+    if (current > indent) return 1
+    t=substr(s,current+1)
+    return current == indent && t ~ /^-[[:space:]]+/
+  }
   function json_string_end(v, i, j, slashes) {
     for (i=1; i<=length(v); i++) if (substr(v,i,1)=="\"") {
       slashes=0; for (j=i-1; j>0 && substr(v,j,1)=="\\"; j--) slashes++
@@ -306,6 +279,19 @@ redact() {
     }
     return out rest
   }
+  function redact_image_mentions(s, out, rest, before, header, values, quote, ending) {
+    out=""; rest=s
+    while (match(tolower(rest),/(^|[^[:alnum:]_])(image|reference)[[:space:]]*[:=]?[[:space:]]+/)) {
+      before=substr(rest,1,RSTART-1); header=substr(rest,RSTART,RLENGTH); values=substr(rest,RSTART+RLENGTH); quote=substr(values,1,1)
+      if (quote == "\"") { ending=json_string_end(substr(values,2)); if (ending) ending++ }
+      else if (quote == sprintf("%c",39)) { ending=index(substr(values,2),quote); if (ending) ending++ }
+      else ending=unquoted_end(values)
+      if (!ending) return out before header quote "<redacted-image>" quote
+      out=out before header (quote == "\"" || quote == sprintf("%c",39) ? quote "<redacted-image>" quote : "<redacted-image>")
+      rest=substr(values,ending + ((quote == "\"" || quote == sprintf("%c",39)) ? 1 : 0))
+    }
+    return out rest
+  }
   function replace_literal(s, p, out, x) {
     out=""
     while ((x=index(s,p)) > 0) {
@@ -316,8 +302,19 @@ redact() {
   }
   BEGIN { while ((getline p < pfile) > 0) if (p != "") patterns[++n]=p; close(pfile) }
   {
+    if (pem_private_key) {
+      if ($0 ~ /-----END [A-Z0-9 ]*PRIVATE KEY-----/) pem_private_key=0
+      next
+    }
+    if ($0 ~ /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/) {
+      pem_indent=leading_spaces($0)
+      print substr($0,1,pem_indent) "<redacted-private-key>"; pem_private_key=1; next
+    }
+    if (length($0) > max_line_bytes) {
+      print "<redacted-oversized-line>"; next
+    }
     if (sensitive_yaml_tree) {
-      if ($0 ~ /^[[:space:]]*$/ || leading_spaces($0) > sensitive_yaml_tree_indent) next
+      if (inside_yaml_tree($0,sensitive_yaml_tree_indent)) next
       sensitive_yaml_tree=0
     }
     if (sensitive_yaml_block) {
@@ -325,6 +322,12 @@ redact() {
       sensitive_yaml_block=0
     }
     s=$0
+    if (pending_yaml_arg) {
+      if (s ~ /^[[:space:]]*$/) next
+      if (leading_spaces(s) == pending_yaml_arg_indent && s ~ /^[[:space:]]*-[[:space:]]+/) {
+        sub(/-[[:space:]]+.*/,"- <redacted-credential>",s); pending_yaml_arg=0
+      } else pending_yaml_arg=0
+    }
     gsub(/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][[:space:]]*[:=][[:space:]]*[Bb][Aa][Ss][Ii][Cc][[:space:]]+[^[:space:]",}]+/, "Authorization: Basic <redacted>", s)
     gsub(/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][[:space:]]*[:=][[:space:]]*[Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+[^[:space:]",}]+/, "Authorization: Bearer <redacted>", s)
     s=redact_json_fields(s)
@@ -332,10 +335,11 @@ redact() {
     s=redact_assignments(s)
     s=redact_space_args(s)
     gsub(/[[:alnum:]_.%+~-]+:[^[:space:]@\/]+@/, "<redacted>@", s)
+    gsub(/[[:alnum:]_-]{8,}\.[[:alnum:]_-]{8,}\.[[:alnum:]_-]{8,}/, "<redacted-jwt>", s)
     key=yaml_key(s); value=yaml_value(s); lower_key=tolower(key)
     if (lower_key == "env" || lower_key == "kubectl.kubernetes.io/last-applied-configuration" || lower_key == "images") {
       replacement=(lower_key == "images" ? "<redacted-image-inventory>" : (lower_key == "env" ? "<redacted-environment>" : "<redacted-credential>"))
-      if (value == "" || yaml_block_scalar(value)) { sensitive_yaml_tree=1; sensitive_yaml_tree_indent=leading_spaces(s) }
+      if (value == "" || yaml_block_scalar(value)) { sensitive_yaml_tree=1; sensitive_yaml_tree_indent=yaml_key_indent(s) }
       s=replace_yaml_value(s, replacement); env_sensitive=0; env_ttl=0
     } else if (lower_key == "name") {
       env_sensitive=sensitive_env_name(value); env_indent=leading_spaces(s); env_ttl=6
@@ -350,7 +354,12 @@ redact() {
       else if (value != "" && image_key(key)) s=replace_yaml_value(s, "<redacted-image>")
       if (env_sensitive && s !~ /^[[:space:]]*$/) { env_ttl--; if (env_ttl <= 0 || leading_spaces(s) < env_indent) env_sensitive=0 }
     }
-    gsub(/[Ii][Mm][Aa][Gg][Ee][[:space:]]+"[^"]+"/, "image \"<redacted-image>\"", s)
+    list_value=s; sub(/^[[:space:]]*-[[:space:]]+/,"",list_value)
+    if (s ~ /^[[:space:]]*-[[:space:]]+--[[:alnum:]_.-]+[[:space:]]*$/) {
+      list_key=list_value; sub(/^--/,"",list_key); list_key=trim(list_key)
+      if (sensitive_key(list_key)) { pending_yaml_arg=1; pending_yaml_arg_indent=leading_spaces(s) }
+    }
+    s=redact_image_mentions(s)
     for (i=1; i<=n; i++) s=replace_literal(s,patterns[i])
     print s
   }' "$1" >"$2"
@@ -409,9 +418,9 @@ collect() {
   run_dir=$(mktemp -d "$staging_dir/run.XXXXXX")
   raw_out="$run_dir/stdout"; raw_err="$run_dir/stderr"
   mkfifo "$run_dir/stdout.fifo" "$run_dir/stderr.fifo"
-  capture_and_drain "$run_dir/stdout.fifo" "$raw_out" "$((max_collector_bytes + 1))" & out_reader=$!
-  capture_and_drain "$run_dir/stderr.fifo" "$raw_err" "$((max_collector_bytes + 1))" & err_reader=$!
-  if "$@" >"$run_dir/stdout.fifo" 2>"$run_dir/stderr.fifo"; then
+  capture_and_drain "$run_dir/stdout.fifo" "$raw_out" "$((max_collector_bytes + 1))" {reservation_fd}<&- & out_reader=$!
+  capture_and_drain "$run_dir/stderr.fifo" "$raw_err" "$((max_collector_bytes + 1))" {reservation_fd}<&- & err_reader=$!
+  if "$@" >"$run_dir/stdout.fifo" 2>"$run_dir/stderr.fifo" {reservation_fd}<&-; then
     command_status=0
   else
     command_status=$?
@@ -447,6 +456,7 @@ collect() {
 collect_component_logs() {
   local component="$1" selector="app.kubernetes.io/component=hami-$1"
   local list_path="$bundle_dir/artifacts/components/$component-pods.txt" line pod_name count=0
+  local restart_counts previous_id
   collect "$component-log-pods" "components/$component-pods.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o name
   [[ "$dry_run" == false && -f "$list_path" ]] || return 0
   LC_ALL=C sort -o "$list_path" "$list_path"
@@ -464,7 +474,16 @@ collect_component_logs() {
     fi
     collect "$component-logs-$pod_name" "logs/$component/$pod_name.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --all-containers=true --prefix --tail="$tail_lines" --since="$since"
     if [[ "$bundle_limit_reached" == false ]]; then
-      collect "$component-previous-logs-$pod_name" "logs/$component/$pod_name.previous.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --previous --all-containers=true --prefix --tail="$tail_lines" --since="$since"
+      previous_id="$component-previous-logs-$pod_name"
+      if restart_counts=$(kubectl "${k[@]}" -n "$namespace" get pod "$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}' {reservation_fd}<&-); then
+        if awk '$1 ~ /^[0-9]+$/ && $1 > 0 { found=1 } END { exit !found }' <<<"$restart_counts"; then
+          collect "$previous_id" "logs/$component/$pod_name.previous.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --previous --all-containers=true --prefix --tail="$tail_lines" --since="$since"
+        else
+          record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" no-restarted-containers
+        fi
+      else
+        record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" pod-status-unavailable
+      fi
     fi
     count=$((count + 1))
   done <"$list_path"
@@ -563,7 +582,4 @@ tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C 
 chmod 600 "$archive_tmp"
 mv "$archive_tmp" "$archive"
 archive_tmp=''
-rm -f -- "$reservation_owner"
-rmdir -- "$reservation_dir"
-reservation_acquired=false
 echo "support bundle written to $archive"
