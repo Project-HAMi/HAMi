@@ -78,7 +78,7 @@ jobs:
           echo "Git log: $(git log ${pr_commit})"
           echo "Base commit: ${base_commit}"
           echo "Git log: $(git log ${base_commit})"
-          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)docs/*' ':(exclude)examples/*' ':(exclude)*.md')
+          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)examples/*' ':(exclude)*.md')
           echo "Changed files: ${changed_files}"
           if [ -n "$changed_files" ]; then
             echo "Will run e2e-test"
