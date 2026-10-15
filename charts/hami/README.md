@@ -122,22 +122,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 ## Resource Name Configuration
 
-### Hygon HCU Resources
-
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.hygon.resourceCountName` | HCU resource name | `"hygon.com/hcunum"` |
-| `devices.hygon.resourceMemoryName` | HCU memory resource name | `"hygon.com/hcumem"` |
-| `devices.hygon.resourceCoreName` | HCU core resource name | `"hygon.com/hcucores"` |
-
-### Metax GPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.metax.resourceVCountName` | GPU resource name | `"metax-tech.com/sgpu"` |
-| `devices.metax.resourceVCoreName` | GPU core resource name | `"metax-tech.com/vcore"` |
-| `devices.metax.resourceVMemoryName` | GPU memory resource name | `"metax-tech.com/vmemory"` |
-| `devices.metax.sgpuTopologyAware` | GPU topology awareness | `false` |
-
 ### Enflame GCU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -246,11 +230,6 @@ path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
 `devicePlugin.nvidiaDriverRoot` explicitly to mount only the driver root instead.
 
 ## Device Configuration
-
-### AWS Neuron
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.awsneuron.customresources` | Custom resources | `["aws.amazon.com/neuron", "aws.amazon.com/neuroncore"]` |
 
 ### Kunlunxin
 | Parameter | Description | Default Value |
@@ -408,12 +387,24 @@ More values will be added in follow-up PRs.
 | devicePlugin.updateStrategy | object | `{"rollingUpdate":{"maxUnavailable":1},"type":"RollingUpdate"}` | Kubernetes DaemonSet update strategy: `RollingUpdate` or `OnDelete`. For RollingUpdate, configure `rollingUpdate.maxUnavailable` as a count or percentage. |
 | devicePlugin.vgpuCache.gracePeriod | string | `"5m"` | Minimum cache directory age, measured from its modification time, before garbage collection. Use Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent of monitor resync and the GC scan interval. |
 | devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
+| devices.awsneuron.customresources | list | `["aws.amazon.com/neuron","aws.amazon.com/neuroncore"]` | List of resource-name strings managed by the scheduler extender. Include the names configured by `devices.awsneuron.resourceCountName` and `devices.awsneuron.resourceCoreName`; they are not added automatically. |
+| devices.awsneuron.resourceCoreName | string | `"aws.amazon.com/neuroncore"` | Resource name for positive integer NeuronCore counts. Cores per device depend on the node; one core is not always half a device. See the [NeuronCore workload example](https://project-hami.io/docs/next/userguide/awsneuron-device/examples/allocate-neuron-core). |
+| devices.awsneuron.resourceCountName | string | `"aws.amazon.com/neuron"` | Resource name for positive integer counts of whole Neuron devices. Takes precedence over `devices.awsneuron.resourceCoreName` requests when both are present. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.cambricon.resourceCoreName | string | `"cambricon.com/mlu.smlu.vcore"` | Resource name for MLU compute, requested as an integer percentage from 0 to 100; omitted requests 100. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
 | devices.cambricon.resourceCountName | string | `"cambricon.com/vmlu"` | Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin. A zero count requests no device; HAMi reads memory and core requests only for a positive count. Sharing needs one MLU and the plugin in `dynamic-smlu` mode; a count above 1 allocates whole MLUs and ignores the memory and core values. A non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration, so set the name there too. |
 | devices.cambricon.resourceMemoryName | string | `"cambricon.com/mlu.smlu.vmemory"` | Resource name for MLU memory, requested in integer units of 256 MiB (`20` is 5120 MiB); run the plugin with `min-dsmlu-unit=256`. Omitted or 0 reserves the whole MLU memory. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.hygon.memoryFactor | int | `1` | Non-negative integer multiplier for explicit HCU memory requests in MiB and their ResourceQuota limits. For example, `1024` makes a memory request of `4` mean 4 GiB. `0` and `1` leave requests unscaled. |
+| devices.hygon.resourceCoreName | string | `"hygon.com/hcucores"` | Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute. |
+| devices.hygon.resourceCountName | string | `"hygon.com/hcunum"` | Resource name for non-negative integer vHCU counts. Required for HCU memory or core requests; `0` requests no device. Must match the vendor device plugin. See [HCU workload examples](https://project-hami.io/docs/next/userguide/hygon-device/examples/allocate-core-and-memory). |
+| devices.hygon.resourceMemoryName | string | `"hygon.com/hcumem"` | Resource name for the memory requested on each vHCU, in integer MiB units, scaled by `devices.hygon.memoryFactor` when it is greater than 1. Omission or `0` requests the selected HCU's full memory. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.metax.resourceCountName | string | `"metax-tech.com/gpu"` | Resource name for non-negative integer whole-GPU counts. Must match the vendor device plugin; `0` requests no device. |
+| devices.metax.resourceVCoreName | string | `"metax-tech.com/vcore"` | Resource name for each sGPU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute. Pods annotated with `metax-tech.com/sgpu-app-class: online` do not reserve compute through this resource. |
+| devices.metax.resourceVCountName | string | `"metax-tech.com/sgpu"` | Resource name for non-negative integer sGPU counts in container limits. Required for sGPU memory or core requests; `0` requests no device. See [MetaX workload examples](https://project-hami.io/docs/next/userguide/metax-device/metax-sgpu/enable-metax-gpu-sharing#running-metax-jobs). |
+| devices.metax.resourceVMemoryName | string | `"metax-tech.com/vmemory"` | Resource name for the memory limit on each sGPU. Bare integers are in GiB; use a quantity such as `2048Mi` to specify the unit explicitly. An omitted or zero limit requests the GPU's full memory. |
+| devices.metax.sgpuTopologyAware | bool | `false` | Enable topology-aware node scoring for sGPU requests of 100% compute. Does not apply to online-class Pods or whole-GPU requests. The Pod annotation `metax-tech.com/sgpu-topology-aware` overrides this setting when it contains a valid boolean. |
 | devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
 | devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
 | devices.mthreads.memoryPerCard | list | `[96]` | Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. 96 = MTT S4000 (48 GiB); 160 = MTT S5000 (80 GiB). Use [96, 160] for mixed fleets. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list. |

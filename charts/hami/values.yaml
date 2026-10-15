@@ -524,15 +524,31 @@ mockDevicePlugin:
     pullSecrets: []
 devices:
   metax:
+    # -- Resource name for non-negative integer whole-GPU counts. Must match the vendor device plugin; `0` requests no device.
     resourceCountName: "metax-tech.com/gpu"
+    # -- Resource name for non-negative integer sGPU counts in container limits. Required for sGPU memory or core requests; `0` requests no device.
+    # See [MetaX workload examples](https://project-hami.io/docs/next/userguide/metax-device/metax-sgpu/enable-metax-gpu-sharing#running-metax-jobs).
     resourceVCountName: "metax-tech.com/sgpu"
+    # -- Resource name for each sGPU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute.
+    # Pods annotated with `metax-tech.com/sgpu-app-class: online` do not reserve compute through this resource.
     resourceVCoreName: "metax-tech.com/vcore"
+    # -- Resource name for the memory limit on each sGPU. Bare integers are in GiB; use a quantity such as `2048Mi` to specify the unit explicitly.
+    # An omitted or zero limit requests the GPU's full memory.
     resourceVMemoryName: "metax-tech.com/vmemory"
+    # -- Enable topology-aware node scoring for sGPU requests of 100% compute. Does not apply to online-class Pods or whole-GPU requests.
+    # The Pod annotation `metax-tech.com/sgpu-topology-aware` overrides this setting when it contains a valid boolean.
     sgpuTopologyAware: false
   hygon:
+    # -- Non-negative integer multiplier for explicit HCU memory requests in MiB and their ResourceQuota limits. For example, `1024` makes a memory request of `4` mean 4 GiB.
+    # `0` and `1` leave requests unscaled.
     memoryFactor: 1
+    # -- Resource name for non-negative integer vHCU counts. Required for HCU memory or core requests; `0` requests no device. Must match the vendor device plugin.
+    # See [HCU workload examples](https://project-hami.io/docs/next/userguide/hygon-device/examples/allocate-core-and-memory).
     resourceCountName: "hygon.com/hcunum"
+    # -- Resource name for the memory requested on each vHCU, in integer MiB units, scaled by `devices.hygon.memoryFactor` when it is greater than 1.
+    # Omission or `0` requests the selected HCU's full memory.
     resourceMemoryName: "hygon.com/hcumem"
+    # -- Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute.
     resourceCoreName: "hygon.com/hcucores"
   cambricon:
     # -- Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin.
@@ -564,8 +580,12 @@ devices:
       - amd.com/gpumem
       - amd.com/gpucores
   awsneuron:
+    # -- Resource name for positive integer counts of whole Neuron devices. Takes precedence over `devices.awsneuron.resourceCoreName` requests when both are present.
     resourceCountName: "aws.amazon.com/neuron"
+    # -- Resource name for positive integer NeuronCore counts. Cores per device depend on the node; one core is not always half a device.
+    # See the [NeuronCore workload example](https://project-hami.io/docs/next/userguide/awsneuron-device/examples/allocate-neuron-core).
     resourceCoreName: "aws.amazon.com/neuroncore"
+    # -- List of resource-name strings managed by the scheduler extender. Include the names configured by `devices.awsneuron.resourceCountName` and `devices.awsneuron.resourceCoreName`; they are not added automatically.
     customresources:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
