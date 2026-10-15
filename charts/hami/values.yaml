@@ -570,19 +570,30 @@ devices:
       - aws.amazon.com/neuron
       - aws.amazon.com/neuroncore
   kunlun:
+    # -- Resource name for non-negative integer physical XPU counts. Must match the device plugin and Pod resources. See [Kunlunxin scheduling](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-schedule).
     resourceCountName: "kunlunxin.com/xpu"
+    # -- Resource name for non-negative integer virtual XPU counts. Use with `devices.kunlun.resourceVMemoryName` for memory partitions. See [VXPU usage](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-vxpu).
     resourceVCountName: "kunlunxin.com/vxpu"
+    # -- Resource name for virtual XPU memory requests in integer MiB per XPU. Requires a virtual XPU count request. See [memory partition sizes](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-vxpu#device-granularity-partitioning).
     resourceVMemoryName: "kunlunxin.com/vxpu-memory"
+    # -- Add Kunlun resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
     enabled: true
-    # devices.kunlun.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.kunlun.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.kunlun.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
   enflame:
+    # -- Resource name for non-negative integer whole-GCU counts. Must match the device plugin and Pod resources.
     resourceNameGCU: "enflame.com/gcu"
+    # -- Resource name for a positive integer DRS slice count on one GCU. Takes precedence over memory/core requests. See [DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads).
     resourceNameDRSGCU: "enflame.com/drs-gcu"
+    # -- Resource name for positive integer memory requests used to select a GCU partition, optionally combined with `devices.enflame.resourceNameGCUCore`.
+    # Documented requests use MiB (20480 = 20 GiB); small values may be interpreted as GiB depending on the available partitions.
+    # See [Enflame DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads).
     resourceNameGCUMemory: "enflame.com/gcu-memory"
+    # -- Resource name for a minimum core percentage (integer, 0-100; 40 means 40%), optionally combined with `devices.enflame.resourceNameGCUMemory`. Zero or omission sets no core minimum. See [DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads).
     resourceNameGCUCore: "enflame.com/gcu-core"
+    # -- Add Enflame resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
     enabled: true
-    # devices.enflame.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.enflame.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.enflame.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
   mthreads:
     # -- Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately.
@@ -600,14 +611,18 @@ devices:
     memoryPerCard:
       - 96
   vastai:
+    # -- Resource name for non-negative integer Vastai device counts (cards or dies, depending on the device plugin mode). Must match the device plugin and Pod resources. See [Vastai usage](https://project-hami.io/docs/next/userguide/vastai/enable-vastai-sharing).
     resourceCountName: "vastaitech.com/va"
+    # -- Add Vastai resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
     enabled: true
-    # devices.vastai.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.vastai.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.vastai.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
   biren:
+    # -- Resource name for non-negative integer Biren device counts. Must match the device plugin and Pod resources. See [Biren usage](https://project-hami.io/docs/next/userguide/biren-device/enable-biren-sharing).
     resourceCountName: "birentech.com/gpu"
+    # -- Add Biren resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
     enabled: true
-    # devices.biren.customresources -- Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields.
+    # devices.biren.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.biren.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
   # Most devices.nvidia values are written to the generated device-config.yaml that
   # the scheduler and the device plugin read. When device-config.content is set, it

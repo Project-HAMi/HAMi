@@ -138,18 +138,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 | `devices.metax.resourceVMemoryName` | GPU memory resource name | `"metax-tech.com/vmemory"` |
 | `devices.metax.sgpuTopologyAware` | GPU topology awareness | `false` |
 
-### Enflame GCU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.enflame.resourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
-| `devices.enflame.resourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
-| `devices.enflame.resourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
-
-### Kunlunxin XPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.kunlun.resourceCountName` | XPU resource name | `"kunlunxin.com/xpu"` |
-
 ## Scheduler Configuration
 
 ### Scheduler profiling
@@ -251,17 +239,6 @@ path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.awsneuron.customresources` | Custom resources | `["aws.amazon.com/neuron", "aws.amazon.com/neuroncore"]` |
-
-### Kunlunxin
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Additional resources; standard resource names are added automatically | `[]` |
-
-### Enflame
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.enflame.customresources` | Additional resources; standard resource names are added automatically | `[]` |
 
 ### Huawei Ascend
 | Parameter | Description | Default Value |
@@ -408,12 +385,23 @@ More values will be added in follow-up PRs.
 | devicePlugin.updateStrategy | object | `{"rollingUpdate":{"maxUnavailable":1},"type":"RollingUpdate"}` | Kubernetes DaemonSet update strategy: `RollingUpdate` or `OnDelete`. For RollingUpdate, configure `rollingUpdate.maxUnavailable` as a count or percentage. |
 | devicePlugin.vgpuCache.gracePeriod | string | `"5m"` | Minimum cache directory age, measured from its modification time, before garbage collection. Use Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent of monitor resync and the GC scan interval. |
 | devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
-| devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.biren.customresources | list | `[]` | Additional resource-name strings managed by the scheduler extender when `devices.biren.enabled` is true. Standard names are added automatically from the resource fields. |
+| devices.biren.enabled | bool | `true` | Add Biren resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately. |
+| devices.biren.resourceCountName | string | `"birentech.com/gpu"` | Resource name for non-negative integer Biren device counts. Must match the device plugin and Pod resources. See [Biren usage](https://project-hami.io/docs/next/userguide/biren-device/enable-biren-sharing). |
 | devices.cambricon.resourceCoreName | string | `"cambricon.com/mlu.smlu.vcore"` | Resource name for MLU compute, requested as an integer percentage from 0 to 100; omitted requests 100. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
 | devices.cambricon.resourceCountName | string | `"cambricon.com/vmlu"` | Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin. A zero count requests no device; HAMi reads memory and core requests only for a positive count. Sharing needs one MLU and the plugin in `dynamic-smlu` mode; a count above 1 allocates whole MLUs and ignores the memory and core values. A non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration, so set the name there too. |
 | devices.cambricon.resourceMemoryName | string | `"cambricon.com/mlu.smlu.vmemory"` | Resource name for MLU memory, requested in integer units of 256 MiB (`20` is 5120 MiB); run the plugin with `min-dsmlu-unit=256`. Omitted or 0 reserves the whole MLU memory. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
-| devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
-| devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.enflame.customresources | list | `[]` | Additional resource-name strings managed by the scheduler extender when `devices.enflame.enabled` is true. Standard names are added automatically from the resource fields. |
+| devices.enflame.enabled | bool | `true` | Add Enflame resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately. |
+| devices.enflame.resourceNameDRSGCU | string | `"enflame.com/drs-gcu"` | Resource name for a positive integer DRS slice count on one GCU. Takes precedence over memory/core requests. See [DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads). |
+| devices.enflame.resourceNameGCU | string | `"enflame.com/gcu"` | Resource name for non-negative integer whole-GCU counts. Must match the device plugin and Pod resources. |
+| devices.enflame.resourceNameGCUCore | string | `"enflame.com/gcu-core"` | Resource name for a minimum core percentage (integer, 0-100; 40 means 40%), optionally combined with `devices.enflame.resourceNameGCUMemory`. Zero or omission sets no core minimum. See [DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads). |
+| devices.enflame.resourceNameGCUMemory | string | `"enflame.com/gcu-memory"` | Resource name for positive integer memory requests used to select a GCU partition, optionally combined with `devices.enflame.resourceNameGCUCore`. Documented requests use MiB (20480 = 20 GiB); small values may be interpreted as GiB depending on the available partitions. See [Enflame DRS workload examples](https://project-hami.io/docs/next/userguide/enflame-device/enable-enflame-gcu-sharing#running-drs-workloads). |
+| devices.kunlun.customresources | list | `[]` | Additional resource-name strings managed by the scheduler extender when `devices.kunlun.enabled` is true. Standard names are added automatically from the resource fields. |
+| devices.kunlun.enabled | bool | `true` | Add Kunlun resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately. |
+| devices.kunlun.resourceCountName | string | `"kunlunxin.com/xpu"` | Resource name for non-negative integer physical XPU counts. Must match the device plugin and Pod resources. See [Kunlunxin scheduling](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-schedule). |
+| devices.kunlun.resourceVCountName | string | `"kunlunxin.com/vxpu"` | Resource name for non-negative integer virtual XPU counts. Use with `devices.kunlun.resourceVMemoryName` for memory partitions. See [VXPU usage](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-vxpu). |
+| devices.kunlun.resourceVMemoryName | string | `"kunlunxin.com/vxpu-memory"` | Resource name for virtual XPU memory requests in integer MiB per XPU. Requires a virtual XPU count request. See [memory partition sizes](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-vxpu#device-granularity-partitioning). |
 | devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
 | devices.mthreads.enabled | bool | `true` | Register customresources with the HAMi scheduler extender. The MThreads toolkit must be installed separately. |
 | devices.mthreads.memoryPerCard | list | `[96]` | Per-card capacities in 512 MiB units used to validate explicit single-device memory limits, not to set node capacity. 96 = MTT S4000 (48 GiB); 160 = MTT S5000 (80 GiB). Use [96, 160] for mixed fleets. Allowed limits are the union of powers of two starting at 2 and each full-card capacity. An empty list falls back to [96]; a legacy scalar is converted to a one-item list. |
@@ -441,7 +429,9 @@ More values will be added in follow-up PRs.
 | devices.nvidia.resourceMemoryPercentageName | string | `"nvidia.com/gpumem-percentage"` | Extended resource name for the GPU memory a container requests on each GPU as a percentage of that GPU's memory, an integer from 0 to 100. `0` is treated as unset. |
 | devices.nvidia.resourcePriorityName | string | `"nvidia.com/priority"` | Extended resource name for the task priority of a container. The admission webhook passes its limit to HAMi-core as `CUDA_TASK_PRIORITY`. A lower value is a higher priority, and HAMi-core uses `1` when it is unset. On a shared GPU, vGPUmonitor pauses kernel launches of lower-priority tasks while higher-priority tasks are active, but only for tasks with a `resourceCoreName` limit between 1 and 99 whose core limit is being enforced (see `gpuCorePolicy`). |
 | devices.nvidia.runtimeClassName | string | `""` | RuntimeClass set on the device plugin Pods and, by the admission webhook, on GPU Pods that do not set `runtimeClassName`, commonly `nvidia` when the NVIDIA container runtime is not the default. The RuntimeClass must exist, either created by `createRuntimeClass` or already present in the cluster. Empty sets no RuntimeClass. |
-| devices.vastai.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.vastai.customresources | list | `[]` | Additional resource-name strings managed by the scheduler extender when `devices.vastai.enabled` is true. Standard names are added automatically from the resource fields. |
+| devices.vastai.enabled | bool | `true` | Add Vastai resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately. |
+| devices.vastai.resourceCountName | string | `"vastaitech.com/va"` | Resource name for non-negative integer Vastai device counts (cards or dies, depending on the device plugin mode). Must match the device plugin and Pod resources. See [Vastai usage](https://project-hami.io/docs/next/userguide/vastai/enable-vastai-sharing). |
 | fullnameOverride | string | `""` | Fully overrides the names of the resources the chart creates, bypassing the `<release>-<chart>` naming. Truncated to 63 characters. |
 | global.annotations | object | `{}` | Annotations added to the scheduler Deployment and PodDisruptionBudget and to the NVIDIA and remote-gpu DaemonSets. |
 | global.gpuHookPath | string | `"/usr/local"` | Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin. |
