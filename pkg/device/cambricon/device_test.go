@@ -182,26 +182,26 @@ func Test_CheckHealth(t *testing.T) {
 	}
 
 	healthy, needUpdate := dev.CheckHealth(CambriconMLUCommonWord, node("mlu-health-absent", 0, 200, 1024, ""))
-	assert.Equal(t, healthy, false)
-	assert.Equal(t, needUpdate, false)
+	assert.False(t, healthy)
+	assert.False(t, needUpdate)
 
 	present := node("mlu-health-present", 100, 100, 1024, "MLU370-X4")
 	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
-	assert.Equal(t, healthy, true)
-	assert.Equal(t, needUpdate, true)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
 	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
-	assert.Equal(t, healthy, true)
-	assert.Equal(t, needUpdate, false)
+	assert.True(t, healthy)
+	assert.False(t, needUpdate)
 
 	relabelled := node("mlu-health-present", 100, 100, 1024, "MLU370-X8")
 	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, relabelled)
-	assert.Equal(t, healthy, true)
-	assert.Equal(t, needUpdate, true)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
 
 	grown := node("mlu-health-present", 200, 200, 1024, "MLU370-X8")
 	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, grown)
-	assert.Equal(t, healthy, true)
-	assert.Equal(t, needUpdate, true)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
 }
 
 func Test_MutateAdmission(t *testing.T) {
