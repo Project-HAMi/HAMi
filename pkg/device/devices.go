@@ -682,6 +682,17 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node, re
 	return true, registerAnnoChanged(devType, node.Name, registerAnno)
 }
 
+// AllocatableHealth reports whether a node should stay in the scheduler cache,
+// and whether its device list should be read again.
+func AllocatableHealth(devType, nodeName string, allocatable, cardCount int64, anno string) (bool, bool) {
+	if allocatable <= 0 {
+		ForgetRegisteredDevices(devType, nodeName)
+		return false, false
+	}
+	observed := strconv.FormatInt(cardCount, 10) + "\n" + anno
+	return true, registerAnnoChanged(devType, nodeName, observed)
+}
+
 // Deprecated: new MIG allocations never encode template/slot indexes in UUIDs.
 func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 	left := strings.Index(uuid, "[")

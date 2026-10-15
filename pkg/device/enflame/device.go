@@ -315,7 +315,38 @@ func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsa
 }
 
 func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	// DRS nodes advertise memory and core, not a card-count resource.
+	// Either one staying allocatable means the plugin is still publishing.
+	memQty := n.Status.Allocatable[corev1.ResourceName(EnflameResourceNameGCUMemory)]
+	coreQty := n.Status.Allocatable[corev1.ResourceName(EnflameResourceNameGCUCore)]
+	mem := memQty.Value()
+	core := coreQty.Value()
+	signal := int64(0)
+	if mem > 0 || core > 0 {
+		signal = 1
+	}
+	anno := ""
+	if n.Annotations != nil {
+		anno = n.Annotations[GCUDrsCapacity]
+	}
+	return device.AllocatableHealth(devType, n.Name, signal, drsAnnotationDevices(anno), anno)
+}
+
+// drsAnnotationDevices is the card count carried by the DRS capacity annotation.
+// An unparsable annotation counts as zero cards; the raw text is still compared
+// separately, so a later correction is read again.
+func drsAnnotationDevices(raw string) int64 {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	spec := drsCapacitySpec{}
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return 0
+	}
+	return int64(len(spec.Devices))
 }
 
 func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

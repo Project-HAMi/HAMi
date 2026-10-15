@@ -30,6 +30,46 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
+func Test_KunlunDevices_CheckHealth(t *testing.T) {
+	KunlunResourceCount = "kunlunxin.com/xpu"
+	dev := &KunlunDevices{}
+
+	node := func(name string, allocatable, capacity int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{},
+				Capacity:    corev1.ResourceList{},
+			},
+		}
+		if allocatable > 0 {
+			n.Status.Allocatable[corev1.ResourceName(KunlunResourceCount)] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if capacity > 0 {
+			n.Status.Capacity[corev1.ResourceName(KunlunResourceCount)] = *resource.NewQuantity(capacity, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(KunlunGPUCommonWord, node("kunlun-health-absent", 0, 8))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("kunlun-health-present", 8, 8)
+	healthy, needUpdate = dev.CheckHealth(KunlunGPUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth(KunlunGPUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	// Allocatable is unchanged, but Capacity is what the device list is built from.
+	resized := node("kunlun-health-present", 8, 4)
+	healthy, needUpdate = dev.CheckHealth(KunlunGPUCommonWord, resized)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
+
 func Test_KunlunDevices_GenerateResourceRequests(t *testing.T) {
 	KunlunResourceCount = "kunlunxin.com/xpu"
 
