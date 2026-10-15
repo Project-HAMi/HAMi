@@ -1392,6 +1392,10 @@ func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
 	ConfigFile = &pluginConfig
 	t.Cleanup(func() { ConfigFile = previousFile })
 
+	previousPath := ConfigFilePath
+	ConfigFilePath = filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(ConfigFilePath, []byte(`{"nodeconfig":[]}`), 0o600))
+	t.Cleanup(func() { ConfigFilePath = previousPath })
 	t.Setenv("REPORT_NODE_CAPACITY", "true")
 
 	sConfig, _, err := LoadNvidiaDevicePluginConfig()
@@ -1735,4 +1739,36 @@ func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.Empty(t, plugin.pendingCDIRemovals)
 	require.Equal(t, 2, calls)
+}
+
+// A missing or malformed node config must not select a local mode or remove
+// an existing remote discovery label, including its custom port.
+func TestLoadNodeConfigFailurePreservesRemoteLabel(t *testing.T) {
+	for _, content := range []string{"missing", "invalid-json"} {
+		t.Run(content, func(t *testing.T) {
+			oldClient, oldNode, oldFile, oldPath := client.KubeClient, util.NodeName, ConfigFile, ConfigFilePath
+			t.Cleanup(func() {
+				client.KubeClient, util.NodeName, ConfigFile, ConfigFilePath = oldClient, oldNode, oldFile, oldPath
+			})
+			util.NodeName = "remote-config-error"
+			client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: util.NodeName, Labels: map[string]string{remotegpu.LupineServerLabel: "15000"}}})
+			path := filepath.Join(t.TempDir(), "plugin.yaml")
+			require.NoError(t, os.WriteFile(path, []byte("{}"), 0o600))
+			ConfigFile = &path
+			ConfigFilePath = filepath.Join(t.TempDir(), "config.json")
+			if content != "missing" {
+				require.NoError(t, os.WriteFile(ConfigFilePath, []byte("{"), 0o600))
+			}
+			cfg, mode, err := LoadNvidiaDevicePluginConfig()
+			require.ErrorContains(t, err, "load node configuration")
+			require.Nil(t, cfg)
+			require.Empty(t, mode)
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), util.NodeName, metav1.GetOptions{})
+			require.NoError(t, err)
+			require.Equal(t, "15000", node.Labels[remotegpu.LupineServerLabel])
+			for _, action := range client.KubeClient.(*fake.Clientset).Actions() {
+				require.NotEqual(t, "patch", action.GetVerb())
+			}
+		})
+	}
 }

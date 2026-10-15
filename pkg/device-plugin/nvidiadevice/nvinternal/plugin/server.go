@@ -268,7 +268,7 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	}
 	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath, node.Labels)
 	if err != nil {
-		klog.Errorf("readFromConfigFile err:%s", err.Error())
+		return nil, "", fmt.Errorf("load node configuration %s: %w", ConfigFilePath, err)
 	}
 	if os.Getenv("REPORT_NODE_CAPACITY") == "true" || os.Getenv("REPORT_NODE_CAPACITY") == "1" {
 		t := true
