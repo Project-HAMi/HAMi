@@ -99,10 +99,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	getHandle := nvml.DeviceGetHandleByUUID
-	if plugin.migMgr != nil {
+	// Remote Start leaves the MIG manager inactive; registration uses its own NVML session.
+	if plugin.migMgr != nil && plugin.operatingMode != nvidia.RemoteMode {
 		done, err := plugin.migMgr.beginOperation()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("query GPU inventory (operating mode %q): %w", plugin.operatingMode, err)
 		}
 		defer done()
 		getHandle = plugin.migMgr.nvmllib.DeviceGetHandleByUUID
@@ -270,7 +271,7 @@ func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model str
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	devices, err := plugin.getAPIDevices()
 	if err != nil {
-		klog.ErrorS(err, "failed to get API devices")
+		klog.ErrorS(err, "failed to get API devices", "operatingMode", plugin.operatingMode)
 		return false, err
 	}
 
@@ -410,10 +411,10 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 }
 
 func (plugin *NvidiaDevicePlugin) topologyScore(available []string) (nvidia.ListDeviceScore, bool, error) {
-	if plugin.migMgr != nil {
+	if plugin.migMgr != nil && plugin.operatingMode != nvidia.RemoteMode {
 		done, err := plugin.migMgr.beginOperation()
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("query GPU topology (operating mode %q): %w", plugin.operatingMode, err)
 		}
 		defer done()
 		return nvidia.CalculateGPUScoreWithNVML(plugin.migMgr.nvmllib, available)

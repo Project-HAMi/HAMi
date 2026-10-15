@@ -374,6 +374,9 @@ devicePlugin:
   # JSON field in `nodeConfiguration.config` overrides this setting for matching nodes.
   reportNodeCapacity: false
   nodeConfiguration:
+    # operatingmode is per-node: "hami-core", "mig", or "remote".
+    # "remote" makes this node a Lupine GPU server; the plugin applies
+    # hami.io/lupine-server (empty value = devices.remotegpu.defaultPort).
     # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
     # `externalConfigName` is set. The `nodeconfig` list selects entries whose `name` matches the node. If
     # none match, it selects matching `nodelabelselector` entries; if neither matches, it uses entries named
@@ -735,18 +738,23 @@ devices:
     limitDelivery: file
   remotegpu:
     # Schedule pods onto GPUs served over the network by a lupine server.
-    # Label each lupine node with hami.io/lupine-server, optionally setting the
-    # label value to the port lupine listens on.
+    # Mark lupine nodes with operatingmode: remote in devicePlugin.nodeConfiguration
+    # (peer to hami-core / mig). The device plugin applies hami.io/lupine-server;
+    # set that label's value to a custom port only when the server is managed
+    # outside the chart (empty value uses defaultPort below).
     enabled: false
     defaultPort: 14833
     resourceCountName: "nvidia.com/remote-gpu"
     resourceMemoryName: "nvidia.com/remote-gpu-memory"
-    # Image carrying HAMi-core, which an init container copies into the client
-    # pod so the memory request is enforced and not merely a placement filter.
+    # -- HAMi-core image for remote GPU memory enforcement; unset uses the device plugin image, empty disables enforcement.
+    # An init container copies HAMi-core into the client Pod.
     # A client node runs no device plugin, so nothing else would deliver it.
     # Leave it unset for the device plugin image. Set it to "" to schedule
     # remote GPUs without enforcement.
     libImage:
+    # -- Client image used to deliver Lupine libraries and libnghttp2 for the CUDA/vLLM examples; empty disables delivery.
+    # Match the server version and workload ABI; an empty string disables delivery.
+    clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04"
     # Image for the session stub the scheduler keeps on each lupine server, so
     # a user port-forwards to the stub instead of the server. Needs socat on
     # the path. Empty runs no stubs, and no port-forward sessions with them.
@@ -766,7 +774,8 @@ devices:
       # works under the NVIDIA container runtime. Name the RuntimeClass that
       # selects it when the cluster does not make it the default, commonly
       # "nvidia". It has its own setting rather than borrowing the device
-      # plugin's, because in remote mode that plugin may not run at all.
+      # plugin's: in remote mode that plugin still runs, but only publishes the
+      # fleet annotation and does not need the NVIDIA runtime itself.
       runtimeClassName: ""
       tolerations: []
       resources: {}

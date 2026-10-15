@@ -1,15 +1,13 @@
-# Serving a model from nodes that own no GPU.
-#
-# Each replica is scheduled on its own, so each is given its own lupine server
-# and its own LUPINE_SERVER address. A replica takes the server it lands on
-# whole, so the fleet needs at least as many servers as replicas, each with at
-# least the requested number of cards.
+# Official vLLM image with remote driver libraries delivered separately.
+# Two-card A100 server; HAMi limits each remote GPU to 20480 MiB.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm-remote-gpu
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: vllm-remote-gpu
@@ -20,18 +18,65 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: registry.example.com/vllm-lupine:cuda-13.1
+          image: vllm/vllm-openai:v0.25.1-ubuntu2404
+          command: ["vllm", "serve", "Qwen/Qwen3-8B"]
           args:
-            - --model=meta-llama/Llama-3.1-8B-Instruct
             - --host=0.0.0.0
             - --port=8000
-            - --gpu-memory-utilization=0.85
+            - --dtype=float16
+            - --tensor-parallel-size=2
+            - --gpu-memory-utilization=0.8
+            - --max-model-len=4096
+            - --max-num-seqs=4
+            - --enforce-eager
+            - --attention-config.backend=TRITON_ATTN
+          env:
+            - name: TORCH_BLAS_PREFER_CUBLASLT
+              value: "0"
+            - name: CUDA_LAUNCH_BLOCKING
+              value: "1"
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
           resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
             limits:
+              memory: 32Gi
               nvidia.com/remote-gpu: 2
-              nvidia.com/remote-gpu-memory: 2000
+              nvidia.com/remote-gpu-memory: 20480
+          volumeMounts:
+            # HAMi populates this volume. PyTorch loads NCCL by absolute path.
+            - name: hami-lupine-client
+              mountPath: /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2
+              subPath: libnccl.so.2
+              readOnly: true
+            - name: shm
+              mountPath: /dev/shm
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        # Controllers validate mount references before the Pod admission webhook.
+        - name: hami-lupine-client
+          emptyDir: {}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+        - name: hf-cache
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -42,5 +87,5 @@ spec:
     app: vllm-remote-gpu
   ports:
     - port: 8000
-      targetPort: 8000
+      targetPort: http
   type: ClusterIP
