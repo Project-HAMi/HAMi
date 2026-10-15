@@ -832,6 +832,19 @@ devices:
       # `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`.
       resources: {}
   ascend:
+    # -- Per-chip objects shared with the separately deployed Ascend device plugin as `vnpus.configs`; overrides replace the whole list.
+    # String `chipName` must match the detected chip name; string `commonWord` identifies the HAMi device type.
+    # `resourceName`, `resourceMemoryName`, and `resourceCoreName` are resource-name strings for Pod device-count, memory, and core requests.
+    # Pod counts are non-negative integers. Memory requests and `memoryAllocatable`, `memoryCapacity`, and template `memory`
+    # use integer MiB (16384 = 16 GiB), without a `Gi` suffix. `memoryAllocatable` is usable memory; `memoryCapacity` is full-device capacity.
+    # `memoryFactor` is an integer request multiplier, applied only above 1.
+    # <br>Pod core requests in `hami-core`/`enpu` mode are integer percentages, 0-100 (`40` means 40%); ENPU treats 0 or omission as 100%.
+    # Configured `aiCore`/`aiCPU` values are integer hardware core counts, not percentages or virtual-device slots.
+    # `templates` lists driver slice definitions: a string `name`, integer `memory`, and optional integer `aiCore`/`aiCPU`.
+    # The named template must be supported by the driver; editing these numbers does not create a new driver template.
+    # The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected.
+    # See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing).
+    # @default -- Per-chip capacities and templates; see [values.yaml](values.yaml).
     configs:
     - chipName: 910A
       commonWord: Ascend910A
@@ -977,20 +990,36 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
-    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
-    # Default mode: template, hami-core (alias: hamiCore), or enpu. Node annotations take priority.
-    # Empty uses template, or hami-core when the deprecated hamiVnpuCore is true.
+    # -- RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset.
+    # Empty leaves the Pod unchanged; an existing Pod value is preserved.
+    runtimeClassName: ""
+    # -- Default VNPU mode: `template`, `hami-core` (alias: `hamiCore`), or `enpu`. Node capability annotations take priority.
+    # An empty or null value uses `template`, or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore` is true.
+    # An explicit mode takes precedence over that flag; unknown modes are rejected.
     hamiVnpuMode: ""
     # -- Positive integer virtual-device slots per physical Ascend NPU in hami-core and ENPU modes. Requires an ascend-device-plugin version supporting vnpus.deviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; ENPU is capped at 100. Template mode keeps its template calculation.
     deviceSplitCount: 10
-    enpuPolicy: elastic  # Default policy: fixed-share, elastic, or best-effort.
+    # -- Default ENPU policy: `fixed-share`, `elastic`, or `best-effort`; numeric string aliases `"1"`, `"2"`, and `"3"` are accepted.
+    # Empty uses `elastic`. A Pod's `huawei.com/enpu-policy` overrides this value; invalid policies are rejected for ENPU workloads.
+    enpuPolicy: elastic
+    # -- Enable Ascend support in the HAMi scheduler and add `devices.ascend.customresources` to the bundled kube-scheduler's extender configuration.
+    # Install the Ascend device plugin separately; this chart does not deploy it.
     enabled: false
+    # -- Not consumed by this chart. Configure the Ascend device plugin image in its separate deployment.
     image: ""
+    # -- Not consumed by this chart. Configure the Ascend device plugin's image pull policy in its separate deployment.
     imagePullPolicy: IfNotPresent
+    # -- Not consumed by this chart. Configure additional Ascend device plugin arguments in its separate deployment.
     extraArgs: []
+    # -- Not consumed by this chart. Configure the Ascend device plugin Pod's node selector in its separate deployment.
     nodeSelector:
       ascend: "on"
+    # -- Not consumed by this chart. Configure the Ascend device plugin Pod's tolerations in its separate deployment.
     tolerations: []
+    # -- Resource-name strings managed by the bundled kube-scheduler's extender when `devices.ascend.enabled` is true.
+    # Include the resource names from `devices.ascend.configs`; they are not added automatically.
+    # This does not register kubelet resources; configure an external kube-scheduler separately.
+    # @default -- Ascend device-count, memory, and core resource names; see [values.yaml](values.yaml).
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory

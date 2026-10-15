@@ -218,17 +218,6 @@ path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
 ## Device Configuration
 
 ### Huawei Ascend
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.ascend.enabled` | Whether to enable | `false` |
-| `devices.ascend.image` | Image | `""` |
-| `devices.ascend.imagePullPolicy` | Image pull policy | `IfNotPresent` |
-| `devices.ascend.extraArgs` | Extra arguments | `[]` |
-| `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
-| `devices.ascend.tolerations` | Tolerations | `[]` |
-| `devices.ascend.hamiVnpuMode` | Default VNPU mode: `template`, `hami-core` (alias `hamiCore`), or `enpu`; node capability annotations take precedence | `""` (resolves to `template`) |
-| `devices.ascend.enpuPolicy` | Default ENPU policy: `fixed-share`, `elastic`, or `best-effort`; numeric aliases `"1"`, `"2"`, and `"3"` are also accepted | `elastic` |
-| `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
 
 Set `devices.ascend.hamiVnpuMode` to choose the global default. The chart renders
 it as `vnpus.hamiVnpuMode` in the scheduler configuration. Empty uses `template`,
@@ -242,8 +231,10 @@ The device plugin's `hami-vnpu-core` and `hami.io/enpu` node annotations overrid
 the corresponding capability with `"true"` or `"false"`; absent annotations use
 the global mode. ENPU requires the companion Ascend device plugin with ENPU
 support. In a mixed cluster, use `devices.ascend.hamiVnpuMode: template` and enable
-ENPU only on the intended nodes through the plugin's `hami.io/enpu: "true"`
-annotation.
+ENPU only on the intended nodes through the separately deployed plugin's node
+configuration (`hamiVnpuMode: enpu`). The plugin publishes the corresponding
+`hami.io/enpu` annotation; changing the Node annotation alone does not change
+the plugin's mode and is overwritten by its next report.
 
 Pods select ENPU explicitly with `huawei.com/vnpu-mode: enpu`. The scheduler also
 accepts `ubs-virt` and `vcann-rt`, matching the mode aliases in the companion
@@ -366,6 +357,17 @@ More values will be added in follow-up PRs.
 | devices.amd.resourceMemoryPercentageName | string | `"amd.com/gpumem-percentage"` | Resource name for requesting GPU memory as a percentage (0-100). If both a positive fixed memory size and a percentage are set, the fixed size takes priority. If either value is explicitly set to 0 and the other is not positive, the full GPU memory is used. If neither is set, `defaultMemory` is used. An empty value disables percentage memory requests. |
 | devices.amd.runtimeClassName | string | `""` | RuntimeClass the admission webhook adds to AMD GPU Pods that do not already specify one. The chart does not create it; empty leaves the Pod unchanged. |
 | devices.ascend.deviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core and ENPU modes. Requires an ascend-device-plugin version supporting vnpus.deviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; ENPU is capped at 100. Template mode keeps its template calculation. |
+| devices.ascend.configs | list | Per-chip capacities and templates; see [values.yaml](values.yaml). | Per-chip objects shared with the separately deployed Ascend device plugin as `vnpus.configs`; overrides replace the whole list. String `chipName` must match the detected chip name; string `commonWord` identifies the HAMi device type. `resourceName`, `resourceMemoryName`, and `resourceCoreName` are resource-name strings for Pod device-count, memory, and core requests. Pod counts are non-negative integers. Memory requests and `memoryAllocatable`, `memoryCapacity`, and template `memory` use integer MiB (16384 = 16 GiB), without a `Gi` suffix. `memoryAllocatable` is usable memory; `memoryCapacity` is full-device capacity. `memoryFactor` is an integer request multiplier, applied only above 1. <br>Pod core requests in `hami-core`/`enpu` mode are integer percentages, 0-100 (`40` means 40%); ENPU treats 0 or omission as 100%. Configured `aiCore`/`aiCPU` values are integer hardware core counts, not percentages or virtual-device slots. `templates` lists driver slice definitions: a string `name`, integer `memory`, and optional integer `aiCore`/`aiCPU`. The named template must be supported by the driver; editing these numbers does not create a new driver template. The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected. See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing). |
+| devices.ascend.customresources | list | Ascend device-count, memory, and core resource names; see [values.yaml](values.yaml). | Resource-name strings managed by the bundled kube-scheduler's extender when `devices.ascend.enabled` is true. Include the resource names from `devices.ascend.configs`; they are not added automatically. This does not register kubelet resources; configure an external kube-scheduler separately. |
+| devices.ascend.enabled | bool | `false` | Enable Ascend support in the HAMi scheduler and add `devices.ascend.customresources` to the bundled kube-scheduler's extender configuration. Install the Ascend device plugin separately; this chart does not deploy it. |
+| devices.ascend.enpuPolicy | string | `"elastic"` | Default ENPU policy: `fixed-share`, `elastic`, or `best-effort`; numeric string aliases `"1"`, `"2"`, and `"3"` are accepted. Empty uses `elastic`. A Pod's `huawei.com/enpu-policy` overrides this value; invalid policies are rejected for ENPU workloads. |
+| devices.ascend.extraArgs | list | `[]` | Not consumed by this chart. Configure additional Ascend device plugin arguments in its separate deployment. |
+| devices.ascend.hamiVnpuMode | string | `""` | Default VNPU mode: `template`, `hami-core` (alias: `hamiCore`), or `enpu`. Node capability annotations take priority. An empty or null value uses `template`, or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore` is true. An explicit mode takes precedence over that flag; unknown modes are rejected. |
+| devices.ascend.image | string | `""` | Not consumed by this chart. Configure the Ascend device plugin image in its separate deployment. |
+| devices.ascend.imagePullPolicy | string | `"IfNotPresent"` | Not consumed by this chart. Configure the Ascend device plugin's image pull policy in its separate deployment. |
+| devices.ascend.nodeSelector | object | `{"ascend":"on"}` | Not consumed by this chart. Configure the Ascend device plugin Pod's node selector in its separate deployment. |
+| devices.ascend.runtimeClassName | string | `""` | RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset. Empty leaves the Pod unchanged; an existing Pod value is preserved. |
+| devices.ascend.tolerations | list | `[]` | Not consumed by this chart. Configure the Ascend device plugin Pod's tolerations in its separate deployment. |
 | devices.awsneuron.customresources | list | `["aws.amazon.com/neuron","aws.amazon.com/neuroncore"]` | List of resource-name strings managed by the scheduler extender. Include the names configured by `devices.awsneuron.resourceCountName` and `devices.awsneuron.resourceCoreName`; they are not added automatically. |
 | devices.awsneuron.resourceCoreName | string | `"aws.amazon.com/neuroncore"` | Resource name for positive integer NeuronCore counts. Cores per device depend on the node; one core is not always half a device. See the [NeuronCore workload example](https://project-hami.io/docs/next/userguide/awsneuron-device/examples/allocate-neuron-core). |
 | devices.awsneuron.resourceCountName | string | `"aws.amazon.com/neuron"` | Resource name for positive integer counts of whole Neuron devices. Takes precedence over `devices.awsneuron.resourceCoreName` requests when both are present. |
