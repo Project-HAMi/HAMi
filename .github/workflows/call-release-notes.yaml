@@ -62,8 +62,6 @@ jobs:
         #   -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
         #   https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${latest_tag}
         
-        # cat result.json | yq '.body' > docs/CHANGELOG/${latest_tag}.md
-
         # rm -rf result.json
 
 
