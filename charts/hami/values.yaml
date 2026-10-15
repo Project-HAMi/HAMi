@@ -982,6 +982,15 @@ devices:
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
   iluvatar:
+    # -- List of Iluvatar device definitions used when `devices.iluvatar.enabled` is true.
+    # Each object contains string fields `chipName`, `commonWord`, `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`.
+    # `commonWord` must be unique and match the device plugin's type and annotation names; `chipName` is not used for matching by the HAMi scheduler.
+    # The resource-name strings identify Pod requests: count is a non-negative integer (0 requests no devices); memory is a non-negative integer in 256 MiB units (64 = 16 GiB, without `Mi` or `Gi` suffixes).
+    # Zero or omitted memory requests use the full device memory. For one GPU, cores are an integer from 0 to 100 (40 means 40%, not `40%`); for multiple GPUs, admission sets 100% cores per GPU.
+    # See [Iluvatar workload examples](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#running-iluvatar-jobs).
+    # Overrides replace the whole list; supply complete objects because omitted fields are not filled from defaults. An empty list removes all Iluvatar device definitions.
+    # A non-empty `device-config.content` or bundled `files/device-config.yaml` takes precedence over this list.
+    # @default -- Device definitions for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     configs:
       - chipName: MR-V100
         commonWord: MR-V100
@@ -1003,7 +1012,13 @@ devices:
         resourceCountName: iluvatar.ai/BI-V100-vgpu
         resourceMemoryName: iluvatar.ai/BI-V100.vMem
         resourceCoreName: iluvatar.ai/BI-V100.vCore
+    # -- Enable Iluvatar device handling in the HAMi scheduler and include `devices.iluvatar.customresources` in the bundled kube-scheduler's extender configuration.
+    # Requires a separately installed Iluvatar gpu-manager; see [Iluvatar setup](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#enabling-gpu-sharing-support).
     enabled: false
+    # -- Resource-name strings delegated to the HAMi scheduler extender so kube-scheduler skips its own checks for these Iluvatar resources.
+    # Used only when both `devices.iluvatar.enabled` and `scheduler.kubeScheduler.enabled` are true.
+    # Include the resource names from `devices.iluvatar.configs`; they are not added automatically. Overrides replace the whole list.
+    # @default -- Count, core, and memory resource names for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     customresources:
       - iluvatar.ai/BI-V100-vgpu
       - iluvatar.ai/BI-V100.vCore

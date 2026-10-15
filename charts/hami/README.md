@@ -255,12 +255,6 @@ Set `huawei.com/enpu-policy` on a Pod to override `devices.ascend.enpuPolicy`.
 Admission records the selected policy on the Pod so later changes to the default
 do not change existing tenants' policies. Invalid policies are rejected.
 
-### Iluvatar
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.iluvatar.enabled` | Whether to enable | `false` |
-| `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |
-
 ## Device Config Overrides
 
 Device configuration defaults are defined in `values.yaml`. Override individual
@@ -381,6 +375,9 @@ More values will be added in follow-up PRs.
 | devices.hygon.resourceCoreName | string | `"hygon.com/hcucores"` | Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute. |
 | devices.hygon.resourceCountName | string | `"hygon.com/hcunum"` | Resource name for non-negative integer vHCU counts. Required for HCU memory or core requests; `0` requests no device. Must match the vendor device plugin. See [HCU workload examples](https://project-hami.io/docs/next/userguide/hygon-device/examples/allocate-core-and-memory). |
 | devices.hygon.resourceMemoryName | string | `"hygon.com/hcumem"` | Resource name for the memory requested on each vHCU, in integer MiB units, scaled by `devices.hygon.memoryFactor` when it is greater than 1. Omission or `0` requests the selected HCU's full memory. |
+| devices.iluvatar.configs | list | Device definitions for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml). | List of Iluvatar device definitions used when `devices.iluvatar.enabled` is true. Each object contains string fields `chipName`, `commonWord`, `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`. `commonWord` must be unique and match the device plugin's type and annotation names; `chipName` is not used for matching by the HAMi scheduler. The resource-name strings identify Pod requests: count is a non-negative integer (0 requests no devices); memory is a non-negative integer in 256 MiB units (64 = 16 GiB, without `Mi` or `Gi` suffixes). Zero or omitted memory requests use the full device memory. For one GPU, cores are an integer from 0 to 100 (40 means 40%, not `40%`); for multiple GPUs, admission sets 100% cores per GPU. See [Iluvatar workload examples](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#running-iluvatar-jobs). Overrides replace the whole list; supply complete objects because omitted fields are not filled from defaults. An empty list removes all Iluvatar device definitions. A non-empty `device-config.content` or bundled `files/device-config.yaml` takes precedence over this list. |
+| devices.iluvatar.customresources | list | Count, core, and memory resource names for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml). | Resource-name strings delegated to the HAMi scheduler extender so kube-scheduler skips its own checks for these Iluvatar resources. Used only when both `devices.iluvatar.enabled` and `scheduler.kubeScheduler.enabled` are true. Include the resource names from `devices.iluvatar.configs`; they are not added automatically. Overrides replace the whole list. |
+| devices.iluvatar.enabled | bool | `false` | Enable Iluvatar device handling in the HAMi scheduler and include `devices.iluvatar.customresources` in the bundled kube-scheduler's extender configuration. Requires a separately installed Iluvatar gpu-manager; see [Iluvatar setup](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#enabling-gpu-sharing-support). |
 | devices.kunlun.customresources | list | `[]` | Additional resource-name strings managed by the scheduler extender when `devices.kunlun.enabled` is true. Standard names are added automatically from the resource fields. |
 | devices.kunlun.enabled | bool | `true` | Add Kunlun resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately. |
 | devices.kunlun.resourceCountName | string | `"kunlunxin.com/xpu"` | Resource name for non-negative integer physical XPU counts. Must match the device plugin and Pod resources. See [Kunlunxin scheduling](https://project-hami.io/docs/next/userguide/kunlunxin-device/enable-kunlunxin-schedule). |
