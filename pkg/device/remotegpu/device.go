@@ -266,7 +266,7 @@ func armMemoryLimit(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 		if existing.Value != "" {
 			// Reinvocation must not add a second copy of HAMi-core.
 			var other []string
-			for _, entry := range strings.Fields(existing.Value) {
+			for entry := range strings.FieldsSeq(existing.Value) {
 				if entry != preload {
 					other = append(other, entry)
 				}

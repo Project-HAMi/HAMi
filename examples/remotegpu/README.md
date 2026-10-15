@@ -18,12 +18,23 @@ compatible with the server and the workload ABI. The chart defaults to
 Lupine build, override this chart setting rather than editing the examples.
 HAMi sets `NVIDIA_VISIBLE_DEVICES=void` to avoid mounting a local driver.
 
-The image must contain `/opt/lupine/lib` and
-`/usr/lib/x86_64-linux-gnu/libnghttp2.so.14`. The injected driver requires a
-compatible libc and its runtime dependencies; copying libraries does not make
-an Ubuntu build portable to every base image. A literal workload
-`LD_LIBRARY_PATH` is preserved after the injected directory. A value supplied
-through `valueFrom` cannot be composed at admission and is rejected.
+Automatic library delivery currently targets the CUDA and vLLM example images,
+which already include `/usr/local/nvidia/lib64` in their library search paths.
+HAMi mounts the Lupine CUDA and NVML shims and `libnghttp2.so.14` as individual
+files there, preserving other files in that directory. The complete client
+library directory is also available at `/opt/lupine/lib` for explicit mounts,
+such as the vLLM NCCL mount below. `LD_LIBRARY_PATH` is not injected or changed.
+
+The client image must contain `/opt/lupine/lib` and provide `sh` and `cp`.
+Delivery copies only the known missing dependency `libnghttp2.so.14`, searching
+Debian/Ubuntu multiarch directories and the common `/usr/lib64`, `/lib64`,
+`/usr/lib`, and `/lib` directories in the client image. A missing library fails
+delivery with a diagnostic. Other dependencies, including OpenSSL, libstdc++,
+and glibc, are provided by the workload image and must have compatible versions.
+This is a limited compatibility measure, not a complete dependency bundler;
+arbitrary workload images may need explicit library mounts or manual delivery.
+Only HAMi-core is added to `LD_PRELOAD` when memory enforcement is requested;
+Lupine shims are loaded on demand.
 
 For images that already deliver their own libraries, set the Pod annotation
 `hami.io/remote-gpu-client-injection: "disabled"`. Setting the chart's

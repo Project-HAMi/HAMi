@@ -19,7 +19,6 @@ package remotegpu
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -35,10 +34,28 @@ func clientInjectionEnabled(pod *corev1.Pod) bool {
 	return pod != nil && RemoteGPUClientImage != "" && pod.Annotations[ClientInjectionAnnotation] != "disabled"
 }
 
+// Copy the known missing dependency from common Debian/Ubuntu and RPM layouts.
+// This intentionally does not attempt to bundle every runtime dependency.
+const clientDeliveryScript = `
+source=$1
+target=$2
+shift 2
+cp -a "$source/." "$target/"
+[ "$#" -gt 0 ] || set -- /usr/lib/*-linux-gnu /lib/*-linux-gnu /usr/lib64 /lib64 /usr/lib /lib
+for directory in "$@"; do
+    if [ -f "$directory/libnghttp2.so.14" ]; then
+        cp -L "$directory/libnghttp2.so.14" "$target/libnghttp2.so.14"
+        exit 0
+    fi
+done
+echo "libnghttp2.so.14 not found in common client image library directories" >&2
+exit 1
+`
+
 func clientDeliveryContainer() corev1.Container {
 	return corev1.Container{
 		Name: clientVolumeName, Image: RemoteGPUClientImage,
-		Command:      []string{"sh", "-ec", "cp -a /opt/lupine/lib/. /lupine-lib/; cp -L /usr/lib/x86_64-linux-gnu/libnghttp2.so.14 /lupine-lib/"},
+		Command:      []string{"sh", "-ec", clientDeliveryScript, clientVolumeName, clientMountPath, "/lupine-lib"},
 		Env:          []corev1.EnvVar{{Name: "NVIDIA_VISIBLE_DEVICES", Value: "void"}},
 		VolumeMounts: []corev1.VolumeMount{{Name: clientVolumeName, MountPath: "/lupine-lib"}},
 	}
@@ -66,17 +83,12 @@ func armClientLibraries(ctr *corev1.Container, pod *corev1.Pod) error {
 			return fmt.Errorf("reserved remote GPU container name %q conflicts with workload", clientVolumeName)
 		}
 	}
-	ld := clientMountPath + ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
-	if e := envOf(ctr, "LD_LIBRARY_PATH"); e != nil {
-		if e.ValueFrom != nil {
-			return fmt.Errorf("container %q takes LD_LIBRARY_PATH from a source; set it literally or disable remote GPU client injection", ctr.Name)
-		}
-		ld = e.Value
-		if !strings.HasPrefix(ld, clientMountPath+":") && ld != clientMountPath {
-			ld = clientMountPath + ":" + ld
-		}
-	}
+	// CUDA and vLLM example images already search this directory. Mount files
+	// individually so unrelated image libraries remain visible.
 	mounts := []corev1.VolumeMount{{Name: clientVolumeName, MountPath: clientMountPath, ReadOnly: true}}
+	for _, library := range []string{"libcuda.so.1", "libnvidia-ml.so.1", "libnghttp2.so.14"} {
+		mounts = append(mounts, corev1.VolumeMount{Name: clientVolumeName, MountPath: "/usr/local/nvidia/lib64/" + library, SubPath: library, ReadOnly: true})
+	}
 	for _, desired := range mounts {
 		for _, existing := range ctr.VolumeMounts {
 			if existing.MountPath == desired.MountPath && !reflect.DeepEqual(existing, desired) {
@@ -93,7 +105,6 @@ func armClientLibraries(ctr *corev1.Container, pod *corev1.Pod) error {
 			ctr.VolumeMounts = append(ctr.VolumeMounts, desired)
 		}
 	}
-	setEnv(ctr, corev1.EnvVar{Name: "LD_LIBRARY_PATH", Value: ld})
 	setEnv(ctr, corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: "void"})
 	for _, name := range []string{"LUPINE_LIB", "LUPINE_LIBCUDA"} {
 		setEnv(ctr, corev1.EnvVar{Name: name, Value: clientMountPath + "/libcuda.so.1"})

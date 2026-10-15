@@ -17,7 +17,11 @@ limitations under the License.
 package remotegpu
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -43,7 +47,7 @@ func TestClientDeliverySharedAndIdempotent(t *testing.T) {
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("a"), remoteClientContainer("b"), {Name: "sidecar"}}}}
 	pod.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "LD_LIBRARY_PATH", Value: "/custom/lib"}, {Name: ldPreloadEnv, Value: "/custom/preload.so"}}
 	pod.Spec.Containers[0].Resources.Limits["nvidia.com/remote-gpu-memory"] = resource.MustParse("3000")
-	for round := 0; round < 2; round++ {
+	for range 2 {
 		for i := range pod.Spec.Containers {
 			if _, err := d.MutateAdmission(&pod.Spec.Containers[i], pod); err != nil {
 				t.Fatal(err)
@@ -57,7 +61,7 @@ func TestClientDeliverySharedAndIdempotent(t *testing.T) {
 	if envValue(&pod.Spec.Containers[0], ldPreloadEnv) != libMountPath+"/libvgpu.so /custom/preload.so" {
 		t.Fatal("preload duplicated or lost")
 	}
-	if envValue(&pod.Spec.Containers[0], "LD_LIBRARY_PATH") != clientMountPath+":/custom/lib" {
+	if envValue(&pod.Spec.Containers[0], "LD_LIBRARY_PATH") != "/custom/lib" {
 		t.Fatal("lost workload library path")
 	}
 	if len(pod.Spec.Containers[2].VolumeMounts) != 0 || len(pod.Spec.Containers[2].Env) != 0 {
@@ -102,16 +106,52 @@ func TestClientDeliveryPreservesExplicitLibraryMount(t *testing.T) {
 	mount := corev1.VolumeMount{Name: clientVolumeName, MountPath: "/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2", SubPath: "libnccl.so.2", ReadOnly: true}
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("vllm")}}}
 	pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{mount}
-	for round := 0; round < 2; round++ {
+	for range 2 {
 		if _, err := d.MutateAdmission(&pod.Spec.Containers[0], pod); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(pod.Spec.Containers[0].VolumeMounts) != 2 || !reflect.DeepEqual(pod.Spec.Containers[0].VolumeMounts[0], mount) {
+	if len(pod.Spec.Containers[0].VolumeMounts) != 5 || !reflect.DeepEqual(pod.Spec.Containers[0].VolumeMounts[0], mount) {
 		t.Fatal("workload library mount changed or duplicated")
 	}
 	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].Name != mount.Name || pod.Spec.Volumes[0].EmptyDir == nil {
 		t.Fatal("referenced client volume not supplied")
+	}
+}
+
+// Library delivery must also work when enforcement is disabled globally.
+func TestClientDeliveryWithoutCore(t *testing.T) {
+	d := clientTestDevice(t)
+	previous := RemoteGPULibImage
+	RemoteGPULibImage = ""
+	t.Cleanup(func() { RemoteGPULibImage = previous })
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("app")}}}
+	ctr := &pod.Spec.Containers[0]
+	if _, err := d.MutateAdmission(ctr, pod); err != nil {
+		t.Fatal(err)
+	}
+	FinalizeAdmission(pod)
+	if len(pod.Spec.InitContainers) != 1 || len(ctr.VolumeMounts) != 4 {
+		t.Fatal("unexpected preparation or cache mounts")
+	}
+	if envOf(ctr, ldPreloadEnv) != nil {
+		t.Fatal("client delivery must not preload Lupine")
+	}
+	if envOf(ctr, "LD_LIBRARY_PATH") != nil {
+		t.Fatal("must preserve image library search paths")
+	}
+}
+
+func TestClientDeliveryPreservesSourcedLibraryPath(t *testing.T) {
+	d := clientTestDevice(t)
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("app")}}}
+	original := corev1.EnvVar{Name: "LD_LIBRARY_PATH", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "path"}}}
+	pod.Spec.Containers[0].Env = []corev1.EnvVar{original}
+	if _, err := d.MutateAdmission(&pod.Spec.Containers[0], pod); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(envOf(&pod.Spec.Containers[0], "LD_LIBRARY_PATH"), &original) {
+		t.Fatal("changed sourced library path")
 	}
 }
 
@@ -139,11 +179,11 @@ func TestClientDeliveryOptOut(t *testing.T) {
 func TestClientDeliveryRejectsConflicts(t *testing.T) {
 	d := clientTestDevice(t)
 	cases := map[string]func(*corev1.Pod){
-		"sourced library path": func(p *corev1.Pod) {
-			p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "LD_LIBRARY_PATH", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Key: "path"}}}}
-		},
 		"mount collision": func(p *corev1.Pod) {
 			p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "mine", MountPath: clientMountPath}}
+		},
+		"driver mount collision": func(p *corev1.Pod) {
+			p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "mine", MountPath: "/usr/local/nvidia/lib64/libcuda.so.1"}}
 		},
 		"volume collision": func(p *corev1.Pod) {
 			p.Spec.Volumes = []corev1.Volume{{Name: clientVolumeName, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mine"}}}}
@@ -174,5 +214,48 @@ func TestFinalizeAdmissionLeavesNonGPUInitOrderUnchanged(t *testing.T) {
 	FinalizeAdmission(p)
 	if !reflect.DeepEqual(before, p) {
 		t.Fatal("reordered non-GPU workload")
+	}
+}
+
+// Exercise the copy command against common client-image layouts.
+func TestClientDeliveryKnownDependency(t *testing.T) {
+	for _, layout := range []string{"usr/lib/x86_64-linux-gnu", "usr/lib/aarch64-linux-gnu", "usr/lib64", "lib64", "usr/lib", "lib"} {
+		t.Run(layout, func(t *testing.T) {
+			root := t.TempDir()
+			source, target, libraries := filepath.Join(root, "driver"), filepath.Join(root, "delivered"), filepath.Join(root, layout)
+			for _, path := range []string{source, target, libraries} {
+				if err := os.MkdirAll(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for path, data := range map[string]string{
+				filepath.Join(source, "libcuda.so.1"):            "driver",
+				filepath.Join(libraries, "libnghttp2.so.14.0.0"): "nghttp2",
+				filepath.Join(libraries, "libssl.so.3"):          "unrelated",
+			} {
+				if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink("libnghttp2.so.14.0.0", filepath.Join(libraries, "libnghttp2.so.14")); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, filepath.Join(root, "missing"), libraries)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("delivery: %v: %s", err, output)
+			}
+			got, err := os.ReadFile(filepath.Join(target, "libnghttp2.so.14"))
+			if err != nil || string(got) != "nghttp2" {
+				t.Fatalf("dependency: %q, %v", got, err)
+			}
+			if _, err := os.Stat(filepath.Join(target, "libssl.so.3")); !os.IsNotExist(err) {
+				t.Fatalf("must not copy unrelated libraries: %v", err)
+			}
+			cmd = exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, filepath.Join(root, "missing"))
+			output, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "libnghttp2.so.14 not found") {
+				t.Fatalf("missing dependency: %v: %s", err, output)
+			}
+		})
 	}
 }
