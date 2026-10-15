@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -123,6 +124,14 @@ func TestBindRejectsRemoteGPUReservationOutsideSelector(t *testing.T) {
 	})
 	pod.UID = "remote-gpu-uid"
 	s := schedulerWithPods(t, pod)
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "client-node"}}
+	_, err := s.kubeClient.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	nodeFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour)
+	nodeIndexer := nodeFactory.Core().V1().Nodes().Informer().GetIndexer()
+	require.NoError(t, nodeIndexer.Add(node))
+	s.nodeLister = nodeFactory.Core().V1().Nodes().Lister()
+	s.eventRecorder = record.NewFakeRecorder(10)
 	reserved := device.PodDevices{remotegpu.RemoteGPUCommonWord: device.PodSingleDevice{
 		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: remotegpu.RemoteGPUCommonWord}},
 	}}
