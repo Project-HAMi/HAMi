@@ -72,8 +72,11 @@ const (
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
 	// RemoteMode marks a GPU this node serves over the network through lupine
-	// rather than to pods of its own. The remote-gpu backend hands such a card
-	// out cluster wide, so this backend must leave it alone.
+	// rather than to pods of its own. It is configured per-node via
+	// operatingmode in the device-plugin ConfigMap (peer to hami-core / mig);
+	// the device plugin then applies the lupine-server discovery label. The
+	// remote-gpu backend hands such a card out cluster wide, so this backend
+	// must leave it alone.
 	RemoteMode = "remote"
 
 	// WholeGPUUsedCores is the cores percentage recorded in the
@@ -184,11 +187,13 @@ type NodeConfig struct {
 	// Name is the node the entry applies to, or NodeConfigFallbackName.
 	Name string `json:"name"`
 	// NodeLabelSelector selects nodes by label when no entry names the node.
-	NodeLabelSelector            *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
-	OperatingMode                string                `json:"operatingmode"`
-	Migstrategy                  string                `json:"migstrategy"`
-	FilterDevice                 *FilterDevice         `json:"filterdevices"`
-	EnableGetPreferredAllocation *bool                 `json:"enablegetpreferredallocation"`
+	NodeLabelSelector *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
+	// OperatingMode selects hami-core, mig, or remote. The device plugin
+	// mirrors remote mode onto the Lupine discovery label.
+	OperatingMode                string        `json:"operatingmode"`
+	Migstrategy                  string        `json:"migstrategy"`
+	FilterDevice                 *FilterDevice `json:"filterdevices"`
+	EnableGetPreferredAllocation *bool         `json:"enablegetpreferredallocation"`
 }
 
 type DevicePluginConfigs struct {

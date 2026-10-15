@@ -268,35 +268,54 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	}
 	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath, node.Labels)
 	if err != nil {
-		klog.Errorf("readFromConfigFile err:%s", err.Error())
+		return nil, "", fmt.Errorf("load node configuration %s: %w", ConfigFilePath, err)
 	}
 	if os.Getenv("REPORT_NODE_CAPACITY") == "true" || os.Getenv("REPORT_NODE_CAPACITY") == "1" {
 		t := true
 		sConfig.NvidiaConfig.ReportNodeCapacity = &t
 	}
-	return sConfig, resolveOperatingMode(mode, node), nil
+	mode = resolveOperatingMode(mode)
+	if err := syncLupineServerLabel(mode, node); err != nil {
+		return nil, "", fmt.Errorf("sync %s for mode %q: %w", remotegpu.LupineServerLabel, mode, err)
+	}
+	return sConfig, mode, nil
 }
 
-// resolveOperatingMode lets the node's lupine label decide whether this plugin
-// serves its GPUs over the network rather than to pods of its own.
-//
-// The label is the operator's single declaration that a node belongs to the
-// lupine fleet: the scheduler's pool discovers servers by it and reads the
-// port from its value. Taking the mode from a second place as well, the
-// per-node config file, would let the two drift and leave a node half in the
-// fleet, serving lupine while still advertising the same cards to kubelet.
-func resolveOperatingMode(configured string, node *corev1.Node) string {
-	if node != nil {
-		if _, ok := node.Labels[remotegpu.LupineServerLabel]; ok {
-			return nvidia.RemoteMode
-		}
-	}
-	if configured == nvidia.RemoteMode {
-		klog.InfoS("ignoring the configured remote operating mode, this node carries no lupine server label",
-			"label", remotegpu.LupineServerLabel, "using", nvidia.HamiCoreMode)
+// resolveOperatingMode returns the operating mode from the per-node ConfigMap
+// entry. remote sits beside hami-core and mig as a configured mode; the
+// device plugin then mirrors it onto the lupine-server label the scheduler's
+// pool and the chart-managed lupine DaemonSet still key on.
+func resolveOperatingMode(configured string) string {
+	if configured == "" {
 		return nvidia.HamiCoreMode
 	}
 	return configured
+}
+
+// syncLupineServerLabel keeps the discovery label in lockstep with the
+// configured operating mode. The pool lists lupine servers by this label and
+// the chart-managed server DaemonSet selects on an empty value; a non-empty
+// value names a custom port for a server managed outside the chart, so an
+// already-labelled remote node keeps its value.
+func syncLupineServerLabel(mode string, node *corev1.Node) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	_, labelled := node.Labels[remotegpu.LupineServerLabel]
+	if mode == nvidia.RemoteMode {
+		if labelled {
+			return nil
+		}
+		klog.InfoS("applying lupine server label for remote operating mode",
+			"node", node.Name, "label", remotegpu.LupineServerLabel)
+		return util.PatchNodeLabels(node, map[string]string{remotegpu.LupineServerLabel: ""})
+	}
+	if !labelled {
+		return nil
+	}
+	klog.InfoS("removing lupine server label; operating mode is no longer remote",
+		"node", node.Name, "label", remotegpu.LupineServerLabel, "mode", mode)
+	return util.RemoveNodeLabels(node, remotegpu.LupineServerLabel)
 }
 
 // resolveReportNodeCapacity lets a per-node Nodeconfig entry decide whether
@@ -449,10 +468,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	}
 
 	if plugin.migMgr == nil {
-		return fmt.Errorf("MIG manager is not configured")
+		return fmt.Errorf("device-plugin NVML session manager is not configured (operating mode %q)", plugin.operatingMode)
 	}
 	if err := plugin.migMgr.Init(); err != nil {
-		return fmt.Errorf("init MIG instance manager: %w", err)
+		return fmt.Errorf("initialize device-plugin NVML session (operating mode %q): %w", plugin.operatingMode, err)
 	}
 
 	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()

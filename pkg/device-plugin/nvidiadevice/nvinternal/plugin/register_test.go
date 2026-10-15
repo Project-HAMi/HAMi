@@ -820,3 +820,27 @@ func TestRegisterInAnnotationReportNodeCapacityDefaultsAndPatchError(t *testing.
 		}
 	}
 }
+
+// Remote Start deliberately leaves the MIG manager inactive. Registration and
+// topology queries must still use the standalone NVML path.
+func TestRemoteRegistrationWithInactiveMIGManager(t *testing.T) {
+	originalInit, originalScore := nvmlInit, calculateGPUScore
+	t.Cleanup(func() { nvmlInit, calculateGPUScore = originalInit, originalScore })
+	initialized := false
+	nvmlInit = func() nvml.Return { initialized = true; return nvml.ERROR_LIBRARY_NOT_FOUND }
+	plugin := &NvidiaDevicePlugin{
+		operatingMode: nvidia.RemoteMode,
+		migMgr:        &MigInstanceManager{},
+		rm:            &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }},
+	}
+	_, err := plugin.getAPIDevices()
+	if !initialized || err == nil {
+		t.Fatalf("remote registration must initialize NVML independently: called=%v, err=%v", initialized, err)
+	}
+	scored := false
+	calculateGPUScore = func(available []string) (nvidia.ListDeviceScore, bool, error) { scored = true; return nil, false, nil }
+	_, _, err = plugin.topologyScore(nil)
+	if !scored || err != nil {
+		t.Fatalf("remote topology must not use an inactive MIG session: called=%v, err=%v", scored, err)
+	}
+}

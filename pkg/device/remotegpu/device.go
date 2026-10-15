@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -74,6 +75,7 @@ const (
 var (
 	RemoteGPUResourceCount  string
 	RemoteGPUResourceMemory string
+	RemoteGPUClientImage    string
 	RemoteGPULibImage       string
 	RemoteGPUSessionImage   string
 
@@ -95,6 +97,7 @@ func InitRemoteGPUDevice(config RemoteGPUConfig) *RemoteGPUDevices {
 	RemoteGPUResourceCount = config.ResourceCountName
 	RemoteGPUResourceMemory = config.ResourceMemoryName
 	RemoteGPULibImage = config.LibImage
+	RemoteGPUClientImage = config.ClientImage
 	RemoteGPUSessionImage = config.SessionImage
 	port := config.DefaultPort
 	if port <= 0 || port > 65535 {
@@ -192,6 +195,9 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
 		return false, nil
 	}
+	if err := armClientLibraries(ctr, pod); err != nil {
+		return false, err
+	}
 	needsLib, err := armMemoryLimit(ctr, pod)
 	if err != nil {
 		return false, err
@@ -218,6 +224,9 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 	// array, and every write above would then land in the abandoned one.
 	if needsLib {
 		addLibDelivery(pod)
+	}
+	if clientInjectionEnabled(pod) {
+		addClientDelivery(pod)
 	}
 	return true, nil
 }
@@ -254,8 +263,17 @@ func armMemoryLimit(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 			return false, fmt.Errorf("container %q takes %s from a source, which cannot be combined with the %s memory limit: set it literally, or drop the %s request",
 				ctr.Name, ldPreloadEnv, RemoteGPUCommonWord, RemoteGPUResourceMemory)
 		}
-		if existing.Value != "" && existing.Value != preload {
-			preload += " " + existing.Value
+		if existing.Value != "" {
+			// Reinvocation must not add a second copy of HAMi-core.
+			var other []string
+			for entry := range strings.FieldsSeq(existing.Value) {
+				if entry != preload {
+					other = append(other, entry)
+				}
+			}
+			if len(other) > 0 {
+				preload += " " + strings.Join(other, " ")
+			}
 		}
 	}
 	mountLib(ctr)

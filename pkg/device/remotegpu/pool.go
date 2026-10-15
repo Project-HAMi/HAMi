@@ -36,8 +36,9 @@ import (
 
 const (
 	// LupineServerLabel marks a GPU node as serving its GPUs through lupine.
-	// The label value is the lupine listen port; an empty value means
-	// RemoteGPUConfig.DefaultPort.
+	// The NVIDIA device plugin applies it when the per-node ConfigMap sets
+	// operatingmode to remote (peer to hami-core / mig). The label value is the
+	// lupine listen port; an empty value means RemoteGPUConfig.DefaultPort.
 	LupineServerLabel = "hami.io/lupine-server"
 
 	// nvidiaRegisterAnnos is where the stock HAMi NVIDIA device plugin already
