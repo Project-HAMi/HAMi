@@ -684,16 +684,6 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node, re
 
 // AllocatableHealth reports whether a node should stay in the scheduler cache,
 // and whether its device list should be read again.
-//
-// allocatable is the quantity the device plugin actually publishes.
-// Zero or less is unhealthy and drops the previous registration, so a plugin
-// that has stopped advertising the resource cannot keep scheduling on a
-// leftover annotation or Capacity entry.
-//
-// While the node is healthy, devices are read again only when cardCount or
-// anno differs from the last registration. anno is whatever describes the
-// cards beyond the count: a device annotation, a card-id label, or the
-// capacity values the device list is built from.
 func AllocatableHealth(devType, nodeName string, allocatable, cardCount int64, anno string) (bool, bool) {
 	if allocatable <= 0 {
 		ForgetRegisteredDevices(devType, nodeName)
