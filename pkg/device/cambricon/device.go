@@ -200,7 +200,26 @@ func (dev *CambriconDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	// Cards are derived from the core resource, which is what the plugin publishes.
+	coreQty := n.Status.Allocatable[corev1.ResourceName(MLUResourceCores)]
+	memQty := n.Status.Capacity[corev1.ResourceName(MLUResourceMemory)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(MLUResourceCores)]
+	cores := coreQty.Value()
+	mem := memQty.Value()
+	capacityCores := capacityQty.Value()
+	cards := int64(0)
+	if cores > 0 {
+		// GetNodeDevices keeps a remainder as its own card: 150 core units are 2 cards.
+		cards = (cores + 99) / 100
+	}
+	label := ""
+	if n.Labels != nil {
+		label = n.Labels[MLUModelLabel]
+	}
+	return device.AllocatableHealth(devType, n.Name, cores, cards, fmt.Sprintf("%s\n%d\n%d", label, mem, capacityCores))
 }
 
 func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {

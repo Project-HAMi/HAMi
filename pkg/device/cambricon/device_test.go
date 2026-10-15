@@ -151,6 +151,59 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 }
 
+func Test_CheckHealth(t *testing.T) {
+	InitMLUDevice(CambriconConfig{
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	dev := &CambriconDevices{}
+
+	node := func(name string, allocatableCores, capacityCores, memory int64, model string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{}},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{},
+				Capacity:    corev1.ResourceList{},
+			},
+		}
+		if model != "" {
+			n.Labels[MLUModelLabel] = model
+		}
+		if allocatableCores > 0 {
+			n.Status.Allocatable[corev1.ResourceName(MLUResourceCores)] = *resource.NewQuantity(allocatableCores, resource.DecimalSI)
+		}
+		if capacityCores > 0 {
+			n.Status.Capacity[corev1.ResourceName(MLUResourceCores)] = *resource.NewQuantity(capacityCores, resource.DecimalSI)
+		}
+		if memory > 0 {
+			n.Status.Capacity[corev1.ResourceName(MLUResourceMemory)] = *resource.NewQuantity(memory, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(CambriconMLUCommonWord, node("mlu-health-absent", 0, 200, 1024, ""))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("mlu-health-present", 100, 100, 1024, "MLU370-X4")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	relabelled := node("mlu-health-present", 100, 100, 1024, "MLU370-X8")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, relabelled)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	grown := node("mlu-health-present", 200, 200, 1024, "MLU370-X8")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, grown)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
+
 func Test_MutateAdmission(t *testing.T) {
 	config := CambriconConfig{
 		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",

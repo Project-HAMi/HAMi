@@ -435,6 +435,52 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 }
 
+func Test_CheckHealth(t *testing.T) {
+	MthreadsResourceCores = "mthreads.com/sgpu-core"
+	MthreadsResourceMemory = "mthreads.com/sgpu-memory"
+	dev := &MthreadsDevices{}
+
+	node := func(name string, allocatableCores, capacityCores, memory int64, label string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{}},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{},
+				Capacity:    corev1.ResourceList{},
+			},
+		}
+		if label != "" {
+			n.Labels[SGPUCoresLabel] = label
+		}
+		if allocatableCores > 0 {
+			n.Status.Allocatable[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(allocatableCores, resource.DecimalSI)
+		}
+		if capacityCores > 0 {
+			n.Status.Capacity[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(capacityCores, resource.DecimalSI)
+		}
+		if memory > 0 {
+			n.Status.Capacity[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(memory, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(MthreadsGPUCommonWord, node("mthreads-health-absent", 0, 32, 160, "0-1"))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("mthreads-health-present", 32, 32, 160, "0-1")
+	healthy, needUpdate = dev.CheckHealth(MthreadsGPUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth(MthreadsGPUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	relabelled := node("mthreads-health-present", 32, 32, 160, "0-2")
+	healthy, needUpdate = dev.CheckHealth(MthreadsGPUCommonWord, relabelled)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
+
 func Test_parseSGPUCoresLabelBounds(t *testing.T) {
 	// 2^32 exceeds the uint32 card-id range and must be dropped, not narrowed.
 	assert.DeepEqual(t, parseSGPUCoresLabel("0-4294967296-3"), []uint{0, 3})

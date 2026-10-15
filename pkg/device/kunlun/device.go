@@ -125,7 +125,14 @@ func (dev *KunlunDevices) CheckType(annos map[string]string, d device.DeviceUsag
 }
 
 func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	countQty := n.Status.Allocatable[corev1.ResourceName(KunlunResourceCount)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(KunlunResourceCount)]
+	count := countQty.Value()
+	capacity := capacityQty.Value()
+	return device.AllocatableHealth(devType, n.Name, count, count, fmt.Sprintf("%d", capacity))
 }
 
 func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

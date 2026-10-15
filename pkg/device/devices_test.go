@@ -1122,6 +1122,42 @@ func Test_CheckHealth(t *testing.T) {
 		assert.Equal(t, present, false)
 	})
 }
+
+func Test_AllocatableHealth(t *testing.T) {
+	const (
+		devType  = "test-allocatable-health"
+		nodeName = "node-alloc-health"
+	)
+
+	healthy, needUpdate := AllocatableHealth(devType, nodeName, 0, 2, "anno")
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 4, 2, "anno")
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 4, 2, "anno")
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 4, 3, "anno")
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 4, 3, "anno-v2")
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 0, 3, "anno-v2")
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	// The zero above forgot the registration, so the same cards must be read again.
+	healthy, needUpdate = AllocatableHealth(devType, nodeName, 4, 3, "anno-v2")
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
 func TestDecodeNodeDevices(t *testing.T) {
 	pairScore := "[{\"uuid\":\"GPU-0\",\"score\":{\"GPU-1\":50,\"GPU-2\":20,\"GPU-3\":20}}]"
 	_, err := DecodePairScores(pairScore)

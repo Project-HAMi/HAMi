@@ -338,7 +338,25 @@ func (dev *MthreadsDevices) checkType(annos map[string]string, d device.DeviceUs
 }
 
 func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	// Cards are derived from the core resource, which is what the plugin publishes.
+	coreQty := n.Status.Allocatable[corev1.ResourceName(MthreadsResourceCores)]
+	memQty := n.Status.Capacity[corev1.ResourceName(MthreadsResourceMemory)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(MthreadsResourceCores)]
+	cores := coreQty.Value()
+	mem := memQty.Value()
+	capacityCores := capacityQty.Value()
+	cards := int64(0)
+	if cores > 0 {
+		cards = (cores + coresPerMthreadsGPU - 1) / coresPerMthreadsGPU
+	}
+	label := ""
+	if n.Labels != nil {
+		label = n.Labels[SGPUCoresLabel]
+	}
+	return device.AllocatableHealth(devType, n.Name, cores, cards, fmt.Sprintf("%s\n%d\n%d", label, mem, capacityCores))
 }
 
 func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
