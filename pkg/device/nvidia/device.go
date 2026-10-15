@@ -201,6 +201,8 @@ type DeviceConfig struct {
 	ResourceName       *string
 	DebugMode          *bool
 	ReportNodeCapacity *bool
+	// DisableCoreLimit carries the CLI setting; either CLI or file configuration can disable limits.
+	DisableCoreLimit bool
 }
 
 type NvidiaGPUDevices struct {
