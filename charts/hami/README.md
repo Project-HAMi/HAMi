@@ -122,13 +122,6 @@ kubectl rollout status daemonset/hami-device-plugin -n kube-system
 
 ## Resource Name Configuration
 
-### Cambricon MLU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `devices.cambricon.resourceCountName` | MLU resource name | `"cambricon.com/vmlu"` |
-| `devices.cambricon.resourceMemoryName` | MLU memory resource name | `"cambricon.com/mlu.smlu.vmemory"` |
-| `devices.cambricon.resourceCoreName` | MLU core resource name | `"cambricon.com/mlu.smlu.vcore"` |
-
 ### Hygon HCU Resources
 
 | Parameter | Description | Default Value |
@@ -416,6 +409,9 @@ More values will be added in follow-up PRs.
 | devicePlugin.vgpuCache.gracePeriod | string | `"5m"` | Minimum cache directory age, measured from its modification time, before garbage collection. Use Go duration syntax such as `30s`, `5m`, or `1h`. Empty or invalid values use `5m`; negative durations prevent startup. `0s` removes the age grace period but still requires live Pod confirmation. Independent of monitor resync and the GC scan interval. |
 | devices.ascend.vnpuDeviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity. |
 | devices.biren.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
+| devices.cambricon.resourceCoreName | string | `"cambricon.com/mlu.smlu.vcore"` | Resource name for MLU compute, requested as an integer percentage from 0 to 100; omitted requests 100. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
+| devices.cambricon.resourceCountName | string | `"cambricon.com/vmlu"` | Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin. A zero count requests no device; HAMi reads memory and core requests only for a positive count. Sharing needs one MLU and the plugin in `dynamic-smlu` mode; a count above 1 allocates whole MLUs and ignores the memory and core values. A non-empty `device-config.content` or a bundled `files/device-config.yaml` replaces the generated device configuration, so set the name there too. |
+| devices.cambricon.resourceMemoryName | string | `"cambricon.com/mlu.smlu.vmemory"` | Resource name for MLU memory, requested in integer units of 256 MiB (`20` is 5120 MiB); run the plugin with `min-dsmlu-unit=256`. Omitted or 0 reserves the whole MLU memory. Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration. |
 | devices.enflame.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.kunlun.customresources | list | `[]` | Additional resource names forwarded to the scheduler extender; standard resources are added automatically from the named resource fields. |
 | devices.mthreads.customresources | list | `["mthreads.com/vgpu"]` | Resource names managed by the scheduler extender when enabled. Include resourceCountName; it is not added automatically. |
