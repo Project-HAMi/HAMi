@@ -351,6 +351,7 @@ More values will be added in follow-up PRs.
 |-----|------|---------|-------------|
 | device-config.content | string | `""` | Full replacement of device-config.yaml; takes precedence over a bundled file and values. This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides. Please note that extender resources still use `devices.*`, keep resource names consistent. Values validation still applies. |
 | devicePlugin.deviceListStrategy | string | `"envvar"` | Comma-separated device list strategies passed to the container runtime: `envvar`, `volume-mounts`, `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires kubelet/CRI support for CDI devices. |
+| devicePlugin.disablecorelimit | string | `"false"` | Set to `"true"` to disable HAMi-core utilization limits. This value is merged with `nvidia.disableCoreLimit` in `device-config.yaml`; either one being true disables limits, while `"false"` does not override a true file value. |
 | devicePlugin.enabled | bool | `true` | Deploy the NVIDIA device plugin DaemonSet, including the vGPU monitor container. |
 | devicePlugin.extraArgs | list | `["-v=4"]` | Additional NVIDIA device plugin command-line arguments as a list of strings. |
 | devicePlugin.extraEnvs | list | `[]` | Extra Kubernetes env entries for the device plugin, as a list of objects with name and value or valueFrom. |
