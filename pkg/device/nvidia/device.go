@@ -40,8 +40,13 @@ import (
 )
 
 const (
-	HandshakeAnnos       = "hami.io/node-handshake"
-	RegisterAnnos        = "hami.io/node-nvidia-register"
+	HandshakeAnnos = "hami.io/node-handshake"
+	RegisterAnnos  = "hami.io/node-nvidia-register"
+	// RegisterOwnerAnnos records which device-plugin instance last wrote
+	// RegisterAnnos. Shutdown clears register annotations only when this still
+	// matches the stopping process, so a rolling update cannot delete a newer
+	// instance's registration.
+	RegisterOwnerAnnos   = "hami.io/node-nvidia-register-owner"
 	RegisterGPUPairScore = "hami.io/node-nvidia-score"
 	NvidiaGPUDevice      = "NVIDIA"
 	GPUInUse             = "nvidia.com/use-gputype"

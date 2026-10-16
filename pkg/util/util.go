@@ -387,6 +387,103 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
 	return err
 }
 
+// EscapeJSONPointer escapes a JSON Pointer token per RFC 6901 so annotation
+// keys that contain '/' or '~' can be addressed in a JSON Patch path.
+func EscapeJSONPointer(s string) string {
+	s = strings.ReplaceAll(s, "~", "~0")
+	s = strings.ReplaceAll(s, "/", "~1")
+	return s
+}
+
+// RemoveNodeAnnotationsIfOwner deletes annotationKeys (and ownerKey) from the
+// named node only when the owner annotation still equals ownerValue. A JSON
+// Patch "test" op makes the check atomic with the removals. When this process
+// no longer owns the annotations (another instance took over, or they were
+// already cleared), it returns removed=false and a nil error.
+func RemoveNodeAnnotationsIfOwner(ctx context.Context, nodeName, ownerKey, ownerValue string, annotationKeys ...string) (bool, error) {
+	if nodeName == "" {
+		return false, fmt.Errorf("node name is empty")
+	}
+	if ownerKey == "" {
+		return false, fmt.Errorf("owner annotation key is empty")
+	}
+	if ownerValue == "" {
+		return false, fmt.Errorf("owner annotation value is empty")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return false, fmt.Errorf("kubernetes client is not initialized")
+	}
+
+	node, err := GetNodeWithContext(ctx, nodeName)
+	if err != nil {
+		return false, err
+	}
+	current, ok := node.Annotations[ownerKey]
+	if !ok || current != ownerValue {
+		klog.V(3).InfoS("Skipping node annotation cleanup; register owner does not match",
+			"node", nodeName, "ownerKey", ownerKey, "want", ownerValue, "have", current)
+		return false, nil
+	}
+
+	type jsonPatchOp struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value,omitempty"`
+	}
+	ops := []jsonPatchOp{{
+		Op:    "test",
+		Path:  "/metadata/annotations/" + EscapeJSONPointer(ownerKey),
+		Value: ownerValue,
+	}}
+	seen := map[string]struct{}{ownerKey: {}}
+	for _, key := range annotationKeys {
+		if key == "" {
+			continue
+		}
+		if _, exists := node.Annotations[key]; !exists {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		ops = append(ops, jsonPatchOp{
+			Op:   "remove",
+			Path: "/metadata/annotations/" + EscapeJSONPointer(key),
+		})
+	}
+	ops = append(ops, jsonPatchOp{
+		Op:   "remove",
+		Path: "/metadata/annotations/" + EscapeJSONPointer(ownerKey),
+	})
+
+	bytes, err := json.Marshal(ops)
+	if err != nil {
+		return false, err
+	}
+	_, err = c.CoreV1().Nodes().Patch(ctx, nodeName, k8stypes.JSONPatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		// Lost the race to another writer, or the annotations were cleared
+		// between Get and Patch. Treat "no longer owner" as a successful skip.
+		latest, getErr := GetNodeWithContext(ctx, nodeName)
+		if getErr == nil {
+			if latest.Annotations[ownerKey] != ownerValue {
+				klog.V(3).InfoS("Register owner changed during cleanup; skipping delete",
+					"node", nodeName, "ownerKey", ownerKey)
+				return false, nil
+			}
+		}
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		klog.ErrorS(err, "failed to remove node annotations if owner",
+			"node", nodeName, "ownerKey", ownerKey)
+		return false, err
+	}
+	return true, nil
+}
+
 // IsValidGPUSchedulerPolicy reports whether policy names GPU scheduling
 // policies HAMi recognizes. The value is read as a comma-separated ordered
 // list, the same way PolicyContains and the sort-key chain read it, so

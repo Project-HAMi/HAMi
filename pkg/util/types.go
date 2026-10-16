@@ -36,6 +36,9 @@ const (
 
 	// NodeNameEnvName define env var name for use get node name.
 	NodeNameEnvName = "NODE_NAME"
+	// PodUIDEnvName is the downward-API env that carries the device-plugin Pod UID,
+	// used as the node register-annotation owner token.
+	PodUIDEnvName   = "POD_UID"
 	TaskPriority    = "CUDA_TASK_PRIORITY"
 	CoreLimitSwitch = "GPU_CORE_UTILIZATION_POLICY"
 

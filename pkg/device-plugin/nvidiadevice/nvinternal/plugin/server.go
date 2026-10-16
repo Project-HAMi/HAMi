@@ -125,9 +125,12 @@ type NvidiaDevicePlugin struct {
 	pendingMIGOwnershipRemovals map[string]struct{}
 	migOwnership                dynamicMIGOwnershipStore
 	deviceCache                 string
-	listNodePods                func() ([]*corev1.Pod, error)
-	listLiveNodePods            func() ([]*corev1.Pod, error)
-	prepareCache                func(string, string) (string, error)
+	// registerOwner is written beside hami.io/node-nvidia-register so shutdown
+	// can clear that annotation only when this instance still owns it.
+	registerOwner    string
+	listNodePods     func() ([]*corev1.Pod, error)
+	listLiveNodePods func() ([]*corev1.Pod, error)
+	prepareCache     func(string, string) (string, error)
 
 	// migMgr owns the plugin start-cycle NVML session used for MIG hardware
 	// mutation (enable, allocate, disable). Construction does not initialize
@@ -398,6 +401,7 @@ func (o *options) newNvidiaDevicePlugin(
 		migMgr:                      migMgr,
 		imexChannels:                o.imexChannels,
 		deviceCache:                 "",
+		registerOwner:               registerOwnerID(),
 		listNodePods:                o.listNodePods,
 		listLiveNodePods:            o.listLiveNodePods,
 		prepareCache:                o.prepareVGPUCache,
@@ -1017,6 +1021,11 @@ func (plugin *NvidiaDevicePlugin) stopLocked() error {
 		plugin.server.Stop()
 	}
 	plugin.workers.Wait()
+	// Clear register annotations only after WatchAndRegister has stopped, so
+	// it cannot rewrite them. Use a fresh deadline: runCtx is already canceled.
+	clearCtx, clearCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	plugin.UnregisterInAnnotation(clearCtx)
+	clearCancel()
 	if plugin.migMgr != nil {
 		plugin.migMgr.Shutdown()
 	}
@@ -1029,6 +1038,16 @@ func (plugin *NvidiaDevicePlugin) stopLocked() error {
 	}
 	plugin.cleanup()
 	return err
+}
+
+// registerOwnerID prefers the Pod UID from the downward API so rolling updates
+// share a stable per-instance token. A generated UUID covers local runs where
+// POD_UID is unset.
+func registerOwnerID() string {
+	if uid := os.Getenv(util.PodUIDEnvName); uid != "" {
+		return uid
+	}
+	return uuid.New().String()
 }
 
 // Serve starts the gRPC server of the device plugin.
