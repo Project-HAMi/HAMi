@@ -32,6 +32,8 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -198,6 +200,30 @@ func nodeUsageFor(t *testing.T, dev *remotegpu.RemoteGPUDevices, node *corev1.No
 	return buildNodeUsage(nodeInfo, task)
 }
 
+// remoteGPUBindScheduler wires the same caches Bind uses in production. The
+// informer stores are deliberately populated directly: these tests exercise
+// scheduling logic, not informer delivery.
+func remoteGPUBindScheduler(t *testing.T, nodes []*corev1.Node, pods ...*corev1.Pod) *Scheduler {
+	t.Helper()
+
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	factory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = factory.Core().V1().Nodes().Lister()
+	s.podLister = factory.Core().V1().Pods().Lister()
+	s.eventRecorder = record.NewFakeRecorder(20)
+	nodeIndexer := factory.Core().V1().Nodes().Informer().GetIndexer()
+	podIndexer := factory.Core().V1().Pods().Informer().GetIndexer()
+	for _, node := range nodes {
+		assert.NilError(t, nodeIndexer.Add(node))
+	}
+	for _, pod := range pods {
+		assert.NilError(t, podIndexer.Add(pod))
+	}
+	s.register(labels.Everything())
+	return s
+}
+
 // A pod asking for a remote GPU must be placeable on a node that owns no GPU,
 // and the lupine server node must not be offered as a host for it.
 func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
@@ -242,6 +268,101 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 	dev.PatchAnnotations(task, &annos, best.Devices)
 	assert.Equal(t, annos["hami.io/lupine-endpoint"], "10.0.0.5:14833")
 	assert.Assert(t, annos["hami.io/remote-gpu-devices-allocated"] != "")
+}
+
+func TestRemoteGPU_ServerPoolSelectorFiltersLupineServers(t *testing.T) {
+	training := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
+	inference := lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-b", 40000)})
+	training.Labels["gpu-pool"] = "training"
+	inference.Labels["gpu-pool"] = "inference"
+	dev := setupRemoteGPUScheduler(t, training, inference, gpulessNode("cpu-1"))
+
+	task := remoteGPUPod("client", 1, 0)
+	task.Annotations = map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=inference"}
+	nodes := map[string]*NodeUsage{"cpu-1": nodeUsageFor(t, dev, gpulessNode("cpu-1"), task)}
+	reqs, err := device.Resourcereqs(task)
+	assert.NilError(t, err)
+	scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 1)
+	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
+	assert.Equal(t, allocated[0][0].UUID, "gpu-b/GPU-b")
+
+	task.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=missing"
+	failed := map[string]string{}
+	scores, err = NewScheduler().calcScore(&nodes, reqs, task, failed)
+	assert.NilError(t, err)
+	assert.Equal(t, len(scores.NodeList), 0)
+	assert.Assert(t, strings.Contains(failed["cpu-1"], "no Lupine server matches"), failed["cpu-1"])
+}
+
+// A server can leave a selected pool after Filter has reserved it. Bind must
+// reject that stale reservation and return only that Pod's booking, otherwise
+// its whole Lupine server remains unavailable until the held-booking TTL.
+func TestRemoteGPU_BindSelectorMismatchReleasesOnlyRejectedPodsBooking(t *testing.T) {
+	gpuA := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
+	gpuB := lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-b", 40000)})
+	gpuA.Labels["gpu-pool"] = "inference"
+	gpuB.Labels["gpu-pool"] = "other"
+	clientNode := gpulessNode("cpu-1")
+	pod := remoteGPUPod("selected", 1, 0)
+	pod.Annotations = map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=inference"}
+	dev := setupRemoteGPUScheduler(t, gpuA, gpuB, clientNode, pod)
+	s := remoteGPUBindScheduler(t, []*corev1.Node{gpuA, gpuB, clientNode}, pod)
+
+	filtered, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{clientNode.Name}})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, *filtered.NodeNames, []string{clientNode.Name})
+
+	// Keep a different Pod's booking on gpu-b. Bind must not release it while
+	// rolling back the rejected Pod's gpu-a reservation.
+	other := remoteGPUPod("other", 1, 0)
+	otherAllocation := device.PodDevices{remotegpu.RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-b/GPU-b", Type: remotegpu.RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
+	}}
+	dev.PatchAnnotations(other, &map[string]string{}, otherAllocation)
+
+	// A normal booking-conflict retry forces a pool refresh without waiting for
+	// its 15-second TTL. It observes gpu-a's label change just as production
+	// does after a refresh.
+	changed := gpuA.DeepCopy()
+	changed.Labels["gpu-pool"] = "changed"
+	_, err = client.KubeClient.CoreV1().Nodes().Update(t.Context(), changed, metav1.UpdateOptions{})
+	assert.NilError(t, err)
+	refresher := remoteGPUPod("refresher", 1, 0)
+	refreshNodes := map[string]*NodeUsage{clientNode.Name: nodeUsageFor(t, dev, clientNode, refresher)}
+	refreshReqs, err := device.Resourcereqs(refresher)
+	assert.NilError(t, err)
+	_, err = s.calcScore(&refreshNodes, refreshReqs, refresher, map[string]string{})
+	assert.NilError(t, err)
+
+	bound, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: clientNode.Name,
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(bound.Error, "reserved Lupine server"), bound.Error)
+
+	// gpu-a is immediately available to a matching new request, proving the
+	// rejected Pod's booking was released.
+	available := remoteGPUPod("available", 1, 0)
+	available.Annotations = map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=changed"}
+	availableNodes := map[string]*NodeUsage{clientNode.Name: nodeUsageFor(t, dev, clientNode, available)}
+	availableReqs, err := device.Resourcereqs(available)
+	assert.NilError(t, err)
+	availableScores, err := s.calcScore(&availableNodes, availableReqs, available, map[string]string{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(availableScores.NodeList), 1)
+
+	// gpu-b remains unavailable because it belongs to the other Pod, not the
+	// rejected one.
+	reserved := remoteGPUPod("reserved", 1, 0)
+	reserved.Annotations = map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=other"}
+	reservedNodes := map[string]*NodeUsage{clientNode.Name: nodeUsageFor(t, dev, clientNode, reserved)}
+	reservedReqs, err := device.Resourcereqs(reserved)
+	assert.NilError(t, err)
+	reservedScores, err := s.calcScore(&reservedNodes, reservedReqs, reserved, map[string]string{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(reservedScores.NodeList), 0)
 }
 
 // Two lupine servers with one free card each must not satisfy a two-card

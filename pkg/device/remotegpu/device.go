@@ -31,6 +31,8 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
@@ -51,6 +53,11 @@ const (
 	// client container through the downward API. There is no device plugin on
 	// a GPU-less client node to inject it at Allocate time.
 	LupineServerAnno = "hami.io/lupine-endpoint"
+
+	// LupineServerSelectorAnno optionally limits a RemoteGPU pod to Lupine
+	// servers with one exact Node-label match, for example
+	// "gpu-pool=inference". It selects the remote server, not the client node.
+	LupineServerSelectorAnno = "hami.io/remote-gpu-server-selector"
 
 	lupineServerEnv     = "LUPINE_SERVER"
 	lupineWorkloadIDEnv = "LUPINE_WORKLOAD_ID"
@@ -79,9 +86,10 @@ var (
 	RemoteGPULibImage       string
 	RemoteGPUSessionImage   string
 
-	errNoClient       = errors.New("kubernetes client is not initialized")
-	errNoRegistration = errors.New("node has no decodable GPU registration")
-	errNoPool         = errors.New("no lupine server available in the cluster")
+	errNoClient               = errors.New("kubernetes client is not initialized")
+	errNoRegistration         = errors.New("node has no decodable GPU registration")
+	errNoPool                 = errors.New("no lupine server available in the cluster")
+	errNoMatchingLupineServer = errors.New("no Lupine server matches hami.io/remote-gpu-server-selector")
 )
 
 type RemoteGPUDevices struct {
@@ -192,7 +200,8 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 			}
 		}
 	}
-	if _, ok := resourceValue(ctr, RemoteGPUResourceCount); !ok {
+	count, ok := resourceValue(ctr, RemoteGPUResourceCount)
+	if !ok || count <= 0 {
 		return false, nil
 	}
 	if err := armClientLibraries(ctr, pod); err != nil {
@@ -483,6 +492,10 @@ func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsa
 // only widen what the pod can reach, which is why a request for more cards than
 // any single server has goes unfilled even when the fleet holds enough.
 func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	selector, err := lupineServerSelector(pod)
+	if err != nil {
+		return false, map[string]device.ContainerDevices{}, err.Error()
+	}
 	byServer := map[string][]*device.DeviceUsage{}
 	servers := make([]string, 0, len(devices))
 	for _, d := range devices {
@@ -499,6 +512,10 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	// Map iteration order is random; sort so equal-fitting servers are picked
 	// deterministically across Filter calls.
 	sort.Strings(servers)
+	servers = dev.pool.matchingServers(selector, servers)
+	if selector != nil && len(servers) == 0 {
+		return false, map[string]device.ContainerDevices{}, errNoMatchingLupineServer.Error()
+	}
 
 	// A previous container fixes this pod to one server. HAMi currently
 	// injects one LUPINE_SERVER endpoint into each client container, so a
@@ -506,6 +523,9 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	prior, committed := committedAllocation(allocated)
 	requirements := []device.ContainerDeviceRequest{request}
 	if prior != "" {
+		if len(dev.pool.matchingServers(selector, []string{prior})) == 0 {
+			return false, map[string]device.ContainerDevices{}, errNoMatchingLupineServer.Error()
+		}
 		servers = []string{prior}
 	} else if podRequests, err := dev.podRequests(pod); err != nil {
 		return false, map[string]device.ContainerDevices{}, err.Error()
@@ -528,7 +548,7 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		// the first refusal stands rather than becoming a refusal with nothing
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
-		if intact := dev.serversStillWhole(byServer, servers); len(intact) > 0 {
+		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers)); len(intact) > 0 {
 			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, requirements, pod, committed)
 		}
 	}
@@ -536,6 +556,84 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		return true, tmpDevs, ""
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// ValidateReservedServer verifies that a reserved RemoteGPU allocation still
+// belongs to a server selected by the Pod. Bind calls this after Filter has
+// recorded the allocation, before Kubernetes commits the Pod to its node.
+func (dev *RemoteGPUDevices) ValidateReservedServer(pod *corev1.Pod, allocated device.PodDevices) error {
+	selector, err := lupineServerSelector(pod)
+	if err != nil {
+		return err
+	}
+	if selector == nil {
+		return nil
+	}
+
+	server, _ := committedAllocation(&allocated)
+	if server == "" {
+		if PodRequestsRemoteGPU(pod) {
+			return fmt.Errorf("no Lupine server is reserved for RemoteGPU pod")
+		}
+		return nil
+	}
+	if len(dev.pool.matchingServers(selector, []string{server})) == 0 {
+		return fmt.Errorf("reserved Lupine server %q no longer matches %s", server, LupineServerSelectorAnno)
+	}
+	return nil
+}
+
+// lupineServerSelector parses the optional pod-level server selector. The
+// feature deliberately accepts one equality requirement only: RemoteGPU
+// server pools are named groups, not a general placement policy language.
+func lupineServerSelector(pod *corev1.Pod) (labels.Selector, error) {
+	if pod == nil || pod.Annotations == nil {
+		return nil, nil
+	}
+	raw, found := pod.Annotations[LupineServerSelectorAnno]
+	if !found {
+		return nil, nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("invalid %s: must not be empty", LupineServerSelectorAnno)
+	}
+	selector, err := labels.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", LupineServerSelectorAnno, err)
+	}
+	requirements, selectable := selector.Requirements()
+	if !selectable || len(requirements) != 1 || (requirements[0].Operator() != selection.Equals && requirements[0].Operator() != selection.DoubleEquals) {
+		return nil, fmt.Errorf("invalid %s: must be one equality selector such as gpu-pool=inference", LupineServerSelectorAnno)
+	}
+	return selector, nil
+}
+
+// ValidateLupineServerSelector validates the optional server-pool annotation
+// without mutating the Pod. The admission webhook also uses it for updates.
+func ValidateLupineServerSelector(pod *corev1.Pod) error {
+	_, err := lupineServerSelector(pod)
+	return err
+}
+
+// PodRequestsRemoteGPU reports whether any container requests a RemoteGPU.
+// It is used by update admission to preserve the create-time rule: an
+// unrelated Pod may carry no RemoteGPU selector semantics at all.
+func PodRequestsRemoteGPU(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	for i := range pod.Spec.InitContainers {
+		if count, found := resourceValue(&pod.Spec.InitContainers[i], RemoteGPUResourceCount); found && count > 0 {
+			return true
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if count, found := resourceValue(&pod.Spec.Containers[i], RemoteGPUResourceCount); found && count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // podRequests returns every RemoteGPU request without merging container

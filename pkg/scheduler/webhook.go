@@ -92,6 +92,12 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Denied(err.Error())
 	}
+	if remotegpu.PodRequestsRemoteGPU(pod) {
+		if err := remotegpu.ValidateLupineServerSelector(pod); err != nil {
+			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			return admission.Denied(err.Error())
+		}
+	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
@@ -172,6 +178,14 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		klog.Errorf("Failed to decode old object: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
+	if remoteGPUSelectorChanged(oldPod, pod) {
+		return admission.Denied(fmt.Sprintf("annotation %s cannot be changed after a pod is created", remotegpu.LupineServerSelectorAnno))
+	}
+	if remotegpu.PodRequestsRemoteGPU(pod) {
+		if err := remotegpu.ValidateLupineServerSelector(pod); err != nil {
+			return admission.Denied(err.Error())
+		}
+	}
 	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)
 	if !changed {
 		return admission.Allowed("no scheduler-owned annotation changed")
@@ -188,6 +202,12 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
 	}
 	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+func remoteGPUSelectorChanged(oldPod, pod *corev1.Pod) bool {
+	oldValue, oldFound := oldPod.Annotations[remotegpu.LupineServerSelectorAnno]
+	value, found := pod.Annotations[remotegpu.LupineServerSelectorAnno]
+	return oldFound != found || oldValue != value
 }
 
 // canWriteNodes asks the API server whether the caller may patch nodes.
