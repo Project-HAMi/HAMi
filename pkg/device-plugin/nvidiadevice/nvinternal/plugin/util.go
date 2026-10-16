@@ -130,8 +130,8 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 
 // validateContainerAllocation rejects an allocation handing the container more
 // than its own resource limits ask for (issue #3041). A MIG slice is charged
-// its profile's capacity rather than the raw request, so there is nothing to
-// compare it against here.
+// its profile's capacity rather than the raw request, so it is checked by
+// validateMigAllocation instead.
 func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Container, allocated device.ContainerDevices) error {
 	if plugin.operatingMode == "mig" {
 		return nil
@@ -145,6 +145,104 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 		return err
 	}
 	return device.ValidateContainerAllocation(ctr.Name, req, allocated, plugin.registeredMemoryMB, device.CoresInRequestUnits)
+}
+
+// registeredMigCard is a MIG card as registered: the memory the scheduler sized
+// percentage requests against, and the profiles it can offer.
+type registeredMigCard struct {
+	memoryMB int64
+	profiles []device.MigProfile
+}
+
+// rememberMigCard records what was registered for a MIG card.
+func (plugin *NvidiaDevicePlugin) rememberMigCard(uuid string, memoryMB int64, profiles []device.MigProfile) {
+	plugin.registeredMigMu.Lock()
+	defer plugin.registeredMigMu.Unlock()
+	if plugin.registeredMig == nil {
+		plugin.registeredMig = map[string]registeredMigCard{}
+	}
+	plugin.registeredMig[uuid] = registeredMigCard{memoryMB: memoryMB, profiles: append([]device.MigProfile(nil), profiles...)}
+}
+
+// registeredMigProfile looks up a profile among those registered for a card.
+// known is false when nothing was registered for the card yet.
+func (plugin *NvidiaDevicePlugin) registeredMigProfile(uuid, name string) (profile device.MigProfile, found, known bool) {
+	plugin.registeredMigMu.RLock()
+	defer plugin.registeredMigMu.RUnlock()
+	card, known := plugin.registeredMig[uuid]
+	for _, p := range card.profiles {
+		if p.Name == name {
+			return p, true, true
+		}
+	}
+	return device.MigProfile{}, false, known
+}
+
+// registeredMigMemoryMB returns the memory registered for a MIG card. Memory
+// scaling does not apply in MIG mode, so this is not registeredMemoryMB.
+func (plugin *NvidiaDevicePlugin) registeredMigMemoryMB(uuid string) (int64, bool) {
+	plugin.registeredMigMu.RLock()
+	defer plugin.registeredMigMu.RUnlock()
+	card, ok := plugin.registeredMig[uuid]
+	return card.memoryMB, ok
+}
+
+// validateMigAllocation rejects a MIG slice the node would not have offered
+// (issue #3077). The slice is charged its profile's capacity, so it cannot be
+// compared with the request directly. Two inputs a pod cannot change stand in
+// for that: the profiles this plugin registered, which come from the node's
+// allowlist, and the container's own memory request. The profile must be
+// registered and large enough for the request. A card with no registered
+// profiles yet, as right after a restart, is left to the scheduler's choice.
+func (plugin *NvidiaDevicePlugin) validateMigAllocation(pod *corev1.Pod, ctr *corev1.Container) error {
+	allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
+	if err != nil {
+		return err
+	}
+	index := containerIndex(pod, ctr.Name)
+	var req device.ContainerDeviceRequest
+	if dev, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]; ok {
+		if req, err = dev.GenerateResourceRequests(ctr); err != nil {
+			return err
+		}
+	}
+	for _, allocation := range allocations {
+		if allocation.ContainerIndex != index {
+			continue
+		}
+		profile, found, known := plugin.registeredMigProfile(allocation.GPUUUID, allocation.Profile)
+		if !known {
+			klog.InfoS("No MIG profiles registered for card yet, skipping the profile check",
+				"container", ctr.Name, "gpu", allocation.GPUUUID, "profile", allocation.Profile)
+			continue
+		}
+		if !found {
+			return fmt.Errorf("container %s is allocated MIG profile %s on device %s, which this node does not offer",
+				ctr.Name, allocation.Profile, allocation.GPUUUID)
+		}
+		if limit, bounded := device.RequestedMemoryMB(req, allocation.GPUUUID, plugin.registeredMigMemoryMB); bounded && profile.MemoryMB < limit {
+			return fmt.Errorf("container %s is allocated MIG profile %s with %d MB on device %s but requests %d MB",
+				ctr.Name, allocation.Profile, profile.MemoryMB, allocation.GPUUUID, limit)
+		}
+	}
+	return nil
+}
+
+// containerIndex numbers a container the way the allocation annotations do:
+// init containers first, then the regular ones. It returns -1 for a name the
+// pod does not have.
+func containerIndex(pod *corev1.Pod, name string) int {
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == name {
+			return i
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return len(pod.Spec.InitContainers) + i
+		}
+	}
+	return -1
 }
 
 // registeredMemoryMB returns the memory this plugin published for a card, which

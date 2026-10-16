@@ -18,6 +18,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -857,6 +858,138 @@ func TestValidateContainerAllocation(t *testing.T) {
 				t.Fatalf("the allocation was rejected: %v", err)
 			}
 		})
+	}
+}
+
+// A forged MIG allocation must name a profile this node registered and that is
+// large enough for the container's own memory request (issue #3077).
+func TestValidateMigAllocation(t *testing.T) {
+	restore := device.DevicesMap
+	defer func() { device.DevicesMap = restore }()
+
+	if err := config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	const uuid = "GPU-1"
+	registered := []device.MigProfile{
+		{Name: "1g.10gb", MemoryMB: 9984},
+		{Name: "3g.40gb", MemoryMB: 40448},
+	}
+	placement := device.MigPlacement{Start: 0, Size: 1}
+	gpu := func(mem string) corev1.ResourceList {
+		return corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem": resource.MustParse(mem)}
+	}
+
+	tests := []struct {
+		name        string
+		limits      corev1.ResourceList
+		allocations []nvidia.MigAllocation
+		unknownCard bool
+		scaling     float64
+		wantErr     string
+	}{
+		{
+			name:        "registered profile that covers the request",
+			limits:      gpu("8000"),
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: uuid, Profile: "1g.10gb", Placement: placement}},
+		},
+		{
+			name:        "profile the node does not offer",
+			limits:      gpu("8000"),
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: uuid, Profile: "7g.80gb", Placement: placement}},
+			wantErr:     "does not offer",
+		},
+		{
+			name:        "profile too small for the request",
+			limits:      gpu("20000"),
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: uuid, Profile: "1g.10gb", Placement: placement}},
+			wantErr:     "requests 20000 MB",
+		},
+		{
+			name:        "percentage of the card",
+			limits:      corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: uuid, Profile: "1g.10gb", Placement: placement}},
+			wantErr:     "requests 20480 MB",
+		},
+		{
+			name:        "memory scaling does not apply to a MIG card",
+			limits:      corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1"), "nvidia.com/gpumem-percentage": resource.MustParse("50")},
+			scaling:     2,
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: uuid, Profile: "3g.40gb", Placement: placement}},
+		},
+		{
+			name:        "another container's allocation is not judged",
+			limits:      gpu("8000"),
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 0, GPUUUID: uuid, Profile: "7g.80gb", Placement: placement}},
+		},
+		{
+			name:        "card with no registered profiles yet",
+			limits:      gpu("8000"),
+			unknownCard: true,
+			allocations: []nvidia.MigAllocation{{ContainerIndex: 1, GPUUUID: "GPU-other", Profile: "7g.80gb", Placement: placement}},
+		},
+		{
+			name:   "no MIG allocation at all",
+			limits: gpu("8000"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaling := tt.scaling
+			if scaling == 0 {
+				scaling = 1
+			}
+			plugin := cardPlugin("mig", uuid, 40960, scaling)
+			plugin.rememberMigCard(uuid, 40960, registered)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Name: "init"}},
+					Containers:     []corev1.Container{*gpuContainer(tt.limits)},
+				},
+			}
+			if len(tt.allocations) > 0 {
+				raw, err := json.Marshal(tt.allocations)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pod.Annotations[nvidia.MigAllocationsAnnotation] = string(raw)
+			}
+			err := plugin.validateMigAllocation(pod, &pod.Spec.Containers[0])
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("the allocation was rejected: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("the allocation was accepted")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "main") {
+				t.Errorf("error %q lacks %q or the container name", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestContainerIndex(t *testing.T) {
+	pod := &corev1.Pod{Spec: corev1.PodSpec{
+		InitContainers: []corev1.Container{{Name: "init"}},
+		Containers:     []corev1.Container{{Name: "a"}, {Name: "b"}},
+	}}
+	for name, want := range map[string]int{"init": 0, "a": 1, "b": 2, "missing": -1} {
+		if got := containerIndex(pod, name); got != want {
+			t.Errorf("containerIndex(%q) = %d, want %d", name, got, want)
+		}
 	}
 }
 
