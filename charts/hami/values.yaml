@@ -556,17 +556,29 @@ devices:
     # Set the name in `device-config.content` or `files/device-config.yaml` too when either replaces the generated configuration.
     resourceCoreName: "cambricon.com/mlu.smlu.vcore"
   amd:
+    # -- Resource name for AMD GPU count requests. Must match the resource advertised by the AMD device plugin; 0 requests no device.
+    # An empty value skips the node GPU health check.
     resourceCountName: "amd.com/gpu"
+    # -- Resource name for per-GPU memory requests in MiB. `defaultMemory` applies when neither memory resource is specified.
     resourceMemoryName: "amd.com/gpumem"
+    # -- Resource name for requesting GPU memory as a percentage (0-100).
+    # If both a positive fixed memory size and a percentage are set, the fixed size takes priority.
+    # If either value is explicitly set to 0 and the other is not positive, the full GPU memory is used.
+    # If neither is set, `defaultMemory` is used. An empty value disables percentage memory requests.
     resourceMemoryPercentageName: "amd.com/gpumem-percentage"
+    # -- Resource name for per-GPU core percentage requests (1-100). Omitted uses `defaultCores`, or all cores when that value is 0.
     resourceCoreName: "amd.com/gpucores"
-    runtimeClassName: ""  # Name of the runtime class to set on Pods that request an AMD GPU
-    # GPUs a container gets when it asks for memory or cores without amd.com/gpu.
+    # -- RuntimeClass the admission webhook adds to AMD GPU Pods that do not already specify one. The chart does not create it; empty leaves the Pod unchanged.
+    runtimeClassName: ""
+    # -- Default GPU count added by the admission webhook when memory, memory percentage, or cores are requested without a GPU count. Values below 1 are treated as 1.
+    # A GPU count already specified in resource requests is preserved.
     defaultGPUNum: 1
-    # MiB of device memory for a container that asks for neither memory nor a percentage; 0 is the whole GPU.
+    # -- Default memory per requested GPU in MiB. Used when neither memory resource is specified; 0 uses the full GPU memory.
     defaultMemory: 0
-    # Percent of the cores for a container that asks for none; 0 is all of them.
+    # -- Default core percentage per requested GPU. Used when no core request is specified; 0 uses all cores. Values are clamped to 0-100.
     defaultCores: 0
+    # -- Resource names managed by the scheduler extender. Include `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`; they are not added automatically.
+    # `resourceMemoryPercentageName` is added automatically.
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
