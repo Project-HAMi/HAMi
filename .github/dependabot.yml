@@ -15,6 +15,14 @@ updates:
     directory: "/docker"
     schedule:
       interval: "daily"
+  - package-ecosystem: "docker"
+    directory: "/benchmarks/ai-benchmark"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

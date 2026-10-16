@@ -1,5 +1,5 @@
 ---
-name: hami_vgpu_metrics_summarizer
+name: hami-vgpu-metrics-summary
 
 description: A comprehensive analysis skill for summarizing HAMi vGPU metrics from Prometheus-style `/metrics` output. It organizes GPU allocation by node, device, pod, and namespace, and produces clear reports covering vGPU core allocation, memory allocation, allocation-based utilization, sharing density, and namespace-level usage patterns.
 ---

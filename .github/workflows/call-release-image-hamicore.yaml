@@ -44,15 +44,23 @@ jobs:
           df -h
       - name: Getting Image Ref
         id: ref
+        # inputs reach the script through the environment, not expression
+        # interpolation, so their contents cannot become part of the command
+        env:
+          IN_REF: ${{ inputs.ref }}
+          IN_SUFFIX: ${{ inputs.suffix }}
+          IN_TAGOVERRIDE: ${{ inputs.tagoverride }}
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
+          DISPATCH_SUFFIX: ${{ github.event.inputs.suffix }}
         run: |
           if ${{ inputs.ref != '' }} ; then
               echo "call by workflow_call"
-              image_ref=${{ inputs.ref }}
-              image_suffix=${{ inputs.suffix }}
+              image_ref="$IN_REF"
+              image_suffix="$IN_SUFFIX"
           elif ${{ github.event_name == 'workflow_dispatch' }} ; then
               echo "call by workflow_dispatch"
-              image_ref=${{ github.event.inputs.ref }}
-              image_suffix=${{ github.event.inputs.suffix }}
+              image_ref="$DISPATCH_REF"
+              image_suffix="$DISPATCH_SUFFIX"
           else
               echo "unexpected event: ${{ github.event_name }}"
               exit 1
@@ -60,7 +68,7 @@ jobs:
           echo "ref=${image_ref}" >> $GITHUB_ENV
           [ -n "${image_suffix}" ] && echo "suffix=-${image_suffix}" >> $GITHUB_ENV
           if ${{ inputs.tagoverride != '' }} ; then
-              echo "imagetag=${{ inputs.tagoverride }}" >> $GITHUB_ENV
+              echo "imagetag=${IN_TAGOVERRIDE}" >> $GITHUB_ENV
           else
               # it is invalid if the ref is branch name "xx/xx/xx"
               echo "imagetag=${image_ref##*/}" >> $GITHUB_ENV
@@ -96,7 +104,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
         with:
-          driver-opts: image=moby/buildkit:v0.31.2@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec
+          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -115,7 +123,7 @@ jobs:
             build-args: |
               VERSION=${{ env.ref }}
               GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-              NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+              NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
               DEST_DIR=/usr/local
             tags: ${{ steps.meta.outputs.tags }}
             push: true

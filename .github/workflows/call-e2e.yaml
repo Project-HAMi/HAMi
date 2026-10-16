@@ -39,6 +39,7 @@ jobs:
           persist-credentials: false
 
       - name: Acquire shared e2e runner lock
+        id: acquire_lock
         run: bash hack/e2e-runner-lock.sh acquire
 
       - name: install Go
@@ -93,6 +94,13 @@ jobs:
             hami.io/node-nvidia-register- hami.io/nvidia-license- \
             --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
           echo "Cleanup done."
+
+      - name: remove imported hami images
+        if: always() && steps.acquire_lock.outcome == 'success'
+        run: |
+          # Drop the per-run hami images imported above, they otherwise pile up on the
+          # shared runner until the node hits ephemeral-storage pressure.
+          sudo ctr -n k8s.io images ls -q | grep "/projecthami/hami:" | xargs -r sudo ctr -n k8s.io images rm 2>/dev/null || true
 
       - name: Release shared e2e runner lock
         if: always()

@@ -72,7 +72,7 @@ function util::install_helm {
   echo "Installing Helm..."
   local get_helm_ref="8eb65528be9bcf8c40096d386c6eef901537f56f"
   local get_helm_sha256="38b65f882d9cae3891755bdb03becc6a01ae6f9cb24826c191f219ddfee70a5d"
-  local helm_version="v3.8.1"
+  local helm_version="v3.22.0"
   local get_helm_script
   get_helm_script=$(mktemp)
   trap 'rm -f "${get_helm_script}"' EXIT

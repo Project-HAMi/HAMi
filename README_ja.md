@@ -12,7 +12,7 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
-[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.com/invite/Amhy7XmbNq)
 [![website](https://img.shields.io/badge/website-blue?style=for-the-badge&logo=readthedocs)](https://project-hami.io)
 
 # HAMi
@@ -86,6 +86,8 @@ resources:
 
 HAMi は GPU、NPU、HCU、MLU、GCU、XPU など、複数のヘテロジニアスアクセラレータバックエンドをサポートしています。デバイスの機能はベンダー、モデル、ドライバー、ハードウェア世代によって異なります。
 
+このリポジトリのデバイスバックエンド：NVIDIA GPU（MIG を含む）、AMD GPU、Huawei Ascend NPU、Cambricon MLU、Hygon HCU、Iluvatar GPU、Kunlunxin XPU、MetaX GPU、Moore Threads GPU、Enflame GCU、Biren GPU、VastAI、AWS Neuron、および [Lupine](https://github.com/lupinemachines) が提供するリモート NVIDIA GPU。ベンダーごとの Pod の例は [examples/](examples/) にあります。
+
 最新のサポートマトリクスについては、[HAMi サポートデバイス](https://project-hami.io/docs/userguide/device-supported)ページを参照してください。
 
 ## クイックスタート
@@ -95,7 +97,7 @@ HAMi は GPU、NPU、HCU、MLU、GCU、XPU など、複数のヘテロジニア�
 NVIDIA デバイスプラグインを使用する場合：
 
 - NVIDIA ドライバー >= 440
-- `nvidia-docker` バージョン > 2.0
+- NVIDIA Container Toolkit（`nvidia-docker2` の後継）
 - NVIDIA が containerd、Docker、または CRI-O のデフォルトランタイムとして設定されていること
 - Kubernetes >= 1.23
 - glibc >= 2.17
@@ -135,7 +137,16 @@ kubectl get pods -n kube-system
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
+ベンダー固有の設定は `values.yaml` の `devices.<vendor>` にあります。設定可能な値と従来のレイアウトからの移行方法は [Chart README](charts/hami/README.md) に記載されています。
+
 完全なインストールガイドと設定オプションについては、[HAMi ドキュメント](https://project-hami.io/docs/get-started/deploy-with-helm/)を参照してください。
+
+### デプロイオプション
+
+- **高可用性**：`scheduler.leaderElect=true` を設定し、`scheduler.replicas` を 1 より大きくすると、複数のスケジューラレプリカを 1 つのリーダーの背後で実行できます。PodDisruptionBudget も作成されます。
+- **OpenShift と SELinux**：OpenShift では `platform.openshift=true`、SELinux が有効なノードでは `selinux.enabled=true` を設定します。
+- **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` で、スケジューラの webhook と `/refit` ポートへのアクセスを制限します。一部の CNI は、ホストネットワークの kube-apiserver のトラフィックを `namespaceSelector` で照合しないため、webhook に到達できなくなることがあります。`scheduler.admissionWebhook.failurePolicy=Ignore` の場合、Pod は HAMi による変更なしで受け入れられます。
+- **Prometheus Operator**：`prometheus.enabled=true` で、スケジューラとServiceMonitor API が利用可能な場合に、スケジューラとデバイスプラグインの ServiceMonitor を作成します。デバイスプラグインの ServiceMonitor には `devicePlugin.enabled` も必要です。
 
 ## スケジューリングポリシー
 
@@ -144,6 +155,10 @@ HAMi は AI ワークロード向けに複数のスケジューリングモー�
 - **binpack**：少数のノードまたはデバイスにワークロードをパックしてリソース利用率を向上させます。
 - **spread**：ノードまたはデバイス間でワークロードを分散させ、競合を減らします。
 - **トポロジアウェアスケジューリング**：サポートされている場合、GPU トポロジに基づいてデバイスの組み合わせを選択します。
+- **mutex**：空いている GPU のみを割り当て、ワークロードがデバイスを共有しないようにします。
+- **numa**：NUMA ノードでデバイスをグループ化するソートキーで、binpack または spread と組み合わせて使います。Pod は `nvidia.com/numa-bind` アノテーションで GPU 同士の NUMA 同一ノード配置を要求できます。
+
+クラスタのデフォルトは `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` と `gpuSchedulerPolicy` で設定します。Pod は `hami.io/node-scheduler-policy` と `hami.io/gpu-scheduler-policy` アノテーションで上書きでき、GPU ポリシーは `binpack,numa` のようなカンマ区切りの組み合わせを受け付けます。
 - **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 HAMi はデフォルトの Kubernetes スケジューラパスと互換性があり、バッチ指向の AI ワークロードに Volcano を組み合わせて使用することもできます。現在のスケジューラ統合ガイドについては、[HAMi Web サイト](https://project-hami.io/docs/)を参照してください。
@@ -161,7 +176,8 @@ http://<scheduler-ip>:<monitor-port>/metrics
 HAMi は他にも以下を提供します：
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI)：ビジュアルクラスタおよびデバイス管理。
-- Grafana ダッシュボードの例：アクセラレータモニタリング用。
+- [skill/](skill/) の Agent skills：GPU Pod のデバッグと vGPU メトリクスの要約用。
+- [Grafana ダッシュボード](https://project-hami.io/docs/userguide/monitoring/grafana-dashboard)：アクセラレータモニタリング用。
 - ベンチマーク素材：ワークロードの動作とスケジューリング効果の評価用。
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
@@ -188,7 +204,7 @@ HAMi は[メンテナー](./MAINTAINERS.md)と[コントリビューター](./AU
 HAMi コミュニティは、ユーザー、コントリビューター、ハードウェアベンダー、Kubernetes ベースの AI インフラストラクチャを構築するプラットフォームチームに開かれています。
 
 - Web サイト：[project-hami.io](https://project-hami.io)
-- Discord：[HAMi Discord に参加](https://discord.gg/Amhy7XmbNq)（推奨）
+- Discord：[HAMi Discord に参加](https://discord.com/invite/Amhy7XmbNq)（推奨）
 - Slack：[CNCF Slack #hami-dev](https://cloud-native.slack.com/archives/C07T10BU4R2)
 - メーリングリスト：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [ミーティングノートとアジェンダ](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
