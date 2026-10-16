@@ -68,7 +68,7 @@ jobs:
           suffix="$(git rev-parse --short HEAD)"
           tag="${value}-${suffix}"
           echo "version=${tag}" >> $GITHUB_OUTPUT
-      # Check the code diff, ignore the docs and examples change
+      # Check the code diff, ignore examples and Markdown changes
       - name: Parse the code diff
         id: parse_code
         run: |
