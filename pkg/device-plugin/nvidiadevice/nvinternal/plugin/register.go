@@ -339,6 +339,9 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	}
 	klog.V(4).InfoS("patch nvidia topo score to node", "hami.io/node-nvidia-score", string(data))
 	annos[nvidia.RegisterAnnos] = encodeddevices
+	if plugin.registerOwner != "" {
+		annos[nvidia.RegisterOwnerAnnos] = plugin.registerOwner
+	}
 	if len(data) > 0 {
 		annos[nvidia.RegisterGPUPairScore] = string(data)
 	}
@@ -354,6 +357,38 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	}
 	plugin.deviceCache = encodeddevices
 	return true, nil
+}
+
+// UnregisterInAnnotation clears the node register annotations during graceful
+// shutdown when this instance still owns them. A newer device-plugin instance
+// that already rewrote the owner token is left untouched.
+func (plugin *NvidiaDevicePlugin) UnregisterInAnnotation(ctx context.Context) {
+	if plugin == nil {
+		return
+	}
+	if plugin.registerOwner == "" {
+		klog.Info("Skipping register annotation cleanup: register owner is unset")
+		return
+	}
+	if util.NodeName == "" {
+		klog.Info("Skipping register annotation cleanup: node name is unset")
+		return
+	}
+	removed, err := util.RemoveNodeAnnotationsIfOwner(ctx, util.NodeName, nvidia.RegisterOwnerAnnos, plugin.registerOwner,
+		nvidia.RegisterAnnos, nvidia.RegisterGPUPairScore)
+	if err != nil {
+		klog.ErrorS(err, "Failed to clear node register annotations on shutdown",
+			"node", util.NodeName, "owner", plugin.registerOwner)
+		return
+	}
+	if removed {
+		klog.InfoS("Cleared node register annotations on shutdown",
+			"node", util.NodeName, "owner", plugin.registerOwner)
+		plugin.deviceCache = ""
+		return
+	}
+	klog.InfoS("Left node register annotations in place; another instance owns them",
+		"node", util.NodeName, "owner", plugin.registerOwner)
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {

@@ -844,3 +844,138 @@ func TestRemoteRegistrationWithInactiveMIGManager(t *testing.T) {
 		t.Fatalf("remote topology must not use an inactive MIG session: called=%v, err=%v", scored, err)
 	}
 }
+
+func TestRegisterInAnnotationWritesOwner(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	util.NodeName = "test-node"
+	defer func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	}()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	client.KubeClient = fake.NewSimpleClientset(node)
+
+	plugin := &NvidiaDevicePlugin{
+		rm:            &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }},
+		registerOwner: "pod-uid-abc",
+	}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if err != nil {
+		t.Fatalf("RegisterInAnnotation() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("RegisterInAnnotation() changed = false, want true")
+	}
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get node: %v", err)
+	}
+	if got := updated.Annotations[nvidia.RegisterOwnerAnnos]; got != "pod-uid-abc" {
+		t.Fatalf("owner annotation = %q, want %q", got, "pod-uid-abc")
+	}
+	if updated.Annotations[nvidia.RegisterAnnos] == "" {
+		t.Fatal("register annotation is empty after successful registration")
+	}
+}
+
+func TestUnregisterInAnnotation(t *testing.T) {
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	defer func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	}()
+	util.NodeName = "test-node"
+
+	t.Run("clears when owner matches", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node",
+				Annotations: map[string]string{
+					nvidia.RegisterOwnerAnnos:   "pod-uid-old",
+					nvidia.RegisterAnnos:        `[{"id":"gpu-0"}]`,
+					nvidia.RegisterGPUPairScore: `{}`,
+				},
+			},
+		}
+		client.KubeClient = fake.NewSimpleClientset(node)
+		plugin := &NvidiaDevicePlugin{
+			registerOwner: "pod-uid-old",
+			deviceCache:   `[{"id":"gpu-0"}]`,
+		}
+
+		plugin.UnregisterInAnnotation(context.Background())
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Get node: %v", err)
+		}
+		for _, key := range []string{nvidia.RegisterOwnerAnnos, nvidia.RegisterAnnos, nvidia.RegisterGPUPairScore} {
+			if _, ok := updated.Annotations[key]; ok {
+				t.Fatalf("annotation %q still present after UnregisterInAnnotation", key)
+			}
+		}
+		if plugin.deviceCache != "" {
+			t.Fatalf("deviceCache = %q after successful unregister, want empty", plugin.deviceCache)
+		}
+	})
+
+	t.Run("leaves newer instance registration alone", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node",
+				Annotations: map[string]string{
+					nvidia.RegisterOwnerAnnos: "pod-uid-new",
+					nvidia.RegisterAnnos:      `[{"id":"gpu-0"}]`,
+				},
+			},
+		}
+		client.KubeClient = fake.NewSimpleClientset(node)
+		plugin := &NvidiaDevicePlugin{registerOwner: "pod-uid-old"}
+
+		plugin.UnregisterInAnnotation(context.Background())
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Get node: %v", err)
+		}
+		if got := updated.Annotations[nvidia.RegisterOwnerAnnos]; got != "pod-uid-new" {
+			t.Fatalf("owner annotation = %q, want %q", got, "pod-uid-new")
+		}
+		if got := updated.Annotations[nvidia.RegisterAnnos]; got != `[{"id":"gpu-0"}]` {
+			t.Fatalf("register annotation = %q, want unchanged", got)
+		}
+	})
+}
+
+func TestRegisterOwnerID(t *testing.T) {
+	t.Run("uses POD_UID when set", func(t *testing.T) {
+		t.Setenv(util.PodUIDEnvName, "from-env")
+		if got := registerOwnerID(); got != "from-env" {
+			t.Fatalf("registerOwnerID() = %q, want from-env", got)
+		}
+	})
+	t.Run("generates uuid when POD_UID unset", func(t *testing.T) {
+		t.Setenv(util.PodUIDEnvName, "")
+		got := registerOwnerID()
+		if got == "" {
+			t.Fatal("registerOwnerID() returned empty string")
+		}
+		if got == "from-env" {
+			t.Fatal("registerOwnerID() unexpectedly reused a previous env value")
+		}
+	})
+}

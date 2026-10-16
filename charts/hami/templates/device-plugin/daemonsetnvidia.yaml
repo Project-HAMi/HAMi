@@ -132,6 +132,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
             - name: DEVICE_LIST_STRATEGY

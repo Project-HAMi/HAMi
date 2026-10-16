@@ -1098,6 +1098,141 @@ func TestPatchNodeAnnotations_ValidNode(t *testing.T) {
 	assert.Equal(t, "bar", updated.Annotations["hami.io/test"])
 }
 
+func TestEscapeJSONPointer(t *testing.T) {
+	assert.Equal(t, "hami.io~1node-nvidia-register", EscapeJSONPointer("hami.io/node-nvidia-register"))
+	assert.Equal(t, "a~0b~1c", EscapeJSONPointer("a~b/c"))
+}
+
+func TestRemoveNodeAnnotationsIfOwner(t *testing.T) {
+	ownerKey := "hami.io/node-nvidia-register-owner"
+	registerKey := "hami.io/node-nvidia-register"
+	scoreKey := "hami.io/node-nvidia-score"
+
+	t.Run("removes when owner matches", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "gpu-node",
+				Annotations: map[string]string{
+					ownerKey:    "uid-old",
+					registerKey: `[{"id":"gpu-0"}]`,
+					scoreKey:    `{}`,
+					"other":     "keep",
+				},
+			},
+		}
+		oldClient := client.KubeClient
+		t.Cleanup(func() { client.KubeClient = oldClient })
+		client.KubeClient = fake.NewClientset(node)
+
+		removed, err := RemoveNodeAnnotationsIfOwner(context.Background(), "gpu-node", ownerKey, "uid-old", registerKey, scoreKey)
+		assert.NilError(t, err)
+		assert.Assert(t, removed)
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "gpu-node", metav1.GetOptions{})
+		assert.NilError(t, err)
+		_, hasOwner := updated.Annotations[ownerKey]
+		_, hasRegister := updated.Annotations[registerKey]
+		_, hasScore := updated.Annotations[scoreKey]
+		assert.Assert(t, !hasOwner)
+		assert.Assert(t, !hasRegister)
+		assert.Assert(t, !hasScore)
+		assert.Equal(t, "keep", updated.Annotations["other"])
+	})
+
+	t.Run("skips when owner differs", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "gpu-node",
+				Annotations: map[string]string{
+					ownerKey:    "uid-new",
+					registerKey: `[{"id":"gpu-0"}]`,
+				},
+			},
+		}
+		oldClient := client.KubeClient
+		t.Cleanup(func() { client.KubeClient = oldClient })
+		client.KubeClient = fake.NewClientset(node)
+
+		removed, err := RemoveNodeAnnotationsIfOwner(context.Background(), "gpu-node", ownerKey, "uid-old", registerKey)
+		assert.NilError(t, err)
+		assert.Assert(t, !removed)
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "gpu-node", metav1.GetOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, "uid-new", updated.Annotations[ownerKey])
+		assert.Equal(t, `[{"id":"gpu-0"}]`, updated.Annotations[registerKey])
+	})
+
+	t.Run("skips when owner annotation missing", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "gpu-node",
+				Annotations: map[string]string{
+					registerKey: `[{"id":"gpu-0"}]`,
+				},
+			},
+		}
+		oldClient := client.KubeClient
+		t.Cleanup(func() { client.KubeClient = oldClient })
+		client.KubeClient = fake.NewClientset(node)
+
+		removed, err := RemoveNodeAnnotationsIfOwner(context.Background(), "gpu-node", ownerKey, "uid-old", registerKey)
+		assert.NilError(t, err)
+		assert.Assert(t, !removed)
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "gpu-node", metav1.GetOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, `[{"id":"gpu-0"}]`, updated.Annotations[registerKey])
+	})
+
+	t.Run("treats lost race as skip", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "gpu-node",
+				Annotations: map[string]string{
+					ownerKey:    "uid-old",
+					registerKey: `[{"id":"gpu-0"}]`,
+				},
+			},
+		}
+		oldClient := client.KubeClient
+		t.Cleanup(func() { client.KubeClient = oldClient })
+		fakeClient := fake.NewClientset(node)
+		patchCalls := 0
+		fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+			patchCalls++
+			if patchCalls == 1 {
+				// Simulate another instance claiming ownership between Get and Patch.
+				obj, getErr := fakeClient.Tracker().Get(action.GetResource(), action.GetNamespace(), "gpu-node")
+				if getErr != nil {
+					return true, nil, getErr
+				}
+				nodeObj, ok := obj.(*corev1.Node)
+				if !ok {
+					return true, nil, fmt.Errorf("tracker object is %T, want *corev1.Node", obj)
+				}
+				n := nodeObj.DeepCopy()
+				n.Annotations[ownerKey] = "uid-new"
+				if updateErr := fakeClient.Tracker().Update(action.GetResource(), n, action.GetNamespace()); updateErr != nil {
+					return true, nil, updateErr
+				}
+				return true, nil, fmt.Errorf("json patch test operation failed")
+			}
+			return false, nil, nil
+		})
+		client.KubeClient = fakeClient
+
+		removed, err := RemoveNodeAnnotationsIfOwner(context.Background(), "gpu-node", ownerKey, "uid-old", registerKey)
+		assert.NilError(t, err)
+		assert.Assert(t, !removed)
+
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "gpu-node", metav1.GetOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, "uid-new", updated.Annotations[ownerKey])
+		assert.Equal(t, `[{"id":"gpu-0"}]`, updated.Annotations[registerKey])
+	})
+}
+
 func TestRemoveNodeAnnotation_NilNode(t *testing.T) {
 	err := RemoveNodeAnnotation(nil, "hami.io/test")
 	assert.ErrorContains(t, err, "node is nil")
