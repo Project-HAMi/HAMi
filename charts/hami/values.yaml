@@ -419,6 +419,9 @@ devicePlugin:
   # -- Strategy for exposing NVIDIA MIG devices: `none`, `single`, or `mixed`. `mixed` exposes MIG profiles as
   # separate resources. Passed as `--mig-strategy`.
   migStrategy: "none"
+  # -- Set to `"true"` to disable HAMi-core utilization limits. This value is
+  # merged with `nvidia.disableCoreLimit` in `device-config.yaml`; either one
+  # being true disables limits, while `"false"` does not override a true file value.
   disablecorelimit: "false"
   # -- Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy`
   # contains only CDI strategies. Null leaves the plugin default unchanged (disabled).

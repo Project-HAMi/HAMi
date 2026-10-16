@@ -345,6 +345,10 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 
 	klog.Infoln("reading config=", nvconfig, "resourceName", nvconfig.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
 
+	// The chart always passes this flag, including its default false. Preserve a
+	// true from a custom device-config.yaml while allowing CLI/env to disable limits.
+	sConfig.NvidiaConfig.DisableCoreLimit = sConfig.NvidiaConfig.DisableCoreLimit || nvconfig.DisableCoreLimit
+
 	// Initialize devices with configuration
 	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)

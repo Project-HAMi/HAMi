@@ -99,8 +99,10 @@ func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 }
 
 func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cli.Flag) (nvidia.DeviceConfig, error) {
-	devcfg := nvidia.DeviceConfig{}
-	devcfg.Config = cfg
+	devcfg := nvidia.DeviceConfig{
+		Config:           cfg,
+		DisableCoreLimit: c.Bool("disable-core-limit"),
+	}
 
 	klog.Infoln("flags=", flags)
 	for _, flag := range flags {
