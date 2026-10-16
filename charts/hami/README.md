@@ -457,6 +457,7 @@ More values will be added in follow-up PRs.
 | legacyMetrics | bool | `false` | Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility. |
 | mockDevicePlugin.enabled | bool | `false` | Deploy the mock device plugin as a DaemonSet on all eligible nodes without node selectors. |
 | mockDevicePlugin.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy: `Always`, `IfNotPresent`, or `Never`. |
+| mockDevicePlugin.image.pullSecrets | list | `[]` | Not consumed by this chart. The mock device plugin DaemonSet does not set imagePullSecrets. |
 | mockDevicePlugin.image.registry | string | `"docker.io"` | Image registry, overridden by `global.imageRegistry`. |
 | mockDevicePlugin.image.repository | string | `"projecthami/mock-device-plugin"` | Image repository for the mock-device-plugin. |
 | mockDevicePlugin.image.tag | string | `"1.0.1@sha256:61d08a5641251ed776e4701c0dcf05c2c2bed5a58b39b8a11ec85ca5e57e674a"` | Image tag (required), pinned by digest; does not inherit `global.imageTag`. |

@@ -529,6 +529,7 @@ mockDevicePlugin:
     tag: "1.0.1@sha256:61d08a5641251ed776e4701c0dcf05c2c2bed5a58b39b8a11ec85ca5e57e674a"
     # -- Image pull policy: `Always`, `IfNotPresent`, or `Never`.
     pullPolicy: IfNotPresent
+    # -- Not consumed by this chart. The mock device plugin DaemonSet does not set imagePullSecrets.
     pullSecrets: []
 devices:
   metax:
