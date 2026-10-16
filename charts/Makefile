@@ -5,7 +5,7 @@ include  ../Makefile.defs
 VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 CHART_FILE := "./hami/Chart.yaml"
 VALUES_FILE := "./hami/values.yaml"
-HELM_DOCS_ARGS := --chart-search-root ./hami --ignore-non-descriptions --sort-values-order=file --log-level warning
+HELM_DOCS_ARGS := --chart-search-root ./hami --sort-values-order=file --log-level warning
 
 .PHONY: all lint update-versions deps validate clean update-helm-chart-docs verify-helm-chart-docs
 all: update-versions deps lint package
