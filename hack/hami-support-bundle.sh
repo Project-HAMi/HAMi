@@ -17,7 +17,15 @@ readonly VENDOR_TOOL_TIMEOUT=30s
 
 # Print command usage, including the mutually exclusive collection scopes.
 usage() {
-  echo 'Usage: hami-support-bundle.sh --kubeconfig FILE --context NAME --namespace NAME [--node NAME | --pod NAME | --cluster-wide] [--since DURATION] [--tail-lines N] [--output-dir DIR] [--redact-pattern TEXT] [--dry-run]'
+  cat <<'EOF'
+Usage: hami-support-bundle.sh --kubeconfig FILE --context NAME --namespace NAME [--workload-namespace NAME] [--node NAME | --pod NAME | --cluster-wide] [--since DURATION] [--tail-lines N] [--output-dir DIR] [--redact-pattern TEXT] [--dry-run]
+
+--namespace is the namespace where HAMi is installed. --workload-namespace
+selects the affected workload namespace and defaults to --namespace.
+
+Requirements: Linux, Bash 4.1 or newer, GNU coreutils and tar, kubectl, and
+util-linux flock.
+EOF
 }
 
 # Print a CLI error and stop before collection begins.
@@ -31,7 +39,7 @@ require_value() {
   [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value"
 }
 
-kubeconfig=''; context=''; namespace=''; node=''; pod=''; since='1h'; tail_lines=500
+kubeconfig=''; context=''; namespace=''; workload_namespace=''; node=''; pod=''; since='1h'; tail_lines=500
 output_dir='./_output/support-bundle'; dry_run=false; cluster_wide=false
 declare -a patterns=()
 while [[ $# -gt 0 ]]; do
@@ -39,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --kubeconfig) require_value "$@"; kubeconfig="$2"; shift 2 ;;
     --context) require_value "$@"; context="$2"; shift 2 ;;
     --namespace) require_value "$@"; namespace="$2"; shift 2 ;;
+    --workload-namespace) require_value "$@"; workload_namespace="$2"; shift 2 ;;
     --node) require_value "$@"; node="$2"; shift 2 ;;
     --pod) require_value "$@"; pod="$2"; shift 2 ;;
     --since) require_value "$@"; since="$2"; shift 2 ;;
@@ -53,13 +62,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$kubeconfig" && -n "$context" && -n "$namespace" ]] || die '--kubeconfig, --context, and --namespace are required'
+workload_namespace="${workload_namespace:-$namespace}"
 [[ "$tail_lines" =~ ^[1-9][0-9]*$ ]] || die '--tail-lines must be positive'
 [[ -z "$pod" || -z "$node" ]] || die '--pod and --node cannot be used together'
 [[ "$cluster_wide" == false || -z "$pod" ]] || die '--cluster-wide and --pod cannot be used together'
 [[ "$cluster_wide" == false || -z "$node" ]] || die '--cluster-wide and --node cannot be used together'
-for pattern in "${patterns[@]}"; do
-  [[ "$pattern" != *$'\n'* && "$pattern" != *$'\r'* ]] || die '--redact-pattern must not contain newlines'
-done
+if [[ -n "${patterns[0]+set}" ]]; then
+  for pattern in "${patterns[@]}"; do
+    [[ "$pattern" != *$'\n'* && "$pattern" != *$'\r'* ]] || die '--redact-pattern must not contain newlines'
+  done
+fi
 command -v kubectl >/dev/null || die 'kubectl is required'
 command -v flock >/dev/null || die 'flock is required'
 
@@ -109,7 +121,10 @@ mkdir -p "$bundle_dir/artifacts" "$bundle_dir/errors"
 records="$staging_dir/records"
 pattern_file="$staging_dir/patterns"
 : >"$records"
-printf '%s\n' "${patterns[@]}" >"$pattern_file"
+: >"$pattern_file"
+if [[ -n "${patterns[0]+set}" ]]; then
+  printf '%s\n' "${patterns[@]}" >"$pattern_file"
+fi
 declare -a k=(--kubeconfig "$kubeconfig" --context "$context" --request-timeout="$KUBECTL_REQUEST_TIMEOUT")
 bundle_bytes=0
 bundle_limit_reached=false
@@ -141,11 +156,11 @@ redact() {
   }
   function sensitive_key(v, compact) {
     v=normalized_key(v); compact=v; gsub(/_/, "", compact)
-    return v ~ /^(auth|authorization)$/ || v ~ /(^|_)(auth|token|password|passwd|secret|credential|credentials)(_|$)/ || v ~ /(^|_)(api|access|private|secret|signing)_key(_|$)/ || compact ~ /(token|password|passwd|secret|apikey|accesskey|privatekey|secretkey|signingkey|clientsecret|credential|credentials)$/
+    return v ~ /^(auth|authorization)$/ || v ~ /(^|_)(auth|token|password|passwd|pass|secret|credential|credentials|cookie|sig|signature)(_|$)/ || v ~ /(^|_)(api|access|private|secret|signing)_key(_|$)/ || compact ~ /(token|password|passwd|pass|secret|apikey|accesskey|privatekey|secretkey|signingkey|clientsecret|credential|credentials|cookie|sig|signature)$/
   }
   function sensitive_env_name(v) {
     v=trim(v); gsub(/^['\''"]|['\''"]$/, "", v); v=toupper(v)
-    return v ~ /(^|_)(AUTH|TOKEN|PASSWORD|PASSWD|SECRET|KEY|CREDENTIAL|CREDENTIALS)(_|$)/
+    return v ~ /(^|_)(AUTH|TOKEN|PASSWORD|PASSWD|PASS|SECRET|KEY|CREDENTIAL|CREDENTIALS|COOKIE|SIG|SIGNATURE)(_|$)/
   }
   function yaml_block_scalar(v) {
     return v ~ /^[|>]([+-][1-9]?|[1-9][+-]?)?$/
@@ -264,11 +279,12 @@ redact() {
   }
   function redact_space_args(s, out, rest, before, header, key, values, quote, ending) {
     out=""; rest=s
-    while (match(rest, /--[[:alnum:]_.-]+[[:space:]]+/)) {
+    while (match(rest, /(--[[:alnum:]_.-]+|-p)[[:space:]]+/)) {
       before=substr(rest,1,RSTART-1); header=substr(rest,RSTART,RLENGTH)
-      key=header; sub(/[[:space:]].*/,"",key); sub(/^--/,"",key)
+      key=header; sub(/[[:space:]].*/,"",key)
       values=substr(rest,RSTART+RLENGTH)
-      if (!sensitive_key(key)) { out=out before header; rest=values; continue }
+      if (key != "-p") sub(/^--/,"",key)
+      if (key != "-p" && !sensitive_key(key)) { out=out before header; rest=values; continue }
       quote=substr(values,1,1)
       if (quote == "\"") { ending=json_string_end(substr(values,2)); if (ending) ending++ }
       else if (quote == sprintf("%c",39)) { ending=index(substr(values,2),quote); if (ending) ending++ }
@@ -289,6 +305,15 @@ redact() {
       if (!ending) return out before header quote "<redacted-image>" quote
       out=out before header (quote == "\"" || quote == sprintf("%c",39) ? quote "<redacted-image>" quote : "<redacted-image>")
       rest=substr(values,ending + ((quote == "\"" || quote == sprintf("%c",39)) ? 1 : 0))
+    }
+    return out rest
+  }
+  function redact_dns_lookups(s, out, rest, before, matched) {
+    out=""; rest=s
+    while (match(tolower(rest), /lookup[[:space:]]+[^[:space:]:]+/)) {
+      before=substr(rest,1,RSTART-1); matched=substr(rest,RSTART,RLENGTH)
+      sub(/[^[:space:]]+$/, "<redacted-host>", matched)
+      out=out before matched; rest=substr(rest,RSTART+RLENGTH)
     }
     return out rest
   }
@@ -336,6 +361,10 @@ redact() {
     s=redact_space_args(s)
     gsub(/[[:alnum:]_.%+~-]+:[^[:space:]@\/]+@/, "<redacted>@", s)
     gsub(/[[:alnum:]_-]{8,}\.[[:alnum:]_-]{8,}\.[[:alnum:]_-]{8,}/, "<redacted-jwt>", s)
+    gsub(/gh[pousr]_[[:alnum:]]{20,}/, "<redacted-token>", s)
+    gsub(/glpat-[[:alnum:]_-]{20,}/, "<redacted-token>", s)
+    gsub(/(AKIA|ASIA)[0-9A-Z]{16}/, "<redacted-access-key>", s)
+    s=redact_dns_lookups(s)
     key=yaml_key(s); value=yaml_value(s); lower_key=tolower(key)
     if (lower_key == "env" || lower_key == "kubectl.kubernetes.io/last-applied-configuration" || lower_key == "images") {
       replacement=(lower_key == "images" ? "<redacted-image-inventory>" : (lower_key == "env" ? "<redacted-environment>" : "<redacted-credential>"))
@@ -355,9 +384,9 @@ redact() {
       if (env_sensitive && s !~ /^[[:space:]]*$/) { env_ttl--; if (env_ttl <= 0 || leading_spaces(s) < env_indent) env_sensitive=0 }
     }
     list_value=s; sub(/^[[:space:]]*-[[:space:]]+/,"",list_value)
-    if (s ~ /^[[:space:]]*-[[:space:]]+--[[:alnum:]_.-]+[[:space:]]*$/) {
-      list_key=list_value; sub(/^--/,"",list_key); list_key=trim(list_key)
-      if (sensitive_key(list_key)) { pending_yaml_arg=1; pending_yaml_arg_indent=leading_spaces(s) }
+    if (s ~ /^[[:space:]]*-[[:space:]]+(--[[:alnum:]_.-]+|-p)[[:space:]]*$/) {
+      list_key=trim(list_value)
+      if (list_key == "-p" || sensitive_key(substr(list_key,3))) { pending_yaml_arg=1; pending_yaml_arg_indent=leading_spaces(s) }
     }
     s=redact_image_mentions(s)
     for (i=1; i<=n; i++) s=replace_literal(s,patterns[i])
@@ -404,7 +433,7 @@ store_candidate() {
 # max_collector_bytes + 1 bytes to either raw staging file.
 collect() {
   local id="$1" path="$2"; shift 2
-  local artifact_path="artifacts/$path" run_dir raw_out raw_err candidate
+  local artifact_path="artifacts/$path" run_dir raw_out raw_err candidate redacted_out redacted_err
   local out_reader err_reader command_status out_size err_size detail=''
   if [[ "$dry_run" == true ]]; then
     printf '[dry-run] %s: ' "$id"; printf '%q ' "$@"; echo
@@ -445,8 +474,14 @@ collect() {
       store_candidate success "$id" "$artifact_path" '' "$candidate"
     fi
   else
-    redact "$raw_err" "$candidate"
-    detail=$(append_detail "exit-code=$command_status" "$detail")
+    redacted_out="$run_dir/stdout.redacted"; redacted_err="$run_dir/stderr.redacted"
+    redact "$raw_out" "$redacted_out"
+    redact "$raw_err" "$redacted_err"
+    {
+      if [[ -s "$redacted_out" ]]; then printf 'stdout:\n'; cat "$redacted_out"; fi
+      if [[ -s "$redacted_err" ]]; then printf 'stderr:\n'; cat "$redacted_err"; fi
+    } >"$candidate"
+    detail=$(append_detail "$detail" "exit-code=$command_status")
     store_candidate failed "$id" "errors/$id.txt" "$detail" "$candidate"
   fi
   rm -rf -- "$run_dir"
@@ -496,9 +531,9 @@ collect scheduler-version versions/hami-scheduler.txt kubectl "${k[@]}" -n "$nam
 collect device-plugin-version versions/hami-device-plugin.txt kubectl "${k[@]}" -n "$namespace" get daemonsets -l app.kubernetes.io/component=hami-device-plugin -o 'jsonpath={range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.app\.kubernetes\.io/version}{"\n"}{end}'
 
 if [[ -n "$pod" ]]; then
-  collect workload-pod workloads/pod.yaml kubectl "${k[@]}" -n "$namespace" get pod "$pod" -o yaml
-  collect events events/events.yaml kubectl "${k[@]}" -n "$namespace" get events --field-selector "involvedObject.kind=Pod,involvedObject.name=$pod" --sort-by=.lastTimestamp -o yaml
-  collect pod-node-name scope/pod-node.txt kubectl "${k[@]}" -n "$namespace" get pod "$pod" -o 'jsonpath={.spec.nodeName}{"\n"}'
+  collect workload-pod workloads/pod.yaml kubectl "${k[@]}" -n "$workload_namespace" get pod "$pod" -o yaml
+  collect events events/events.yaml kubectl "${k[@]}" -n "$workload_namespace" get events --field-selector "involvedObject.kind=Pod,involvedObject.name=$pod" --sort-by=.lastTimestamp -o yaml
+  collect pod-node-name scope/pod-node.txt kubectl "${k[@]}" -n "$workload_namespace" get pod "$pod" -o 'jsonpath={.spec.nodeName}{"\n"}'
   if [[ "$dry_run" == false && -s "$bundle_dir/artifacts/scope/pod-node.txt" ]]; then
     IFS= read -r pod_node <"$bundle_dir/artifacts/scope/pod-node.txt"
     if [[ -n "$pod_node" ]]; then
@@ -510,16 +545,16 @@ if [[ -n "$pod" ]]; then
     record skipped node artifacts/nodes/node.yaml pod-node-unavailable
   fi
 elif [[ -n "$node" ]]; then
-  collect workloads-on-node workloads/pods-on-node.yaml kubectl "${k[@]}" -n "$namespace" get pods --field-selector "spec.nodeName=$node" -o yaml
-  collect events events/events.yaml kubectl "${k[@]}" -n "$namespace" get events --field-selector "involvedObject.kind=Node,involvedObject.name=$node" --sort-by=.lastTimestamp -o yaml
+  collect workloads-on-node workloads/pods-on-node.yaml kubectl "${k[@]}" -n "$workload_namespace" get pods --field-selector "spec.nodeName=$node" -o yaml
+  collect events events/events.yaml kubectl "${k[@]}" -n "$workload_namespace" get events --field-selector "involvedObject.kind=Node,involvedObject.name=$node" --sort-by=.lastTimestamp -o yaml
   collect node nodes/node.yaml kubectl "${k[@]}" get node "$node" -o yaml
 elif [[ "$cluster_wide" == true ]]; then
   collect workloads workloads/pods.yaml kubectl "${k[@]}" -A get pods -o yaml
   collect events events/events.yaml kubectl "${k[@]}" -A get events --sort-by=.lastTimestamp -o yaml
   collect nodes nodes/nodes.yaml kubectl "${k[@]}" get nodes -o yaml
 else
-  collect workloads workloads/pods.yaml kubectl "${k[@]}" -n "$namespace" get pods -o yaml
-  collect events events/events.yaml kubectl "${k[@]}" -n "$namespace" get events --sort-by=.lastTimestamp -o yaml
+  collect workloads workloads/pods.yaml kubectl "${k[@]}" -n "$workload_namespace" get pods -o yaml
+  collect events events/events.yaml kubectl "${k[@]}" -n "$workload_namespace" get events --sort-by=.lastTimestamp -o yaml
   record skipped nodes artifacts/nodes/nodes.yaml namespace-scope
 fi
 

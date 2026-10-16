@@ -22,8 +22,14 @@ Please include the following information:
 >
 > ```bash
 > hack/hami-support-bundle.sh --kubeconfig /path/to/config --context my-context \
->   --namespace hami-system --pod affected-pod --output-dir ./hami-support
+>   --namespace hami-system --workload-namespace affected-workload-namespace \
+>   --pod affected-pod --output-dir ./hami-support
 > ```
+>
+> The script requires Linux, Bash 4.1 or newer, GNU coreutils and tar, `kubectl`,
+> and util-linux `flock`. `--namespace` identifies the HAMi installation;
+> `--workload-namespace` identifies the affected Pod or Node workloads and
+> defaults to `--namespace` when they are the same.
 >
 > The collector never queries Kubernetes Secrets and applies best-effort
 > structured redaction, but logs and resource fields can contain unexpected

@@ -31,7 +31,11 @@ if [[ "${MOCK_MODE:-}" == large-stderr ]]; then
   echo 'collector output survived'
   exec awk 'BEGIN { for (i=0; i<8192; i++) printf "e" > "/dev/stderr" }'
 fi
-if [[ " $* " == *" rollout status "* ]]; then echo 'Authorization: Basic Zm9vOmJhcg==' >&2; exit 1; fi
+if [[ " $* " == *" rollout status "* ]]; then
+  echo 'rollout progress before failure'
+  echo 'Authorization: Basic Zm9vOmJhcg==' >&2
+  exit 1
+fi
 if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   if [[ " $* " == *"hami-device-plugin"* ]]; then
     for number in 7 3 1 6 2 5 4; do echo "pod/device-plugin-$number"; done
@@ -68,6 +72,9 @@ Authorization: Basic Zm9vOmJhcg==
 {"token":"json-token","apiKey":"json-api-key","normal":"visible"}
 {"Authorization":"Basic anNvbi1iYXNpYw==","auth":"docker-auth-value"}
 password: yaml-password
+db-pass: database-short-password
+sig: signature-secret
+cookie: session-cookie-secret
 access_token: access-token-value
 password=equals-password
 api_key="quoted equals api key"
@@ -77,11 +84,17 @@ args: ["--token=json-array-token","--normal=visible"]
 separateArgs:
   - --password
   - yaml-list-password
+  - -p
+  - short-option-password
   - --normal
   - visible-setting
 inline_json: {"name":"HF_TOKEN","value":"inline-json-secret"}
 eventMessage: Failed to pull image private.event.example/team/image:v1 after resolving reference private.reference.example/team/image:v1
 session: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signaturevalue123
+github_output: authenticated as ghp_0123456789abcdefghijklmnopqrstuvwxyz
+gitlab_output: authenticated as glpat-0123456789abcdefghij
+cloud_identity: using AKIAIOSFODNN7EXAMPLE
+network_error: 'dial tcp: lookup private.registry.example on 10.0.0.10:53: no such host'
 pem: |
   -----BEGIN PRIVATE KEY-----
   pem-private-key-material
@@ -203,8 +216,14 @@ chmod +x "$tmp/bin/npu-smi"
 export KUBECTL_LOG="$tmp/kubectl.log" VENDOR_LOG="$tmp/vendor.log"
 export PATH="$tmp/bin:$PATH"
 
+# Help documents the two namespace roles and Linux-specific dependencies.
+"$root/hack/hami-support-bundle.sh" --help >"$tmp/help.txt"
+assert_contains "$tmp/help.txt" '--workload-namespace NAME'
+assert_contains "$tmp/help.txt" 'Linux, Bash 4\.1 or newer'
+assert_contains "$tmp/help.txt" 'util-linux flock'
+
 # Pod scope, structured redaction, per-Pod logs, failures, and local vendor tools.
-"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --pod target --tail-lines 3 --redact-pattern custom-secret --output-dir "$tmp/pod-out"
+"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --workload-namespace tenant-a --pod target --tail-lines 3 --redact-pattern custom-secret --output-dir "$tmp/pod-out"
 tar -tzf "$tmp/pod-out/hami-support-bundle.tar.gz" >"$tmp/pod-archive-members.txt"
 assert_contains "$tmp/pod-archive-members.txt" '^hami-support-bundle/manifest\.json$'
 assert_contains "$tmp/pod-archive-members.txt" '^hami-support-bundle/artifacts/workloads/pod\.yaml$'
@@ -226,7 +245,9 @@ sensitive_fragments=(
   space-separated-password json-array-token inline-json-secret private.node.example
   yaml-list-password compact-db-password compact-plain-private-value
   private.event.example private.reference.example pem-private-key-material signaturevalue123
-  compact.private.example
+  compact.private.example database-short-password signature-secret session-cookie-secret
+  short-option-password ghp_0123456789abcdefghijklmnopqrstuvwxyz glpat-0123456789abcdefghij
+  AKIAIOSFODNN7EXAMPLE private.registry.example
 )
 for fragment in "${sensitive_fragments[@]}"; do
   if grep -R -F -- "$fragment" "$bundle" >/dev/null; then
@@ -250,6 +271,10 @@ assert_contains "$bundle/artifacts/workloads/pod.yaml" 'inline_json: \{"name":"H
 assert_contains "$bundle/artifacts/workloads/pod.yaml" '- <redacted-credential>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'eventMessage: Failed to pull image <redacted-image> after resolving reference <redacted-image>'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'session: <redacted-jwt>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'github_output: authenticated as <redacted-token>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'gitlab_output: authenticated as <redacted-token>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" 'cloud_identity: using <redacted-access-key>'
+assert_contains "$bundle/artifacts/workloads/pod.yaml" "network_error: 'dial tcp: lookup <redacted-host> on 10\.0\.0\.10:53: no such host'"
 assert_contains "$bundle/artifacts/workloads/pod.yaml" '^[[:space:]]*<redacted-private-key>$'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'name: retained-container-name'
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'resources:'
@@ -260,6 +285,12 @@ assert_contains "$bundle/artifacts/workloads/pod.yaml" 'images: <redacted-image-
 assert_contains "$bundle/artifacts/workloads/pod.yaml" 'ordinary multiline text'
 assert_contains "$bundle/artifacts/config/scheduler.yaml" 'password: <redacted-credential>'
 assert_contains "$bundle/artifacts/config/scheduler.yaml" 'configmap-normal-multiline'
+assert_contains "$bundle/errors/scheduler-rollout.txt" '^stdout:$'
+assert_contains "$bundle/errors/scheduler-rollout.txt" '^rollout progress before failure$'
+assert_contains "$bundle/errors/scheduler-rollout.txt" '^stderr:$'
+assert_contains "$bundle/errors/scheduler-rollout.txt" 'Authorization: <redacted-credential>'
+assert_contains "$bundle/manifest.json" '"collector":"scheduler-rollout".*"detail":"exit-code=1"'
+assert_not_contains "$bundle/manifest.json" 'exit-code=1;"'
 assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
@@ -271,6 +302,9 @@ test "$device_plugin_log_order" = '1 2 3 4 5 6 7' || fail "device-plugin logs we
 assert_not_contains "$KUBECTL_LOG" 'logs -l '
 assert_not_contains "$KUBECTL_LOG" ' get nodes '
 assert_contains "$KUBECTL_LOG" ' get node gpu-node-a -o yaml'
+assert_contains "$KUBECTL_LOG" '-n tenant-a get pod target -o yaml'
+assert_contains "$KUBECTL_LOG" '-n tenant-a get events --field-selector involvedObject.kind=Pod'
+assert_contains "$KUBECTL_LOG" '-n hami get configmaps'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--tail=3 --since=1h'
 assert_not_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 --previous'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-2 --previous .*--tail=3 --since=1h'
@@ -319,13 +353,14 @@ assert_contains "$tmp/cluster-dry.txt" '-A get events'
 assert_contains "$tmp/cluster-dry.txt" ' get nodes -o yaml'
 assert_contains "$tmp/cluster-dry.txt" '-n hami get configmaps'
 
-# Node mode limits tenant workloads/events to the requested namespace.
-"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --node gpu-node-a --dry-run --output-dir "$tmp/node-dry" >"$tmp/node-dry.txt"
-assert_contains "$tmp/node-dry.txt" '-n hami get pods --field-selector spec.nodeName=gpu-node-a'
-assert_contains "$tmp/node-dry.txt" '-n hami get events --field-selector involvedObject.kind=Node'
+# Node mode limits tenant workloads/events to the explicit workload namespace.
+"$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --workload-namespace tenant-a --node gpu-node-a --dry-run --output-dir "$tmp/node-dry" >"$tmp/node-dry.txt"
+assert_contains "$tmp/node-dry.txt" '-n tenant-a get pods --field-selector spec.nodeName=gpu-node-a'
+assert_contains "$tmp/node-dry.txt" '-n tenant-a get events --field-selector involvedObject.kind=Node'
 assert_not_contains "$tmp/node-dry.txt" '-A get pods'
 assert_contains "$tmp/node-dry.txt" ' get node gpu-node-a -o yaml'
 assert_not_contains "$tmp/node-dry.txt" ' get nodes '
+assert_contains "$tmp/node-dry.txt" '-n hami get configmaps'
 test "$(wc -l <"$KUBECTL_LOG")" -eq "$kubectl_calls_before_dry_run" || fail 'dry-run executed kubectl'
 
 # Scope flags are mutually exclusive.
