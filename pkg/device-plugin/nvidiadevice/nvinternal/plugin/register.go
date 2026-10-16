@@ -206,6 +206,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 				klog.InfoS("skip MIG device with no discovered profile capacity", "id", UUID, "model", Model)
 				continue
 			}
+			plugin.rememberMigCard(UUID, registeredmem, info.MIGProfiles)
 			info.Count = 0
 			for _, profile := range info.MIGProfiles {
 				if int64(profile.InstanceCount) > info.Count {

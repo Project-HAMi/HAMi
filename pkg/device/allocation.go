@@ -67,6 +67,12 @@ func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, all
 	return nil
 }
 
+// RequestedMemoryMB returns the memory the request entitles the container to on
+// the named card, and whether the request bounds it at all.
+func RequestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int64, bool) {
+	return requestedMemoryMB(req, uuid, cardMemory)
+}
+
 // requestedMemoryMB returns the memory the request entitles the container to on
 // the named card, and whether the request bounds it at all.
 func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int64, bool) {
