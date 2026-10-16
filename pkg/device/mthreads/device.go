@@ -298,20 +298,23 @@ func (dev *MthreadsDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[str
 	devlist, ok := pd[MthreadsGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[device.SupportDevices[MthreadsGPUDevice]] = device.EncodePodSingleDevice(devlist)
+		indices := make([]string, 0)
+		seen := make(map[int]struct{})
 		for _, dp := range devlist {
-			if len(dp) > 0 {
-				value := ""
-				for _, val := range dp {
-					value = value + fmt.Sprint(val.Idx) + ","
+			for _, val := range dp {
+				if _, alreadyAdded := seen[val.Idx]; alreadyAdded {
+					continue
 				}
-				if len(value) > 0 {
-					(*annoinput)[MthreadsAssignedGPUIndex] = strings.TrimRight(value, ",")
-					//(*annoinput)[MthreadsAssignedNode]=
-					tmp := strconv.FormatInt(time.Now().UnixNano(), 10)
-					(*annoinput)[MthreadsPredicateTime] = tmp
-					(*annoinput)[MthreadsAssignedNode] = (*annoinput)[util.AssignedNodeAnnotations]
-				}
+				seen[val.Idx] = struct{}{}
+				indices = append(indices, strconv.Itoa(val.Idx))
 			}
+		}
+		if len(indices) > 0 {
+			(*annoinput)[MthreadsAssignedGPUIndex] = strings.Join(indices, ",")
+			//(*annoinput)[MthreadsAssignedNode]=
+			tmp := strconv.FormatInt(time.Now().UnixNano(), 10)
+			(*annoinput)[MthreadsPredicateTime] = tmp
+			(*annoinput)[MthreadsAssignedNode] = (*annoinput)[util.AssignedNodeAnnotations]
 		}
 	}
 	klog.Infoln("annoinput", (*annoinput))
