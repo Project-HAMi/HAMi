@@ -31,7 +31,6 @@ missing_license_header_files="$($ADDLICENSE_BIN \
   -check \
   -ignore "benchmarks/**" \
   -ignore "charts/**" \
-  -ignore "docs/**" \
   -ignore "docker/**" \
   -ignore "examples/**" \
   -ignore "lib/**" \
