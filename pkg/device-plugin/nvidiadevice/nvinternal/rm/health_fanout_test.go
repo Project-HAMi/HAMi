@@ -143,6 +143,7 @@ func TestCheckHealthMIGSlices(t *testing.T) {
 	}{
 		{name: "GPU-wide event reaches every slice", parent: "GPU-a", gi: noInstance, ci: noInstance, want: sliceA},
 		{name: "instance event reaches only its slice", parent: "GPU-a", gi: 2, ci: 0, want: []string{sliceA[1]}},
+		{name: "GPU-instance event with unspecified compute instance reaches only its slice", parent: "GPU-a", gi: 2, ci: noInstance, want: []string{sliceA[1]}},
 		{name: "unknown instance reaches nothing", parent: "GPU-a", gi: 7, ci: 0},
 		{name: "unknown parent is ignored", parent: "GPU-unknown", gi: noInstance, ci: noInstance},
 	}
