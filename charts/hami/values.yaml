@@ -980,7 +980,6 @@ devices:
     # An empty or null value uses `template`, or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore` is true.
     # An explicit mode takes precedence over that flag; unknown modes are rejected.
     hamiVnpuMode: ""
-    # -- Positive integer virtual-device slots per physical Ascend NPU in hami-core mode. Requires an ascend-device-plugin version supporting vnpus.vnpuDeviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; template and ENPU modes keep their own capacity.
     vnpuDeviceSplitCount: 10
     # -- Default ENPU policy: `fixed-share`, `elastic`, or `best-effort`; numeric string aliases `"1"`, `"2"`, and `"3"` are accepted.
     # Empty uses `elastic`. A Pod's `huawei.com/enpu-policy` overrides this value; invalid policies are rejected for ENPU workloads.
