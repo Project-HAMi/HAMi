@@ -19,18 +19,20 @@ docker run -d \
 # 2. Wait for vLLM to be ready by polling /v1/models
 echo "Waiting for vLLM to load model and become ready..."
 MAX_RETRIES=${MAX_RETRIES:-120}
-for ((i = 1; i <= MAX_RETRIES; i++)); do
+i=1
+while [ "$i" -le "$MAX_RETRIES" ]; do
   if curl -s "$VLLM_URL/v1/models" > /dev/null 2>&1; then
     echo "Service is ready!"
     break
   fi
-  if ((i == MAX_RETRIES)); then
+  if [ "$i" -eq "$MAX_RETRIES" ]; then
     echo "vLLM did not become ready after $((MAX_RETRIES * 5))s" >&2
     docker stop "$CONTAINER_NAME"
     exit 1
   fi
   echo "  ...waiting (checking every 5s)..."
   sleep 5
+  i=$((i + 1))
 done
 
 # 3. Run the benchmark, forwarding any CLI args
