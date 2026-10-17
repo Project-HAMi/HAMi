@@ -177,8 +177,10 @@ jobs:
             cd ../hami-bench-base
             # The base may predate BENCH_COUNT, so invoke go test directly
             # instead of relying on the new script interface from this PR.
+            package_list="$(go list ./pkg/... ./cmd/...)"
+            readarray -t benchmark_packages <<<"${package_list}"
             go test -run '^$' -bench . -benchmem -benchtime 100ms -count 10 \
-              $(go list ./pkg/... ./cmd/...)
+              "${benchmark_packages[@]}"
           ) 2>&1 | tee _output/bench/base.txt
       - name: Run benchmarks
         # PR comparisons need independent samples for benchstat, rather than

@@ -134,4 +134,38 @@ if BENCHSTAT_BIN="${tmp_dir}/failing-benchstat" \
 	exit 1
 fi
 
+# An empty policy must not silently disable every allocation gate.
+: >"${tmp_dir}/empty-policy.tsv"
+if BENCHSTAT_BIN="${tmp_dir}/benchstat" \
+	"${repo_root}/hack/bench-compare.sh" "${tmp_dir}/base.txt" "${tmp_dir}/base.txt" "${tmp_dir}/report.txt" "${tmp_dir}/empty-policy.tsv"; then
+	echo "expected empty policy to fail" >&2
+	exit 1
+fi
+
+# Package discovery is a separate prerequisite. A failing go list must stop
+# bench.sh before go test, rather than being hidden inside argument expansion.
+mkdir -p "${tmp_dir}/fake-bin"
+cat >"${tmp_dir}/fake-bin/go" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "list" ]]; then
+	exit 23
+fi
+if [[ "${1:-}" == "test" ]]; then
+	touch "${GO_TEST_MARKER}"
+	exit 0
+fi
+exit 2
+EOF
+chmod +x "${tmp_dir}/fake-bin/go"
+
+if PATH="${tmp_dir}/fake-bin:${PATH}" GO_TEST_MARKER="${tmp_dir}/go-test-ran" \
+	BENCH_OUTPUT_DIR="${tmp_dir}/bench-output" bash "${repo_root}/hack/bench.sh"; then
+	echo "expected go list failure to propagate" >&2
+	exit 1
+fi
+if [[ -e "${tmp_dir}/go-test-ran" ]]; then
+	echo "go test ran after package discovery failed" >&2
+	exit 1
+fi
+
 echo "bench comparison tests passed"

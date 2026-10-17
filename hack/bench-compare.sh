@@ -152,6 +152,10 @@ BEGIN {
 		alloc_limits[policy_count] = fields[3]
 	}
 	close(policy)
+	if (policy_count == 0) {
+		printf "benchmark policy contains no rules\n" > "/dev/stderr"
+		errors++
+	}
 
 	for (i = 1; i <= policy_count; i++) {
 		matched = 0

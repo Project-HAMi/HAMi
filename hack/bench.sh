@@ -42,5 +42,7 @@ result_file="${output_dir}/results.txt"
 #
 # --race is deliberately omitted. The race detector multiplies the runtime and
 # distorts the allocation figures the benchmarks exist to report.
+package_list="$(go list ./pkg/... ./cmd/...)"
+readarray -t benchmark_packages <<<"${package_list}"
 go test -run '^$' -bench . -benchmem -benchtime "${BENCHTIME}" -count "${BENCH_COUNT}" \
-  $(go list ./pkg/... ./cmd/...) 2>&1 | tee "${result_file}"
+  "${benchmark_packages[@]}" 2>&1 | tee "${result_file}"
