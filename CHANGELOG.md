@@ -444,7 +444,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Score MIG placements and add a backtracking fallback
 - Add scheduler NUMA refit for device allocations
 - Account native sidecar container GPU resources
-- Ascend: schedule ENPU workloads with policy isolation and configure `vnpuDeviceSplitCount`
+- Ascend: schedule ENPU workloads with policy isolation and configure `deviceSplitCount` for both hami-core and ENPU modes
 - Report memory and core resources to node capacity
 - Add profiling support with a dedicated HTTP bind address
 - Add OpenShift and SELinux support, a PodDisruptionBudget for HA scheduler deployments, and chart values for the scheduler kube-qps, kube-burst, kube-timeout and node-lock retry timeout

@@ -352,11 +352,11 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- define "hami-vgpu.validateDeviceValues" -}}
 {{/* Validate values even when device-config.content overrides the generated config. */}}
 {{- $_ := include "hami-vgpu.ascendVnpuMode" . -}}
-{{- $count := .Values.devices.ascend.vnpuDeviceSplitCount -}}
+{{- $count := .Values.devices.ascend.deviceSplitCount -}}
 {{- $integer := int64 $count -}}
 {{- $numeric := has (kindOf $count) (list "int" "int64" "float64") -}}
 {{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
-  {{- fail "devices.ascend.vnpuDeviceSplitCount must be a positive integer" -}}
+  {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
 {{- end -}}
 {{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
 {{- $removedRootFields := dict
