@@ -535,3 +535,13 @@ func TestRemoteGPU_MemoryRequestFiltersCards(t *testing.T) {
 	assert.Equal(t, len(scores.NodeList), 0)
 	assert.Assert(t, failed["cpu-1"] != "")
 }
+
+func TestRequestsDevice(t *testing.T) {
+	reqs := device.PodDeviceRequests{
+		{"NVIDIA": device.ContainerDeviceRequest{Nums: 1}},
+		{remotegpu.RemoteGPUCommonWord: device.ContainerDeviceRequest{Nums: 1}},
+	}
+	assert.Assert(t, requestsDevice(reqs, remotegpu.RemoteGPUCommonWord))
+	assert.Assert(t, !requestsDevice(reqs[:1], remotegpu.RemoteGPUCommonWord))
+	assert.Assert(t, !requestsDevice(nil, remotegpu.RemoteGPUCommonWord))
+}

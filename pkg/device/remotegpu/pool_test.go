@@ -633,3 +633,40 @@ func TestPool_RefreshDoesNotBlockReservedDuringAServerFetch(t *testing.T) {
 	close(release)
 	<-refreshDone
 }
+
+// A pod Fit refused must be requeued once the fleet changes, because
+// kube-scheduler does not requeue it on that change by itself.
+func TestPool_NudgesRefusedPodWhenFleetChanges(t *testing.T) {
+	nodes := []corev1.Node{}
+	stubFleet(t, nodes, nil, nil)
+	nudged := make(chan []waiter, 1)
+	prev := nudgePods
+	nudgePods = func(pods []waiter, _ uint64) { nudged <- pods }
+	t.Cleanup(func() { nudgePods = prev })
+
+	dev := InitRemoteGPUDevice(testConfig())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}
+	dev.WaitForFleet(pod)
+
+	// Nothing changed: the refused pod stays untouched.
+	dev.pool.snapshot(context.Background())
+	select {
+	case <-nudged:
+		t.Fatal("pod nudged without a fleet change")
+	default:
+	}
+
+	nodes = append(nodes, lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}))
+	stubFleet(t, nodes, nil, nil)
+	dev.pool.mu.Lock()
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.mu.Unlock()
+	dev.pool.snapshot(context.Background())
+	select {
+	case got := <-nudged:
+		assert.Equal(t, len(got), 1)
+		assert.Equal(t, got[0].namespace+"/"+got[0].name, "ns/p")
+	case <-time.After(time.Second):
+		t.Fatal("refused pod was not nudged after the fleet changed")
+	}
+}
