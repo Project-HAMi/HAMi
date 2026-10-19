@@ -57,6 +57,8 @@ const (
 	NodeFitPod                        = "NodeFitPod"
 	ResourceQuotaNotFit               = "ResourceQuotaNotFit"
 	ModeNotFit                        = "ModeNotFit"
+	HyperNodeTierNotFit               = "HyperNodeTierNotFit"
+	GangTopologyNotFit                = "GangTopologyNotFit"
 )
 
 func GenReason(reasons map[string]int, cards int) string {

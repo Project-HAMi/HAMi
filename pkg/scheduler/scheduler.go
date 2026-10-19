@@ -94,6 +94,12 @@ type Scheduler struct {
 	lock   sync.RWMutex
 	synced atomic.Bool
 
+	// topology caches the NPU interconnect hierarchy of the cluster, rebuilt
+	// from the node labels and annotations on every register tick. It stays nil
+	// while the feature is off, which is the default, so that an unconfigured
+	// cluster takes the same code path as before.
+	topology atomic.Pointer[topologyView]
+
 	// allocLock serializes reservation mutations between Filter, the NUMA
 	// refit (RefitNumaAllocation), and pod adds/updates that release init-container
 	// usage, so these paths cannot observe or produce half-applied accounting.
@@ -524,6 +530,7 @@ func (s *Scheduler) Start() error {
 	}
 	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: s.onUpdateNode,
 		DeleteFunc: s.onDelNode,
 	})
 	if err != nil {
@@ -615,6 +622,10 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		return
 	}
 	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
+	// The NPU interconnect hierarchy is rebuilt from the same node snapshot: the
+	// tiers are read straight off the node labels and annotations, so a relabeled
+	// fabric is picked up on the next register tick without a watch of its own.
+	s.rebuildTopology(rawNodes)
 	for _, val := range rawNodes {
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
@@ -1401,6 +1412,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if len(failedNodes) != 0 {
 		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
 	}
+	// The NPU topology rules of this pod are resolved once and reused by both the
+	// hard filter and the ranking that follows the scoring pass. The plan is nil,
+	// and both calls then do nothing, unless the pod opted in to topology aware
+	// scheduling and its group already has a member placed.
+	topoPlan := s.topologyPlanFor(pod)
+	s.applyTopologyGangFilter(topoPlan, pod, resourceReqs, nodeUsage, failedNodes)
+	s.applyTopologyFilter(topoPlan, pod, nodeUsage, failedNodes)
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
@@ -1408,6 +1426,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
+	s.applyTopologyScore(topoPlan, pod, nodeScores)
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores", "pod", pod.Name)
 		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonNoFit)
