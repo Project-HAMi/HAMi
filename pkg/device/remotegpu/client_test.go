@@ -111,7 +111,7 @@ func TestClientDeliveryPreservesExplicitLibraryMount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(pod.Spec.Containers[0].VolumeMounts) != 5 || !reflect.DeepEqual(pod.Spec.Containers[0].VolumeMounts[0], mount) {
+	if len(pod.Spec.Containers[0].VolumeMounts) != 6 || !reflect.DeepEqual(pod.Spec.Containers[0].VolumeMounts[0], mount) {
 		t.Fatal("workload library mount changed or duplicated")
 	}
 	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].Name != mount.Name || pod.Spec.Volumes[0].EmptyDir == nil {
@@ -131,8 +131,11 @@ func TestClientDeliveryWithoutCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	FinalizeAdmission(pod)
-	if len(pod.Spec.InitContainers) != 1 || len(ctr.VolumeMounts) != 4 {
+	if len(pod.Spec.InitContainers) != 1 || len(ctr.VolumeMounts) != 5 {
 		t.Fatal("unexpected preparation or cache mounts")
+	}
+	if !reflect.DeepEqual(ctr.VolumeMounts[len(ctr.VolumeMounts)-1], corev1.VolumeMount{Name: clientVolumeName, MountPath: clientSMIMountPath, SubPath: clientSMIWrapperName, ReadOnly: true}) {
+		t.Fatal("nvidia-smi not mounted from the client image")
 	}
 	if envOf(ctr, ldPreloadEnv) != nil {
 		t.Fatal("client delivery must not preload Lupine")
@@ -185,6 +188,9 @@ func TestClientDeliveryRejectsConflicts(t *testing.T) {
 		"driver mount collision": func(p *corev1.Pod) {
 			p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "mine", MountPath: "/usr/local/nvidia/lib64/libcuda.so.1"}}
 		},
+		"nvidia-smi mount collision": func(p *corev1.Pod) {
+			p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "mine", MountPath: clientSMIMountPath}}
+		},
 		"volume collision": func(p *corev1.Pod) {
 			p.Spec.Volumes = []corev1.Volume{{Name: clientVolumeName, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mine"}}}}
 		},
@@ -228,10 +234,12 @@ func TestClientDeliveryKnownDependency(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			smi := filepath.Join(root, "nvidia-smi")
 			for path, data := range map[string]string{
 				filepath.Join(source, "libcuda.so.1"):            "driver",
 				filepath.Join(libraries, "libnghttp2.so.14.0.0"): "nghttp2",
 				filepath.Join(libraries, "libssl.so.3"):          "unrelated",
+				smi:                                              "smi",
 			} {
 				if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 					t.Fatal(err)
@@ -241,12 +249,21 @@ func TestClientDeliveryKnownDependency(t *testing.T) {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, filepath.Join(root, "missing"), libraries)
+			cmd.Env = append(os.Environ(), "NVIDIA_SMI_SOURCE="+smi)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("delivery: %v: %s", err, output)
 			}
 			got, err := os.ReadFile(filepath.Join(target, "libnghttp2.so.14"))
 			if err != nil || string(got) != "nghttp2" {
 				t.Fatalf("dependency: %q, %v", got, err)
+			}
+			got, err = os.ReadFile(filepath.Join(target, clientSMIBinaryName))
+			if err != nil || string(got) != "smi" {
+				t.Fatalf("nvidia-smi: %q, %v", got, err)
+			}
+			got, err = os.ReadFile(filepath.Join(target, clientSMIWrapperName))
+			if err != nil || string(got) != clientSMIWrapper {
+				t.Fatalf("nvidia-smi wrapper: %q, %v", got, err)
 			}
 			if _, err := os.Stat(filepath.Join(target, "libssl.so.3")); !os.IsNotExist(err) {
 				t.Fatalf("must not copy unrelated libraries: %v", err)
@@ -255,6 +272,12 @@ func TestClientDeliveryKnownDependency(t *testing.T) {
 			output, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(output), "libnghttp2.so.14 not found") {
 				t.Fatalf("missing dependency: %v: %s", err, output)
+			}
+			cmd = exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, libraries)
+			cmd.Env = append(os.Environ(), "NVIDIA_SMI_SOURCE="+filepath.Join(root, "missing-smi"))
+			output, err = cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "nvidia-smi not found") {
+				t.Fatalf("missing nvidia-smi: %v: %s", err, output)
 			}
 		})
 	}
