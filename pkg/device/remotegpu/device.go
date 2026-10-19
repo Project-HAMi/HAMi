@@ -57,7 +57,7 @@ const (
 	// LupineServerSelectorAnno optionally limits a RemoteGPU pod to Lupine
 	// servers with one exact Node-label match, for example
 	// "gpu-pool=inference". It selects the remote server, not the client node.
-	LupineServerSelectorAnno = "hami.io/remote-gpu-server-selector"
+	LupineServerSelectorAnno = "hami.io/remote-server"
 
 	lupineServerEnv     = "LUPINE_SERVER"
 	lupineWorkloadIDEnv = "LUPINE_WORKLOAD_ID"
@@ -89,7 +89,7 @@ var (
 	errNoClient               = errors.New("kubernetes client is not initialized")
 	errNoRegistration         = errors.New("node has no decodable GPU registration")
 	errNoPool                 = errors.New("no lupine server available in the cluster")
-	errNoMatchingLupineServer = errors.New("no Lupine server matches hami.io/remote-gpu-server-selector")
+	errNoMatchingLupineServer = errors.New("no Lupine server matches " + LupineServerSelectorAnno)
 )
 
 type RemoteGPUDevices struct {
