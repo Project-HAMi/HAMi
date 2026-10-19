@@ -713,14 +713,15 @@ func TestApiNudgePods(t *testing.T) {
 	assert.Equal(t, len(apiNudgePods([]waiter{w}, 3)), 1, "no client: keep the pod")
 
 	live := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p"}}
-	client.KubeClient = fake.NewClientset(live)
+	cs := fake.NewClientset(live)
+	client.KubeClient = cs
 	gone := waiter{uid: "uid-2", namespace: "ns", name: "gone"}
 	assert.Equal(t, len(apiNudgePods([]waiter{w, gone}, 3)), 0, "patched or already gone")
 	got, err := client.KubeClient.CoreV1().Pods("ns").Get(context.Background(), "p", metav1.GetOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, got.Annotations[RetryAnno], "3")
 
-	client.KubeClient.(*fake.Clientset).PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+	cs.PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("apiserver down")
 	})
 	assert.Equal(t, len(apiNudgePods([]waiter{w}, 4)), 1, "failed patch: keep the pod")
