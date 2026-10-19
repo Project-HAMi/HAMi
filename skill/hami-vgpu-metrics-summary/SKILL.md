@@ -200,7 +200,7 @@ These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
 **Per-container vGPU runtime metrics**
 - `hami_vgpu_memory_used_bytes` — vGPU memory usage per container
 - `hami_vgpu_memory_limit_bytes` — vGPU memory limit per container
-- `hami_container_device_memory_bytes` — deprecated in v2.11, removed in v2.12; same value as `hami_vgpu_memory_used_bytes`, use that instead
+- `hami_container_device_memory_bytes` — deprecated in v2.11.0, removed in v2.12.0; same value as `hami_vgpu_memory_used_bytes`, use that instead
 - `hami_container_device_utilization_ratio` — container device SM utilization
 - `hami_container_last_kernel_elapsed_seconds` — seconds since last kernel execution
 - `hami_vgpu_memory_context_bytes` — memory context size
@@ -774,7 +774,7 @@ If the user asks in English, answer in English.
 | `hami_host_gpu_memory_controller_utilization_ratio` | Runtime GPU memory controller utilization from vGPU monitor | runtime/device |
 | `hami_vgpu_memory_used_bytes` / `vGPU_device_memory_usage_in_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_limit_bytes` / `vGPU_device_memory_limit_in_bytes` | Runtime per-container vGPU memory limit from vGPU monitor | runtime/container |
-| `hami_container_device_memory_bytes` / `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor (`hami_container_device_memory_bytes` is deprecated in v2.11, removed in v2.12; use `hami_vgpu_memory_used_bytes`) | runtime/container |
+| `hami_container_device_memory_bytes` / `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor (`hami_container_device_memory_bytes` is deprecated in v2.11.0, removed in v2.12.0; use `hami_vgpu_memory_used_bytes`) | runtime/container |
 | `hami_container_device_utilization_ratio` / `Device_utilization_desc_of_container` | Container device SM utilization from vGPU monitor | runtime/container |
 | `hami_container_last_kernel_elapsed_seconds` / `Device_last_kernel_of_container` | Seconds since last kernel execution from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_context_bytes` | Memory context size from vGPU monitor | runtime/container |
