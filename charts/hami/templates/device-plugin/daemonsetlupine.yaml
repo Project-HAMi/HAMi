@@ -70,6 +70,9 @@ spec:
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
+          {{- with .Values.devices.remotegpu.server.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.devices.remotegpu.server.resources }}
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}

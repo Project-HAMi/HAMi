@@ -780,6 +780,10 @@ devices:
       # fleet annotation and does not need the NVIDIA runtime itself.
       runtimeClassName: ""
       tolerations: []
+      # -- Container securityContext of the lupine server. Set `privileged: true` on hosts where the
+      # NVIDIA container toolkit has accept-nvidia-visible-devices-envvar-when-unprivileged=false,
+      # otherwise NVIDIA_VISIBLE_DEVICES is ignored and the server sees no GPU.
+      securityContext: {}
       resources: {}
   ascend:
     configs:
