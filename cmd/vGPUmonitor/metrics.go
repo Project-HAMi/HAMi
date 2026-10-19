@@ -109,7 +109,7 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
-		`Container device memory usage in bytes`,
+		"DEPRECATED: use hami_vgpu_memory_used_bytes, deprecated in v2.11, removed in v2.12",
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
