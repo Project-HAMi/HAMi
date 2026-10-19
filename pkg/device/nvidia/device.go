@@ -71,6 +71,10 @@ const (
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
+	// WholeGPUUsedCores is the cores percentage recorded in the
+	// vgpu-devices-allocated annotation when a container holds the entire GPU.
+	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
+	WholeGPUUsedCores int64 = 100
 	// RemoteMode marks a GPU this node serves over the network through lupine
 	// rather than to pods of its own. It is configured per-node via
 	// operatingmode in the device-plugin ConfigMap (peer to hami-core / mig);
@@ -78,11 +82,6 @@ const (
 	// remote-gpu backend hands such a card out cluster wide, so this backend
 	// must leave it alone.
 	RemoteMode = "remote"
-
-	// WholeGPUUsedCores is the cores percentage recorded in the
-	// vgpu-devices-allocated annotation when a container holds the entire GPU.
-	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
-	WholeGPUUsedCores int64 = 100
 )
 
 var (

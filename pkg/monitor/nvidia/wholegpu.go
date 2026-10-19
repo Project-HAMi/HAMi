@@ -93,6 +93,11 @@ type wholeGPUState struct {
 	nvmlInitialized bool
 	getNodeDevices  func() (map[string]*device.DeviceInfo, error)
 
+	// dcgm lazily brings up an embedded host engine the first time a MIG
+	// device's utilization is actually requested; created together with the
+	// state itself so synthesized wholeGPUUsage values can reference it.
+	dcgm *dcgmWholeGPUCollector
+
 	// verdicts caches terminal per-container decisions, keyed the same way
 	// as ContainerLister.containers ("{podUID}_{containerName}").
 	verdicts map[string]wholeGPUVerdict
@@ -131,8 +136,13 @@ const indeterminateRetryWindow = 30 * time.Second
 // has been confirmed to hold one or more whole physical GPUs. It is
 // stateless beyond the UUID list: every getter queries NVML directly, since
 // Observe() calls these outside ContainerLister's lock.
+//
+// dcgm is consulted only for MIG-allocated devices, whose utilization NVML
+// cannot report at instance granularity; it may be nil when the caller has
+// no DCGM available yet.
 type wholeGPUUsage struct {
 	nvmllib nvml.Interface
+	dcgm    *dcgmWholeGPUCollector
 	uuids   []string
 }
 
@@ -173,12 +183,40 @@ func (u *wholeGPUUsage) DeviceSmUtil(idx int) uint64 {
 		return 0
 	}
 
+	// MIG devices do not support whole-device utilization rates in NVML, so
+	// query them from DCGM at GPU-instance granularity instead.
+	isMig, ret := handle.IsMigDeviceHandle()
+	if errors.Is(ret, nvml.SUCCESS) && isMig {
+		if u.dcgm == nil {
+			return 0
+		}
+		giID, ret := handle.GetGpuInstanceId()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG device %s GetGpuInstanceId failed: %v", u.uuids[idx], ret)
+			return 0
+		}
+		// DCGM uses global entity IDs, so pass the parent GPU UUID along
+		// with the per-parent giID to disambiguate MIG instances.
+		parentHandle, ret := handle.GetDeviceHandleFromMigDeviceHandle()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG device %s GetDeviceHandleFromMigDeviceHandle failed: %v", u.uuids[idx], ret)
+			return 0
+		}
+		parentUUID, ret := parentHandle.GetUUID()
+		if !errors.Is(ret, nvml.SUCCESS) {
+			klog.V(4).Infof("wholegpu: MIG parent device GetUUID failed: %v", ret)
+			return 0
+		}
+		return u.dcgm.GpuInstanceSmUtil(parentUUID, uint(giID), u.uuids[idx])
+	}
+
 	rates, ret := handle.GetUtilizationRates()
 	if !errors.Is(ret, nvml.SUCCESS) {
 		klog.V(4).Infof("wholegpu: GetUtilizationRates(%s) failed: %v", u.uuids[idx], ret)
 		return 0
 	}
 	return uint64(rates.Gpu)
+
 }
 
 func (u *wholeGPUUsage) SetDeviceSmLimit(l uint64) {}
@@ -245,9 +283,12 @@ type wholeGPUCandidate struct {
 	devices   device.ContainerDevices
 }
 
-// reconcileWholeGPU composes prefetchWholeGPUInputs+reconcileWholeGPULocked
-// for tests; Update calls the pair around its own locked section. pods is
-// node-scoped by the pod informer.
+// reconcileWholeGPU composes prefetchWholeGPUInputs and reconcileWholeGPULocked
+// for tests that do not drive the result through Update(). Production paths
+// call the two functions directly around their own locked section so the
+// cache-dir scan can skip over synthesized entries.
+//
+// pods is scoped to this node by the pod informer's field selector.
 func (l *ContainerLister) reconcileWholeGPU(pods []*corev1.Pod) {
 	inputs := l.prefetchWholeGPUInputs(pods)
 	l.mutex.Lock()
@@ -319,6 +360,7 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 	if l.wholeGPU == nil {
 		l.wholeGPU = &wholeGPUState{
 			nvmllib:            nvml.New(),
+			dcgm:               newDCGMWholeGPUCollector(nil),
 			verdicts:           make(map[string]wholeGPUVerdict),
 			firstSeenAt:        make(map[string]time.Time),
 			ownedContainerKeys: make(map[string]struct{}),
@@ -382,7 +424,7 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 				l.containers[key] = &ContainerUsage{
 					PodUID:        string(cand.pod.UID),
 					ContainerName: cand.container,
-					Info:          &wholeGPUUsage{nvmllib: state.nvmllib, uuids: uuids},
+					Info:          &wholeGPUUsage{nvmllib: state.nvmllib, dcgm: state.dcgm, uuids: uuids},
 				}
 				state.ownedContainerKeys[key] = struct{}{}
 				klog.Infof("wholegpu: synthesized whole-GPU usage for %s (%d device(s))", key, len(uuids))
@@ -445,14 +487,15 @@ func physTotalMiB(nvmllib nvml.Interface, uuid string) (int64, bool) {
 	return int64(mem.Total / 1024 / 1024), true
 }
 
-// evaluateContainerWholeGPU decides whether every allocated device is a whole
-// physical GPU: not a MIG slice, allocated full memory, and free of
-// over-subscription (a scaled device needs the hook to enforce it). Figures
-// must match the node registry exactly, so stale or forged values fail closed.
+// evaluateContainerWholeGPU reports whether a container holds every device it
+// was allocated, so that device's whole NVML utilization is its own. MIG
+// instances are hardware-isolated and always handed over whole, so they qualify
+// at instance granularity; anything else needs full memory and cores, matching
+// the device plugin's isWholeGPUAllocation.
 //
-// The second return value reports why an indeterminate verdict is pending:
-// causeRegistryMiss or causePhysUnreadable (causeNotIndeterminate for any
-// terminal verdict).
+// The returned cause distinguishes an indeterminate verdict: a registry miss or
+// an unreadable NVML reading is transient, so the caller retries rather than
+// failing closed. physMiB may be nil, skipping the over-subscription check.
 func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(uuid string) (int64, bool)) (wholeGPUVerdict, indeterminateCause) {
 	if len(ctrDevs) == 0 {
 		return notWholeGPU, causeNotIndeterminate
@@ -461,18 +504,35 @@ func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[str
 	for _, cd := range ctrDevs {
 		nodeDev, ok := nodeDevs[cd.UUID]
 		if !ok || nodeDev == nil {
+			// Not in the node registry this cycle: the annotation may simply
+			// be older than the registration, so stay pending and retry.
 			cause = causeRegistryMiss
+			continue
+		}
+		if nodeDev.Mode == nv.MigMode {
+			// MIG registers each instance as its own device, and an instance is
+			// hardware-isolated, so holding one means holding it whole. Its core
+			// figure is the profile's physical SM count (1g.10gb -> 14) rather than
+			// the 100-percent marker, so the core checks below do not apply.
+			if cd.Usedmem != nodeDev.Devmem {
+				return notWholeGPU, causeNotIndeterminate
+			}
 			continue
 		}
 		// Cores fully requested or unrequested (0 is unbounded) both mean
 		// the whole card; only an explicit partial core request disqualifies.
-		if nodeDev.Mode == nv.MigMode || cd.Usedmem != nodeDev.Devmem || (cd.Usedcores != 0 && cd.Usedcores != nv.WholeGPUUsedCores) {
+		if cd.Usedmem != nodeDev.Devmem || (cd.Usedcores != 0 && cd.Usedcores != nv.WholeGPUUsedCores) {
 			return notWholeGPU, causeNotIndeterminate
 		}
 		// Over-subscribed (core-scaled) devices register a scaled core
 		// count; they need the hook to enforce it, so never qualify.
 		if nodeDev.Devcore != nv.WholeGPUUsedCores {
 			return notWholeGPU, causeNotIndeterminate
+		}
+		// No probe means the caller classifies without NVML: scaling cannot be
+		// detected, so skip it rather than leave the verdict pending forever.
+		if physMiB == nil {
+			continue
 		}
 		totalMiB, ok := physMiB(cd.UUID)
 		if !ok {
@@ -488,6 +548,8 @@ func evaluateContainerWholeGPU(ctrDevs device.ContainerDevices, nodeDevs map[str
 			return notWholeGPU, causeNotIndeterminate
 		}
 	}
+	// A pending cause outranks confirming the container; a not-whole device
+	// anywhere in the request already returned above.
 	if cause != causeNotIndeterminate {
 		return indeterminate, cause
 	}
