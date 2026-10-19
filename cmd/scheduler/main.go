@@ -74,6 +74,9 @@ func init() {
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
+	rootCmd.Flags().StringVar(&config.TopologyTierLabels, "npu-topology-tier-labels", "", "comma separated node label keys describing the NPU interconnect hierarchy, from the smallest domain to the largest, e.g. 'npu.io/hypernode,@npu.io/rack=2'. Prefix a key with '@' to read it from the node annotations. Empty disables NPU topology aware scheduling.")
+	rootCmd.Flags().StringVar(&config.TopologyMode, "npu-topology-mode", util.TopologyModeSoft, "default mode for Pods that opt into NPU topology aware scheduling without naming one: 'hard' rejects nodes outside the allowed tier, 'soft' only ranks closer nodes higher")
+	rootCmd.Flags().Float32Var(&config.TopologyScoreWeight, "npu-topology-score-weight", config.DefaultTopologyScoreWeight, "weight of the locality bonus the NPU topology scorer adds to the score of a node")
 
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")

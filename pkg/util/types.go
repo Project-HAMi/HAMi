@@ -93,6 +93,36 @@ const (
 	// reconciles the scheduler-selected GPU with the NUMA-aligned replica
 	// preferred by kubelet's Topology Manager. See NumaAlignmentMode.
 	NumaAlignmentAnnotationKey = "hami.io/numa-alignment"
+	// TopologyModeAnnotationKey is a per-Pod annotation opting the Pod into NPU
+	// topology aware scheduling. See TopologyModeHard and TopologyModeSoft for
+	// the accepted values.
+	TopologyModeAnnotationKey = "hami.io/npu-topology-mode"
+	// TopologyHighestTierAnnotationKey is a per-Pod annotation capping how far up
+	// the NPU interconnect hierarchy the group of the Pod may spread. Tier 1 is
+	// the smallest domain and a larger tier a wider one; a node is only eligible
+	// when its lowest common domain with the group is not above that tier.
+	TopologyHighestTierAnnotationKey = "hami.io/npu-highest-tier-allowed"
+	// TopologyGroupAnnotationKey overrides how the group of Pods that has to
+	// stay close to each other is identified. Without it the group is derived
+	// from the usual job labels, see topologyGroupLabels in the scheduler.
+	TopologyGroupAnnotationKey = "hami.io/npu-topology-group"
+	// TopologyGangSizeAnnotationKey declares how many Pods make up the gang
+	// that has to be placed as a whole. When it is set with a value greater
+	// than one, the topology hard filter proves before binding the first Pod
+	// that one allowed topology domain can hold every member of the gang.
+	// Without it the existing incremental topology behavior is kept.
+	TopologyGangSizeAnnotationKey = "hami.io/npu-topology-gang-size"
+)
+
+// Topology modes accepted by TopologyModeAnnotationKey, and the values of the
+// scheduler's --npu-topology-mode flag.
+const (
+	// TopologyModeHard rejects every node that would place the Pod outside the
+	// tier its group allows.
+	TopologyModeHard = "hard"
+	// TopologyModeSoft keeps every node eligible and only ranks the closer ones
+	// higher.
+	TopologyModeSoft = "soft"
 )
 
 func (s SchedulerPolicyName) String() string {

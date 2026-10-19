@@ -156,6 +156,30 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
+      # NPU topology-aware scheduling (scheduler side).
+      # extraArgs replaces the whole list. Keep the two entries above when
+      # enabling a topology flag.
+      # Omitting --npu-topology-tier-labels disables the feature. When set, list
+      # the hardware hierarchy from the smallest domain to the largest, comma
+      # separated. Prefix a key with @ to read it from node annotations instead
+      # of labels.
+      #   Super-pod only:             @hami.io/npu-super-pod-id
+      #   Rack above super-pod:       @hami.io/npu-rack-id,@hami.io/npu-super-pod-id
+      #   Node-only cluster:          kubernetes.io/hostname
+      #     Each node is its own domain, so Pods of one job prefer one node.
+      #     Intra-node HCCS placement remains the device plugin's responsibility.
+      #   Mixed clusters:             kubernetes.io/hostname,@hami.io/npu-super-pod-id
+      #     Nodes with the annotation are grouped by super-pod; nodes without it
+      #     fall back to a single-node domain.
+      # Operators that maintain reliable ToR and cluster labels can use their own
+      # keys, for example topology.example.com/tor-id and
+      # topology.example.com/cluster-id. The label values must match the fabric.
+      # With only the node tier configured, hard mode plus no
+      # hami.io/npu-highest-tier-allowed requires a whole gang to fit on one
+      # node. Prefer soft mode until that capacity has been validated.
+      # Related flags: --npu-topology-mode (soft by default; hard rejects nodes
+      # outside the allowed tier) and --npu-topology-score-weight (default 20).
+      #- --npu-topology-tier-labels=@hami.io/npu-super-pod-id
   # -- Age after which a node lock is treated as expired, as a positive duration such as `5m`. An unparsable or non-positive value is ignored
   # and `5m` is used. A `--node-lock-timeout` flag in `scheduler.extender.extraArgs` overrides it.
   nodeLockExpire: "5m"

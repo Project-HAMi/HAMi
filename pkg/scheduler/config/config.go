@@ -70,6 +70,25 @@ var (
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
 
+	// TopologyTierLabels describes the NPU interconnect hierarchy the scheduler
+	// ranks nodes by, from the smallest domain to the largest, as a comma
+	// separated list of node label keys. A key prefixed with "@" is read from
+	// the node annotations instead of the labels, and "key=N" pins the tier
+	// level of a key explicitly. Empty, the default, disables NPU topology
+	// aware scheduling.
+	TopologyTierLabels string
+
+	// TopologyMode is the mode Pods that opt into NPU topology aware scheduling
+	// get when they do not name one. See util.TopologyModeHard and
+	// util.TopologyModeSoft.
+	TopologyMode = util.TopologyModeSoft
+
+	// TopologyScoreWeight scales the locality bonus the NPU topology scorer adds
+	// to the score of a node. The base score of a node is util.Weight per device
+	// dimension, so the default keeps topology a preference that a much better
+	// device fit can still outweigh.
+	TopologyScoreWeight float32
+
 	// NodeLockTimeout is the timeout for node locks.
 	NodeLockTimeout time.Duration
 
@@ -93,6 +112,11 @@ var (
 	DevicePluginNamespace      string
 	DevicePluginServiceAccount string
 )
+
+// DefaultTopologyScoreWeight is the default TopologyScoreWeight. It is larger
+// than util.Weight so that keeping a job inside one domain outranks the device
+// fit of any single node, which is the point of topology aware scheduling.
+const DefaultTopologyScoreWeight float32 = 20
 
 type Config struct {
 	NvidiaConfig    nvidia.NvidiaConfig       `yaml:"nvidia"`
