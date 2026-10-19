@@ -200,7 +200,7 @@ These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
 **Per-container vGPU runtime metrics**
 - `hami_vgpu_memory_used_bytes` — vGPU memory usage per container
 - `hami_vgpu_memory_limit_bytes` — vGPU memory limit per container
-- `hami_container_device_memory_bytes` — deprecated in v2.11.0, removed in v2.12.0; same value as `hami_vgpu_memory_used_bytes`, use that instead
+- `hami_container_device_memory_bytes` — container device memory usage (deprecated in v2.11.0, removed in v2.12.0; use `hami_vgpu_memory_used_bytes` instead)
 - `hami_container_device_utilization_ratio` — container device SM utilization
 - `hami_container_last_kernel_elapsed_seconds` — seconds since last kernel execution
 - `hami_vgpu_memory_context_bytes` — memory context size
