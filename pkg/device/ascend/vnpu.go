@@ -41,6 +41,10 @@ type VNPUConfig struct {
 	AICPU              int64      `yaml:"aiCPU"`
 	Templates          []Template `yaml:"templates"`
 	SuperPod           bool       `yaml:"superPod"`
+	// HamiVnpuMode overrides the global mode for this chip. Empty inherits it.
+	HamiVnpuMode string `yaml:"hamiVnpuMode,omitempty"`
+	// RuntimeClassName overrides the global runtime class for this chip.
+	RuntimeClassName string `yaml:"runtimeClassName,omitempty"`
 }
 
 // VNPUs holds the default Ascend VNPU mode and the per-chip config list.

@@ -87,6 +87,17 @@ func (dev *Devices) trimMemory(m int64) (int64, string) {
 	return 0, ""
 }
 
+func parseVNPUMode(value string) (string, error) {
+	switch mode := strings.ToLower(strings.TrimSpace(value)); mode {
+	case "hamicore", VNPUModeHamiCore:
+		return VNPUModeHamiCore, nil
+	case VNPUModeTemplate, VNPUModeENPU:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid Ascend VNPU mode %q", value)
+	}
+}
+
 func InitDevices(vnpus VNPUs) []*Devices {
 	var devs []*Devices
 	if !enableAscend {
@@ -103,16 +114,28 @@ func InitDevices(vnpus VNPUs) []*Devices {
 	}
 	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
+		chipMode := mode
+		if strings.TrimSpace(vnpu.HamiVnpuMode) != "" {
+			chipMode, err = parseVNPUMode(vnpu.HamiVnpuMode)
+			if err != nil {
+				klog.Errorf("Invalid Ascend VNPU mode for %s: %v", commonWord, err)
+				continue
+			}
+		}
+		chipRuntimeClassName := vnpus.RuntimeClassName
+		if vnpu.RuntimeClassName != "" {
+			chipRuntimeClassName = vnpu.RuntimeClassName
+		}
 		dev := &Devices{
 			config:                 vnpu,
 			nodeRegisterAnno:       fmt.Sprintf("hami.io/node-register-%s", commonWord),
 			useUUIDAnno:            fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
 			noUseUUIDAnno:          fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:          fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
-			vnpuMode:               mode,
+			vnpuMode:               chipMode,
 			enpuPolicy:             vnpus.EnpuPolicy,
 			overwriteEnv:           vnpus.OverwriteEnv,
-			runtimeClassName:       vnpus.RuntimeClassName,
+			runtimeClassName:       chipRuntimeClassName,
 			allAscendResourceNames: allAscendResourceNames,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
@@ -197,6 +220,11 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	reqNum := count.Value()
+	if dev.isAscend950() {
+		if err := dev.validate950Container(ctr, vnpuMode, reqNum); err != nil {
+			return false, err
+		}
+	}
 	if dev.config.CommonWord == Ascend910CType && dev.config.SuperPod && !isENPU {
 		if reqNum == 1 {
 			// Since the minimum allocation unit is one physical module (2 NPUs), round up the limits and requests to 2.
@@ -860,6 +888,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
 	}
 
+	if npu.isAscend950() && (vnpuMode != VNPUModeHamiCore || k.Nums != 1 || k.Memreq <= 0 || k.Coresreq <= 0) {
+		return false, nil, "Ascend 950 requires explicit hami-core, one device and positive memory/core quotas"
+	}
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 	isENPU := isENPUMode(vnpuMode)
 	isTemplate := (vnpuMode == VNPUModeTemplate)
@@ -1224,4 +1255,27 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 		"indices", selectedIndices)
 
 	return result
+}
+
+// Ascend 950 (Ascend950PR / Ascend950DT) is scheduled as one hami-core device
+// with an explicit memory quota and a core quota from 1 to 100.
+func (dev *Devices) isAscend950() bool {
+	return dev.CommonWord() == "Ascend950PR" || dev.CommonWord() == "Ascend950DT"
+}
+
+func (dev *Devices) validate950Container(ctr *corev1.Container, mode string, count int64) error {
+	if mode != VNPUModeHamiCore || count != 1 {
+		return fmt.Errorf("%s requires huawei.com/vnpu-mode: hami-core and exactly one device per container", dev.CommonWord())
+	}
+	for _, name := range []string{dev.config.ResourceMemoryName, dev.config.ResourceCoreName} {
+		value, ok := ctr.Resources.Limits[corev1.ResourceName(name)]
+		amount, integer := value.AsInt64()
+		if !ok || !integer || amount <= 0 {
+			return fmt.Errorf("%s requires a positive integer limit for %s", dev.CommonWord(), name)
+		}
+		if name == dev.config.ResourceCoreName && amount > 100 {
+			return fmt.Errorf("%s must be between 1 and 100", name)
+		}
+	}
+	return nil
 }

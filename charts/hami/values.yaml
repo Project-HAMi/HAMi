@@ -783,6 +783,19 @@ devices:
       resources: {}
   ascend:
     configs:
+    # Ascend950DT: 8 NPUs, 98304 MiB HBM, one die per NPU.
+    # Scheduled as one hami-core device with explicit memory and core quotas.
+    - chipName: Ascend950DT
+      commonWord: Ascend950DT
+      resourceName: huawei.com/Ascend950DT
+      resourceMemoryName: huawei.com/Ascend950DT-memory
+      resourceCoreName: huawei.com/Ascend950DT-core
+      memoryAllocatable: 98304
+      memoryCapacity: 98304
+      memoryFactor: 1
+      aiCore: 0
+      hamiVnpuMode: hami-core
+      templates: []
     - chipName: 910A
       commonWord: Ascend910A
       resourceName: huawei.com/Ascend910A
@@ -963,6 +976,9 @@ devices:
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
+      - huawei.com/Ascend950DT
+      - huawei.com/Ascend950DT-memory
+      - huawei.com/Ascend950DT-core
   iluvatar:
     configs:
       - chipName: MR-V100
