@@ -57,7 +57,8 @@ func TestVNPUModeConfig(t *testing.T) {
 		{name: "empty", config: "hamiVnpuMode: ''", wantMode: VNPUModeTemplate},
 		{name: "template", config: "hamiVnpuMode: template", wantMode: VNPUModeTemplate},
 		{name: "core", config: "hamiVnpuMode: hami-core", wantMode: VNPUModeHamiCore},
-		{name: "shared plugin slot capacity", config: "hamiVnpuMode: hami-core\nvnpuDeviceSplitCount: 20", wantMode: VNPUModeHamiCore, wantSplitCount: 20},
+		{name: "shared plugin slot capacity", config: "hamiVnpuMode: hami-core\ndeviceSplitCount: 20", wantMode: VNPUModeHamiCore, wantSplitCount: 20},
+		{name: "shared ENPU slot capacity", config: "hamiVnpuMode: enpu\ndeviceSplitCount: 20", wantMode: VNPUModeENPU, wantSplitCount: 20},
 		{name: "core alias", config: "hamiVnpuMode: hamiCore", wantMode: VNPUModeHamiCore},
 		{name: "ENPU", config: "hamiVnpuMode: enpu", wantMode: VNPUModeENPU},
 		{name: "case and whitespace", config: "hamiVnpuMode: ' ENPU '", wantMode: VNPUModeENPU},
@@ -72,7 +73,7 @@ func TestVNPUModeConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var config VNPUs
 			assert.NilError(t, yaml.UnmarshalStrict([]byte(tc.config), &config))
-			assert.Equal(t, config.VNPUDeviceSplitCount, tc.wantSplitCount)
+			assert.Equal(t, config.DeviceSplitCount, tc.wantSplitCount)
 			config.Configs = configs
 			devs := InitDevices(config)
 			assert.Equal(t, len(devs), len(configs))
