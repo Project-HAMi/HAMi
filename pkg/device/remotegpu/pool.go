@@ -94,15 +94,19 @@ var (
 
 // waiter is a pod Fit refused, remembered so it can be nudged on a fleet change.
 type waiter struct {
+	uid             types.UID
 	namespace, name string
 	at              time.Time
 }
 
-func apiNudgePods(pods []waiter, rev uint64) {
+// apiNudgePods returns the pods it could not patch, so they are kept for the
+// next fleet change instead of being dropped.
+func apiNudgePods(pods []waiter, rev uint64) []waiter {
 	c := client.GetClient()
 	if c == nil {
-		return
+		return pods
 	}
+	var failed []waiter
 	payload := []byte(`{"metadata":{"annotations":{"` + RetryAnno + `":"` + strconv.FormatUint(rev, 10) + `"}}}`)
 	for _, w := range pods {
 		ctx, cancel := context.WithTimeout(context.Background(), poolFetchTimeout)
@@ -110,8 +114,10 @@ func apiNudgePods(pods []waiter, rev uint64) {
 		cancel()
 		if err != nil && !apierrors.IsNotFound(err) {
 			klog.V(4).InfoS("remotegpu: failed to requeue waiting pod", "pod", w.namespace+"/"+w.name, "error", err)
+			failed = append(failed, w)
 		}
 	}
+	return failed
 }
 
 func apiListLupineNodes(ctx context.Context) ([]corev1.Node, error) {
@@ -191,19 +197,36 @@ func (p *pool) wait(pod *corev1.Pod) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.waiting[pod.UID] = waiter{namespace: pod.Namespace, name: pod.Name, at: time.Now()}
+	p.waiting[pod.UID] = waiter{uid: pod.UID, namespace: pod.Namespace, name: pod.Name, at: time.Now()}
+}
+
+// pruneWaiting forgets pods refused longer ago than waitingTTL. Callers hold p.mu.
+func (p *pool) pruneWaiting() {
+	for uid, w := range p.waiting {
+		if time.Since(w.at) >= waitingTTL {
+			delete(p.waiting, uid)
+		}
+	}
 }
 
 // takeWaiting hands over the pods worth nudging and forgets them. Callers hold p.mu.
 func (p *pool) takeWaiting() []waiter {
-	var out []waiter
+	p.pruneWaiting()
+	out := make([]waiter, 0, len(p.waiting))
 	for _, w := range p.waiting {
-		if time.Since(w.at) < waitingTTL {
-			out = append(out, w)
-		}
+		out = append(out, w)
 	}
 	clear(p.waiting)
 	return out
+}
+
+// requeue puts back pods a nudge could not reach, for the next fleet change.
+func (p *pool) requeue(pods []waiter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, w := range pods {
+		p.waiting[w.uid] = w
+	}
 }
 
 // booking records who a card was set aside for, so a scheduling attempt that
@@ -238,6 +261,7 @@ func serverOf(id string) string {
 // in-flight checks) and the swap of the new state in run under the lock.
 func (p *pool) refresh(ctx context.Context) {
 	p.mu.Lock()
+	p.pruneWaiting()
 	if !p.fetchedAt.IsZero() && time.Since(p.fetchedAt) < poolTTL {
 		p.mu.Unlock()
 		return
@@ -337,7 +361,11 @@ func (p *pool) refresh(ctx context.Context) {
 	if !sameFleet(p.devices, devices) {
 		p.fleetRev++
 		if waiting := p.takeWaiting(); len(waiting) > 0 {
-			go nudgePods(waiting, p.fleetRev)
+			go func(rev uint64) {
+				if failed := nudgePods(waiting, rev); len(failed) > 0 {
+					p.requeue(failed)
+				}
+			}(p.fleetRev)
 		}
 	}
 	p.endpoints = endpoints
