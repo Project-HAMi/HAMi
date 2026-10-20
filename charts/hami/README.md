@@ -284,7 +284,6 @@ lists when changing resource names or chip definitions.
 ## Values
 
 Values are listed in the same order as in [values.yaml](values.yaml).
-Fields marked with `@ignored` are omitted.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -561,6 +560,6 @@ make verify-helm-chart-docs
 Add descriptions with `# -- Description` immediately above a value in
 `values.yaml`, then regenerate this README. The commands use
 `--sort-values-order=file` to preserve the order in `values.yaml`. Values without
-descriptions are included; use `# @ignored` to exclude a field from the table.
+descriptions are included.
 Do not edit the generated table directly. Text outside the generated markers
 is maintained directly in this README.
