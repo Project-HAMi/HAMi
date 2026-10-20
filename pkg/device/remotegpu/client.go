@@ -44,6 +44,8 @@ func clientInjectionEnabled(pod *corev1.Pod) bool {
 
 // Copy the known missing dependency from common Debian/Ubuntu and RPM layouts.
 // This intentionally does not attempt to bundle every runtime dependency.
+// When client injection is enabled, the client image must provide /opt/lupine/lib,
+// sh, cp, libnghttp2.so.14, and nvidia-smi. A missing nvidia-smi fails delivery.
 // NVIDIA_SMI_SOURCE overrides the nvidia-smi search and is set only by tests.
 const clientDeliveryScript = `
 source=$1

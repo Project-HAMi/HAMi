@@ -4,7 +4,7 @@ Remote GPU lets a Pod on a node without a local GPU use NVIDIA GPUs on another n
 
 Please note that:
 1. Client nodes must be separate from server nodes. 
-2. We only support limited image for this feature(CUDA amd vllm 0.19-0.26) 
+2. Only a limited set of images is supported: CUDA and vLLM 0.19 to 0.26. 
 3. A workload reserves the **entire server**. Set `nvidia.com/remote-gpu` to its
 physical GPU count; the CUDA client can see all GPUs on that server. Concurrent
 examples therefore need separate servers, or must be run sequentially.
