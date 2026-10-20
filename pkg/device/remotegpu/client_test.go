@@ -282,3 +282,40 @@ func TestClientDeliveryKnownDependency(t *testing.T) {
 		})
 	}
 }
+
+// A failing nvidia-smi copy must fail delivery even when the wrapper write would succeed.
+// Calling the installer in an || list disables errexit for the whole function.
+func TestClientDeliveryNVIDIASmiCopyFailure(t *testing.T) {
+	root := t.TempDir()
+	source, target, libraries, bin := filepath.Join(root, "driver"), filepath.Join(root, "delivered"), filepath.Join(root, "lib"), filepath.Join(root, "bin")
+	for _, path := range []string{source, target, libraries, bin} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	smi := filepath.Join(root, "nvidia-smi")
+	for path, data := range map[string]string{
+		filepath.Join(source, "libcuda.so.1"):        "driver",
+		filepath.Join(libraries, "libnghttp2.so.14"): "nghttp2",
+		smi: "smi",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stub := "#!/bin/sh\n" +
+		"if [ \"$1\" = -L ] && [ \"$(basename \"$2\")\" = " + clientSMIBinaryName + " ]; then\n" +
+		"echo \"cp nvidia-smi failed\" >&2\n" +
+		"exit 1\n" +
+		"fi\n" +
+		"exec /bin/cp \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "cp"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, libraries)
+	cmd.Env = append(os.Environ(), "NVIDIA_SMI_SOURCE="+smi, "PATH="+bin+":"+os.Getenv("PATH"))
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "cp nvidia-smi failed") {
+		t.Fatalf("nvidia-smi copy failure: %v: %s", err, output)
+	}
+}

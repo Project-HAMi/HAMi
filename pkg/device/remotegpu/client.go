@@ -76,7 +76,7 @@ install_nvidia_smi() {
 for directory in "$@"; do
     if [ -f "$directory/libnghttp2.so.14" ]; then
         cp -L "$directory/libnghttp2.so.14" "$target/libnghttp2.so.14"
-        install_nvidia_smi || exit 1
+        install_nvidia_smi
         exit 0
     fi
 done
