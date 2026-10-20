@@ -418,8 +418,15 @@ func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 // WaitForFleet remembers a pod the scheduler could not place, so that the
 // pool requeues it once the lupine fleet changes. Fit is not enough for this:
 // with no lupine server registered, no node offers a card and Fit never runs.
-func (dev *RemoteGPUDevices) WaitForFleet(pod *corev1.Pod) {
-	dev.pool.wait(pod)
+// rev is the FleetRevision the placement attempt ran against; a pod refused on
+// an older fleet is requeued at once instead of waiting for the next change.
+func (dev *RemoteGPUDevices) WaitForFleet(pod *corev1.Pod, rev uint64) {
+	dev.pool.wait(pod, rev)
+}
+
+// FleetRevision changes whenever the lupine fleet does.
+func (dev *RemoteGPUDevices) FleetRevision() uint64 {
+	return dev.pool.revision()
 }
 
 func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {

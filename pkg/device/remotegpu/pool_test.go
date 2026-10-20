@@ -672,7 +672,7 @@ func TestPool_NudgesRefusedPodWhenFleetChanges(t *testing.T) {
 
 	dev := InitRemoteGPUDevice(testConfig())
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}
-	dev.WaitForFleet(pod)
+	dev.WaitForFleet(pod, dev.FleetRevision())
 
 	// Nothing changed: the refused pod stays untouched.
 	dev.pool.snapshot(context.Background())
@@ -700,9 +700,9 @@ func TestPool_NudgesRefusedPodWhenFleetChanges(t *testing.T) {
 // A nudge that could not reach the pod must not forget it.
 func TestPool_KeepsPodsTheNudgeFailedFor(t *testing.T) {
 	p := newPool(DefaultLupinePort)
-	p.wait(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}})
-	p.wait(nil)
-	p.wait(&corev1.Pod{})
+	p.wait(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}, 0)
+	p.wait(nil, 0)
+	p.wait(&corev1.Pod{}, 0)
 	p.mu.Lock()
 	taken := p.takeWaiting()
 	p.mu.Unlock()
@@ -747,4 +747,24 @@ func TestApiNudgePods(t *testing.T) {
 		return true, nil, errors.New("apiserver down")
 	})
 	assert.Equal(t, len(apiNudgePods([]waiter{w}, 4)), 1, "failed patch: keep the pod")
+}
+
+// A pod refused on a fleet that changed before it registered missed that
+// change's nudge, so it is nudged at once instead of waiting.
+func TestPool_NudgesPodRefusedOnStaleFleet(t *testing.T) {
+	nudged := make(chan []waiter, 1)
+	prev := nudgePods
+	nudgePods = func(pods []waiter, _ uint64) []waiter { nudged <- pods; return nil }
+	t.Cleanup(func() { nudgePods = prev })
+
+	p := newPool(DefaultLupinePort)
+	p.fleetRev = 2
+	p.wait(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}, 1)
+	select {
+	case got := <-nudged:
+		assert.Equal(t, len(got), 1)
+	case <-time.After(time.Second):
+		t.Fatal("pod refused on a stale fleet was not nudged")
+	}
+	assert.Equal(t, len(p.waiting), 0)
 }

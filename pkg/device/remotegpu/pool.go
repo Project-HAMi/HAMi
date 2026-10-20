@@ -195,13 +195,24 @@ func newPool(defaultPort int) *pool {
 }
 
 // wait remembers a pod Fit refused, so a fleet change can requeue it.
-func (p *pool) wait(pod *corev1.Pod) {
+// A pod refused on an older fleet than rev missed that change's nudge, so it is
+// nudged now.
+func (p *pool) wait(pod *corev1.Pod, rev uint64) {
 	if pod == nil || pod.UID == "" {
 		return
 	}
+	w := waiter{uid: pod.UID, namespace: pod.Namespace, name: pod.Name, at: time.Now()}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.waiting[pod.UID] = waiter{uid: pod.UID, namespace: pod.Namespace, name: pod.Name, at: time.Now()}
+	if rev != p.fleetRev {
+		go func(rev uint64) {
+			if failed := nudgePods([]waiter{w}, rev); len(failed) > 0 {
+				p.requeue(failed)
+			}
+		}(p.fleetRev)
+		return
+	}
+	p.waiting[pod.UID] = w
 }
 
 // pruneWaiting forgets pods refused longer ago than waitingTTL. Callers hold p.mu.
