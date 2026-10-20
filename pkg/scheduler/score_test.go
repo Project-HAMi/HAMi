@@ -230,7 +230,7 @@ func TestScoreNodeRegularMthreadsInitKeepsPodOnOneDevice(t *testing.T) {
 		},
 	}
 	requests := device.PodDeviceRequests{
-		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 8000, Coresreq: 10}},
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 8192, Coresreq: 10}},
 		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 4096, Coresreq: 6}},
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "mthreads-node"}}
