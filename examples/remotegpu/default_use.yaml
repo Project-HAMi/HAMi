@@ -4,6 +4,12 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: remote-gpu-pod
+  # Optional: choose a Lupine server pool by its Node labels. This does not
+  # affect the client Pod's Kubernetes node placement.
+  # annotations:
+  #   hami.io/remote-server: gpu-pool=inference
+  # Server labels are refreshed by the scheduler at most once every 15 seconds,
+  # so wait for that refresh after changing a Lupine server's labels.
 spec:
   restartPolicy: Never
   containers:
