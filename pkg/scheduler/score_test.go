@@ -31,8 +31,10 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
+	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -254,6 +256,57 @@ func TestScoreNodeRegularMthreadsInitKeepsPodOnOneDevice(t *testing.T) {
 	annotations := map[string]string{}
 	mthreadsDevice.PatchAnnotations(pod, &annotations, got.NodeList[0].Devices)
 	assert.Equal(t, annotations[mthreads.MthreadsAssignedGPUIndex], "1")
+}
+
+func TestScoreNodeRegularMthreadsInitRejectsDifferentDevice(t *testing.T) {
+	mthreads.InitMthreadsDevice(mthreads.MthreadsConfig{})
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mthreads-cross-device", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+	}
+	requests := device.PodDeviceRequests{
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 8192, Coresreq: 8}},
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 4096, Coresreq: 12}},
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "mthreads-node"}}
+	usage := &NodeUsage{
+		Node:     node,
+		NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+		Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{
+			// GPU-A has enough free memory and cores for the app, but not the init.
+			{Device: &device.DeviceUsage{ID: "gpu-a", Index: 0, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 49152, Usedmem: 45056, Totalcore: 16}},
+			// GPU-B fits the init, but lacks the free cores required by the app.
+			{Device: &device.DeviceUsage{ID: "gpu-b", Index: 1, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 49152, Totalcore: 16, Usedcores: 6}},
+		}},
+	}
+	nodes := map[string]*NodeUsage{node.Name: usage}
+	failedNodes := map[string]string{}
+
+	got, err := (&Scheduler{}).calcScoreWithOptions(&nodes, requests, pod, failedNodes, false, false)
+	assert.NilError(t, err)
+	assert.Equal(t, len(got.NodeList), 0)
+	assert.Assert(t, strings.Contains(failedNodes[node.Name], common.CardNotFoundCustomFilterRule), "failure reason: %q", failedNodes[node.Name])
+}
+
+func TestAppFitAllocationsRetainsBackendQuotaHistory(t *testing.T) {
+	initAllocs := device.PodDevices{
+		nvidia.NvidiaGPUDevice:       {{{UUID: "nvidia-init", Usedmem: 20000}}},
+		amd.AMDDevice:                {{{UUID: "amd-init", Usedmem: 20000}}},
+		cambricon.CambriconMLUDevice: {{{UUID: "mlu-init", Usedmem: 20000}}},
+		mthreads.MthreadsGPUDevice:   {{{UUID: "mthreads-init", Usedmem: 20000}}},
+	}
+
+	got := appFitAllocations(initAllocs, nil)
+	assert.Equal(t, len(got[nvidia.NvidiaGPUDevice][0]), 0)
+	withSidecar := appFitAllocations(initAllocs, map[int]struct{}{0: {}})
+	assert.Equal(t, withSidecar[nvidia.NvidiaGPUDevice][0][0].UUID, "nvidia-init")
+	for _, devType := range []string{amd.AMDDevice, cambricon.CambriconMLUDevice, mthreads.MthreadsGPUDevice} {
+		assert.Equal(t, len(got[devType][0]), 1)
+		assert.Equal(t, got[devType][0][0].UUID, initAllocs[devType][0][0].UUID)
+	}
 }
 
 // test case matrix

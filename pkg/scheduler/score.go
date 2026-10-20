@@ -29,7 +29,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
-	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -282,9 +281,17 @@ func sidecarInitIndexes(task *corev1.Pod) map[int]struct{} {
 	return idx
 }
 
-func activeInitAllocations(initAllocs device.PodDevices, sidecarIdx map[int]struct{}) device.PodDevices {
+// appFitAllocations keeps the full init history for backends whose Fit method
+// still uses it for quota checks or Pod-wide placement rules. NVIDIA can use
+// only concurrent init allocations for placement because FitWithQuota receives
+// the complete history separately.
+func appFitAllocations(initAllocs device.PodDevices, sidecarIdx map[int]struct{}) device.PodDevices {
 	active := make(device.PodDevices, len(initAllocs))
 	for devType, rows := range initAllocs {
+		if devType != nvidia.NvidiaGPUDevice {
+			active[devType] = rows.DeepCopy()
+			continue
+		}
 		active[devType] = make(device.PodSingleDevice, len(rows))
 		for idx := range rows {
 			if _, isSidecar := sidecarIdx[idx]; isSidecar {
@@ -293,16 +300,6 @@ func activeInitAllocations(initAllocs device.PodDevices, sidecarIdx map[int]stru
 		}
 	}
 	return active
-}
-
-// preserveMthreadsInitAllocations keeps the full allocation history available
-// to the Mthreads backend while fitting app containers. Mthreads' Fit method
-// enforces one physical device across a Pod, and its device selection is
-// represented by a single Pod-level annotation.
-func preserveMthreadsInitAllocations(allocations *device.PodDevices, initAllocs device.PodDevices) {
-	if initRows, ok := initAllocs[mthreads.MthreadsGPUDevice]; ok {
-		(*allocations)[mthreads.MthreadsGPUDevice] = initRows.DeepCopy()
-	}
 }
 
 func completeAllocationHistory(initAllocs, activeAllocs device.PodDevices, numInitContainers int) device.PodDevices {
@@ -458,8 +455,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 			return nodeScoreResult{reason: reason}
 		}
 		initAllocs = allocs
-		score.Devices = activeInitAllocations(initAllocs, sidecarIdx)
-		preserveMthreadsInitAllocations(&score.Devices, initAllocs)
+		score.Devices = appFitAllocations(initAllocs, sidecarIdx)
 	}
 
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, initAllocs, allocTypes, numInitContainers, nodeID, weights); !fit {
