@@ -11,6 +11,10 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      golang-org-x:
+        patterns:
+          - "golang.org/x/*"
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
