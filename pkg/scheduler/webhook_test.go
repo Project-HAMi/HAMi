@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -42,6 +43,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -1757,6 +1759,113 @@ func TestUnrelatedUpdateAllowed(t *testing.T) {
 	}
 	if len(resp.Patches) > 0 {
 		t.Errorf("the update was patched: %v", resp.Patches)
+	}
+}
+
+func TestRemoteGPUInvalidServerSelectorDeniedAtAdmission(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+	for _, selector := range []string{"gpu-pool in (inference)", "   "} {
+		t.Run(selector, func(t *testing.T) {
+			pod := remoteGPUWebhookPod(resourceName, map[string]string{
+				remotegpu.LupineServerSelectorAnno: selector,
+			})
+
+			resp := admitPod(t, pod)
+			if resp.Allowed {
+				t.Fatal("invalid RemoteGPU selector was admitted")
+			}
+			if resp.Result.Code != http.StatusForbidden {
+				t.Fatalf("invalid selector returned status %d, want %d", resp.Result.Code, http.StatusForbidden)
+			}
+			if !strings.Contains(resp.Result.Message, remotegpu.LupineServerSelectorAnno) {
+				t.Fatalf("denial %q does not identify the invalid selector", resp.Result.Message)
+			}
+		})
+	}
+}
+
+func TestRemoteGPUServerSelectorUpdateValidation(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+
+	t.Run("unrelated pod may change the annotation", func(t *testing.T) {
+		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{remotegpu.LupineServerSelectorAnno: "gpu-pool=inference"})
+		oldPod.Spec.Containers[0].Resources.Limits = nil
+		newPod := oldPod.DeepCopy()
+		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=training"
+		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
+		if !resp.Allowed {
+			t.Fatalf("unrelated pod update denied: %v", resp.Result)
+		}
+	})
+
+	t.Run("selector is immutable", func(t *testing.T) {
+		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
+			remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+		})
+		newPod := oldPod.DeepCopy()
+		newPod.Annotations[remotegpu.LupineServerSelectorAnno] = "gpu-pool=training"
+
+		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
+		if resp.Allowed {
+			t.Fatal("RemoteGPU selector changed after pod creation")
+		}
+		if !strings.Contains(resp.Result.Message, "cannot be changed after a pod is created") {
+			t.Fatalf("unexpected denial %q", resp.Result.Message)
+		}
+	})
+
+	t.Run("invalid existing selector is denied when RemoteGPU is added", func(t *testing.T) {
+		oldPod := remoteGPUWebhookPod(resourceName, map[string]string{
+			remotegpu.LupineServerSelectorAnno: "gpu-pool in (inference)",
+		})
+		oldPod.Spec.Containers[0].Resources.Limits = nil
+		newPod := oldPod.DeepCopy()
+		newPod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{
+			corev1.ResourceName(resourceName): resource.MustParse("1"),
+		}
+
+		resp := updatePod(t, oldPod, newPod, "system:serviceaccount:team-a:builder")
+		if resp.Allowed {
+			t.Fatal("invalid RemoteGPU selector update was admitted")
+		}
+		if !strings.Contains(resp.Result.Message, remotegpu.LupineServerSelectorAnno) {
+			t.Fatalf("denial %q does not identify the invalid selector", resp.Result.Message)
+		}
+	})
+
+}
+
+func initRemoteGPUWebhookDevice(t *testing.T) string {
+	t.Helper()
+	oldDevices := device.DevicesMap
+	oldCount := remotegpu.RemoteGPUResourceCount
+	oldMemory := remotegpu.RemoteGPUResourceMemory
+	oldLibImage := remotegpu.RemoteGPULibImage
+	oldSessionImage := remotegpu.RemoteGPUSessionImage
+	dev := remotegpu.InitRemoteGPUDevice(remotegpu.RemoteGPUConfig{
+		ResourceCountName:  "hami.io/remote-gpu",
+		ResourceMemoryName: "hami.io/remote-gpu-memory",
+	})
+	device.DevicesMap = map[string]device.Devices{remotegpu.RemoteGPUDevice: dev}
+	t.Cleanup(func() {
+		device.DevicesMap = oldDevices
+		remotegpu.RemoteGPUResourceCount = oldCount
+		remotegpu.RemoteGPUResourceMemory = oldMemory
+		remotegpu.RemoteGPULibImage = oldLibImage
+		remotegpu.RemoteGPUSessionImage = oldSessionImage
+	})
+	return remotegpu.RemoteGPUResourceCount
+}
+
+func remoteGPUWebhookPod(resourceName string, annotations map[string]string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "remote-gpu", Namespace: "team-a", Annotations: annotations},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				corev1.ResourceName(resourceName): resource.MustParse("1"),
+			}},
+		}}},
 	}
 }
 
