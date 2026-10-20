@@ -25,6 +25,17 @@ env:
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  support-bundle:
+    name: Support bundle tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Test support bundle collector
+        run: make test-support-bundle
+
   lint:
     name: lint
     runs-on: ubuntu-22.04
