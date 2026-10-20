@@ -28,7 +28,15 @@ const (
 	clientMountPath  = "/opt/lupine/lib"
 	// ClientInjectionAnnotation opts out when a workload delivers its own libraries.
 	ClientInjectionAnnotation = "hami.io/remote-gpu-client-injection"
+	clientSMIMountPath        = "/usr/bin/nvidia-smi"
+	clientSMIBinaryName       = "nvidia-smi"
+	clientSMIWrapperName      = "nvidia-smi.wrapper"
 )
+
+// clientSMIWrapper is mounted at /usr/bin/nvidia-smi. LD_LIBRARY_PATH applies
+// only to that process, so nvidia-smi loads the Lupine NVML shim and the
+// workload's own library search path stays unchanged.
+const clientSMIWrapper = "#!/bin/sh\nLD_LIBRARY_PATH=" + clientMountPath + "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} exec " + clientMountPath + "/" + clientSMIBinaryName + " \"$@\"\n"
 
 func clientInjectionEnabled(pod *corev1.Pod) bool {
 	return pod != nil && RemoteGPUClientImage != "" && pod.Annotations[ClientInjectionAnnotation] != "disabled"
@@ -36,15 +44,39 @@ func clientInjectionEnabled(pod *corev1.Pod) bool {
 
 // Copy the known missing dependency from common Debian/Ubuntu and RPM layouts.
 // This intentionally does not attempt to bundle every runtime dependency.
+// When client injection is enabled, the client image must provide /opt/lupine/lib,
+// sh, cp, libnghttp2.so.14, and nvidia-smi. A missing nvidia-smi fails delivery.
+// NVIDIA_SMI_SOURCE overrides the nvidia-smi search and is set only by tests.
 const clientDeliveryScript = `
 source=$1
 target=$2
 shift 2
 cp -a "$source/." "$target/"
+install_nvidia_smi() {
+    smi=${NVIDIA_SMI_SOURCE:-}
+    if [ -z "$smi" ]; then
+        for candidate in /usr/bin/nvidia-smi /usr/local/bin/nvidia-smi; do
+            if [ -f "$candidate" ]; then
+                smi=$candidate
+                break
+            fi
+        done
+    fi
+    if [ ! -f "$smi" ]; then
+        echo "nvidia-smi not found in the client image" >&2
+        return 1
+    fi
+    cp -L "$smi" "$target/` + clientSMIBinaryName + `"
+    chmod 755 "$target/` + clientSMIBinaryName + `"
+    cat > "$target/` + clientSMIWrapperName + `" <<'EOF'
+` + clientSMIWrapper + `EOF
+    chmod 755 "$target/` + clientSMIWrapperName + `"
+}
 [ "$#" -gt 0 ] || set -- /usr/lib/*-linux-gnu /lib/*-linux-gnu /usr/lib64 /lib64 /usr/lib /lib
 for directory in "$@"; do
     if [ -f "$directory/libnghttp2.so.14" ]; then
         cp -L "$directory/libnghttp2.so.14" "$target/libnghttp2.so.14"
+        install_nvidia_smi
         exit 0
     fi
 done
@@ -89,6 +121,7 @@ func armClientLibraries(ctr *corev1.Container, pod *corev1.Pod) error {
 	for _, library := range []string{"libcuda.so.1", "libnvidia-ml.so.1", "libnghttp2.so.14"} {
 		mounts = append(mounts, corev1.VolumeMount{Name: clientVolumeName, MountPath: "/usr/local/nvidia/lib64/" + library, SubPath: library, ReadOnly: true})
 	}
+	mounts = append(mounts, corev1.VolumeMount{Name: clientVolumeName, MountPath: clientSMIMountPath, SubPath: clientSMIWrapperName, ReadOnly: true})
 	for _, desired := range mounts {
 		for _, existing := range ctr.VolumeMounts {
 			if existing.MountPath == desired.MountPath && !reflect.DeepEqual(existing, desired) {

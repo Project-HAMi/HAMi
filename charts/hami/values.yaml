@@ -800,7 +800,8 @@ devices:
     # Set to `""` to skip library injection and use memory requests only as placement filters.
     # An explicit image reference is used unchanged.
     libImage:
-    # -- Client image used to deliver Lupine libraries and libnghttp2 for the CUDA/vLLM examples; empty disables delivery.
+    # -- Client image used to deliver Lupine libraries, libnghttp2, and nvidia-smi for the CUDA/vLLM examples; empty disables delivery.
+    # It must contain `/opt/lupine/lib`, `sh`, `cp`, `libnghttp2.so.14`, and `nvidia-smi`. Injection fails when `nvidia-smi` is missing.
     # Match the server version and workload ABI; an empty string disables delivery.
     clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04"
     # -- Image for a relay Pod on each lupine server node, so users can port-forward to the relay.
