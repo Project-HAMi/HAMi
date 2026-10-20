@@ -490,22 +490,6 @@ func Test_PatchAnnotations(t *testing.T) {
 	}
 }
 
-func TestPatchAnnotationsKeepsGPUIndicesFromEveryContainer(t *testing.T) {
-	dev := InitMthreadsDevice(MthreadsConfig{})
-	annotations := map[string]string{}
-	podDevices := device.PodDevices{
-		MthreadsGPUDevice: {
-			{{Idx: 1, UUID: "init-gpu", Type: MthreadsGPUDevice, Usedmem: 1000, Usedcores: 1}},
-			{{Idx: 0, UUID: "app-gpu", Type: MthreadsGPUDevice, Usedmem: 1000, Usedcores: 1}},
-		},
-	}
-
-	result := dev.PatchAnnotations(&corev1.Pod{}, &annotations, podDevices)
-	assert.Equal(t, result[MthreadsAssignedGPUIndex], "1,0")
-	assert.Assert(t, strings.Contains(result[device.SupportDevices[MthreadsGPUDevice]], "init-gpu,Mthreads,1000,1"))
-	assert.Assert(t, strings.Contains(result[device.SupportDevices[MthreadsGPUDevice]], "app-gpu,Mthreads,1000,1"))
-}
-
 func Test_checkType(t *testing.T) {
 	tests := []struct {
 		name string

@@ -218,7 +218,7 @@ func TestScoreNodeQuotaPreservesInitContainerPositions(t *testing.T) {
 	}
 }
 
-func TestScoreNodeRegularMthreadsInitDoesNotConstrainAppPlacement(t *testing.T) {
+func TestScoreNodeRegularMthreadsInitKeepsPodOnOneDevice(t *testing.T) {
 	mthreadsDevice := mthreads.InitMthreadsDevice(mthreads.MthreadsConfig{})
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "mthreads-init", Namespace: "default"},
@@ -229,15 +229,15 @@ func TestScoreNodeRegularMthreadsInitDoesNotConstrainAppPlacement(t *testing.T) 
 	}
 	requests := device.PodDeviceRequests{
 		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 8000, Coresreq: 10}},
-		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 2000, Coresreq: 50}},
+		{mthreads.MthreadsGPUDevice: {Nums: 1, Type: mthreads.MthreadsGPUDevice, Memreq: 4096, Coresreq: 6}},
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "mthreads-node"}}
 	usage := &NodeUsage{
 		Node:     node,
 		NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
 		Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{
-			{Device: &device.DeviceUsage{ID: "gpu-a", Index: 0, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 4000, Totalcore: 100}},
-			{Device: &device.DeviceUsage{ID: "gpu-b", Index: 1, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 10000, Totalcore: 20}},
+			{Device: &device.DeviceUsage{ID: "gpu-a", Index: 0, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 4096, Totalcore: 16}},
+			{Device: &device.DeviceUsage{ID: "gpu-b", Index: 1, Type: mthreads.MthreadsGPUDevice, Health: true, Count: 10, Totalmem: 49152, Totalcore: 16}},
 		}},
 	}
 	nodes := map[string]*NodeUsage{node.Name: usage}
@@ -250,10 +250,10 @@ func TestScoreNodeRegularMthreadsInitDoesNotConstrainAppPlacement(t *testing.T) 
 	allocations := got.NodeList[0].Devices[mthreads.MthreadsGPUDevice]
 	assert.Equal(t, len(allocations), 2)
 	assert.Equal(t, allocations[0][0].UUID, "gpu-b")
-	assert.Equal(t, allocations[1][0].UUID, "gpu-a")
+	assert.Equal(t, allocations[1][0].UUID, "gpu-b")
 	annotations := map[string]string{}
 	mthreadsDevice.PatchAnnotations(pod, &annotations, got.NodeList[0].Devices)
-	assert.Equal(t, annotations[mthreads.MthreadsAssignedGPUIndex], "1,0")
+	assert.Equal(t, annotations[mthreads.MthreadsAssignedGPUIndex], "1")
 }
 
 // test case matrix
@@ -5127,13 +5127,16 @@ func Test_calcScore_AllocationRowsStayInLockstep(t *testing.T) {
 	}
 
 	wantRows := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
-	for typ, rows := range got.NodeList[0].Devices {
-		if len(rows) != wantRows {
-			t.Fatalf("device type %s recorded %d rows, want %d (one per container); "+
-				"pkg/device/ascend derives the container index from this row count",
-				typ, len(rows), wantRows)
-		}
+	assertRows := func(typ string, initCount, appCount int) {
+		t.Helper()
+		rows, ok := got.NodeList[0].Devices[typ]
+		assert.Assert(t, ok, "missing allocation rows for %s", typ)
+		assert.Equal(t, len(rows), wantRows)
+		assert.Equal(t, len(rows[0]), initCount)
+		assert.Equal(t, len(rows[1]), appCount)
 	}
+	assertRows("Ascend910B3", 1, 0)
+	assertRows("Ascend910B4", 0, 1)
 }
 
 // mixedCapacityNode holds two NVIDIA cards of different memory capacity,

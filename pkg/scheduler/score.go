@@ -29,6 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -294,6 +295,16 @@ func activeInitAllocations(initAllocs device.PodDevices, sidecarIdx map[int]stru
 	return active
 }
 
+// preserveMthreadsInitAllocations keeps the full allocation history available
+// to the Mthreads backend while fitting app containers. Mthreads' Fit method
+// enforces one physical device across a Pod, and its device selection is
+// represented by a single Pod-level annotation.
+func preserveMthreadsInitAllocations(allocations *device.PodDevices, initAllocs device.PodDevices) {
+	if initRows, ok := initAllocs[mthreads.MthreadsGPUDevice]; ok {
+		(*allocations)[mthreads.MthreadsGPUDevice] = initRows.DeepCopy()
+	}
+}
+
 func completeAllocationHistory(initAllocs, activeAllocs device.PodDevices, numInitContainers int) device.PodDevices {
 	complete := initAllocs.DeepCopy()
 	for devType, rows := range activeAllocs {
@@ -448,6 +459,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 		}
 		initAllocs = allocs
 		score.Devices = activeInitAllocations(initAllocs, sidecarIdx)
+		preserveMthreadsInitAllocations(&score.Devices, initAllocs)
 	}
 
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, initAllocs, allocTypes, numInitContainers, nodeID, weights); !fit {
