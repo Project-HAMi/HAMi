@@ -1205,7 +1205,16 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 	// The node the filter phase picked is the only node this pod may be bound
 	// to. Binding it elsewhere would leave the reservation on the scheduled
 	// node while the pod consumes devices on another.
-	if pi, ok := s.podManager.GetPod(current); ok && pi.NodeID != "" && pi.NodeID != args.Node {
+	pi, reserved := s.podManager.GetPod(current)
+	if !reserved {
+		if remotegpu.PodRequestsRemoteGPU(current) {
+			if _, selected := current.Annotations[remotegpu.LupineServerSelectorAnno]; selected {
+				return fmt.Errorf("RemoteGPU pod %s/%s has no scheduler reservation", args.PodNamespace, args.PodName)
+			}
+		}
+		return nil
+	}
+	if pi.NodeID != "" && pi.NodeID != args.Node {
 		return fmt.Errorf("pod %s/%s was scheduled to node %s, bind request names node %s",
 			args.PodNamespace, args.PodName, pi.NodeID, args.Node)
 	}
@@ -1275,6 +1284,19 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 			errStr = e.Error()
 		}
 		return &extenderv1.ExtenderBindingResult{Error: errStr}, nil
+	}
+
+	// A RemoteGPU selector can stop matching after Filter has made a
+	// reservation (for example, following a pool refresh after a server label
+	// change). Validate it only after fail is available: rejection must release
+	// this Pod's short-lived pool booking just like every other bind failure.
+	if pi, reserved := s.podManager.GetPod(current); reserved {
+		if remote, ok := device.GetDevices()[remotegpu.RemoteGPUCommonWord].(*remotegpu.RemoteGPUDevices); ok {
+			if err := remote.ValidateReservedServer(current, pi.Devices); err != nil {
+				klog.ErrorS(err, "Reserved RemoteGPU server no longer matches pod selector", "pod", klog.KObj(current))
+				return fail(err)
+			}
+		}
 	}
 
 	if err = s.acquireNodeLocks(node, current); err != nil {
