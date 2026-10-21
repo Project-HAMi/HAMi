@@ -487,13 +487,36 @@ collect() {
   rm -rf -- "$run_dir"
 }
 
-# Discover component Pods once, sort them, and collect each Pod's logs serially.
-collect_component_logs() {
+# Collect a bounded operational view without the environment and volume detail
+# present in full Pod manifests.
+collect_component_pod_metadata() {
   local component="$1" selector="app.kubernetes.io/component=hami-$1"
+  collect "$component-pod-metadata" "components/$component-pod-metadata.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o wide
+}
+
+# Discover component Pods once, sort them, and collect each Pod's logs serially.
+# optional_empty_detail makes an empty optional component explicit in the
+# manifest; required components retain their original empty-list behaviour.
+collect_component_logs() {
+  local component="$1" optional_empty_detail="${2:-}" selector="app.kubernetes.io/component=hami-$1"
   local list_path="$bundle_dir/artifacts/components/$component-pods.txt" line pod_name count=0
   local restart_counts previous_id
   collect "$component-log-pods" "components/$component-pods.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o name
-  [[ "$dry_run" == false && -f "$list_path" ]] || return 0
+  [[ "$dry_run" == false ]] || return 0
+  if [[ ! -f "$list_path" ]]; then
+    if [[ -n "$optional_empty_detail" ]]; then
+      if [[ "$bundle_limit_reached" == true ]]; then
+        record limited "$component-logs" "artifacts/logs/$component" "bundle-byte-limit=$max_bundle_bytes;not-run"
+      else
+        record skipped "$component-logs" "artifacts/logs/$component" pod-discovery-unavailable
+      fi
+    fi
+    return 0
+  fi
+  if [[ ! -s "$list_path" ]]; then
+    [[ -z "$optional_empty_detail" ]] || record skipped "$component-logs" "artifacts/logs/$component" "$optional_empty_detail"
+    return 0
+  fi
   LC_ALL=C sort -o "$list_path" "$list_path"
   while IFS= read -r line; do
     [[ "$line" == pod/* ]] || continue
@@ -522,6 +545,39 @@ collect_component_logs() {
     fi
     count=$((count + 1))
   done <"$list_path"
+}
+
+# Collect one optional DaemonSet-backed component. Workload discovery decides
+# whether rollout status is meaningful, while Pod discovery independently
+# controls log collection so a DaemonSet with no Pods remains diagnosable.
+collect_optional_daemonset_component() {
+  local component="$1" selector="app.kubernetes.io/component=hami-$1"
+  local workloads_path="$bundle_dir/artifacts/components/$component-daemonsets.txt"
+  local empty_logs_detail=component-not-installed
+
+  collect_component_pod_metadata "$component"
+  collect "$component-daemonsets" "components/$component-daemonsets.txt" kubectl "${k[@]}" -n "$namespace" get daemonsets -l "$selector" -o name
+  if [[ "$dry_run" == true ]]; then
+    collect "$component-rollout" "components/$component-rollout.txt" kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l "$selector" --timeout=30s
+  elif [[ -s "$workloads_path" ]]; then
+    empty_logs_detail=no-matching-pods
+    collect "$component-rollout" "components/$component-rollout.txt" kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l "$selector" --timeout=30s
+  elif [[ -f "$workloads_path" ]]; then
+    record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" component-not-installed
+  elif [[ "$bundle_limit_reached" == true ]]; then
+    record limited "$component-rollout" "artifacts/components/$component-rollout.txt" "bundle-byte-limit=$max_bundle_bytes;not-run"
+  else
+    empty_logs_detail=workload-discovery-unavailable
+    record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" workload-discovery-unavailable
+  fi
+  collect_component_logs "$component" "$empty_logs_detail"
+}
+
+# Session relays are scheduler-created Pods and have no rollout workload.
+collect_optional_pod_component() {
+  local component="$1"
+  collect_component_pod_metadata "$component"
+  collect_component_logs "$component" component-not-installed
 }
 
 # This script intentionally never runs a Kubernetes Secret API request.
@@ -564,6 +620,9 @@ collect scheduler-rollout components/scheduler.txt kubectl "${k[@]}" -n "$namesp
 collect device-plugin-rollout components/device-plugin.txt kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l app.kubernetes.io/component=hami-device-plugin --timeout=30s
 collect_component_logs scheduler
 collect_component_logs device-plugin
+collect_optional_daemonset_component mock-device-plugin
+collect_optional_daemonset_component lupine-server
+collect_optional_pod_component lupine-session
 
 # Vendor utilities run only on the host executing this script. They are never
 # run in Kubernetes workloads or presented as diagnostics from a remote node.
