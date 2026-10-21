@@ -980,6 +980,105 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+// TestDevices_Fit_MultiDeviceUUIDAnnotations covers the use/nouse-neuron-uuid
+// annotations on requests for more than one device. That path selects through
+// graphSelect rather than the per-device loop, and used to ignore both
+// annotations.
+func TestDevices_Fit_MultiDeviceUUIDAnnotations(t *testing.T) {
+	dev := InitAWSNeuronDevice(AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	})
+	// Each device exposes two NeuronCores (mask 0b11) and is idle.
+	makeDevices := func(nodeType string, n int) []*device.DeviceUsage {
+		devices := make([]*device.DeviceUsage, n)
+		for i := range n {
+			devices[i] = makeAWSDeviceUsage(fmt.Sprintf("dev-%d", i), uint(i), 0, 2, 3, 0, nodeType, true)
+		}
+		return devices
+	}
+
+	tests := []struct {
+		name       string
+		devices    []*device.DeviceUsage
+		nums       int64
+		annos      map[string]string
+		wantFit    bool
+		wantDevIDs []string
+		wantReason string
+	}{
+		{
+			name:       "inf ring skips a device excluded by nouse-neuron-uuid",
+			devices:    makeDevices("inf2", 4),
+			nums:       2,
+			annos:      map[string]string{AWSNeuronNoUseUUID: "dev-0"},
+			wantFit:    true,
+			wantDevIDs: []string{"dev-1", "dev-2"},
+		},
+		{
+			name:       "inf ring stays within the devices named by use-neuron-uuid",
+			devices:    makeDevices("inf2", 4),
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "dev-2,dev-3"},
+			wantFit:    true,
+			wantDevIDs: []string{"dev-2", "dev-3"},
+		},
+		{
+			name:       "trn group containing an excluded device is not chosen",
+			devices:    makeDevices("trn", 8),
+			nums:       4,
+			annos:      map[string]string{AWSNeuronNoUseUUID: "dev-1"},
+			wantFit:    true,
+			wantDevIDs: []string{"dev-4", "dev-5", "dev-6", "dev-7"},
+		},
+		{
+			// An excluded device must not bridge the devices on either side
+			// of it into one contiguous run.
+			name:       "pinned devices that are not adjacent do not fit",
+			devices:    makeDevices("inf2", 4),
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "dev-0,dev-2"},
+			wantFit:    false,
+			wantReason: "2/4 CardUuidMismatch",
+		},
+		{
+			name:       "every device excluded",
+			devices:    makeDevices("inf2", 2),
+			nums:       2,
+			annos:      map[string]string{AWSNeuronNoUseUUID: "dev-0,dev-1"},
+			wantFit:    false,
+			wantReason: "2/2 CardUuidMismatch",
+		},
+		{
+			name:       "empty annotations keep the first contiguous run",
+			devices:    makeDevices("inf2", 4),
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "", AWSNeuronNoUseUUID: " "},
+			wantFit:    true,
+			wantDevIDs: []string{"dev-0", "dev-1"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: test.annos}}
+			request := device.ContainerDeviceRequest{
+				Nums:     test.nums,
+				Coresreq: 2,
+				Type:     AWSNeuronDevice,
+			}
+			fit, result, reason := dev.Fit(test.devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, test.wantFit)
+			assert.Equal(t, reason, test.wantReason)
+			var gotIDs []string
+			for _, d := range result[AWSNeuronDevice] {
+				gotIDs = append(gotIDs, d.UUID)
+			}
+			assert.DeepEqual(t, gotIDs, test.wantDevIDs)
+		})
+	}
+}
+
 // Test_graphSelect_ScoreSortedInput covers the order the scheduler actually
 // hands to Fit. DeviceUsageList sorts by score, so a busy device can sit at
 // position zero while its Index is elsewhere. graphSelect must reason about
