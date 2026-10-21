@@ -220,7 +220,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	reqNum := count.Value()
-	if dev.isAscend950() {
+	if dev.isAscend950DT() {
 		if err := dev.validate950Container(ctr, vnpuMode, reqNum); err != nil {
 			return false, err
 		}
@@ -888,8 +888,8 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
 	}
 
-	if npu.isAscend950() && (vnpuMode != VNPUModeHamiCore || k.Nums != 1 || k.Memreq <= 0 || k.Coresreq <= 0) {
-		return false, nil, "Ascend 950 requires explicit hami-core, one device and positive memory/core quotas"
+	if npu.isAscend950DT() && (vnpuMode != VNPUModeHamiCore || k.Nums != 1 || k.Memreq <= 0 || k.Coresreq <= 0) {
+		return false, nil, "Ascend950DT requires explicit hami-core, one device and positive memory/core quotas"
 	}
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 	isENPU := isENPUMode(vnpuMode)
@@ -1257,10 +1257,10 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	return result
 }
 
-// Ascend 950 (Ascend950PR / Ascend950DT) is scheduled as one hami-core device
+// Ascend950DT is scheduled as one hami-core device
 // with an explicit memory quota and a core quota from 1 to 100.
-func (dev *Devices) isAscend950() bool {
-	return dev.CommonWord() == "Ascend950PR" || dev.CommonWord() == "Ascend950DT"
+func (dev *Devices) isAscend950DT() bool {
+	return dev.CommonWord() == "Ascend950DT"
 }
 
 func (dev *Devices) validate950Container(ctr *corev1.Container, mode string, count int64) error {
