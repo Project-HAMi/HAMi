@@ -830,6 +830,10 @@ devices:
       # -- Kubernetes tolerations for lupine server Pods, as a list of objects with key,
       # operator, value, effect, and optional tolerationSeconds.
       tolerations: []
+      # -- Container securityContext of the lupine server. Set `privileged: true` on hosts where the
+      # NVIDIA container toolkit has accept-nvidia-visible-devices-envvar-when-unprivileged=false,
+      # otherwise NVIDIA_VISIBLE_DEVICES is ignored and the server sees no GPU.
+      securityContext: {}
       # -- Kubernetes resource requests and limits for the lupine server container, for example
       # `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`.
       resources: {}
