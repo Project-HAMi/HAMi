@@ -30,7 +30,6 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/nodepodinformer"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 )
 
 func TestSortedIntSetKeys(t *testing.T) {
@@ -543,24 +542,18 @@ func TestMIGCleanupRequiresLiveConfirmation(t *testing.T) {
 	}
 }
 
-// TestPodSyncGateUsesResolvedMode checks that only the final MIG mode waits,
-// including a node label overriding a configured MIG mode with remote mode.
+// TestPodSyncGateUsesResolvedMode checks that only the final MIG mode waits.
+// remote is a configured peer of hami-core/mig and does not wait for MIG sync.
 func TestPodSyncGateUsesResolvedMode(t *testing.T) {
 	for _, tc := range []struct {
 		name, configured string
-		remote           bool
 		wait             bool
 	}{
 		{name: "MIG", configured: nvidia.MigMode, wait: true},
 		{name: "HamiCore", configured: nvidia.HamiCoreMode},
-		{name: "remote label overrides MIG", configured: nvidia.MigMode, remote: true},
-		{name: "unlabelled remote falls back", configured: nvidia.RemoteMode},
+		{name: "remote", configured: nvidia.RemoteMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			node := &corev1.Node{}
-			if tc.remote {
-				node.Labels = map[string]string{remotegpu.LupineServerLabel: ""}
-			}
 			calls := 0
 			o := &options{}
 			WithNodePodSync(func(ctx context.Context) error {
@@ -570,7 +563,7 @@ func TestPodSyncGateUsesResolvedMode(t *testing.T) {
 				require.InDelta(t, 30, time.Until(deadline).Seconds(), 1)
 				return nil
 			})(o)
-			err := o.waitForPodSync(t.Context(), resolveOperatingMode(tc.configured, node))
+			err := o.waitForPodSync(t.Context(), resolveOperatingMode(tc.configured))
 			require.NoError(t, err)
 			if tc.wait {
 				require.Equal(t, 1, calls)

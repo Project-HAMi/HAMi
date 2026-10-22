@@ -25,7 +25,7 @@ import (
 // (issue #3041).
 func TestValidateContainerAllocation(t *testing.T) {
 	const uuid = "GPU-1"
-	knownCard := func(asked string) (int32, bool) {
+	knownCard := func(asked string) (int64, bool) {
 		if asked != uuid {
 			return 0, false
 		}

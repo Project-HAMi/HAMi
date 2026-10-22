@@ -1,6 +1,6 @@
 header:
   schema-version: 2.0.0
-  last-updated: '2026-07-22'
+  last-updated: '2026-10-13'
   last-reviewed: '2026-07-22'
   url: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY-INSIGHTS.yml
   comment: |
@@ -116,7 +116,8 @@ repository:
           release: false
         results: {}
         comment: |
-          Automated dependency update PRs for Go modules and GitHub Actions.
+          Automated dependency update PRs for Go modules, Dockerfiles and
+          GitHub Actions.
       - name: CodeQL
         type: SAST
         version: latest
@@ -129,6 +130,19 @@ repository:
         results: {}
         comment: |
           Static analysis on pull requests via GitHub Actions.
+      - name: Trivy
+        type: SCA
+        version: latest
+        rulesets:
+          - built-in
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          Nightly vulnerability scan of the built container images, with
+          results uploaded to GitHub code scanning.
       - name: GitHub secret scanning
         type: secret-scanning
         version: latest

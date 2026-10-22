@@ -66,7 +66,7 @@ const normalizedCoreLimit = 100
 // normalizeAMDCoreMetrics converts AMD physical CU counts to the percentage
 // unit used by HAMi's core ratio metrics. Other devices keep their existing
 // metric values.
-func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64, float64) {
+func normalizeAMDCoreMetrics(deviceType string, total, allocated int64) (float64, float64) {
 	if !strings.HasPrefix(strings.ToUpper(deviceType), "AMD") || total <= 0 {
 		return float64(total), float64(allocated)
 	}
@@ -77,7 +77,7 @@ func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64
 // normalize core metrics. It is deliberately a value type: the collector only
 // reads these two scalars, so the index does not retain the snapshot's devices.
 type deviceMeta struct {
-	totalcore  int32
+	totalcore  int64
 	deviceType string
 }
 
@@ -115,7 +115,7 @@ func newDeviceMetaIndex(nu *map[string]*schedulerpkg.NodeUsage) map[string]devic
 
 // mibToBytes converts a memory quantity expressed in mebibytes (MiB), the unit
 // used throughout HAMi's device accounting, to bytes for byte-oriented metrics.
-func mibToBytes(mib int32) float64 {
+func mibToBytes(mib int64) float64 {
 	return float64(mib) * 1024 * 1024
 }
 
@@ -487,7 +487,7 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 	)
 	for _, pd := range remoteGPUPool() {
 		d := pd.Device
-		allocated, usedmem := 0.0, int32(0)
+		allocated, usedmem := 0.0, int64(0)
 		if pd.Reserved {
 			allocated, usedmem = 1, d.Devmem
 		}

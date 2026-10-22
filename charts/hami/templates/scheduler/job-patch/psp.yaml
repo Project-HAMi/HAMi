@@ -1,6 +1,9 @@
 {{- if .Values.scheduler.admissionWebhook.enabled -}}
 {{- if and (.Values.scheduler.patch.enabled) (not .Values.scheduler.certManager.enabled) }}
 {{- if .Values.podSecurityPolicy.enabled }}
+{{- if semverCompare ">=1.25-0" .Capabilities.KubeVersion.Version }}
+{{- fail "podSecurityPolicy.enabled needs the policy/v1beta1 PodSecurityPolicy API, which Kubernetes removed in 1.25; leave it disabled on this cluster" }}
+{{- end }}
 apiVersion: policy/v1beta1
 kind: PodSecurityPolicy
 metadata:

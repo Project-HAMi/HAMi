@@ -1028,6 +1028,53 @@ func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
 	}
 }
 
+func TestPatchNodeLabels_NilNode(t *testing.T) {
+	err := PatchNodeLabels(nil, map[string]string{"hami.io/test": "bar"})
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestPatchNodeLabels_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node-labels",
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := PatchNodeLabels(node, map[string]string{"hami.io/lupine-server": ""})
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node-labels", metav1.GetOptions{})
+	assert.NilError(t, err)
+	value, ok := updated.Labels["hami.io/lupine-server"]
+	assert.Assert(t, ok)
+	assert.Equal(t, "", value)
+}
+
+func TestRemoveNodeLabels_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node-remove-labels",
+			Labels: map[string]string{
+				"hami.io/lupine-server": "",
+			},
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := RemoveNodeLabels(node, "hami.io/lupine-server")
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node-remove-labels", metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, hasLabel := updated.Labels["hami.io/lupine-server"]
+	assert.Assert(t, !hasLabel)
+}
+
 func TestPatchNodeAnnotations_NilNode(t *testing.T) {
 	err := PatchNodeAnnotations(nil, map[string]string{"hami.io/test": "bar"})
 	assert.ErrorContains(t, err, "node is nil")

@@ -46,10 +46,10 @@ import (
 	"sync"
 	"time"
 
+	"dario.cat/mergo"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/google/uuid"
-	"github.com/imdario/mergo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
@@ -268,35 +268,54 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	}
 	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath, node.Labels)
 	if err != nil {
-		klog.Errorf("readFromConfigFile err:%s", err.Error())
+		return nil, "", fmt.Errorf("load node configuration %s: %w", ConfigFilePath, err)
 	}
 	if os.Getenv("REPORT_NODE_CAPACITY") == "true" || os.Getenv("REPORT_NODE_CAPACITY") == "1" {
 		t := true
 		sConfig.NvidiaConfig.ReportNodeCapacity = &t
 	}
-	return sConfig, resolveOperatingMode(mode, node), nil
+	mode = resolveOperatingMode(mode)
+	if err := syncLupineServerLabel(mode, node); err != nil {
+		return nil, "", fmt.Errorf("sync %s for mode %q: %w", remotegpu.LupineServerLabel, mode, err)
+	}
+	return sConfig, mode, nil
 }
 
-// resolveOperatingMode lets the node's lupine label decide whether this plugin
-// serves its GPUs over the network rather than to pods of its own.
-//
-// The label is the operator's single declaration that a node belongs to the
-// lupine fleet: the scheduler's pool discovers servers by it and reads the
-// port from its value. Taking the mode from a second place as well, the
-// per-node config file, would let the two drift and leave a node half in the
-// fleet, serving lupine while still advertising the same cards to kubelet.
-func resolveOperatingMode(configured string, node *corev1.Node) string {
-	if node != nil {
-		if _, ok := node.Labels[remotegpu.LupineServerLabel]; ok {
-			return nvidia.RemoteMode
-		}
-	}
-	if configured == nvidia.RemoteMode {
-		klog.InfoS("ignoring the configured remote operating mode, this node carries no lupine server label",
-			"label", remotegpu.LupineServerLabel, "using", nvidia.HamiCoreMode)
+// resolveOperatingMode returns the operating mode from the per-node ConfigMap
+// entry. remote sits beside hami-core and mig as a configured mode; the
+// device plugin then mirrors it onto the lupine-server label the scheduler's
+// pool and the chart-managed lupine DaemonSet still key on.
+func resolveOperatingMode(configured string) string {
+	if configured == "" {
 		return nvidia.HamiCoreMode
 	}
 	return configured
+}
+
+// syncLupineServerLabel keeps the discovery label in lockstep with the
+// configured operating mode. The pool lists lupine servers by this label and
+// the chart-managed server DaemonSet selects on an empty value; a non-empty
+// value names a custom port for a server managed outside the chart, so an
+// already-labelled remote node keeps its value.
+func syncLupineServerLabel(mode string, node *corev1.Node) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	_, labelled := node.Labels[remotegpu.LupineServerLabel]
+	if mode == nvidia.RemoteMode {
+		if labelled {
+			return nil
+		}
+		klog.InfoS("applying lupine server label for remote operating mode",
+			"node", node.Name, "label", remotegpu.LupineServerLabel)
+		return util.PatchNodeLabels(node, map[string]string{remotegpu.LupineServerLabel: ""})
+	}
+	if !labelled {
+		return nil
+	}
+	klog.InfoS("removing lupine server label; operating mode is no longer remote",
+		"node", node.Name, "label", remotegpu.LupineServerLabel, "mode", mode)
+	return util.RemoveNodeLabels(node, remotegpu.LupineServerLabel)
 }
 
 // resolveReportNodeCapacity lets a per-node Nodeconfig entry decide whether
@@ -325,6 +344,10 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	deviceListStrategies, _ := spec.NewDeviceListStrategies(*nvconfig.Flags.Plugin.DeviceListStrategy)
 
 	klog.Infoln("reading config=", nvconfig, "resourceName", nvconfig.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
+
+	// The chart always passes this flag, including its default false. Preserve a
+	// true from a custom device-config.yaml while allowing CLI/env to disable limits.
+	sConfig.NvidiaConfig.DisableCoreLimit = sConfig.NvidiaConfig.DisableCoreLimit || nvconfig.DisableCoreLimit
 
 	// Initialize devices with configuration
 	if err := config.InitDevicesWithConfig(sConfig); err != nil {
@@ -449,10 +472,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 	}
 
 	if plugin.migMgr == nil {
-		return fmt.Errorf("MIG manager is not configured")
+		return fmt.Errorf("device-plugin NVML session manager is not configured (operating mode %q)", plugin.operatingMode)
 	}
 	if err := plugin.migMgr.Init(); err != nil {
-		return fmt.Errorf("init MIG instance manager: %w", err)
+		return fmt.Errorf("initialize device-plugin NVML session (operating mode %q): %w", plugin.operatingMode, err)
 	}
 
 	deviceNumbers, deviceNames, err := plugin.migMgr.deviceInventory()
@@ -1493,7 +1516,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
+				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%s", hostHookPath, sharedCacheName)
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
@@ -1527,16 +1550,18 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				)
 				configureHostPIDLockParentMount(response)
 				configureHostPIDBroker(response)
-				limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
-				if err != nil {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
-					return nil, fmt.Errorf("write GPU limits file: %w", err)
+				if resolveLimitDelivery(current, plugin.schedulerConfig.LimitDelivery) == nvidia.LimitDeliveryFile {
+					limitsFile, err := writeContainerLimits(cacheFileHostDirectory, response.Envs, &currentCtr)
+					if err != nil {
+						PodAllocationFailed(nodename, current, NodeLockNvidia)
+						return nil, fmt.Errorf("write GPU limits file: %w", err)
+					}
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: overrideEnvContainerPath,
+						HostPath:      limitsFile,
+						ReadOnly:      true,
+					})
 				}
-				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-					ContainerPath: overrideEnvContainerPath,
-					HostPath:      limitsFile,
-					ReadOnly:      true,
-				})
 				found := false
 				userSpecified := false
 				for _, val := range currentCtr.Env {

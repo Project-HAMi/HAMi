@@ -178,6 +178,35 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
 {{- end -}}
 
+{{/*
+With an auto-detected driver root, the device plugin loads NVML from the driver
+injected by the NVIDIA Container Toolkit. The host root is mounted only when a
+CDI device list strategy needs to walk the host driver layout. The strategy can
+also be overridden through extraArgs or extraEnvs, so check those too.
+*/}}
+{{- define "hami.devicePlugin.autoDriverRootHostMount" -}}
+{{- $strategies := list (toString .Values.devicePlugin.deviceListStrategy) -}}
+{{- $takeNext := false -}}
+{{- range .Values.devicePlugin.extraArgs -}}
+{{- $arg := toString . -}}
+{{- if $takeNext -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- $takeNext = regexMatch "^--?device-list-strategy$" $arg -}}
+{{- if regexMatch "^--?device-list-strategy=" $arg -}}
+{{- $strategies = append $strategies $arg -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.devicePlugin.extraEnvs -}}
+{{- if eq (toString .name) "DEVICE_LIST_STRATEGY" -}}
+{{- $strategies = append $strategies (toString .value) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (join "," $strategies)) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "hami.scheduler.patch.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.image) "global" .Values.global) }}
 {{- end -}}
@@ -323,11 +352,11 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- define "hami-vgpu.validateDeviceValues" -}}
 {{/* Validate values even when device-config.content overrides the generated config. */}}
 {{- $_ := include "hami-vgpu.ascendVnpuMode" . -}}
-{{- $count := .Values.devices.ascend.vnpuDeviceSplitCount -}}
+{{- $count := .Values.devices.ascend.deviceSplitCount -}}
 {{- $integer := int64 $count -}}
 {{- $numeric := has (kindOf $count) (list "int" "int64" "float64") -}}
 {{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
-  {{- fail "devices.ascend.vnpuDeviceSplitCount must be a positive integer" -}}
+  {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
 {{- end -}}
 {{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
 {{- $removedRootFields := dict

@@ -18,14 +18,15 @@ package remotegpu
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/assert/cmp"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -41,7 +42,7 @@ func testConfig() RemoteGPUConfig {
 }
 
 // card builds a free device on the named lupine server.
-func card(server, uuid string, mem int32) *device.DeviceUsage {
+func card(server, uuid string, mem int64) *device.DeviceUsage {
 	return &device.DeviceUsage{
 		ID:        deviceID(server, uuid),
 		Type:      RemoteGPUCommonWord,
@@ -52,12 +53,21 @@ func card(server, uuid string, mem int32) *device.DeviceUsage {
 	}
 }
 
-func request(nums, mem int32) device.ContainerDeviceRequest {
+func request(nums, mem int64) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{
 		Nums:     nums,
 		Type:     RemoteGPUCommonWord,
 		Memreq:   mem,
 		Coresreq: 100,
+	}
+}
+
+func setServerLabels(dev *RemoteGPUDevices, byServer map[string]map[string]string) {
+	dev.pool.mu.Lock()
+	defer dev.pool.mu.Unlock()
+	dev.pool.serverLabels = make(map[string]labels.Set, len(byServer))
+	for server, serverLabels := range byServer {
+		dev.pool.serverLabels[server] = labels.Set(serverLabels)
 	}
 }
 
@@ -95,6 +105,98 @@ func TestFit_ConfinesAllocationToOneServer(t *testing.T) {
 	assert.Equal(t, fit, true)
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
 	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-1")
+}
+
+func TestFit_ServerPoolSelectorFiltersCandidates(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	setServerLabels(dev, map[string]map[string]string{
+		"gpu-a": {"gpu-pool": "training"},
+		"gpu-b": {"gpu-pool": "inference"},
+	})
+	devices := []*device.DeviceUsage{
+		card("gpu-a", "GPU-a", 40000),
+		card("gpu-b", "GPU-b", 40000),
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		LupineServerSelectorAnno: "gpu-pool=inference",
+	}}}
+
+	fit, allocated, reason := dev.Fit(devices, request(1, 0), pod, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-b/GPU-b")
+}
+
+func TestFit_ServerPoolSelectorRejectsNoMatchAndInvalidInput(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	setServerLabels(dev, map[string]map[string]string{"gpu-a": {"gpu-pool": "training"}})
+	devices := []*device.DeviceUsage{card("gpu-a", "GPU-a", 40000)}
+
+	tests := []struct {
+		name     string
+		selector string
+		want     string
+	}{
+		{name: "no matching server", selector: "gpu-pool=inference", want: "no Lupine server matches"},
+		{name: "set-based selector", selector: "gpu-pool in (inference)", want: "must be one equality selector"},
+		{name: "invalid selector", selector: "=inference", want: "invalid " + LupineServerSelectorAnno},
+		{name: "blank selector", selector: "   ", want: "must not be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: tt.selector}}}
+			fit, allocated, reason := dev.Fit(devices, request(1, 0), pod, nil, nil)
+			assert.Equal(t, fit, false)
+			assert.Equal(t, len(allocated), 0)
+			assert.Assert(t, cmp.Contains(reason, tt.want))
+		})
+	}
+}
+
+func TestFit_SelectorWithEmptyPoolReportsNoServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
+	fit, _, reason := dev.Fit(nil, request(1, 0), pod, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, reason, errNoPool.Error())
+}
+
+func TestFit_SelectorRejectsPreviouslyCommittedNonmatchingServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	setServerLabels(dev, map[string]map[string]string{"gpu-a": {"gpu-pool": "training"}, "gpu-b": {"gpu-pool": "inference"}})
+	devices := []*device.DeviceUsage{card("gpu-a", "GPU-a", 40000), card("gpu-b", "GPU-b", 40000)}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
+	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{device.ContainerDevices{{UUID: "gpu-a/GPU-a", Type: RemoteGPUCommonWord}}}}
+	fit, _, reason := dev.Fit(devices, request(1, 0), pod, nil, &allocated)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, reason, errNoMatchingLupineServer.Error())
+}
+
+func TestFit_SelectorIsRecheckedAfterForcedRefresh(t *testing.T) {
+	free := card("gpu-a", "GPU-1", 40000)
+	holder := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "holder", Annotations: map[string]string{
+		AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{device.ContainerDevices{{UUID: free.ID, Type: RemoteGPUCommonWord}}}),
+	}}, Spec: corev1.PodSpec{NodeName: "cpu-1"}}
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}
+	nodes[0].Labels["gpu-pool"] = "inference"
+	stubFleet(t, nodes, []corev1.Pod{holder}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	nodes[0].Labels["gpu-pool"] = "training"
+	stubFleet(t, nodes, nil, nil)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{free}, request(1, 0), pod, nil, nil)
+	assert.Equal(t, fit, false, "the refreshed server no longer matches")
+	assert.Assert(t, reason != "")
+}
+
+func TestValidateReservedServer_ColdPool(t *testing.T) {
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}
+	nodes[0].Labels["gpu-pool"] = "inference"
+	stubFleet(t, nodes, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
+	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord}}}}
+	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
 }
 
 func TestFit_MultiContainerStaysOnSelectedServer(t *testing.T) {
@@ -193,45 +295,6 @@ func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
 }
 
-func TestFit_RejectsInvalidRequestInAnyPodContainer(t *testing.T) {
-	valid := requestingContainer("valid", 1, 0)
-	invalid := requestingContainer("invalid", 1<<31, 0)
-	tests := []struct {
-		name string
-		spec corev1.PodSpec
-	}{
-		{
-			name: "init container",
-			spec: corev1.PodSpec{
-				InitContainers: []corev1.Container{invalid},
-				Containers:     []corev1.Container{valid},
-			},
-		},
-		{
-			name: "app container",
-			spec: corev1.PodSpec{
-				Containers: []corev1.Container{valid, invalid},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dev := InitRemoteGPUDevice(testConfig())
-			fit, allocated, reason := dev.Fit(
-				[]*device.DeviceUsage{card("gpu-a", "GPU-1", 80000)},
-				request(1, 0),
-				&corev1.Pod{Spec: tt.spec},
-				nil,
-				nil,
-			)
-			assert.Equal(t, fit, false)
-			assert.Equal(t, len(allocated), 0)
-			assert.Assert(t, strings.Contains(reason, `container "invalid"`), reason)
-		})
-	}
-}
-
 func TestFit_FailureReasonsCountCardsAndServers(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{
@@ -296,8 +359,8 @@ func TestFit_AllocatesWholeCard(t *testing.T) {
 	fit, allocated, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	got := allocated[RemoteGPUCommonWord][0]
-	assert.Equal(t, got.Usedmem, int32(40000))
-	assert.Equal(t, got.Usedcores, int32(100))
+	assert.Equal(t, got.Usedmem, int64(40000))
+	assert.Equal(t, got.Usedcores, int64(100))
 }
 
 func TestFit_RejectsUnfitCards(t *testing.T) {
@@ -538,6 +601,38 @@ func TestMutateAdmission_ReplacesLiteralServerEnv(t *testing.T) {
 	assert.Equal(t, workload, 1)
 }
 
+func TestMutateAdmission_LeavesSelectorValidationToWebhook(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+		corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1"),
+	}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		LupineServerSelectorAnno: "gpu-pool in (inference)",
+	}}}
+
+	found, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+	assert.Equal(t, found, true)
+}
+
+func TestValidateReservedServer(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	setServerLabels(dev, map[string]map[string]string{
+		"gpu-a": {"gpu-pool": "inference"},
+	})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		LupineServerSelectorAnno: "gpu-pool=inference",
+	}}}
+	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: deviceID("gpu-a", "GPU-1"), Type: RemoteGPUCommonWord}},
+	}}
+
+	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
+
+	pod.Annotations[LupineServerSelectorAnno] = "gpu-pool=training"
+	assert.ErrorContains(t, dev.ValidateReservedServer(pod, allocated), "reserved Lupine server \"gpu-a\"")
+}
+
 func TestMutateAdmission_IgnoresContainerWithoutRequest(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	ctr := &corev1.Container{}
@@ -546,6 +641,40 @@ func TestMutateAdmission_IgnoresContainerWithoutRequest(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, found, false)
 	assert.Equal(t, len(ctr.Env), 0)
+}
+
+func TestPodRequestsRemoteGPURequiresPositiveCount(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "zero count app container",
+			pod:  &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{requestingContainer("app", 0, 0)}}},
+		},
+		{
+			name: "zero count init container",
+			pod:  &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{requestingContainer("init", 0, 0)}}},
+		},
+		{
+			name: "positive app container",
+			pod:  &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{requestingContainer("app", 1, 0)}}},
+			want: true,
+		},
+		{
+			name: "positive init container",
+			pod:  &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{requestingContainer("init", 1, 0)}}},
+			want: true,
+		},
+	}
+
+	InitRemoteGPUDevice(testConfig())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, PodRequestsRemoteGPU(tt.pod), tt.want)
+		})
+	}
 }
 
 func TestGenerateResourceRequests(t *testing.T) {
@@ -561,14 +690,14 @@ func TestGenerateResourceRequests(t *testing.T) {
 
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, req.Nums, int32(2))
-	assert.Equal(t, req.Memreq, int32(2000))
-	assert.Equal(t, req.Coresreq, int32(100))
+	assert.Equal(t, req.Nums, int64(2))
+	assert.Equal(t, req.Memreq, int64(2000))
+	assert.Equal(t, req.Coresreq, int64(100))
 	assert.Equal(t, req.Type, RemoteGPUCommonWord)
 
 	empty, err := dev.GenerateResourceRequests(&corev1.Container{})
 	assert.NilError(t, err)
-	assert.Equal(t, empty.Nums, int32(0))
+	assert.Equal(t, empty.Nums, int64(0))
 }
 
 func TestPatchAnnotations_WritesResolvedEndpoint(t *testing.T) {

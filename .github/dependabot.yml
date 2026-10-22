@@ -11,10 +11,22 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      golang-org-x:
+        patterns:
+          - "golang.org/x/*"
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "daily"
+  - package-ecosystem: "docker"
+    directory: "/benchmarks/ai-benchmark"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

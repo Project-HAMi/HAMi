@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"gotest.tools/v3/assert"
@@ -86,11 +87,11 @@ func Test_containerNameByIndex(t *testing.T) {
 
 func Test_evaluateContainerWholeGPU(t *testing.T) {
 	// physOK pretends every UUID carries exactly 8000 MiB of physical memory.
-	physOK := func(string) (int32, bool) { return 8000, true }
+	physOK := func(string) (int64, bool) { return 8000, true }
 
 	// verdict adapts evaluateContainerWholeGPU for assertions that only
 	// care about the verdict itself.
-	verdict := func(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(string) (int32, bool)) wholeGPUVerdict {
+	verdict := func(ctrDevs device.ContainerDevices, nodeDevs map[string]*device.DeviceInfo, physMiB func(string) (int64, bool)) wholeGPUVerdict {
 		got, _ := evaluateContainerWholeGPU(ctrDevs, nodeDevs, physMiB)
 		return got
 	}
@@ -112,10 +113,13 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), confirmedWholeGPU)
 	})
 
-	t.Run("unrequested cores do not rescue a MIG mode device", func(t *testing.T) {
-		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 0}}
+	t.Run("MIG profile core count is not read as a partial core request", func(t *testing.T) {
+		// MIG hands out the profile's physical SM count (14 for 1g.10gb) rather
+		// than the 100-percent marker, so checking it against WholeGPUUsedCores
+		// would reject every instance as a partial allocation.
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 14}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode}}
-		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), confirmedWholeGPU)
 	})
 
 	t.Run("unrequested cores do not rescue a core over-subscribed registry", func(t *testing.T) {
@@ -130,10 +134,10 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
 	})
 
-	t.Run("MIG mode device is never a whole GPU even at full memory and cores", func(t *testing.T) {
+	t.Run("MIG instance is whole even when cores were requested explicitly", func(t *testing.T) {
 		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode}}
-		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), confirmedWholeGPU)
 	})
 
 	t.Run("fractional memory allocation is not a whole GPU", func(t *testing.T) {
@@ -183,7 +187,7 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 	})
 
 	t.Run("unreadable physical memory is indeterminate, not failed closed", func(t *testing.T) {
-		physFail := func(string) (int32, bool) { return 0, false }
+		physFail := func(string) (int64, bool) { return 0, false }
 		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100}}
 		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}
 		got, cause := evaluateContainerWholeGPU(ctrDevs, nodeDevs, physFail)
@@ -192,7 +196,7 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 	})
 
 	t.Run("registry miss outranks physical read failure for the pending cause", func(t *testing.T) {
-		physFail := func(string) (int32, bool) { return 0, false }
+		physFail := func(string) (int64, bool) { return 0, false }
 		ctrDevs := device.ContainerDevices{
 			{UUID: "GPU-unregistered", Usedmem: 8000, Usedcores: 100},
 			{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100},
@@ -202,6 +206,53 @@ func Test_evaluateContainerWholeGPU(t *testing.T) {
 		assert.Equal(t, got, indeterminate)
 		assert.Equal(t, cause, causeRegistryMiss)
 	})
+
+	t.Run("MIG instance allocation below the instance memory is not whole", func(t *testing.T) {
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 4000}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode}}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+	})
+
+	t.Run("MIG instance does not depend on reading physical memory", func(t *testing.T) {
+		// The registry already carries the instance's own memory, so an NVML read
+		// failure must not leave the verdict pending.
+		physFail := func(string) (int64, bool) { return 0, false }
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode}}
+		got, cause := evaluateContainerWholeGPU(ctrDevs, nodeDevs, physFail)
+		assert.Equal(t, got, confirmedWholeGPU)
+		assert.Equal(t, cause, causeNotIndeterminate)
+	})
+
+	t.Run("nil physical probe classifies without NVML instead of panicking", func(t *testing.T) {
+		// The dry-run report classifies before touching NVML and passes no probe.
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 8000, Usedcores: 100}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}
+		got, cause := evaluateContainerWholeGPU(ctrDevs, nodeDevs, nil)
+		assert.Equal(t, got, confirmedWholeGPU)
+		assert.Equal(t, cause, causeNotIndeterminate)
+	})
+
+	t.Run("nil physical probe cannot detect memory scaling", func(t *testing.T) {
+		// Accepted trade-off of going probe-free: without a physical reading an
+		// over-subscribed registry is indistinguishable from a whole card. The
+		// same fixture is rejected above once physOK can see the real memory.
+		ctrDevs := device.ContainerDevices{{UUID: "GPU-1", Usedmem: 12000, Usedcores: 100}}
+		nodeDevs := map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 12000, Devcore: 100, Mode: ""}}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, nil), confirmedWholeGPU)
+	})
+
+	t.Run("a shared device beside a MIG instance keeps the container not whole", func(t *testing.T) {
+		ctrDevs := device.ContainerDevices{
+			{UUID: "GPU-1", Usedmem: 8000},
+			{UUID: "GPU-2", Usedmem: 2000, Usedcores: 100},
+		}
+		nodeDevs := map[string]*device.DeviceInfo{
+			"GPU-1": {ID: "GPU-1", Devmem: 8000, Mode: nv.MigMode},
+			"GPU-2": {ID: "GPU-2", Devmem: 8000, Devcore: 100, Mode: ""},
+		}
+		assert.Equal(t, verdict(ctrDevs, nodeDevs, physOK), notWholeGPU)
+	})
 }
 
 func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
@@ -209,6 +260,9 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 		return &mock.Device{
 			GetMemoryInfoFunc:       func() (nvml.Memory, nvml.Return) { return mem, memRet },
 			GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { return utilization, utilRet },
+			// DeviceSmUtil probes MIG ownership on every call, so the mock must
+			// answer it. false keeps these cases on the plain utilization path.
+			IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return false, nvml.SUCCESS },
 		}
 	}
 
@@ -313,6 +367,77 @@ func Test_wholeGPUUsage_deviceMethods(t *testing.T) {
 		assert.Equal(t, u.DeviceSmUtil(5), uint64(0))
 	})
 
+	// migUsage wraps handle in a usage view whose only device is a MIG
+	// instance. collector may be nil to model DCGM being unavailable.
+	migUsage := func(handle nvml.Device, collector *dcgmWholeGPUCollector) *wholeGPUUsage {
+		return &wholeGPUUsage{
+			uuids:   []string{"MIG-GPU-parent/3/0"},
+			nvmllib: &mock.Interface{DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) { return handle, nvml.SUCCESS }},
+			dcgm:    collector,
+		}
+	}
+	// A collector that is already initialized, so no case brings up a real
+	// embedded host engine.
+	migCollector := func() *dcgmWholeGPUCollector { return newMigTestCollector(nil) }
+
+	t.Run("MIG utilization comes from DCGM at instance granularity", func(t *testing.T) {
+		parent := &mock.Device{GetUUIDFunc: func() (string, nvml.Return) { return "GPU-parent", nvml.SUCCESS }}
+		handle := &mock.Device{
+			IsMigDeviceHandleFunc:                  func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+			GetGpuInstanceIdFunc:                   func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+			GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) { return parent, nvml.SUCCESS },
+			// The MIG path must never fall back to whole-device NVML rates,
+			// which would report the parent card's usage for one instance.
+			GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { return nvml.Utilization{Gpu: 99}, nvml.SUCCESS },
+		}
+		collector := newMigTestCollector(&fakeLatestValuesQuerier{vals: []dcgm.FieldValue_v1{
+			{FieldID: dcgm.DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO, FieldType: dcgm.DCGM_FT_DOUBLE, Status: 0, Value: dcgmDoubleBytes(0.42)},
+		}})
+		seedMigHierarchy(collector, "GPU-parent", 3, 11)
+		assert.Equal(t, migUsage(handle, collector).DeviceSmUtil(0), uint64(42))
+	})
+
+	t.Run("MIG device with no DCGM collector yields zero", func(t *testing.T) {
+		handle := &mock.Device{IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS }}
+		assert.Equal(t, migUsage(handle, nil).DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("MIG instance id lookup failure yields zero", func(t *testing.T) {
+		handle := &mock.Device{
+			IsMigDeviceHandleFunc: func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+			GetGpuInstanceIdFunc:  func() (int, nvml.Return) { return 0, nvml.ERROR_NOT_SUPPORTED },
+		}
+		assert.Equal(t, migUsage(handle, migCollector()).DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("MIG parent handle lookup failure yields zero", func(t *testing.T) {
+		handle := &mock.Device{
+			IsMigDeviceHandleFunc:                  func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+			GetGpuInstanceIdFunc:                   func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+			GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) { return nil, nvml.ERROR_NOT_SUPPORTED },
+		}
+		assert.Equal(t, migUsage(handle, migCollector()).DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("MIG parent UUID failure yields zero", func(t *testing.T) {
+		parent := &mock.Device{GetUUIDFunc: func() (string, nvml.Return) { return "", nvml.ERROR_NOT_SUPPORTED }}
+		handle := &mock.Device{
+			IsMigDeviceHandleFunc:                  func() (bool, nvml.Return) { return true, nvml.SUCCESS },
+			GetGpuInstanceIdFunc:                   func() (int, nvml.Return) { return 3, nvml.SUCCESS },
+			GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) { return parent, nvml.SUCCESS },
+		}
+		assert.Equal(t, migUsage(handle, migCollector()).DeviceSmUtil(0), uint64(0))
+	})
+
+	t.Run("an unsupported MIG probe falls back to NVML utilization", func(t *testing.T) {
+		// Old drivers reject IsMigDeviceHandle outright; the device is then
+		// treated as a plain GPU rather than silently reporting zero.
+		handle := &mock.Device{
+			IsMigDeviceHandleFunc:   func() (bool, nvml.Return) { return false, nvml.ERROR_NOT_SUPPORTED },
+			GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) { return nvml.Utilization{Gpu: 42}, nvml.SUCCESS },
+		}
+		assert.Equal(t, migUsage(handle, migCollector()).DeviceSmUtil(0), uint64(42))
+	})
 }
 
 func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
@@ -330,7 +455,7 @@ func Test_reconcileWholeGPU_addsSynthesizedEntry(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -375,7 +500,7 @@ func Test_reconcileWholeGPU_replacesRealShmEntry(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -407,7 +532,7 @@ func Test_reconcileWholeGPU_prunesOnPodDeletion(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -445,7 +570,7 @@ func Test_reconcileWholeGPU_verdictCached_noNodeGet(t *testing.T) {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				calls++
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
@@ -478,7 +603,7 @@ func Test_reconcileWholeGPU_noFlapOnNodeTableFailure(t *testing.T) {
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
 				firstSeenAt:     make(map[string]time.Time),
-				physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+				physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					if *fail {
 						return nil, errors.New("apiserver unavailable")
@@ -521,7 +646,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	// newLister builds a lister whose verdict for "uid6_ctr" has supposedly
 	// been pending since firstSeen, with the device optionally present in
 	// the node registry.
-	newLister := func(registered bool, phys func(string) (int32, bool), firstSeen time.Time) (*ContainerLister, *corev1.Pod) {
+	newLister := func(registered bool, phys func(string) (int64, bool), firstSeen time.Time) (*ContainerLister, *corev1.Pod) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "p", Namespace: "default", UID: "uid6",
@@ -551,7 +676,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	past := time.Now().Add(-indeterminateRetryWindow - time.Minute)
 
 	t.Run("registry miss past the window locks to notWholeGPU", func(t *testing.T) {
-		l, pod := newLister(false, func(string) (int32, bool) { return 8000, true }, past)
+		l, pod := newLister(false, func(string) (int64, bool) { return 8000, true }, past)
 		l.reconcileWholeGPU([]*corev1.Pod{pod})
 		assert.Equal(t, l.wholeGPU.verdicts["uid6_ctr"], notWholeGPU)
 		_, ok := l.containers["uid6_ctr"]
@@ -559,7 +684,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 	})
 
 	t.Run("unreadable physical memory never ages out of retry", func(t *testing.T) {
-		l, pod := newLister(true, func(string) (int32, bool) { return 0, false }, past)
+		l, pod := newLister(true, func(string) (int64, bool) { return 0, false }, past)
 		l.reconcileWholeGPU([]*corev1.Pod{pod})
 		_, cached := l.wholeGPU.verdicts["uid6_ctr"]
 		assert.Equal(t, cached, false)
@@ -567,7 +692,7 @@ func Test_reconcileWholeGPU_retryWindow(t *testing.T) {
 
 	t.Run("physical memory readable again later still confirms", func(t *testing.T) {
 		failing := true
-		l, pod := newLister(true, func(string) (int32, bool) {
+		l, pod := newLister(true, func(string) (int64, bool) {
 			if failing {
 				return 0, false
 			}
@@ -611,7 +736,7 @@ func newWholeGPUTestLister(dir string, pods ...*corev1.Pod) *ContainerLister {
 			nvmlInitialized: true,
 			verdicts:        make(map[string]wholeGPUVerdict),
 			firstSeenAt:     make(map[string]time.Time),
-			physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+			physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 			getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 				return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 			},
@@ -662,7 +787,7 @@ func Test_ContainerLister_Update_WholeGPU(t *testing.T) {
 				nvmlInitialized: true,
 				verdicts:        make(map[string]wholeGPUVerdict),
 				firstSeenAt:     make(map[string]time.Time),
-				physTotalMiB:    func(string) (int32, bool) { return 8000, true },
+				physTotalMiB:    func(string) (int64, bool) { return 8000, true },
 				getNodeDevices: func() (map[string]*device.DeviceInfo, error) {
 					return map[string]*device.DeviceInfo{"GPU-1": {ID: "GPU-1", Devmem: 8000, Devcore: 100, Mode: ""}}, nil
 				},
@@ -835,7 +960,7 @@ func Test_fetchNodeDevices(t *testing.T) {
 		devs, err := serveNodeForTest(t, http.StatusOK, registered).fetchNodeDevices()
 		assert.NilError(t, err)
 		assert.Equal(t, len(devs), 1)
-		assert.Equal(t, devs["GPU-1"].Devmem, int32(8000))
+		assert.Equal(t, devs["GPU-1"].Devmem, int64(8000))
 	})
 
 	t.Run("node without a register annotation yields an empty registry", func(t *testing.T) {
@@ -882,7 +1007,7 @@ func Test_physTotalMiB(t *testing.T) {
 		}}
 		got, ok := physTotalMiB(lib, "GPU-1")
 		assert.Equal(t, ok, true)
-		assert.Equal(t, got, int32(8000))
+		assert.Equal(t, got, int64(8000))
 	})
 }
 

@@ -150,7 +150,7 @@ func (plugin *NvidiaDevicePlugin) validateContainerAllocation(ctr *corev1.Contai
 // registeredMemoryMB returns the memory this plugin published for a card, which
 // is what the scheduler sized a percentage request against, oversubscription
 // included.
-func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int32, bool) {
+func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int64, bool) {
 	if plugin.rm == nil {
 		return 0, false
 	}
@@ -158,9 +158,9 @@ func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int32, bool) 
 	if !ok || card == nil {
 		return 0, false
 	}
-	total := int32(card.TotalMemory / 1024 / 1024)
+	total := int64(card.TotalMemory / 1024 / 1024)
 	if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
-		total = int32(float64(total) * *plugin.schedulerConfig.DeviceMemoryScaling)
+		total = int64(float64(total) * *plugin.schedulerConfig.DeviceMemoryScaling)
 	}
 	return total, true
 }

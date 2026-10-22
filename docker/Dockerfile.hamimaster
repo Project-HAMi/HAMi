@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
+ARG GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
 ARG HAMICORE_IMAGE
 FROM $GOLANG_IMAGE AS build
 FROM $HAMICORE_IMAGE AS corebuild
@@ -9,13 +9,13 @@ ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 
-FROM nvidia/cuda:13.4.2-base-ubuntu22.04@sha256:5d8ec7ec049bc403934ac149b56083f27eeba2863c7bccd38d092e7c905d28e0
+FROM nvidia/cuda:13.4.3-base-ubuntu22.04@sha256:7416c5229cb6c5b2e7cd7a5930ec97db03f3e064d56b8abacf525f6b4da0b271
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-RUN rm -rf /usr/local/cuda-13.3/compat/libcuda.so*
+RUN rm -rf /usr/local/cuda-*/compat/libcuda.so*
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility

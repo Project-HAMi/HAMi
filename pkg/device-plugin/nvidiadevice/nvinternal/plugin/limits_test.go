@@ -31,6 +31,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -271,4 +273,100 @@ func TestAllocate_MIGDeviceGetsNoLimitsFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.ContainerResponses, 1)
 	require.Nil(t, findMount(response.ContainerResponses[0].Mounts, overrideEnvContainerPath))
+}
+
+// TestResolveLimitDelivery checks the order pod annotation, device configuration, file, and that
+// an unknown value is skipped.
+func TestResolveLimitDelivery(t *testing.T) {
+	file, env, unknown := nvidia.LimitDeliveryFile, nvidia.LimitDeliveryEnv, nvidia.LimitDelivery("both")
+	for _, tc := range []struct {
+		name       string
+		annotation string
+		configured *nvidia.LimitDelivery
+		want       nvidia.LimitDelivery
+	}{
+		{"nothing set", "", nil, file},
+		{"configured env", "", &env, env},
+		{"unknown configured value", "", &unknown, file},
+		{"annotation env over configured file", "env", &file, env},
+		{"annotation file over configured env", "file", &env, file},
+		{"unknown annotation keeps configured env", "ENV", &env, env},
+		{"unknown annotation and nothing configured", "ENV", nil, file},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := newLimitsTestPod()
+			if tc.annotation != "" {
+				pod.Annotations[nvidia.LimitDeliveryAnnotation] = tc.annotation
+			}
+			require.Equal(t, tc.want, resolveLimitDelivery(pod, tc.configured))
+		})
+	}
+	require.Equal(t, file, resolveLimitDelivery(nil, nil))
+}
+
+// TestLimitDeliveryConfig checks that the device configuration accepts limitDelivery and that a
+// nodeconfig entry overrides it.
+func TestLimitDeliveryConfig(t *testing.T) {
+	directory := t.TempDir()
+	deviceConfig := filepath.Join(directory, "device-config.yaml")
+	require.NoError(t, os.WriteFile(deviceConfig, []byte("nvidia:\n  limitDelivery: file\n"), 0o600))
+	loaded, err := config.LoadConfig(deviceConfig)
+	require.NoError(t, err)
+	require.Equal(t, nvidia.LimitDeliveryFile, *loaded.NvidiaConfig.LimitDelivery)
+
+	t.Setenv(util.NodeNameEnvName, "gpu-node-01")
+	nodeConfig := filepath.Join(directory, "config.json")
+	require.NoError(t, os.WriteFile(nodeConfig, []byte(`{"nodeconfig": [{"name": "gpu-node-01", "limitdelivery": "env"}]}`), 0o600))
+	_, err = readFromConfigFile(&loaded.NvidiaConfig, nodeConfig, nil)
+	require.NoError(t, err)
+	require.Equal(t, nvidia.LimitDeliveryEnv, *loaded.NvidiaConfig.LimitDelivery)
+}
+
+// TestAllocate_LimitDelivery checks that only the file mode writes and mounts the limits file,
+// and that both modes use the fixed shared cache name.
+func TestAllocate_LimitDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured nvidia.LimitDelivery
+		annotation string
+		wantFile   bool
+	}{
+		{"configured env", nvidia.LimitDeliveryEnv, "", false},
+		{"annotation env over configured file", nvidia.LimitDeliveryFile, "env", false},
+		{"annotation file over configured env", nvidia.LimitDeliveryEnv, "file", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupInRequestDevices(t)
+			plugin := newTestPlugin(t)
+			plugin.schedulerConfig.LimitDelivery = ptr(tc.configured)
+			pod := newLimitsTestPod()
+			if tc.annotation != "" {
+				pod.Annotations[nvidia.LimitDeliveryAnnotation] = tc.annotation
+			}
+			setupFakeClient(t, pod)
+			mockAllocateGlobals(t, pod)
+
+			response, err := plugin.Allocate(context.Background(), &kubeletdevicepluginv1beta1.AllocateRequest{
+				ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+					{DevicesIds: []string{"GPU-aaa-0"}},
+				},
+			})
+			require.NoError(t, err)
+			require.Len(t, response.ContainerResponses, 1)
+			containerResponse := response.ContainerResponses[0]
+			require.Equal(t, "3000m", containerResponse.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+			require.Equal(t, hostHookPath+"/vgpu/"+sharedCacheName, containerResponse.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"])
+
+			cacheMount := findMount(containerResponse.Mounts, fmt.Sprintf("%s/vgpu", hostHookPath))
+			require.NotNil(t, cacheMount)
+			limitsFile := vgpucache.LimitsFilePath(cacheMount.HostPath)
+			if tc.wantFile {
+				require.NotNil(t, findMount(containerResponse.Mounts, overrideEnvContainerPath))
+				require.FileExists(t, limitsFile)
+			} else {
+				require.Nil(t, findMount(containerResponse.Mounts, overrideEnvContainerPath))
+				require.NoFileExists(t, limitsFile)
+			}
+		})
+	}
 }

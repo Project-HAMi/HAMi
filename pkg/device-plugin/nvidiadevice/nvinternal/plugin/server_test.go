@@ -573,7 +573,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	_, err = readFromConfigFile(&nvconfig, path+"/config.json", nil)
 	if err != nil {
@@ -590,7 +590,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
-		DefaultGPUNum:                int32(2),
+		DefaultGPUNum:                int64(2),
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
@@ -956,8 +956,8 @@ func TestAlignContainerDevicesWithAllocatedIDsPreservesMetadata(t *testing.T) {
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1",
 	})
 	require.NoError(t, err)
-	require.Equal(t, int32(3000), aligned[0].Usedmem)
-	require.Equal(t, int32(50), aligned[0].Usedcores)
+	require.Equal(t, int64(3000), aligned[0].Usedmem)
+	require.Equal(t, int64(50), aligned[0].Usedcores)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[0].UUID)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[1].UUID)
 }
@@ -1304,11 +1304,11 @@ func TestAllocateRejectsEmptyDeviceIDs(t *testing.T) {
 	require.ErrorContains(t, err, "invalid allocation request with no devices requested")
 }
 
-// TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead verifies that a valid
-// device config cannot select an operating mode without reading the node.
-// A node that cannot be read is not a node without the label. Falling back to
-// a local mode there would advertise to kubelet the cards lupine is already
-// serving over the network, putting two workloads on the same GPU.
+// TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead verifies that a
+// valid device config cannot finish resolving its operating mode without the
+// node: the plugin must sync the lupine-server label to match, and guessing a
+// local mode when the node is unknown would advertise to kubelet cards that a
+// remote node may already be serving over the network.
 func TestLoadNvidiaDevicePluginConfigFailsWhenTheNodeCannotBeRead(t *testing.T) {
 	previous := client.KubeClient
 	client.KubeClient = fake.NewSimpleClientset()
@@ -1392,6 +1392,10 @@ func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
 	ConfigFile = &pluginConfig
 	t.Cleanup(func() { ConfigFile = previousFile })
 
+	previousPath := ConfigFilePath
+	ConfigFilePath = filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(ConfigFilePath, []byte(`{"nodeconfig":[]}`), 0o600))
+	t.Cleanup(func() { ConfigFilePath = previousPath })
 	t.Setenv("REPORT_NODE_CAPACITY", "true")
 
 	sConfig, _, err := LoadNvidiaDevicePluginConfig()
@@ -1400,33 +1404,21 @@ func TestLoadNvidiaDevicePluginConfigReportNodeCapacityFromEnv(t *testing.T) {
 	require.True(t, *sConfig.NvidiaConfig.ReportNodeCapacity)
 }
 
-// The lupine label is the operator's one declaration that a node serves its
-// GPUs over the network. Deriving the mode from it keeps the plugin and the
-// scheduler's pool from disagreeing about which fleet a node belongs to.
+// remote is a peer of hami-core and mig in the per-node ConfigMap; the device
+// plugin then mirrors it onto the lupine-server label used for discovery.
 func TestResolveOperatingMode(t *testing.T) {
-	labelled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
-		Name:   "gpu-a",
-		Labels: map[string]string{remotegpu.LupineServerLabel: ""},
-	}}
-	plain := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-b"}}
-
 	for _, tc := range []struct {
 		name       string
 		configured string
-		node       *corev1.Node
 		want       string
 	}{
-		{"label wins over the configured mode", nvidia.HamiCoreMode, labelled, nvidia.RemoteMode},
-		{"label wins over mig too", nvidia.MigMode, labelled, nvidia.RemoteMode},
-		{"an unlabelled node keeps its configured mode", nvidia.MigMode, plain, nvidia.MigMode},
-		// Honouring remote here would hide the cards from both fleets: this
-		// backend would skip them and the pool would never discover the node.
-		{"remote without the label is refused", nvidia.RemoteMode, plain, nvidia.HamiCoreMode},
-		{"remote with no node readable is refused", nvidia.RemoteMode, nil, nvidia.HamiCoreMode},
-		{"no node readable keeps the configured mode", nvidia.HamiCoreMode, nil, nvidia.HamiCoreMode},
+		{"hami-core passes through", nvidia.HamiCoreMode, nvidia.HamiCoreMode},
+		{"mig passes through", nvidia.MigMode, nvidia.MigMode},
+		{"remote passes through", nvidia.RemoteMode, nvidia.RemoteMode},
+		{"empty falls back to hami-core", "", nvidia.HamiCoreMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, resolveOperatingMode(tc.configured, tc.node))
+			require.Equal(t, tc.want, resolveOperatingMode(tc.configured))
 		})
 	}
 }
@@ -1436,7 +1428,7 @@ func TestResolveOperatingMode(t *testing.T) {
 func TestIsWholeGPUAllocation(t *testing.T) {
 	// 8 GiB card: TotalMemory is in bytes, Usedmem in MiB.
 	const (
-		gibInMiB = int32(8 * 1024)
+		gibInMiB = int64(8 * 1024)
 		uuidA    = "GPU-aaaa"
 		uuidB    = "GPU-bbbb"
 	)
@@ -1568,6 +1560,51 @@ func TestIsWholeGPUAllocation(t *testing.T) {
 			require.Equal(t, tc.want, isWholeGPUAllocation(tc.devreq, tc.rm))
 		})
 	}
+}
+
+func TestSyncLupineServerLabel(t *testing.T) {
+	previous := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = previous })
+
+	t.Run("remote applies an empty label when missing", func(t *testing.T) {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-a"}}
+		client.KubeClient = fake.NewSimpleClientset(node)
+		require.NoError(t, syncLupineServerLabel(nvidia.RemoteMode, node))
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "gpu-a", metav1.GetOptions{})
+		require.NoError(t, err)
+		value, ok := updated.Labels[remotegpu.LupineServerLabel]
+		require.True(t, ok)
+		require.Empty(t, value)
+	})
+
+	t.Run("remote preserves a custom port label", func(t *testing.T) {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:   "gpu-b",
+			Labels: map[string]string{remotegpu.LupineServerLabel: "20000"},
+		}}
+		client.KubeClient = fake.NewSimpleClientset(node)
+		require.NoError(t, syncLupineServerLabel(nvidia.RemoteMode, node))
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "gpu-b", metav1.GetOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "20000", updated.Labels[remotegpu.LupineServerLabel])
+	})
+
+	t.Run("non-remote removes a leftover label", func(t *testing.T) {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:   "gpu-c",
+			Labels: map[string]string{remotegpu.LupineServerLabel: ""},
+		}}
+		client.KubeClient = fake.NewSimpleClientset(node)
+		require.NoError(t, syncLupineServerLabel(nvidia.HamiCoreMode, node))
+		updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "gpu-c", metav1.GetOptions{})
+		require.NoError(t, err)
+		_, ok := updated.Labels[remotegpu.LupineServerLabel]
+		require.False(t, ok)
+	})
+
+	t.Run("nil node is refused", func(t *testing.T) {
+		require.ErrorContains(t, syncLupineServerLabel(nvidia.RemoteMode, nil), "node is nil")
+	})
 }
 
 // The chart always passes --report-node-capacity explicitly (true or
@@ -1702,4 +1739,36 @@ func TestDynamicMIGCDIRemovalRetryPreservedWithSharedSnapshot(t *testing.T) {
 	require.NoError(t, plugin.reconcileActiveMigAllocations())
 	require.Empty(t, plugin.pendingCDIRemovals)
 	require.Equal(t, 2, calls)
+}
+
+// A missing or malformed node config must not select a local mode or remove
+// an existing remote discovery label, including its custom port.
+func TestLoadNodeConfigFailurePreservesRemoteLabel(t *testing.T) {
+	for _, content := range []string{"missing", "invalid-json"} {
+		t.Run(content, func(t *testing.T) {
+			oldClient, oldNode, oldFile, oldPath := client.KubeClient, util.NodeName, ConfigFile, ConfigFilePath
+			t.Cleanup(func() {
+				client.KubeClient, util.NodeName, ConfigFile, ConfigFilePath = oldClient, oldNode, oldFile, oldPath
+			})
+			util.NodeName = "remote-config-error"
+			client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: util.NodeName, Labels: map[string]string{remotegpu.LupineServerLabel: "15000"}}})
+			path := filepath.Join(t.TempDir(), "plugin.yaml")
+			require.NoError(t, os.WriteFile(path, []byte("{}"), 0o600))
+			ConfigFile = &path
+			ConfigFilePath = filepath.Join(t.TempDir(), "config.json")
+			if content != "missing" {
+				require.NoError(t, os.WriteFile(ConfigFilePath, []byte("{"), 0o600))
+			}
+			cfg, mode, err := LoadNvidiaDevicePluginConfig()
+			require.ErrorContains(t, err, "load node configuration")
+			require.Nil(t, cfg)
+			require.Empty(t, mode)
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), util.NodeName, metav1.GetOptions{})
+			require.NoError(t, err)
+			require.Equal(t, "15000", node.Labels[remotegpu.LupineServerLabel])
+			for _, action := range client.KubeClient.(*fake.Clientset).Actions() {
+				require.NotEqual(t, "patch", action.GetVerb())
+			}
+		})
+	}
 }

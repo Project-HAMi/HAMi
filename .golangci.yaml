@@ -8,7 +8,7 @@ output:
       path: stdout
       print-linter-name: true
       print-issued-lines: true
-      colors: true 
+      colors: true
 linters:
   default: none
   enable:
@@ -28,48 +28,15 @@ linters:
     - testifylint
     - unconvert
   settings:
-    dupl:
-      threshold: 800
     depguard:
       rules:
         main:
           deny:
             - pkg: github.com/pkg/errors
               desc: use standard library errors or k8s.io/klog/v2
-    errcheck:
-      check-type-assertions: true
-      check-blank: true
-    errorlint:
-      errorf: true
-      asserts: true
-      comparison: true
-    goconst:
-      min-len: 3
-      min-occurrences: 3
-    gocritic:
-      disabled-checks:
-        - commentedOutCode
-        - whyNoLint
-      enabled-tags:
-        - diagnostic
-        - experimental
-        - opinionated
-        - performance
-        - style
-      settings:
-        hugeParam:
-          sizeThreshold: 80
-        rangeExprCopy:
-          sizeThreshold: 512
-        rangeValCopy:
-          sizeThreshold: 128
-    gocyclo:
-      min-complexity: 20
     godot:
       scope: declarations
       capital: false
-    nestif:
-      min-complexity: 20
     modernize:
       disable:
         - embedlit
@@ -85,7 +52,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
-      - pkg/device-plugin 
+      - pkg/device-plugin
 issues:
   uniq-by-line: true
 formatters:
@@ -95,8 +62,6 @@ formatters:
   settings:
     gofmt:
       simplify: true
-    gofumpt:
-      extra-rules: true
     goimports:
       local-prefixes:
         - github.com/Project-HAMi/HAMi

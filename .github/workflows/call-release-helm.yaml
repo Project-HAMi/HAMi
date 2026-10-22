@@ -6,7 +6,7 @@ name: Call Release Helm Charts
 # and on branch "github_pages", update '/index.yaml' for '/charts/*.tgz'
 
 env:
-  HELM_VERSION: v3.8.1
+  HELM_VERSION: v3.22.0
   MERGE_BRANCH: gh-pages
 on:
   workflow_call:
@@ -41,14 +41,19 @@ jobs:
     steps:
       - name: Get Original Ref
         id: get_original_ref
+        # inputs reach the script through the environment, not expression
+        # interpolation, so their contents cannot become part of the command
+        env:
+          IN_REF: ${{ inputs.ref }}
+          IN_SUBMIT: ${{ inputs.submit }}
         run: |
           if ${{ inputs.ref != '' }} ; then
               echo "call by workflow_call"
-              echo "REF=${{ inputs.ref }}" >> $GITHUB_ENV
-              echo "SUBMIT=${{ inputs.submit }}" >> $GITHUB_ENV
+              echo "REF=${IN_REF}" >> $GITHUB_ENV
+              echo "SUBMIT=${IN_SUBMIT}" >> $GITHUB_ENV
           elif ${{ github.event_name == 'workflow_dispatch' }} ; then
               echo "call by self workflow_dispatch"
-              echo "REF=${{ inputs.ref }}" >> $GITHUB_ENV
+              echo "REF=${IN_REF}" >> $GITHUB_ENV
               echo "SUBMIT=true" >> $GITHUB_ENV
           else
               echo "unexpected event: ${{ github.event_name }}"
@@ -58,6 +63,7 @@ jobs:
   # packages tgz from /charts of original branch, deploy to /charts of target branch
   package_chart:
     runs-on: ubuntu-latest
+    needs: [get_ref]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -95,7 +101,7 @@ jobs:
           mkdir -p tmp
           mv charts/*.tgz tmp
       - name: Upload Artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: chart_package_artifact
           path: tmp/*
@@ -123,7 +129,7 @@ jobs:
           persist-credentials: "true"
 
       - name: Download Artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: chart_package_artifact
           path: charts/

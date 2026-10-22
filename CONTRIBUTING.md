@@ -16,6 +16,7 @@ Welcome to HAMi!
     - [File an Issue](#file-an-issue)
 - [Contributor Workflow](#contributor-workflow)
   - [Creating Pull Requests](#creating-pull-requests)
+  - [Issue and PR Lifecycle](#issue-and-pr-lifecycle)
   - [Code Review](#code-review)
 
 # Before you get started
@@ -143,20 +144,20 @@ Please never hesitate to ask questions or submit a pull request.
 This is a rough outline of what a contributor's workflow looks like:
 
 - Create a topic branch from where you want to base the contribution (usually master)
-- Make commits of logical units
+- Make commits of logical units, signed off with `git commit -s` (the DCO check fails without a `Signed-off-by` trailer)
 - Push changes in your topic branch to your personal fork of the repository
 - Submit a pull request to [Project-HAMi/HAMi](https://github.com/Project-HAMi/HAMi)
 
 ## Creating Pull Requests
 
 Pull requests are often called simply "PRs".
-HAMi generally follows the standard [GitHub pull request](https://help.github.com/articles/about-pull-requests/) process.
+HAMi generally follows the standard [GitHub pull request](https://docs.github.com/en/pull-requests/reference/pull-requests) process.
 To submit a proposed change, please develop the code/fix and add new test cases.
 Before submitting a pull request, run these local verifications to predict whether continuous integration will pass or fail:
 
 * Run and pass `make verify`
 
-For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make verify_chart`.
+For Helm chart or chart-validation changes, use Helm v3.22.0 and also run `make verify_chart`.
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
 and verifies that the chart and application versions match.
 
@@ -191,6 +192,6 @@ This policy helps us keep the backlog focused and avoids letting stale work bloc
 To make it easier for your PR to receive reviews, consider that reviewers will need you to:
 
 * Follow [good coding guidelines](https://github.com/golang/go/wiki/CodeReviewComments)
-* Write [good commit messages](https://chris.beams.io/posts/git-commit/)
+* Write [good commit messages](https://chris.beams.io/git-commit)
 * Break large changes into a logical series of smaller patches which individually make easily understandable changes, and in aggregate solve a broader issue
 * Separate cosmetics from functional changes. Cosmetic changes (reindentation, whitespace, comment wording, style fixes) must not be mixed with logic changes in the same commit — split them into their own commit. If the cosmetics are unrelated to the PR's purpose, they belong in a separate PR entirely. This keeps diffs reviewable: reviewers should not have to filter out formatting noise to find what actually changed.

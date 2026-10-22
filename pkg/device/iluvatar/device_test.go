@@ -17,6 +17,7 @@ limitations under the License.
 package iluvatar
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,13 +25,74 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 )
+
+func TestCheckHealth(t *testing.T) {
+	dev := &IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+		},
+		nodeRegisterAnno: "hami.io/node-MR-V100-register",
+	}
+	oneCard := "GPU-0,10,8192,100,MR-V100,0,true:"
+	twoCards := "GPU-0,10,8192,100,MR-V100,0,true:GPU-1,10,8192,100,MR-V100,0,true:"
+
+	node := func(name string, mem, core int64, register string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
+		}
+		if register != "" {
+			n.Annotations[dev.nodeRegisterAnno] = register
+		}
+		if mem > 0 {
+			n.Status.Allocatable["iluvatar.ai/MR-V100.vMem"] = *resource.NewQuantity(mem, resource.DecimalSI)
+		}
+		if core > 0 {
+			n.Status.Allocatable["iluvatar.ai/MR-V100.vCore"] = *resource.NewQuantity(core, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth("MR-V100", nil)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	// A count resource without memory or core must not keep the node schedulable.
+	countOnly := node("iluvatar-health-count", 0, 0, oneCard)
+	countOnly.Status.Allocatable["iluvatar.ai/MR-V100-vgpu"] = *resource.NewQuantity(2, resource.DecimalSI)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", countOnly)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("iluvatar-health-mem", 8192, 0, oneCard)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	present.Annotations[dev.nodeRegisterAnno] = twoCards
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = dev.CheckHealth("MR-V100", node("iluvatar-health-core", 0, 100, oneCard))
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
 
 func TestGetNodeDevices(t *testing.T) {
 	dev := IluvatarDevices{
@@ -61,9 +123,9 @@ func TestGetNodeDevices(t *testing.T) {
 			want: []*device.DeviceInfo{
 				{
 					ID:           "GPU-bad51c5a-ed4c-591d-91bf-c04a12e19eae",
-					Count:        int32(10),
-					Devcore:      int32(100),
-					Devmem:       int32(8192),
+					Count:        int64(10),
+					Devcore:      int64(100),
+					Devmem:       int64(8192),
 					Type:         "MR-V100",
 					Numa:         0,
 					Health:       true,
@@ -337,11 +399,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(100),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -356,11 +418,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(50),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(50),
 			},
 		},
 		{
@@ -375,11 +437,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(256000),
-				MemPercentagereq: int32(0),
-				Coresreq:         int32(0),
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
 			},
 		},
 		{
@@ -453,36 +515,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(1),
+				Nums:             int64(1),
 				Type:             "MR-V100",
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
-				Coresreq:         int32(0),
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
 			},
-		},
-		{
-			name: "memory overflowing int32 is rejected, not truncated to zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
-						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "decimal-form memory request is rejected, not treated as zero",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
-						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16.0Gi"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "device count zero is rejected",
@@ -501,17 +539,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("-1"),
-					},
-				},
-			},
-			want: device.ContainerDeviceRequest{},
-		},
-		{
-			name: "device count above int32 max is rejected",
-			args: &corev1.Container{
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("2147483648"),
 					},
 				},
 			},
@@ -977,7 +1004,7 @@ func TestFit_CoresValidation(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		coresreq int32
+		coresreq int64
 		wantOk   bool
 	}{
 		{
@@ -1094,7 +1121,7 @@ func Test_GenerateResourceRequests_MutatedMultiCard(t *testing.T) {
 			t.Fatalf("MutateAdmission(count=%d): %v", count, err)
 		}
 		got, _ := dev.GenerateResourceRequests(ctr)
-		if got.Nums != int32(count) {
+		if got.Nums != count {
 			t.Errorf("count=%d: Nums = %d, want %d", count, got.Nums, count)
 		}
 		if count > 1 && got.Coresreq != 100 {
@@ -1114,8 +1141,8 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 		name     string
 		count    int64
 		cores    int64
-		wantCore int32
-		wantNums int32
+		wantCore int64
+		wantNums int64
 	}{
 		{name: "scaled by the webhook", count: 2, cores: 200, wantCore: 100, wantNums: 2},
 		{name: "scaled by the webhook, eight cards", count: 8, cores: 800, wantCore: 100, wantNums: 8},
@@ -1138,4 +1165,27 @@ func Test_GenerateResourceRequests_CoreLimitScales(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNodeCleanUpRemovesHandshake(t *testing.T) {
+	dev := &IluvatarDevices{handshakeAnno: "hami.io/node-handshake-MR-V100"}
+	prevClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = prevClient })
+	client.KubeClient = fake.NewClientset()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-cleanup",
+			Annotations: map[string]string{dev.handshakeAnno: "Requesting_2024-01-02 00:00:00"},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	assert.NilError(t, dev.NodeCleanUp(node.Name))
+
+	got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, ok := got.Annotations[dev.handshakeAnno]
+	assert.Equal(t, ok, false)
 }

@@ -28,6 +28,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -95,7 +96,7 @@ func setNodeReady(n *corev1.Node, status corev1.ConditionStatus) {
 	n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
 }
 
-func gpu(uuid string, mem int32) *device.DeviceInfo {
+func gpu(uuid string, mem int64) *device.DeviceInfo {
 	return &device.DeviceInfo{ID: uuid, Count: 10, Devmem: mem, Devcore: 100, Type: "NVIDIA", Health: true, Mode: nvidia.RemoteMode}
 }
 
@@ -114,7 +115,7 @@ func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
 		ids[d.ID] = true
 		assert.Equal(t, d.DeviceVendor, RemoteGPUCommonWord)
 		// Whole-card allocation: the NVIDIA plugin's split count is discarded.
-		assert.Equal(t, d.Count, int32(1))
+		assert.Equal(t, d.Count, int64(1))
 	}
 	assert.Assert(t, ids["gpu-a/GPU-1"])
 	assert.Assert(t, ids["gpu-b/GPU-3"])
@@ -126,6 +127,27 @@ func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
 	ep, ok = p.endpoint("gpu-b")
 	assert.Assert(t, ok)
 	assert.Equal(t, ep, "10.0.0.6:24000")
+}
+
+func TestPool_RefreshUpdatesServerLabels(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-a", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-b", 40000)}),
+	}
+	nodes[0].Labels["gpu-pool"] = "training"
+	nodes[1].Labels["gpu-pool"] = "inference"
+	stubFleet(t, nodes, nil, nil)
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	selector := labels.SelectorFromSet(labels.Set{"gpu-pool": "inference"})
+	assert.DeepEqual(t, p.matchingServers(selector, []string{"gpu-a", "gpu-b"}), []string{"gpu-b"})
+
+	nodes[0].Labels["gpu-pool"] = "inference"
+	nodes[1].Labels["gpu-pool"] = "training"
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	assert.DeepEqual(t, p.matchingServers(selector, []string{"gpu-a", "gpu-b"}), []string{"gpu-a"})
 }
 
 func TestPool_SkipsUnusableNodes(t *testing.T) {

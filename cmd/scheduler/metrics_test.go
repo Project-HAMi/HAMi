@@ -174,7 +174,7 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 func TestMibToBytes(t *testing.T) {
 	tests := []struct {
 		name string
-		mib  int32
+		mib  int64
 		want float64
 	}{
 		{name: "zero", mib: 0, want: 0},
@@ -216,7 +216,7 @@ func TestNewDeviceMetaIndex(t *testing.T) {
 	tests := []struct {
 		name           string
 		uuid           string
-		wantTotalcore  int32
+		wantTotalcore  int64
 		wantDeviceType string
 		wantOk         bool
 	}{

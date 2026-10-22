@@ -29,6 +29,12 @@ When adding a new third-party package, maintainers should:
 4. **Pin the Version:** Explicitly pin the dependency to the chosen version within the repository.
 5. **Update Documentation:** Revise the project documentation to include details about the new dependency.
 
+## Automation
+
+- Dependabot opens daily update PRs for Go modules, the Dockerfiles under `docker/` and GitHub Actions.
+- The `GOLANG_IMAGE` and `NVIDIA_IMAGE` pins in `version.mk` (mirrored in the Dockerfiles and workflows) and the tool versions in the workflows are updated by hand.
+- A nightly Trivy scan checks the built images, and CodeQL and OpenSSF Scorecard run in CI. Findings are tracked under Security and quality.
+
 ## Archive/Deprecation
 
 If a third-party package becomes deprecated or discontinued, maintainers must promptly identify and integrate a suitable alternative while updating the documentation accordingly.

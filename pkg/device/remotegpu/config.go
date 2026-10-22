@@ -18,7 +18,8 @@ package remotegpu
 
 // RemoteGPUConfig describes the resource names a client pod uses to ask for a
 // fraction of the lupine GPU pool, and the port lupine listens on when a
-// server node does not override it through the LupineServerLabel value.
+// server node's LupineServerLabel value (applied by the device plugin for
+// operatingmode: remote) does not override it.
 type RemoteGPUConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
@@ -27,6 +28,8 @@ type RemoteGPUConfig struct {
 	// to load it. Leave it empty to schedule remote GPUs without enforcing the
 	// memory request, which is then only a placement filter.
 	LibImage string `yaml:"libImage"`
+	// ClientImage delivers Lupine client libraries. Empty disables automatic delivery.
+	ClientImage string `yaml:"clientImage"`
 	// SessionImage relays a port-forwarded session to the lupine server beside
 	// it, so a user never forwards to the server itself. It needs socat on the
 	// path. Leave it empty to run no session stubs.

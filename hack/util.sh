@@ -72,7 +72,7 @@ function util::install_helm {
   echo "Installing Helm..."
   local get_helm_ref="8eb65528be9bcf8c40096d386c6eef901537f56f"
   local get_helm_sha256="38b65f882d9cae3891755bdb03becc6a01ae6f9cb24826c191f219ddfee70a5d"
-  local helm_version="v3.8.1"
+  local helm_version="v3.22.0"
   local get_helm_script
   get_helm_script=$(mktemp)
   trap 'rm -f "${get_helm_script}"' EXIT
@@ -136,9 +136,9 @@ function util::check_pods_status {
 
     # Checking unhealthy pods in namespaces，ignore the  Running & Succeeded status
     if [[ -z "$namespace" ]]; then
-      unhealthy_pods=$(kubectl get po -A --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk '!/Running|Succeeded|Completed/ {print $2}')
+      unhealthy_pods=$(kubectl get po -A --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk '!/Running|Succeeded|Completed/ {print $1"/"$2}')
     else
-      unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk '!/Running|Succeeded|Completed/ {print $1}')
+      unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk -v ns="$namespace" '!/Running|Succeeded|Completed/ {print ns"/"$1}')
     fi
 
     if [[ -z "$unhealthy_pods" ]]; then
@@ -158,15 +158,20 @@ function util::check_pods_status {
   done
 
   if [[ -n "$unhealthy_pods" ]]; then
-    echo "Found unhealthy pods in namespace $namespace:"
+    echo "Found unhealthy pods:"
     echo "$unhealthy_pods"
 
+    local pod_namespace pod_name
     for pod in $unhealthy_pods; do
+      pod_namespace=${pod%%/*}
+      pod_name=${pod#*/}
       echo "Describing pod: $pod"
-      kubectl describe po "$pod" -n "$namespace" --kubeconfig "$kubeconfig"
+      kubectl describe po "$pod_name" -n "$pod_namespace" --kubeconfig "$kubeconfig"
 
       echo "Fetching logs for pod: $pod"
-      kubectl logs "$pod" -n "$namespace" --kubeconfig "$kubeconfig"
+      kubectl logs "$pod_name" -n "$pod_namespace" --kubeconfig "$kubeconfig" --all-containers --prefix
+      echo "Fetching previous logs for pod: $pod"
+      kubectl logs "$pod_name" -n "$pod_namespace" --kubeconfig "$kubeconfig" --all-containers --prefix --previous || true
       echo "---------------------------------------------------"
     done
 

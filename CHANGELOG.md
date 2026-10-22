@@ -409,4 +409,48 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix multiple device typos
 - Add unit test coverage for node discovery handshake parsing with malformed or empty annotations
 
+## v2.10.0 - 2026-08-21
+
+**New features**
+- Remove DRA components from the HAMi main chart
+- Add init container GPU resource accounting
+- Add PodGroup support, retrying NodeLock in Bind for PodGroup members
+- Add flexible MIG with dynamic instance allocation and deallocation
+- Add the mutex GPU scheduling policy and comma-separated scheduler policy combinations
+- Add opt-in NUMA topology alignment for vGPU replicas
+- Add support for Biren devices
+- Add support for AMD Instinct MI300X series vGPU
+- Add vNPU compat mode, letting Ascend pods schedule across vNPU-template and HAMi-core nodes
+- Add 910C vNPU templates to the mock device plugin
+
+**Improvements**
+- Remove the 'deleted' handshake annotations when registering
+- Compile HAMi-core on a ubi8 image to support all glibc versions
+
+**Bug fixes**
+- Skip memory alignment to vNPU templates in HAMi-core mode for Ascend
+
+## Unreleased
+
+**Breaking changes**
+- Vendor settings in the Helm chart moved to `devices.<vendor>`. The previous root-level fields are no longer read, and the chart lists the replacement path for each one
+
+**New features**
+- AMD: default GPU count, memory and cores, device cordon, `gpumem-percentage` memory requests, ResourceQuota check in Fit, `amd.com/numa-bind`, topology-aware policy by XGMI links and NUMA, and a configurable `runtimeClassName`
+- Add the remote-gpu backend for GPUs served by Lupine
+- Add vGPUmonitor whole-GPU hook bypass and direct NVML monitoring
+- Add the device plugin `limitDelivery` switch and match node config by label selector
+- Add CDI support for dynamic MIG devices and let a pod prefer a MIG profile over 3g by annotation
+- Score MIG placements and add a backtracking fallback
+- Add scheduler NUMA refit for device allocations
+- Account native sidecar container GPU resources
+- Ascend: schedule ENPU workloads with policy isolation and configure `deviceSplitCount` for both hami-core and ENPU modes
+- Report memory and core resources to node capacity
+- Add profiling support with a dedicated HTTP bind address
+- Add OpenShift and SELinux support, a PodDisruptionBudget for HA scheduler deployments, and chart values for the scheduler kube-qps, kube-burst, kube-timeout and node-lock retry timeout
+- Generate the chart values documentation with helm-docs
+
+**Bug fixes**
+- Keep `HAMI_NODELOCK_EXPIRE` unless `--node-lock-timeout` is set
+- Restore steady-state usage when a pod is replayed after a scheduler restart
 

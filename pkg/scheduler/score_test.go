@@ -87,7 +87,7 @@ func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		mask  int32
+		mask  int64
 		limit int64
 		used  int64
 		fit   bool
@@ -3390,12 +3390,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3403,11 +3403,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3416,8 +3416,8 @@ func Test_fitInCertainDevice(t *testing.T) {
 			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{
-						Usedcores: int32(1),
-						Usedmem:   int32(1024),
+						Usedcores: int64(1),
+						Usedmem:   int64(1024),
 						Type:      nvidia.NvidiaGPUDevice,
 						UUID:      "test-0",
 					},
@@ -3441,12 +3441,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3454,11 +3454,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             "test",
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3484,12 +3484,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(5),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(5),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3497,11 +3497,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3527,12 +3527,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3540,11 +3540,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(200),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(200),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3570,12 +3570,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8000),
-									Usedmem:   int32(8000),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8000),
+									Usedmem:   int64(8000),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3583,11 +3583,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(0),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(100),
+					Memreq:           int64(0),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(100),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3613,12 +3613,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(0),
-									Totalcore: int32(100),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(0),
+									Totalcore: int64(100),
 									Health:    true,
 								},
 							},
@@ -3626,11 +3626,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(100),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(100),
+					Memreq:           int64(100),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(100),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3656,12 +3656,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(1),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(1),
 									Health:    true,
 								},
 							},
@@ -3669,11 +3669,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(0),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(0),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3699,12 +3699,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Mode:      "mig",
 									MigProfiles: []device.MigProfile{{
 										Name: "1g.test", MemoryMB: 2048, Core: 1,
@@ -3717,11 +3717,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(2),
+					Nums:             int64(2),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
@@ -3732,8 +3732,8 @@ func Test_fitInCertainDevice(t *testing.T) {
 					{
 						UUID:      "test-0",
 						Type:      nvidia.NvidiaGPUDevice,
-						Usedcores: int32(1),
-						Usedmem:   int32(2048),
+						Usedcores: int64(1),
+						Usedmem:   int64(2048),
 					},
 				},
 			},
@@ -3756,12 +3756,12 @@ func Test_fitInCertainDevice(t *testing.T) {
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3769,11 +3769,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -3806,11 +3806,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(2),
+					Nums:             int64(2),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(1),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(1),
 				},
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -3828,8 +3828,8 @@ func Test_fitInCertainDevice(t *testing.T) {
 					{
 						UUID:      "test-0",
 						Type:      nvidia.NvidiaGPUDevice,
-						Usedcores: int32(1),
-						Usedmem:   int32(1024),
+						Usedcores: int64(1),
+						Usedmem:   int64(1024),
 					},
 				},
 			},
@@ -3868,11 +3868,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(2),
+					Nums:             int64(2),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(20),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(20),
 				},
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -3905,12 +3905,12 @@ func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem
 		ID:        id,
 		Numa:      numa,
 		Type:      Type,
-		Used:      int32(used),
-		Count:     int32(count),
-		Totalmem:  int32(totalmem),
-		Usedmem:   int32(usedmem),
-		Usedcores: int32(usedcores),
-		Totalcore: int32(totalcore),
+		Used:      int64(used),
+		Count:     int64(count),
+		Totalmem:  int64(totalmem),
+		Usedmem:   int64(usedmem),
+		Usedcores: int64(usedcores),
+		Totalcore: int64(totalcore),
 		Health:    true,
 	}
 }
@@ -3972,12 +3972,12 @@ func Test_fitInDevices(t *testing.T) {
 									ID:        "test-1",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -3986,12 +3986,12 @@ func Test_fitInDevices(t *testing.T) {
 									ID:        "test-2",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -4000,11 +4000,11 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				requests: device.ContainerDeviceRequests{
 					"test-2": {
-						Nums:             int32(1),
+						Nums:             int64(1),
 						Type:             nvidia.NvidiaGPUDevice,
-						Memreq:           int32(1024),
-						MemPercentagereq: int32(100),
-						Coresreq:         int32(1),
+						Memreq:           int64(1024),
+						MemPercentagereq: int64(100),
+						Coresreq:         int64(1),
 					},
 				},
 				annos:    map[string]string{},
@@ -4032,12 +4032,12 @@ func Test_fitInDevices(t *testing.T) {
 									ID:        "test-1",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -4046,11 +4046,11 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				requests: device.ContainerDeviceRequests{
 					"test-1": {
-						Nums:             int32(2),
+						Nums:             int64(2),
 						Type:             nvidia.NvidiaGPUDevice,
-						Memreq:           int32(1024),
-						MemPercentagereq: int32(100),
-						Coresreq:         int32(1),
+						Memreq:           int64(1024),
+						MemPercentagereq: int64(100),
+						Coresreq:         int64(1),
 					},
 				},
 				annos:    map[string]string{},
@@ -4079,12 +4079,12 @@ func Test_fitInDevices(t *testing.T) {
 									ID:        "test-2",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
+									Used:      int64(1),
+									Count:     int64(4),
+									Totalmem:  int64(8192),
+									Usedmem:   int64(2048),
+									Usedcores: int64(1),
+									Totalcore: int64(4),
 									Health:    true,
 								},
 							},
@@ -4093,11 +4093,11 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				requests: device.ContainerDeviceRequests{
 					"test-1": {
-						Nums:             int32(1),
+						Nums:             int64(1),
 						Type:             "test",
-						Memreq:           int32(1024),
-						MemPercentagereq: int32(100),
-						Coresreq:         int32(1),
+						Memreq:           int64(1024),
+						MemPercentagereq: int64(100),
+						Coresreq:         int64(1),
 					},
 				},
 				annos:    map[string]string{},
@@ -4376,11 +4376,11 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(3),
+					Nums:             int64(3),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(20),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(20),
 				},
 				annos: map[string]string{},
 				pod: &corev1.Pod{
@@ -4438,11 +4438,11 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 					},
 				},
 				request: device.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int64(1),
 					Type:             nvidia.NvidiaGPUDevice,
-					Memreq:           int32(1024),
-					MemPercentagereq: int32(100),
-					Coresreq:         int32(20),
+					Memreq:           int64(1024),
+					MemPercentagereq: int64(100),
+					Coresreq:         int64(20),
 				},
 				annos: map[string]string{},
 				pod: &corev1.Pod{
@@ -4579,7 +4579,7 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 	always := corev1.ContainerRestartPolicyAlways
 
-	newNodes := func(totalMem int32) *map[string]*NodeUsage {
+	newNodes := func(totalMem int64) *map[string]*NodeUsage {
 		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
 		return &map[string]*NodeUsage{
 			"node1": {
@@ -4599,14 +4599,14 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 		}
 	}
 
-	gpuReq := func(mem int32) map[string]device.ContainerDeviceRequest {
+	gpuReq := func(mem int64) map[string]device.ContainerDeviceRequest {
 		return map[string]device.ContainerDeviceRequest{
 			nvidia.NvidiaGPUDevice: {
 				Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: mem, Coresreq: 10,
 			},
 		}
 	}
-	row := func(mem int32) device.ContainerDevices {
+	row := func(mem int64) device.ContainerDevices {
 		return device.ContainerDevices{
 			{Idx: 0, UUID: "uuid1", Type: nvidia.NvidiaGPUDevice, Usedcores: 10, Usedmem: mem},
 		}
@@ -4621,12 +4621,12 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		totalMem    int32
+		totalMem    int64
 		inits       []corev1.Container
 		requests    device.PodDeviceRequests
 		wantDevices device.PodDevices
 		wantFailed  map[string]string
-		wantUsedmem int32
+		wantUsedmem int64
 	}{
 		{
 			name:     "regular then sidecar never overlap and fit",
@@ -4770,7 +4770,7 @@ func Test_calcScore_AscendHamiCoreOversellConcurrency(t *testing.T) {
 		}
 	}
 
-	occupyWithTenant := func(cores int32) *map[string]*NodeUsage {
+	occupyWithTenant := func(cores int64) *map[string]*NodeUsage {
 		nodes := newOversoldNode()
 		tenant := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "default", UID: types.UID("tenant-uid")},
@@ -4793,7 +4793,7 @@ func Test_calcScore_AscendHamiCoreOversellConcurrency(t *testing.T) {
 		return nodes
 	}
 
-	ascendReq := func(cores int32, mem int32) device.ContainerDeviceRequests {
+	ascendReq := func(cores int64, mem int64) device.ContainerDeviceRequests {
 		return device.ContainerDeviceRequests{
 			"Ascend910B3": {
 				Nums: 1, Type: "Ascend910B3",

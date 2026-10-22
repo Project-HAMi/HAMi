@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -69,29 +69,29 @@ type MigPlacement struct {
 // not populate or consume them.
 type MigTemplate struct {
 	Name   string `yaml:"name"`
-	Core   int32  `yaml:"core"`
-	Memory int32  `yaml:"memory"`
-	Count  int32  `yaml:"count"`
+	Core   int64  `yaml:"core"`
+	Memory int64  `yaml:"memory"`
+	Count  int64  `yaml:"count"`
 }
 
 type MigTemplateUsage struct {
 	Name   string
-	Core   int32
-	Memory int32
+	Core   int64
+	Memory int64
 	InUse  bool
 }
 
 type Geometry []MigTemplate
 type MIGS []MigTemplateUsage
 type MigInUse struct {
-	Index     int32
+	Index     int64
 	UsageList MIGS
 }
 
 type MigProfile struct {
 	Name       string         `json:"name"`
-	MemoryMB   int32          `json:"memoryMB"`
-	Core       int32          `json:"core"`
+	MemoryMB   int64          `json:"memoryMB"`
+	Core       int64          `json:"core"`
 	SliceCount uint32         `json:"sliceCount"`
 	Placements []MigPlacement `json:"placements"`
 
@@ -118,12 +118,12 @@ type AllowedMigProfiles struct {
 type DeviceUsage struct {
 	ID                  string
 	Index               uint
-	Used                int32
-	Count               int32
-	Usedmem             int32
-	Totalmem            int32
-	Totalcore           int32
-	Usedcores           int32
+	Used                int64
+	Count               int64
+	Usedmem             int64
+	Totalmem            int64
+	Totalcore           int64
+	Usedcores           int64
 	Mode                string
 	MigProfiles         []MigProfile
 	MigAllocationsInUse []MigAllocation
@@ -140,9 +140,9 @@ type DeviceUsage struct {
 type DeviceInfo struct {
 	ID           string         `json:"id,omitempty"`
 	Index        uint           `json:"index,omitempty"`
-	Count        int32          `json:"count,omitempty"`
-	Devmem       int32          `json:"devmem,omitempty"`
-	Devcore      int32          `json:"devcore,omitempty"`
+	Count        int64          `json:"count,omitempty"`
+	Devmem       int64          `json:"devmem,omitempty"`
+	Devcore      int64          `json:"devcore,omitempty"`
 	Type         string         `json:"type,omitempty"`
 	Numa         int            `json:"numa,omitempty"`
 	Mode         string         `json:"mode,omitempty"`
@@ -216,7 +216,7 @@ type ResourceNames struct {
 	// while a ResourceQuota limit is written in unscaled ones, so a quota check
 	// has to bring the limit up by the same factor. Backends that do not scale
 	// leave this zero.
-	MemoryFactor int32
+	MemoryFactor int64
 }
 
 type ContainerDevice struct {
@@ -224,20 +224,20 @@ type ContainerDevice struct {
 	Idx       int
 	UUID      string
 	Type      string
-	Usedmem   int32
-	Usedcores int32
+	Usedmem   int64
+	Usedcores int64
 	// Slots is the number of concurrent tasks this collapsed entry represents on the device.
 	// Usage reconstruction adds it to DeviceUsage.Used; 0 (raw, uncollapsed entries) counts as 1.
-	Slots      int32
+	Slots      int64
 	CustomInfo map[string]any
 }
 
 type ContainerDeviceRequest struct {
-	Nums             int32
+	Nums             int64
 	Type             string
-	Memreq           int32
-	MemPercentagereq int32
-	Coresreq         int32
+	Memreq           int64
+	MemPercentagereq int64
+	Coresreq         int64
 	// TotalCoresreq preserves a NeuronCore request until the candidate node's
 	// cores-per-device geometry is known. Other backends leave it zero.
 	TotalCoresreq int64
@@ -246,8 +246,8 @@ type ContainerDeviceRequest struct {
 // CoreMaskAccounting is implemented by backends whose Usedcores values are
 // bit masks rather than additive core counts.
 type CoreMaskAccounting interface {
-	AccumulateCores(used, allocated int32) int32
-	CountAllocatedCores(allocated int32) int64
+	AccumulateCores(used, allocated int64) int64
+	CountAllocatedCores(allocated int64) int64
 }
 
 type ContainerDevices []ContainerDevice
@@ -351,15 +351,15 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 		}
 		items := strings.Split(val, ",")
 		if len(items) == 7 || len(items) == 9 {
-			count, err := strconv.ParseInt(items[1], 10, 32)
+			count, err := strconv.ParseInt(items[1], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid count field: %w", err)
 			}
-			devmem, err := strconv.ParseInt(items[2], 10, 32)
+			devmem, err := strconv.ParseInt(items[2], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid memory field: %w", err)
 			}
-			devcore, err := strconv.ParseInt(items[3], 10, 32)
+			devcore, err := strconv.ParseInt(items[3], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid core field: %w", err)
 			}
@@ -385,9 +385,9 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 			}
 			i := DeviceInfo{
 				ID:      items[0],
-				Count:   int32(count),
-				Devmem:  int32(devmem),
-				Devcore: int32(devcore),
+				Count:   count,
+				Devmem:  devmem,
+				Devcore: devcore,
 				Type:    items[4],
 				Numa:    numa,
 				Health:  health,
@@ -415,11 +415,11 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	for _, val := range dlist {
 		builder.WriteString(val.ID)
 		builder.WriteString(",")
-		builder.WriteString(strconv.FormatInt(int64(val.Count), 10))
+		builder.WriteString(strconv.FormatInt(val.Count, 10))
 		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devmem)))
+		builder.WriteString(strconv.FormatInt(val.Devmem, 10))
 		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devcore)))
+		builder.WriteString(strconv.FormatInt(val.Devcore, 10))
 		builder.WriteString(",")
 		builder.WriteString(val.Type)
 		builder.WriteString(",")
@@ -545,14 +545,14 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		if tmpstr[1] == "" {
 			return nil, fmt.Errorf("pod annotation format error, missing device type")
 		}
-		devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
+		devmem, err := strconv.ParseInt(tmpstr[2], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid memory field: %w", err)
 		}
 		if devmem < 0 {
 			return nil, fmt.Errorf("memory field must not be negative: %d", devmem)
 		}
-		devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
+		devcores, err := strconv.ParseInt(tmpstr[3], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid core field: %w", err)
 		}
@@ -562,14 +562,14 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		tmpdev := ContainerDevice{
 			UUID:      tmpstr[0],
 			Type:      tmpstr[1],
-			Usedmem:   int32(devmem),
-			Usedcores: int32(devcores),
+			Usedmem:   devmem,
+			Usedcores: devcores,
 		}
 		// The 5th field is optional. An unusable value is ignored rather than
 		// rejected: dropping the whole annotation undercounts far more than one slot.
 		if len(tmpstr) >= 5 {
-			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 32); err == nil && devslots >= 0 {
-				tmpdev.Slots = int32(devslots)
+			if devslots, err := strconv.ParseInt(tmpstr[4], 10, 64); err == nil && devslots >= 0 {
+				tmpdev.Slots = devslots
 			} else {
 				klog.V(5).Infof("ignoring unusable slots field %q in segment %q", tmpstr[4], val)
 			}
@@ -621,51 +621,76 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	for _, value := range templates[templateIdx] {
 		for range value.Count {
-			n.Index = int32(templateIdx)
+			n.Index = int64(templateIdx)
 			n.UsageList = append(n.UsageList, MigTemplateUsage{Name: value.Name, Memory: value.Memory, Core: value.Core})
 		}
 	}
 }
 
-func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
-	handshake := node.Annotations[util.HandshakeAnnos[devType]]
-	if strings.Contains(handshake, "Requesting") {
-		_, timestampStr, found := strings.Cut(handshake, "_")
-		if !found {
-			return true, false
-		}
-		formertime, err := time.ParseInLocation(time.DateTime, timestampStr, time.Local)
-		if err != nil {
-			return true, false
-		}
-		if time.Now().Before(formertime.Add(time.Second * 60)) {
-			return true, false
-		}
+var registeredDevices = struct {
+	sync.Mutex
+	seen map[string]string
+}{seen: map[string]string{}}
 
-		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
-		if qty.Value() > 0 {
-			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
-			return true, false
-		}
-		return false, false
-	} else {
-		_, ok := util.HandshakeAnnos[devType]
-		if ok {
-			tmppat := make(map[string]string)
-			tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
-			klog.V(5).InfoS("New timestamp for annotation", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
-			n, err := util.GetNode(node.Name)
-			if err != nil {
-				klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
-				return true, false
-			}
-			klog.V(5).InfoS("Patching node annotations", "nodeName", node.Name, "annotations", tmppat)
-			if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-				klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
-			}
-		}
+func registeredDevicesKey(devType, nodeName string) string {
+	return devType + "/" + nodeName
+}
+
+func registerAnnoChanged(devType, nodeName, registerAnno string) bool {
+	key := registeredDevicesKey(devType, nodeName)
+	registeredDevices.Lock()
+	defer registeredDevices.Unlock()
+	if previous, ok := registeredDevices.seen[key]; ok && previous == registerAnno {
+		return false
+	}
+	registeredDevices.seen[key] = registerAnno
+	return true
+}
+
+func ForgetRegisteredDevices(devType, nodeName string) {
+	key := registeredDevicesKey(devType, nodeName)
+	registeredDevices.Lock()
+	defer registeredDevices.Unlock()
+	delete(registeredDevices.seen, key)
+}
+
+func RemoveObsoleteHandshake(devType string, node *corev1.Node) {
+	annoKey, ok := util.HandshakeAnnos[devType]
+	if !ok {
+		return
+	}
+	if _, present := node.Annotations[annoKey]; !present {
+		return
+	}
+	klog.V(5).InfoS("Removing obsolete handshake annotation", "nodeName", node.Name, "annotationKey", annoKey)
+	if err := util.RemoveNodeAnnotation(node, annoKey); err != nil {
+		klog.ErrorS(err, "Failed to remove obsolete handshake annotation", "nodeName", node.Name, "annotationKey", annoKey)
+	}
+}
+
+func CheckHealth(devType string, resourceCountName string, node *corev1.Node, registerAnno string) (bool, bool) {
+	RemoveObsoleteHandshake(devType, node)
+	if resourceCountName == "" {
 		return true, true
 	}
+	qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
+	if qty.Value() <= 0 {
+		klog.V(5).InfoS("Device absent from node Allocatable", "nodeName", node.Name, "resource", resourceCountName)
+		ForgetRegisteredDevices(devType, node.Name)
+		return false, false
+	}
+	return true, registerAnnoChanged(devType, node.Name, registerAnno)
+}
+
+// AllocatableHealth reports whether a node should stay in the scheduler cache,
+// and whether its device list should be read again.
+func AllocatableHealth(devType, nodeName string, allocatable, cardCount int64, anno string) (bool, bool) {
+	if allocatable <= 0 {
+		ForgetRegisteredDevices(devType, nodeName)
+		return false, false
+	}
+	observed := strconv.FormatInt(cardCount, 10) + "\n" + anno
+	return true, registerAnnoChanged(devType, nodeName, observed)
 }
 
 // Deprecated: new MIG allocations never encode template/slot indexes in UUIDs.
@@ -717,7 +742,7 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests, err error) {
 		"containerCount", len(pod.Spec.Containers),
 		"totalContainers", totalContainers)
 	//Count Nvidia GPU
-	cnt := int32(0)
+	cnt := int64(0)
 
 	// Process init containers first (indices 0 to len(InitContainers)-1)
 	for i := range pod.Spec.InitContainers {

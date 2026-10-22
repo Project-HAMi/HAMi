@@ -101,3 +101,55 @@ func TestGenerateDeviceConfigFromNvidiaReportNodeCapacity(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateDeviceConfigFromNvidiaDisableCoreLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  string
+		want bool
+	}{
+		{name: "unset defaults to false"},
+		{name: "CLI true", args: []string{"--disable-core-limit=true"}, want: true},
+		{name: "CLI false", args: []string{"--disable-core-limit=false"}},
+		{name: "bare CLI flag", args: []string{"--disable-core-limit"}, want: true},
+		{name: "environment true", env: "true", want: true},
+		{name: "environment false", env: "false"},
+		{name: "CLI false overrides environment true", args: []string{"--disable-core-limit=false"}, env: "true"},
+		{name: "CLI true overrides environment false", args: []string{"--disable-core-limit=true"}, env: "false", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DISABLE_CORE_LIMIT", tt.env)
+			previous := plugin.ConfigFile
+			t.Cleanup(func() { plugin.ConfigFile = previous })
+			configPath := newTestConfigFile(t)
+			plugin.ConfigFile = &configPath
+			cfg := &spec.Config{}
+			called := false
+			app := &cli.App{
+				Flags: addFlags(),
+				Action: func(c *cli.Context) error {
+					called = true
+					got, err := generateDeviceConfigFromNvidia(cfg, c, nil)
+					if err != nil {
+						return err
+					}
+					if got.DisableCoreLimit != tt.want {
+						t.Errorf("DisableCoreLimit = %v, want %v", got.DisableCoreLimit, tt.want)
+					}
+					if got.Config != cfg {
+						t.Error("upstream NVIDIA config was not preserved")
+					}
+					return nil
+				},
+			}
+			if err := app.Run(append([]string{"test"}, tt.args...)); err != nil {
+				t.Fatalf("parse CLI and generate config: %v", err)
+			}
+			if !called {
+				t.Fatal("CLI action was not called")
+			}
+		})
+	}
+}

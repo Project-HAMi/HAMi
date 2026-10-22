@@ -276,7 +276,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 			cardIDs = append(cardIDs, i)
 		}
 	}
-	devmemPerCard := int32(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores)
+	devmemPerCard := memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores
 
 	for _, cardID := range cardIDs {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
@@ -338,7 +338,25 @@ func (dev *MthreadsDevices) checkType(annos map[string]string, d device.DeviceUs
 }
 
 func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	// Cards are derived from the core resource, which is what the plugin publishes.
+	coreQty := n.Status.Allocatable[corev1.ResourceName(MthreadsResourceCores)]
+	memQty := n.Status.Capacity[corev1.ResourceName(MthreadsResourceMemory)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(MthreadsResourceCores)]
+	cores := coreQty.Value()
+	mem := memQty.Value()
+	capacityCores := capacityQty.Value()
+	cards := int64(0)
+	if cores > 0 {
+		cards = (cores + coresPerMthreadsGPU - 1) / coresPerMthreadsGPU
+	}
+	label := ""
+	if n.Labels != nil {
+		label = n.Labels[SGPUCoresLabel]
+	}
+	return device.AllocatableHealth(devType, n.Name, cores, cards, fmt.Sprintf("%s\n%d\n%d", label, mem, capacityCores))
 }
 
 func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
@@ -360,7 +378,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			memnum := 0
@@ -370,10 +388,10 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 			if ok {
 				memnums, parsed := mem.AsInt64()
-				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
-					klog.ErrorS(nil, "mthreads memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+				if !parsed || memnums < 0 || memnums > math.MaxInt64/int64(MemoryFactor) {
+					klog.ErrorS(nil, "mthreads memory request is not a non-negative integer or overflows after applying the memory factor",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("memory request %s is not a non-negative integer or overflows after applying the memory factor", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 				klog.InfoS("Memory allocation calculated",
@@ -381,7 +399,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					"requestedMem", memnums,
 					"allocatedMem", memnum)
 			}
-			corenum := int32(0)
+			corenum := int64(0)
 			core, ok := ctr.Resources.Limits[mthreadsResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[mthreadsResourceCores]
@@ -416,7 +434,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 					klog.ErrorS(nil, "mthreads core request exceeds the per card limit", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "mthreads", Reason: fmt.Sprintf("core request %d exceeds the per card limit of 100", corenums)}
 				}
-				corenum = int32(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -425,10 +443,10 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) (dev
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             MthreadsGPUDevice,
-				Memreq:           int32(memnum) / int32(n),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum) / n,
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
@@ -513,7 +531,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)

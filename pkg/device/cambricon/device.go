@@ -200,7 +200,26 @@ func (dev *CambriconDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	// Cards are derived from the core resource, which is what the plugin publishes.
+	coreQty := n.Status.Allocatable[corev1.ResourceName(MLUResourceCores)]
+	memQty := n.Status.Capacity[corev1.ResourceName(MLUResourceMemory)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(MLUResourceCores)]
+	cores := coreQty.Value()
+	mem := memQty.Value()
+	capacityCores := capacityQty.Value()
+	cards := int64(0)
+	if cores > 0 {
+		// GetNodeDevices keeps a remainder as its own card: 150 core units are 2 cards.
+		cards = (cores + 99) / 100
+	}
+	label := ""
+	if n.Labels != nil {
+		label = n.Labels[MLUModelLabel]
+	}
+	return device.AllocatableHealth(devType, n.Name, cores, cards, fmt.Sprintf("%s\n%d\n%d", label, mem, capacityCores))
 }
 
 func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -220,7 +239,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Index:        uint(i),
 			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
+			Devmem:       memoryTotal * MemoryFactor * 100 / cards,
 			Devcore:      100,
 			Type:         mluType,
 			Numa:         0,
@@ -272,11 +291,30 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 				// not an invalid request. See the nvidia backend.
 				return device.ContainerDeviceRequest{}, nil
 			}
-			if n < 0 || n > math.MaxInt32 {
+			if n < 0 {
 				klog.ErrorS(nil, "cambricon device count request is out of range", "container", ctr.Name, "request", n)
 				return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("device count %d is out of range", n)}
 			}
 			klog.Info("Found cambricon devices")
+			if n > 1 {
+				// The plugin gives a count above 1 whole MLUs and ignores the
+				// memory and core values, so skip validating them and take the
+				// whole device. A declared memory still counts toward quota.
+				req := device.ContainerDeviceRequest{
+					Nums:             n,
+					Type:             CambriconMLUDevice,
+					MemPercentagereq: 100,
+					Coresreq:         100,
+				}
+				mem, ok := ctr.Resources.Limits[mluResourceMem]
+				if !ok {
+					mem, ok = ctr.Resources.Requests[mluResourceMem]
+				}
+				if memnums, parsed := mem.AsInt64(); ok && parsed && memnums > 0 && memnums <= math.MaxInt64/int64(MemoryFactor) {
+					req.Memreq = memnums * int64(MemoryFactor)
+				}
+				return req, nil
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
@@ -286,14 +324,14 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			if ok {
 				memnums, parsed := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
-				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
-					klog.ErrorS(nil, "cambricon memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+				if !parsed || memnums < 0 || memnums > math.MaxInt64/int64(MemoryFactor) {
+					klog.ErrorS(nil, "cambricon memory request is not a non-negative integer or overflows after applying the memory factor",
 						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("memory request %s is not a plain integer within the int32 range", mem.String())}
+					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("memory request %s is not a non-negative integer or overflows after applying the memory factor", mem.String())}
 				}
 				memnum = int(memnums) * MemoryFactor
 			}
-			corenum := int32(100)
+			corenum := int64(100)
 			core, ok := ctr.Resources.Limits[mluResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[mluResourceCores]
@@ -304,7 +342,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 					klog.ErrorS(nil, "cambricon core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
 					return device.ContainerDeviceRequest{}, &device.ErrInvalidDeviceRequest{Container: ctr.Name, Device: "cambricon", Reason: fmt.Sprintf("core request %s is out of range (must be 0-100)", core.String())}
 				}
-				corenum = int32(corenums)
+				corenum = corenums
 			}
 
 			mempnum := 0
@@ -313,10 +351,10 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 			}
 
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             n,
 				Type:             CambriconMLUDevice,
-				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
+				Memreq:           int64(memnum),
+				MemPercentagereq: int64(mempnum),
 				Coresreq:         corenum,
 			}, nil
 		}
@@ -382,16 +420,16 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	cur = append(cur, device.ContainerDevice{
 		UUID:      devUUID,
 		Type:      CambriconMLUDevice,
-		Usedmem:   int32(memreq),
-		Usedcores: int32(coresreq),
+		Usedmem:   memreq,
+		Usedcores: coresreq,
 	})
 	hypo[CambriconMLUDevice] = append(hypo[CambriconMLUDevice], cur)
 
 	var mem, core int64
 	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[CambriconMLUDevice] {
 		for _, val := range ctrDevs {
-			mem += int64(val.Usedmem)
-			core += int64(val.Usedcores)
+			mem += val.Usedmem
+			core += val.Usedcores
 		}
 	}
 
@@ -440,7 +478,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 
-		memreq := int32(0)
+		memreq := int64(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
@@ -458,7 +496,12 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memreq), int64(k.Coresreq)) {
+		if originReq > 1 {
+			// The plugin gives a count above 1 whole MLUs, so both the
+			// allocation and the quota take the whole card.
+			memreq = dev.Totalmem
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, k.Coresreq) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue

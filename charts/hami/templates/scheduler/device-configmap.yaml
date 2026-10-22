@@ -32,6 +32,7 @@ data:
       enableNumaTopology: {{ .Values.devices.nvidia.enableNumaTopology }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
+      limitDelivery: {{ .Values.devices.nvidia.limitDelivery | default "file" }}
       runtimeClassName: "{{ .Values.devices.nvidia.runtimeClassName }}"
       adoptExistingMIGInstances: {{ .Values.devices.nvidia.adoptExistingMIGInstances | default false }}
       migProfileAllowlist:
@@ -81,6 +82,7 @@ data:
       {{- else }}
       libImage: {{ .Values.devices.remotegpu.libImage | quote }}
       {{- end }}
+      clientImage: {{ .Values.devices.remotegpu.clientImage | quote }}
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
     {{- end }}
     kunlun:
@@ -94,6 +96,9 @@ data:
       resourceCountName: {{ .Values.devices.amd.resourceCountName }}
       resourceCoreName: {{ .Values.devices.amd.resourceCoreName }}
       resourceMemoryName: {{ .Values.devices.amd.resourceMemoryName }}
+      defaultGPUNum: {{ .Values.devices.amd.defaultGPUNum }}
+      defaultMemory: {{ .Values.devices.amd.defaultMemory }}
+      defaultCores: {{ .Values.devices.amd.defaultCores }}
       resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
       runtimeClassName: "{{ .Values.devices.amd.runtimeClassName }}"
     vastai:
@@ -101,7 +106,7 @@ data:
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     vnpus:
-      vnpuDeviceSplitCount: {{ .Values.devices.ascend.vnpuDeviceSplitCount | int64 }}
+      deviceSplitCount: {{ .Values.devices.ascend.deviceSplitCount | int64 }}
       hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
       enpuPolicy: {{ .Values.devices.ascend.enpuPolicy | default "elastic" | quote }}
       overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}

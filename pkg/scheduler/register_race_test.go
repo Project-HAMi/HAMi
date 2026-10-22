@@ -106,8 +106,7 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					nvidia.RegisterAnnos:     reg,
-					"hami.io/node-handshake": "Requesting_2999-01-01 00:00:00",
+					nvidia.RegisterAnnos: reg,
 				},
 			},
 		}

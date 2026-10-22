@@ -84,7 +84,7 @@ func TestPrepareHostPIDLockParentCreatesStickyModeOnLinux(t *testing.T) {
 	require.NoError(t, unix.Fstatat(parentFD, "vgpulock", &createdStat,
 		unix.AT_SYMLINK_NOFOLLOW))
 	require.Equal(t, hostPIDLockParentCreateMode,
-		uint32(createdStat.Mode)&0o7777)
+		createdStat.Mode&0o7777)
 }
 
 func TestPrepareDefaultHostPIDLockParentAsRoot(t *testing.T) {

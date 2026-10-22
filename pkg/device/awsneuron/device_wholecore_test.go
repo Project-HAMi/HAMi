@@ -47,7 +47,7 @@ func Test_GenerateResourceRequests_WholeDeviceDefersCoreCountToFit(t *testing.T)
 	}
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.NilError(t, err)
-	assert.Equal(t, req.Coresreq, int32(0))
+	assert.Equal(t, req.Coresreq, int64(0))
 }
 
 func Test_GetNodeDevices_RegistersFourCoreInferentia1Mask(t *testing.T) {
@@ -70,7 +70,7 @@ func Test_GetNodeDevices_RegistersFourCoreInferentia1Mask(t *testing.T) {
 	devices, err := dev.GetNodeDevices(node)
 	assert.NilError(t, err)
 	assert.Equal(t, len(devices), 4)
-	assert.Equal(t, devices[0].Devcore, int32(15))
+	assert.Equal(t, devices[0].Devcore, int64(15))
 }
 
 func Test_Fit_WholeDeviceNotShared(t *testing.T) {
@@ -87,7 +87,7 @@ func Test_Fit_WholeDeviceNotShared(t *testing.T) {
 		Health:    true,
 		CustomInfo: map[string]any{
 			AWSNodeType:             "inf1.6xlarge",
-			AWSCoresPerNeuronDevice: int32(4),
+			AWSCoresPerNeuronDevice: int64(4),
 		},
 	}
 	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "default", Annotations: map[string]string{}}}
@@ -136,7 +136,7 @@ func Test_Fit_FourCoreRequestNeedsEnoughDeviceCapacity(t *testing.T) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "four-core", Namespace: "default", Annotations: map[string]string{}}}
 	fit, allocations, reason := dev.Fit([]*device.DeviceUsage{inf1Usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true, reason)
-	assert.Equal(t, allocations[AWSNeuronDevice][0].Usedcores, int32(15))
+	assert.Equal(t, allocations[AWSNeuronDevice][0].Usedcores, int64(15))
 
 	inf2Devices, err := dev.GetNodeDevices(newNeuronNode("inf2", "inf2.8xlarge", 1, 2))
 	assert.NilError(t, err)
@@ -169,7 +169,7 @@ func Test_Fit_SharedCoresAreDistinctAndReplayable(t *testing.T) {
 	}})
 	assert.NilError(t, err)
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
-	for _, wantMask := range []int32{1, 2, 4, 8} {
+	for _, wantMask := range []int64{1, 2, 4, 8} {
 		fit, allocations, reason := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, fit, true, reason)
 		allocation := allocations[AWSNeuronDevice][0]
@@ -182,7 +182,7 @@ func Test_Fit_SharedCoresAreDistinctAndReplayable(t *testing.T) {
 		assert.Equal(t, usage.Usedcores, replayed.Usedcores)
 		assert.Equal(t, usage.CustomInfo[AWSUsageInfo], int(usage.Usedcores))
 	}
-	assert.Equal(t, usage.Usedcores, int32(15))
+	assert.Equal(t, usage.Usedcores, int64(15))
 	fit, _, _ := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 }
@@ -202,9 +202,9 @@ func Test_Fit_NeuronCoreRequestRequiresContiguousRange(t *testing.T) {
 
 	for _, test := range []struct {
 		name     string
-		used     int32
+		used     int64
 		fit      bool
-		wantMask int32
+		wantMask int64
 		wantIDs  string
 	}{
 		// Core 1 is occupied. Cores 0 and 2 are free but cannot be combined;
@@ -216,7 +216,7 @@ func Test_Fit_NeuronCoreRequestRequiresContiguousRange(t *testing.T) {
 			usage := &device.DeviceUsage{
 				ID: "neuron-0", Index: 0, Count: 4, Totalcore: 15,
 				Usedcores: test.used, Type: AWSNeuronDevice, Health: true,
-				CustomInfo: map[string]any{AWSCoresPerNeuronDevice: int32(4)},
+				CustomInfo: map[string]any{AWSCoresPerNeuronDevice: int64(4)},
 			}
 			fit, allocations, reason := dev.Fit([]*device.DeviceUsage{usage}, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 			assert.Equal(t, fit, test.fit, reason)
@@ -238,11 +238,11 @@ func Test_Fit_MultiDeviceCoreRequestUsesNodeGeometry(t *testing.T) {
 		name      string
 		coresEach int64
 		requested string
-		wantMasks []int32
+		wantMasks []int64
 	}{
-		{name: "four cores on two-core devices", coresEach: 2, requested: "4", wantMasks: []int32{3, 3}},
-		{name: "six cores on two-core devices", coresEach: 2, requested: "6", wantMasks: []int32{3, 3, 3}},
-		{name: "six cores on four-core devices", coresEach: 4, requested: "6", wantMasks: []int32{15, 3}},
+		{name: "four cores on two-core devices", coresEach: 2, requested: "4", wantMasks: []int64{3, 3}},
+		{name: "six cores on two-core devices", coresEach: 2, requested: "6", wantMasks: []int64{3, 3, 3}},
+		{name: "six cores on four-core devices", coresEach: 4, requested: "6", wantMasks: []int64{15, 3}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -262,7 +262,7 @@ func Test_Fit_MultiDeviceCoreRequestUsesNodeGeometry(t *testing.T) {
 				Limits: corev1.ResourceList{"aws.amazon.com/neuroncore": resource.MustParse(test.requested)},
 			}})
 			assert.NilError(t, err)
-			assert.Equal(t, request.Nums, int32(1))
+			assert.Equal(t, request.Nums, int64(1))
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
 			fit, allocations, reason := dev.Fit(usages, request, pod, &device.NodeInfo{}, &device.PodDevices{})
 			assert.Equal(t, fit, true, reason)
@@ -290,7 +290,7 @@ func Test_PatchAnnotations_EmitsAllInferentia1CoreIndexes(t *testing.T) {
 			Idx:       1,
 			Usedcores: 15,
 			CustomInfo: map[string]any{
-				AWSCoresPerNeuronDevice: int32(4),
+				AWSCoresPerNeuronDevice: int64(4),
 			},
 		}}},
 	})

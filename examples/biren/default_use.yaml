@@ -5,7 +5,7 @@ metadata:
 spec:
   restartPolicy: OnFailure
   containers:
-    - image: ubuntu
+    - image: ubuntu:22.04
       name: pod1
       command: ["sleep"]
       args: ["infinity"]

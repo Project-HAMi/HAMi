@@ -50,7 +50,7 @@ func refitTestPod(annotations map[string]string) *corev1.Pod {
 	}}
 }
 
-func refitTestRequest(nums, memreq, coresreq int32) device.ContainerDeviceRequests {
+func refitTestRequest(nums, memreq, coresreq int64) device.ContainerDeviceRequests {
 	return device.ContainerDeviceRequests{
 		nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 			Nums:     nums,
@@ -90,7 +90,7 @@ func TestRestrictNodeUsagePreservesPolicyAndOriginal(t *testing.T) {
 	// The original node keeps its full device list and is not aliased.
 	assert.Equal(t, len(node.Devices.DeviceLists), 3)
 	restricted.Devices.DeviceLists[0].Device.Used = 99
-	assert.Equal(t, deviceB.Used, int32(2))
+	assert.Equal(t, deviceB.Used, int64(2))
 }
 
 func TestRestrictNodeUsageEmptyAllowedSet(t *testing.T) {
@@ -295,7 +295,7 @@ func TestFitInRestrictedDevicesUsesPodPolicyAnnotation(t *testing.T) {
 			{ID: "GPU-c", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
 		}},
 	}
-	usedByID := map[string]int32{"GPU-a": 3, "GPU-b": 2, "GPU-c": 1}
+	usedByID := map[string]int64{"GPU-a": 3, "GPU-b": 2, "GPU-c": 1}
 
 	run := func(policy string) []string {
 		pod := refitTestPod(map[string]string{util.GPUSchedulerPolicyAnnotationKey: policy})

@@ -1,29 +1,54 @@
-# A pod that runs where there is no GPU and reaches one over the network.
-#
-# The node this lands on owns no GPU and runs no device plugin. The scheduler
-# picks a lupine server for the pod and writes its address into the
-# hami.io/lupine-endpoint annotation; the webhook wires LUPINE_SERVER to that
-# annotation through the downward API, so the container reads it at startup.
-#
-# The image supplies the client side: lupine's libcuda shim on the library
-# search path, which is what turns the CUDA calls into requests to the server.
+# CUDA computation on a client node without a local GPU or NVIDIA driver.
+# HAMi automatically delivers Lupine libraries and injects the server endpoint.
 apiVersion: v1
 kind: Pod
 metadata:
   name: remote-gpu-pod
+  # Optional: choose a Lupine server pool by its Node labels. This does not
+  # affect the client Pod's Kubernetes node placement.
+  # annotations:
+  #   hami.io/remote-server: gpu-pool=inference
+  # Server labels are refreshed by the scheduler at most once every 15 seconds,
+  # so wait for that refresh after changing a Lupine server's labels.
 spec:
+  restartPolicy: Never
   containers:
     - name: cuda-container
-      image: ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04
-      command: ["bash", "-c", "nvidia-smi -L && sleep 86400"]
+      image: nvidia/cuda:13.0.2-devel-ubuntu24.04
+      command: ["bash", "-ec"]
+      args:
+        - |
+          cat > /tmp/check.cu <<'CUDA'
+          #include <cuda_runtime.h>
+          #include <cstdio>
+          #define CHECK(call) do { cudaError_t e = (call); if (e != cudaSuccess) { fprintf(stderr, "%s: %s\n", #call, cudaGetErrorString(e)); return 1; } } while (0)
+          __global__ void add(int *value) { *value += 7; }
+          int main() {
+            int count = 0;
+            CHECK(cudaGetDeviceCount(&count));
+            if (count < 1) return 1;
+            for (int device = 0; device < count; ++device) {
+              CHECK(cudaSetDevice(device));
+              cudaDeviceProp prop;
+              CHECK(cudaGetDeviceProperties(&prop, device));
+              int input = 35, result = 0, *value = nullptr;
+              CHECK(cudaMalloc(&value, sizeof(int)));
+              CHECK(cudaMemcpy(value, &input, sizeof(int), cudaMemcpyHostToDevice));
+              add<<<1, 1>>>(value);
+              CHECK(cudaGetLastError());
+              CHECK(cudaDeviceSynchronize());
+              CHECK(cudaMemcpy(&result, value, sizeof(int), cudaMemcpyDeviceToHost));
+              CHECK(cudaFree(value));
+              printf("GPU %d: %s, memory=%zu MiB, result=%d\n", device, prop.name, prop.totalGlobalMem / (1024 * 1024), result);
+              if (result != 42) return 1;
+            }
+            puts("REMOTE CUDA PASS");
+            return 0;
+          }
+          CUDA
+          nvcc -arch=sm_80 /tmp/check.cu -o /tmp/check
+          /tmp/check
       resources:
         limits:
-          # How many cards the pod needs. The server it lands on must have at
-          # least this many, and the pod is given that server whole: a client
-          # can see every GPU on the server it is pointed at, so leaving a card
-          # behind would leave it visible here and free for the next pod.
-          nvidia.com/remote-gpu: 1
-          # Memory each card may use, in MB (Optional, Integer). HAMi-core is
-          # loaded into the container to hold the pod to it, and reports the
-          # card as this size. Leave it out to run without a limit.
+          nvidia.com/remote-gpu: 2
           nvidia.com/remote-gpu-memory: 3000

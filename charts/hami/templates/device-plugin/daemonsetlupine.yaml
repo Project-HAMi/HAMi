@@ -37,12 +37,13 @@ spec:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
-              # An empty value, not Exists: the label's value carries the
-              # port the scheduler sends clients to, and a DaemonSet listens
-              # on one port everywhere. A node whose label names a port is one
-              # whose server is run outside the chart, so the chart-managed
-              # server stays off it rather than listening on defaultPort while
-              # clients are told to dial the labelled one.
+              # An empty value, not Exists: the device plugin applies this
+              # label when operatingmode is remote, and the value carries the
+              # port the scheduler sends clients to. A DaemonSet listens on one
+              # port everywhere. A node whose label names a port is one whose
+              # server is run outside the chart, so the chart-managed server
+              # stays off it rather than listening on defaultPort while clients
+              # are told to dial the labelled one.
               - matchExpressions:
                   # hami.io/lupine-server is a protocol constant shared with
                   # pkg/device/remotegpu, not something to configure here.
@@ -69,6 +70,9 @@ spec:
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
+          {{- with .Values.devices.remotegpu.server.securityContext }}
+          securityContext: {{ toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.devices.remotegpu.server.resources }}
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}

@@ -1063,7 +1063,7 @@ func TestGenerateResourceRequests_CountEdgesAcrossBackends(t *testing.T) {
 			}
 			got, err := dev.GenerateResourceRequests(ctr)
 			assert.NilError(t, err)
-			assert.Equal(t, got.Nums, int32(0), "%s reported devices for a zero count", commonWord)
+			assert.Equal(t, got.Nums, int64(0), "%s reported devices for a zero count", commonWord)
 		})
 	}
 }

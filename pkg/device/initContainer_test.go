@@ -244,7 +244,7 @@ func TestCollapseInitContainerUsage_MultiAppSameGPUSlots(t *testing.T) {
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
-	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(3))
+	assert.Equal(t, result["NVIDIA"][0][0].Slots, int64(3))
 }
 
 // A multi-slot allocation such as an Enflame DRS profile already carries its own
@@ -258,7 +258,7 @@ func TestCollapseInitContainerUsage_MultiSlotAppContainers(t *testing.T) {
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
-	assert.Equal(t, result["Enflame"][0][0].Slots, int32(6))
+	assert.Equal(t, result["Enflame"][0][0].Slots, int64(6))
 }
 
 func TestSteadyStateDeviceUsage_NilInput(t *testing.T) {
@@ -367,7 +367,7 @@ func TestSteadyStateDeviceUsage_MultiAppSameGPUSlots(t *testing.T) {
 		},
 	}
 	result := SteadyStateDeviceUsage(pod, raw)
-	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(2))
+	assert.Equal(t, result["NVIDIA"][0][0].Slots, int64(2))
 }
 
 // --- Sidecar container accounting (sidecarsContainer-design.md) ---
