@@ -217,7 +217,7 @@ func (dev *HCUDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 				}
 				memnum = int(memnums)
 			}
-			corenum := int64(100)
+			corenum := int64(0)
 			core, ok := ctr.Resources.Limits[hcuResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[hcuResourceCores]

@@ -557,7 +557,7 @@ devices:
     # -- Resource name for the memory requested on each vHCU, in integer MiB units, scaled by `devices.hygon.memoryFactor` when it is greater than 1.
     # Omission or `0` requests the selected HCU's full memory.
     resourceMemoryName: "hygon.com/hcumem"
-    # -- Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission requests 100; `0` reserves no compute.
+    # -- Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission or `0` reserves no compute. An explicit `100` requests the card exclusively.
     resourceCoreName: "hygon.com/hcucores"
   cambricon:
     # -- Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin.
