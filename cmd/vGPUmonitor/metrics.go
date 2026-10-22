@@ -524,6 +524,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 	// Iterate through each Pod
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		podContainers, found := containerMap[string(pod.UID)]
 		if !found {
 			klog.V(5).Infof("No containers found for pod %s/%s", pod.Namespace, pod.Name)
