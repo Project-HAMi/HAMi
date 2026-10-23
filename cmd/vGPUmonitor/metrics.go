@@ -659,6 +659,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 	}
 	failed := 0
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
 			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
