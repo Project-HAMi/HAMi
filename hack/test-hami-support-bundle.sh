@@ -36,17 +36,30 @@ if [[ " $* " == *" rollout status "* ]]; then
   echo 'Authorization: Basic Zm9vOmJhcg==' >&2
   exit 1
 fi
+if [[ ( "${MOCK_MODE:-}" == optional-absent || "${MOCK_MODE:-}" == optional-no-pods ) && " $* " == *" get pods "* ]]; then
+  case " $* " in
+    *hami-mock-device-plugin*|*hami-lupine-server*|*hami-lupine-session*) exit 0 ;;
+  esac
+fi
+if [[ " $* " == *" get daemonsets "* && " $* " == *" -o name "* ]]; then
+  case " $* " in
+    *hami-mock-device-plugin*) [[ "${MOCK_MODE:-}" == optional-absent ]] || echo daemonset/hami-mock-device-plugin ;;
+    *hami-lupine-server*) [[ "${MOCK_MODE:-}" == optional-absent ]] || echo daemonset/hami-lupine-server ;;
+  esac
+  exit 0
+fi
 if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
-  if [[ " $* " == *"hami-device-plugin"* ]]; then
-    for number in 7 3 1 6 2 5 4; do echo "pod/device-plugin-$number"; done
-  else
-    echo pod/scheduler-2
-    echo pod/scheduler-1
-  fi
+  case " $* " in
+    *hami-mock-device-plugin*) echo pod/mock-device-plugin-1 ;;
+    *hami-lupine-server*) echo pod/lupine-server-1 ;;
+    *hami-lupine-session*) echo pod/lupine-session-1 ;;
+    *hami-device-plugin*) for number in 7 3 1 6 2 5 4; do echo "pod/device-plugin-$number"; done ;;
+    *) echo pod/scheduler-2; echo pod/scheduler-1 ;;
+  esac
   exit 0
 fi
 if [[ " $* " == *"jsonpath="*"restartCount"* ]]; then
-  if [[ " $* " == *"scheduler-"* || " $* " == *"device-plugin-1 "* ]]; then echo 0; else echo 1; fi
+  if [[ " $* " == *"scheduler-"* || " $* " == *" get pod device-plugin-1 "* ]]; then echo 0; else echo 1; fi
   exit 0
 fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
@@ -295,6 +308,19 @@ assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
 assert_contains "$KUBECTL_LOG" ' get daemonsets -l app.kubernetes.io/component=hami-device-plugin '
+for component in mock-device-plugin lupine-server lupine-session; do
+  assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o wide"
+  assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o name"
+  assert_contains "$KUBECTL_LOG" "logs pod/$component-1 .*--tail=3 --since=1h"
+  assert_contains "$KUBECTL_LOG" "logs pod/$component-1 --previous .*--tail=3 --since=1h"
+  test -f "$bundle/artifacts/components/$component-pod-metadata.txt" || fail "$component Pod metadata was not collected"
+done
+for component in mock-device-plugin lupine-server; do
+  assert_contains "$KUBECTL_LOG" " get daemonsets -l app.kubernetes.io/component=hami-$component -o name"
+  assert_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
+  assert_contains "$bundle/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-rollout\""
+done
+assert_not_contains "$KUBECTL_LOG" 'rollout status .*app.kubernetes.io/component=hami-lupine-session'
 test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -vc -- '--previous')" -eq 7 || fail 'did not collect all seven current device-plugin Pod logs'
 test "$(grep 'logs pod/device-plugin-' "$KUBECTL_LOG" | grep -c -- '--previous')" -eq 6 || fail 'did not limit previous logs to restarted device-plugin Pods'
 device_plugin_log_order=$(grep -v -- '--previous' "$KUBECTL_LOG" | sed -n 's/.*logs pod\/device-plugin-\([0-9][0-9]*\).*/\1/p' | paste -sd ' ' -)
@@ -320,6 +346,34 @@ fi
 if awk '!/--request-timeout=30s/ { exit 1 }' "$KUBECTL_LOG"; then :; else fail 'a kubectl command lacks --request-timeout'; fi
 if awk -v args="--kubeconfig $tmp/config --context test" 'index($0,args) == 0 { exit 1 }' "$KUBECTL_LOG"; then :; else fail 'a kubectl command lacks the explicit kubeconfig or context'; fi
 test "$(stat -c %a "$tmp/pod-out/hami-support-bundle.tar.gz")" = 600 || fail 'archive permissions are not private'
+
+# Optional components that are not installed are explicit skips, not failed
+# rollout or log collectors.
+: >"$KUBECTL_LOG"
+MOCK_MODE=optional-absent "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/optional-absent-out" >/dev/null
+mkdir "$tmp/optional-absent-bundle"
+tar -xzf "$tmp/optional-absent-out/hami-support-bundle.tar.gz" -C "$tmp/optional-absent-bundle"
+optional_absent="$tmp/optional-absent-bundle/hami-support-bundle"
+for component in mock-device-plugin lupine-server; do
+  assert_contains "$optional_absent/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-rollout\".*component-not-installed"
+  assert_contains "$optional_absent/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-logs\".*component-not-installed"
+  assert_not_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component "
+done
+assert_contains "$optional_absent/manifest.json" '"status":"skipped","collector":"lupine-session-logs".*component-not-installed'
+assert_not_contains "$optional_absent/manifest.json" '"status":"failed","collector":"(mock-device-plugin|lupine-server|lupine-session)'
+
+# An installed DaemonSet with no Pods still gets rollout diagnostics; only its
+# per-Pod log collector is skipped.
+: >"$KUBECTL_LOG"
+MOCK_MODE=optional-no-pods "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/optional-no-pods-out" >/dev/null
+mkdir "$tmp/optional-no-pods-bundle"
+tar -xzf "$tmp/optional-no-pods-out/hami-support-bundle.tar.gz" -C "$tmp/optional-no-pods-bundle"
+optional_no_pods="$tmp/optional-no-pods-bundle/hami-support-bundle"
+for component in mock-device-plugin lupine-server; do
+  assert_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
+  assert_contains "$optional_no_pods/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-rollout\""
+  assert_contains "$optional_no_pods/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-logs\".*no-matching-pods"
+done
 
 # Prove the Secret API guard recognizes both Kubernetes resource spellings.
 printf '%s\n' 'get secret example' >"$tmp/forbidden.log"
@@ -352,6 +406,14 @@ assert_contains "$tmp/cluster-dry.txt" '-A get pods -o yaml'
 assert_contains "$tmp/cluster-dry.txt" '-A get events'
 assert_contains "$tmp/cluster-dry.txt" ' get nodes -o yaml'
 assert_contains "$tmp/cluster-dry.txt" '-n hami get configmaps'
+for component in mock-device-plugin lupine-server lupine-session; do
+  assert_contains "$tmp/ns-dry.txt" "get pods -l app.kubernetes.io/component=hami-$component -o wide"
+  assert_contains "$tmp/ns-dry.txt" "get pods -l app.kubernetes.io/component=hami-$component -o name"
+done
+for component in mock-device-plugin lupine-server; do
+  assert_contains "$tmp/ns-dry.txt" "rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
+done
+assert_not_contains "$tmp/ns-dry.txt" 'rollout status .*app.kubernetes.io/component=hami-lupine-session'
 
 # Node mode limits tenant workloads/events to the explicit workload namespace.
 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --workload-namespace tenant-a --node gpu-node-a --dry-run --output-dir "$tmp/node-dry" >"$tmp/node-dry.txt"
