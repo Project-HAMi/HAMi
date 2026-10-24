@@ -137,7 +137,7 @@ kubectl get pods -n kube-system
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
-厂商相关配置位于 `values.yaml` 的 `devices.<vendor>` 下。[Chart README](charts/hami/README.md) 记录了可配置的值，以及如何从旧的配置布局迁移。
+厂商相关配置位于 `values.yaml` 的 `devices.<vendor>` 下。[Chart README](charts/hami/README.md) 列出了可配置的参数。从旧配置布局迁移时，请参阅[升级指南](https://project-hami.io/zh/docs/next/installation/upgrade)。
 
 完整的安装指南和配置选项，请参阅 [HAMi 文档](https://project-hami.io/docs/get-started/deploy-with-helm/)。
 

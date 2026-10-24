@@ -137,7 +137,7 @@ kubectl get pods -n kube-system
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
-ベンダー固有の設定は `values.yaml` の `devices.<vendor>` にあります。設定可能な値と従来のレイアウトからの移行方法は [Chart README](charts/hami/README.md) に記載されています。
+ベンダー固有の設定は `values.yaml` の `devices.<vendor>` にあります。設定可能な値は [Chart README](charts/hami/README.md) に記載されています。従来のレイアウトからの移行方法は[アップグレードガイド（英語）](https://project-hami.io/docs/next/installation/upgrade)を参照してください。
 
 完全なインストールガイドと設定オプションについては、[HAMi ドキュメント](https://project-hami.io/docs/get-started/deploy-with-helm/)を参照してください。
 

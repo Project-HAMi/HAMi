@@ -137,7 +137,7 @@ When `hami-device-plugin` and `hami-scheduler` are both `Running`, submit an exa
 kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
-Vendor settings live under `devices.<vendor>` in `values.yaml`. The [chart README](charts/hami/README.md) documents the configurable values and how to move from the previous layout.
+Vendor settings live under `devices.<vendor>` in `values.yaml`. The [chart README](charts/hami/README.md) lists the configurable values. To migrate from the previous layout, follow the [upgrade guide](https://project-hami.io/docs/next/installation/upgrade).
 
 For the complete installation guide and configuration options, see the [HAMi documentation](https://project-hami.io/docs/get-started/deploy-with-helm/).
 
