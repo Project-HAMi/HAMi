@@ -465,8 +465,20 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	}
 	if k.Nums > 1 {
 		candidates := make([]*device.DeviceUsage, len(devices))
+		uuidMismatches := 0
 		for i, candidate := range devices {
 			copy := candidate.DeepCopy()
+			candidates[i] = copy
+			// graphSelect reads adjacency from slice positions, so a device the
+			// use/nouse-neuron-uuid annotations rule out is marked unschedulable
+			// on the copy rather than dropped. Dropping it would make the devices
+			// on either side of it look adjacent.
+			if !device.CheckUUID(pod.GetAnnotations(), copy.ID, AWSNeuronUseUUID, AWSNeuronNoUseUUID, neuron.CommonWord()) {
+				uuidMismatches++
+				copy.Health = false
+				klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", copy.ID)
+				continue
+			}
 			requiredCores := k.Coresreq
 			if remainingCores > 0 {
 				requiredCores = min(remainingCores, countMaskAvailable(copy.Totalcore))
@@ -476,10 +488,13 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			if _, found := allocateCoreMask(copy.Usedcores, copy.Totalcore, requiredCores); !found {
 				copy.Health = false
 			}
-			candidates[i] = copy
 		}
 		alloc := graphSelect(candidates, int(k.Nums))
 		if len(alloc) == 0 {
+			if uuidMismatches > 0 {
+				reason[common.CardUUIDMismatch] = uuidMismatches
+				return false, tmpDevs, common.GenReason(reason, len(devices))
+			}
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
 			return false, tmpDevs, common.GenReason(reason, len(devices))
