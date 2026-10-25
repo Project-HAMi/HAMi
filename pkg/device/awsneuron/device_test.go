@@ -1039,7 +1039,7 @@ func TestDevices_Fit_MultiDeviceUUIDAnnotations(t *testing.T) {
 			nums:       2,
 			annos:      map[string]string{AWSNeuronUseUUID: "dev-0,dev-2"},
 			wantFit:    false,
-			wantReason: "2/4 CardUuidMismatch",
+			wantReason: "1/4 NumaNotFit, 2/4 CardUuidMismatch",
 		},
 		{
 			name:       "every device excluded",
@@ -1048,6 +1048,57 @@ func TestDevices_Fit_MultiDeviceUUIDAnnotations(t *testing.T) {
 			annos:      map[string]string{AWSNeuronNoUseUUID: "dev-0,dev-1"},
 			wantFit:    false,
 			wantReason: "2/2 CardUuidMismatch",
+		},
+		{
+			// The pinned devices are adjacent, but one of them is busy. The
+			// reason must name the busy device, not only the excluded ones.
+			name: "pinned device that is busy reports insufficient cores",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-2", 2, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-3", 3, 0, 2, 3, 3, "inf2", true),
+			},
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "dev-2,dev-3"},
+			wantFit:    false,
+			wantReason: "1/4 CardInsufficientCore, 2/4 CardUuidMismatch",
+		},
+		{
+			name: "every device busy reports insufficient cores",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 3, "inf2", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 3, "inf2", true),
+			},
+			nums:       2,
+			wantFit:    false,
+			wantReason: "2/2 CardInsufficientCore",
+		},
+		{
+			name: "pinned device used by another pod reports the conflict",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-2", 2, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-3", 3, 1, 2, 3, 1, "inf2", true),
+			},
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "dev-2,dev-3"},
+			wantFit:    false,
+			wantReason: "1/4 ExclusiveDeviceAllocateConflict, 2/4 CardUuidMismatch",
+		},
+		{
+			name: "pinned device that is unhealthy reports it",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-2", 2, 0, 2, 3, 0, "inf2", true),
+				makeAWSDeviceUsage("dev-3", 3, 0, 2, 3, 0, "inf2", false),
+			},
+			nums:       2,
+			annos:      map[string]string{AWSNeuronUseUUID: "dev-2,dev-3"},
+			wantFit:    false,
+			wantReason: "1/4 CardNotHealth, 2/4 CardUuidMismatch",
 		},
 		{
 			name:       "empty annotations keep the first contiguous run",

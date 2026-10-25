@@ -465,7 +465,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	}
 	if k.Nums > 1 {
 		candidates := make([]*device.DeviceUsage, len(devices))
-		uuidMismatches := 0
+		uuidMismatches, unhealthy, inUse, busy, free := 0, 0, 0, 0, 0
 		for i, candidate := range devices {
 			copy := candidate.DeepCopy()
 			candidates[i] = copy
@@ -479,6 +479,17 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 				klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", copy.ID)
 				continue
 			}
+			if !copy.Health {
+				unhealthy++
+				klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", copy.ID, "health", copy.Health)
+				continue
+			}
+			// graphSelect only hands out devices no other pod is using.
+			if copy.Used > 0 {
+				inUse++
+				klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", copy.ID, "used", copy.Used)
+				continue
+			}
 			requiredCores := k.Coresreq
 			if remainingCores > 0 {
 				requiredCores = min(remainingCores, countMaskAvailable(copy.Totalcore))
@@ -487,16 +498,33 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			}
 			if _, found := allocateCoreMask(copy.Usedcores, copy.Totalcore, requiredCores); !found {
 				copy.Health = false
+				busy++
+				klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", copy.ID, "device total core", copy.Totalcore, "device used core", copy.Usedcores, "request cores", requiredCores)
+				continue
 			}
+			free++
 		}
 		alloc := graphSelect(candidates, int(k.Nums))
 		if len(alloc) == 0 {
+			// Report every reason that took a device out, so a pod pinned to
+			// devices that are merely busy does not read as a UUID problem.
 			if uuidMismatches > 0 {
 				reason[common.CardUUIDMismatch] = uuidMismatches
-				return false, tmpDevs, common.GenReason(reason, len(devices))
 			}
-			reason[common.NumaNotFit]++
-			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
+			if unhealthy > 0 {
+				reason[common.CardNotHealth] = unhealthy
+			}
+			if inUse > 0 {
+				reason[common.ExclusiveDeviceAllocateConflict] = inUse
+			}
+			if busy > 0 {
+				reason[common.CardInsufficientCore] = busy
+			}
+			// Enough devices were free, so the topology is what failed.
+			if free >= int(k.Nums) || len(reason) == 0 {
+				reason[common.NumaNotFit]++
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
+			}
 			return false, tmpDevs, common.GenReason(reason, len(devices))
 		}
 		for _, dev := range alloc {
