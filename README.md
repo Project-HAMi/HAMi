@@ -159,7 +159,7 @@ HAMi supports multiple scheduling modes for AI workloads:
 - **numa**: a sort key that groups devices by NUMA node, chained with binpack or spread. A pod can ask for GPU-to-GPU NUMA co-location with the `nvidia.com/numa-bind` annotation.
 - **dynamic MIG**: create, cache, reuse, and reclaim NVIDIA MIG instances dynamically for supported cards and modes.
 
-Set the cluster defaults with `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` and `gpuSchedulerPolicy`. A pod overrides them with the `hami.io/node-scheduler-policy` and `hami.io/gpu-scheduler-policy` annotations, and the GPU policy accepts a comma-separated combination such as `binpack,numa`.
+Set the cluster defaults with `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` and `gpuSchedulerPolicy`. A pod overrides them with the `hami.io/node-scheduler-policy` and `hami.io/gpu-scheduler-policy` annotations, and the GPU policy accepts a comma-separated combination such as `binpack,numa`. HAMi picks a single node inside Filter, so kube-scheduler's own scoring plugins do not influence placement; to honor a pod's preferred `nodeAffinity`, set `scheduler.defaultSchedulerPolicy.nodeAffinityScoreWeight` (flag `--node-affinity-score-weight`, default `0` = off) and matching nodes gain a bonus proportional to the matched term weights under both node policies.
 
 HAMi works with the default Kubernetes scheduler path and can also be used with Volcano for batch-oriented AI workloads. See the [HAMi website](https://project-hami.io/docs/) for current scheduler integration guides.
 
