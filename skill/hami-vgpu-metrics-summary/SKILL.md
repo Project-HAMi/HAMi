@@ -767,7 +767,7 @@ If the user asks in English, answer in English.
 | `hami_node_gpu_mig_instance_info` / `nodeGPUMigInstance` | MIG/MPS sharing-mode instance information | device |
 | `hami_vgpu_core_allocated_ratio` / `vGPUCoreAllocated` | GPU core share allocated to a pod on one device | pod/device |
 | `hami_vgpu_memory_allocated_bytes` / `vGPUMemoryAllocated` | GPU memory allocated to a pod on one device | pod/device |
-| `hami_resource_quota_used` / `QuotaUsed` | Namespace-level quota usage | namespace |
+| `hami_resource_quota_used` / `QuotaUsed` | Namespace-level quota usage (the `limit` label of `hami_resource_quota_used` is deprecated in v2.11.0, removed in v2.12.0; use `hami_resource_quota_limit` instead) | namespace |
 | `hami_resource_quota_limit` | Namespace-level quota limit | namespace |
 | `hami_host_gpu_memory_used_bytes` / `HostGPUMemoryUsage` | Runtime physical GPU memory used from vGPU monitor | runtime/device |
 | `hami_host_gpu_utilization_ratio` / `HostCoreUtilization` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
@@ -798,7 +798,7 @@ If the user asks in English, answer in English.
 | `hami_*memory*_bytes` and legacy memory allocation metrics | bytes |
 | `GPUDeviceSharedNum > 1` or `hami_gpu_shared_count > 1` | multiple containers share the same GPU |
 | `nodeGPUMemoryPercentage = 1` or `hami_node_gpu_memory_allocated_ratio = 1` | device memory fully allocated |
-| `QuotaUsed limit=0` or `hami_resource_quota_used limit=0` | limit absent/unset/unreported, usage still valid |
+| `QuotaUsed limit=0`, or no `hami_resource_quota_limit` series for the quota | limit absent/unset/unreported, usage still valid |
 | only `hami_host_gpu_*` / `hami_vgpu_memory_used_bytes` present | runtime monitor metrics only, not full scheduler allocation view |
 
 ---
