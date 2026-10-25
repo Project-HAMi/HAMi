@@ -798,7 +798,7 @@ If the user asks in English, answer in English.
 | `hami_*memory*_bytes` and legacy memory allocation metrics | bytes |
 | `GPUDeviceSharedNum > 1` or `hami_gpu_shared_count > 1` | multiple containers share the same GPU |
 | `nodeGPUMemoryPercentage = 1` or `hami_node_gpu_memory_allocated_ratio = 1` | device memory fully allocated |
-| `QuotaUsed limit=0`, or no `hami_resource_quota_limit` series for the quota | limit absent/unset/unreported, usage still valid |
+| `QuotaUsed limit=0` with no `hami_resource_quota_limit` series for the quota | limit absent/unset/unreported, usage still valid |
 | only `hami_host_gpu_*` / `hami_vgpu_memory_used_bytes` present | runtime monitor metrics only, not full scheduler allocation view |
 
 ---
