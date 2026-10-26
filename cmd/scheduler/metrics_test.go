@@ -629,7 +629,7 @@ func TestClusterManagerCollectorQuotaMetrics(t *testing.T) {
 # TYPE hami_resource_quota_limit gauge
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
 hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
@@ -650,7 +650,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			metricsProvider: provider,
 		}
 		want := `
-# HELP QuotaUsed resourcequota usage for a certain device
+# HELP QuotaUsed resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE QuotaUsed gauge
 QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
 QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096
@@ -658,7 +658,7 @@ QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 40
 # TYPE hami_resource_quota_limit gauge
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
 hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
@@ -697,7 +697,7 @@ func TestClusterManagerCollectorQuotaUnconfiguredLimit(t *testing.T) {
 		metricsProvider: unconfProvider,
 	}
 	want := `
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpumem"} 1024
 `
