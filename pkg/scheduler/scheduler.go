@@ -161,6 +161,15 @@ func (s *Scheduler) GetAllocationMetrics() *metrics.SchedulerOutcomeMetrics {
 
 // deviceTypeForRequests returns the single requested device type, or a bounded
 // fallback when the request contains zero or multiple device types.
+func requestsDevice(requests device.PodDeviceRequests, deviceType string) bool {
+	for _, container := range requests {
+		if _, ok := container[deviceType]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func deviceTypeForRequests(requests device.PodDeviceRequests) string {
 	types := make(map[string]struct{})
 	for _, container := range requests {
@@ -1423,6 +1432,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if len(failedNodes) != 0 {
 		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
 	}
+	var fleetRev uint64
+	rgpu, hasRGPU := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices)
+	if hasRGPU {
+		fleetRev = rgpu.FleetRevision()
+	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
@@ -1432,6 +1446,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores", "pod", pod.Name)
+		if hasRGPU && requestsDevice(resourceReqs, remotegpu.RemoteGPUCommonWord) {
+			rgpu.WaitForFleet(pod, fleetRev)
+		}
 		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonNoFit)
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
