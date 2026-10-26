@@ -59,7 +59,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.14.0
+          version: v2.15.0
           install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
@@ -301,7 +301,7 @@ jobs:
     needs: [ test, get_info ]
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     env:
-      HELM_VERSION: v3.22.0
+      HELM_VERSION: v3.22.1
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

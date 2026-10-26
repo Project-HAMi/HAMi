@@ -1,7 +1,7 @@
 name: Chart Lint
 
 env:
-  HELM_VERSION: v3.22.0
+  HELM_VERSION: v3.22.1
   HELM_DOCS_VERSION: v1.14.2
 
 on:
