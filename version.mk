@@ -5,7 +5,7 @@ DEVICES=nvidia
 OUTPUT_DIR=bin
 TARGET_PLATFORMS=linux/amd64
 GOLANG_IMAGE=golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
-NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
+NVIDIA_IMAGE=nvidia/cuda:13.4.3-cudnn-devel-ubi8@sha256:53d7fab8667b6524238d2ff5b03b4be788e7afd7c00e5cd15cc2af8f911d8010
 DEST_DIR=/usr/local/vgpu/
 
 VERSION = v0.0.1

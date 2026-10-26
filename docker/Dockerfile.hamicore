@@ -1,4 +1,4 @@
-ARG NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
+ARG NVIDIA_IMAGE=nvidia/cuda:13.4.3-cudnn-devel-ubi8@sha256:53d7fab8667b6524238d2ff5b03b4be788e7afd7c00e5cd15cc2af8f911d8010
 
 FROM $NVIDIA_IMAGE AS nvbuild
 RUN dnf --disablerepo=cuda install -y cmake git && dnf clean all
