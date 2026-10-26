@@ -231,3 +231,27 @@ func Test_dcgmWholeGPUCollector_ensureInit_retry(t *testing.T) {
 		assert.Assert(t, !col.lastAttempt.Before(before), "ensureInit must update lastAttempt when the retry window has elapsed")
 	})
 }
+
+type watchedMIGQuerier struct {
+	fakeLatestValuesQuerier
+	watches  int
+	watchErr error
+}
+
+func (q *watchedMIGQuerier) WatchMIGEntity(uint) error { q.watches++; return q.watchErr }
+func TestMIGProfilingWatchRetriesAndIsRegisteredOnce(t *testing.T) {
+	q := &watchedMIGQuerier{watchErr: errors.New("transient watch failure")}
+	c := newDCGMWholeGPUCollector(q)
+	c.initialized = true
+	c.migHierarchy = map[migHierarchyKey]uint{{parentGpuUuid: "GPU-parent", nvmlInstanceId: 7}: 3}
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
+	if q.watches != 1 || c.watched[3] {
+		t.Fatal("failed watch cached")
+	}
+	q.watchErr = nil
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
+	if q.watches != 2 || !c.watched[3] {
+		t.Fatal("successful watch not reused")
+	}
+}

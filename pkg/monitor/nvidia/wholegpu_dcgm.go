@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -86,6 +87,7 @@ type dcgmWholeGPUCollector struct {
 	// refreshed with the field update loop so new MIG instances show up.
 	migHierarchy map[migHierarchyKey]uint
 	hierarchyAt  time.Time
+	watched      map[uint]bool
 }
 
 // newDCGMWholeGPUCollector returns a collector. Passing nil for q selects the
@@ -189,6 +191,21 @@ func (c *dcgmWholeGPUCollector) GpuInstanceSmUtil(parentGpuUuid string, nvmlInst
 		klog.V(4).Infof("wholegpu: no DCGM entity for MIG instance %s/%d (uuid %s)", parentGpuUuid, nvmlInstanceId, uuidForLog)
 		return 0
 	}
+	if watcher, ok := c.querier.(interface{ WatchMIGEntity(uint) error }); ok {
+		c.mu.Lock()
+		if c.watched == nil {
+			c.watched = make(map[uint]bool)
+		}
+		if !c.watched[entityID] {
+			if err := watcher.WatchMIGEntity(entityID); err != nil {
+				c.mu.Unlock()
+				klog.Warningf("wholegpu: watch MIG entity %d: %v", entityID, err)
+				return 0
+			}
+			c.watched[entityID] = true
+		}
+		c.mu.Unlock()
+	}
 	vals, err := c.querier.EntityGetLatestValues(dcgm.FE_GPU_I, entityID, migProfUtilFields)
 	if err != nil {
 		klog.V(4).Infof("wholegpu: EntityGetLatestValues(FE_GPU_I %d, %s) failed: %v", entityID, uuidForLog, err)
@@ -223,4 +240,27 @@ func (c *dcgmWholeGPUCollector) lookupMIGEntityID(parentGpuUuid string, nvmlInst
 	}
 	id, ok := c.migHierarchy[migHierarchyKey{parentGpuUuid: parentGpuUuid, nvmlInstanceId: nvmlInstanceId}]
 	return id, ok
+}
+
+// WatchMIGEntity registers the profiling counter before reading cached values.
+func (realDCGMQuerier) WatchMIGEntity(entityID uint) error {
+	group, err := dcgm.CreateGroup(fmt.Sprintf("hami-mig-%d-%d", entityID, time.Now().UnixNano()))
+	if err != nil {
+		return err
+	}
+	if err = dcgm.AddEntityToGroup(group, dcgm.FE_GPU_I, entityID); err != nil {
+		dcgm.DestroyGroup(group)
+		return err
+	}
+	fields, err := dcgm.FieldGroupCreate(fmt.Sprintf("hami-prof-%d-%d", entityID, time.Now().UnixNano()), migProfUtilFields)
+	if err != nil {
+		dcgm.DestroyGroup(group)
+		return err
+	}
+	if err = dcgm.WatchFieldsWithGroupEx(fields, group, 1000000, 60, 60); err != nil {
+		dcgm.FieldGroupDestroy(fields)
+		dcgm.DestroyGroup(group)
+		return err
+	}
+	return nil
 }
