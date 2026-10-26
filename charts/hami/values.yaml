@@ -210,24 +210,26 @@ scheduler:
     # writes a self-signed certificate to Secret `<fullname>-scheduler-tls`, and a post-install and post-upgrade hook Job sets its CA on the webhook.
     # Requires `admissionWebhook.enabled`.
     enabled: true
+    # Mirror of registry.k8s.io/ingress-nginx/kube-webhook-certgen.
+    # Pin the mirror index digest; its upstream index digest differs.
     image:
       # -- Registry of the certgen image used on Kubernetes versions before 1.22. `global.imageRegistry` overrides it.
-      registry: "docker.io"
-      # -- Repository of the certgen image used on Kubernetes versions before 1.22.
-      repository: "jettech/kube-webhook-certgen"
+      registry: "registry.cn-hangzhou.aliyuncs.com"
+      # -- Repository of the ingress-nginx certgen mirror used on Kubernetes versions before 1.22.
+      repository: "google_containers/kube-webhook-certgen"
       # -- Tag of the certgen image used on Kubernetes versions before 1.22, pinned by digest.
-      tag: "v1.5.2@sha256:2217d8028431f82afef26b0023ff8b9247971be3964a22e80ef5ca2f36e1a293"
+      tag: "v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989"
       # -- Pull policy of the certgen image used on Kubernetes versions before 1.22.
       pullPolicy: IfNotPresent
       # -- Names of existing image pull Secrets for the certgen Jobs on Kubernetes versions before 1.22, added after `global.imagePullSecrets`.
       pullSecrets: []
     imageNew:
       # -- Registry of the certgen image used on Kubernetes 1.22 and later. `global.imageRegistry` overrides it.
-      registry: "docker.io"
-      # -- Repository of the certgen image used on Kubernetes 1.22 and later.
-      repository: "liangjw/kube-webhook-certgen"
+      registry: "registry.cn-hangzhou.aliyuncs.com"
+      # -- Repository of the ingress-nginx certgen mirror used on Kubernetes 1.22 and later.
+      repository: "google_containers/kube-webhook-certgen"
       # -- Tag of the certgen image used on Kubernetes 1.22 and later, pinned by digest.
-      tag: "v1.1.1@sha256:64d8c73dca984af206adf9d6d7e46aa550362b1d7a01f3a0a91b20cc67868660"
+      tag: "v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989"
       # -- Pull policy of the certgen image used on Kubernetes 1.22 and later.
       pullPolicy: IfNotPresent
       # -- Names of existing image pull Secrets for the certgen Jobs on Kubernetes 1.22 and later, added after `global.imagePullSecrets`.
