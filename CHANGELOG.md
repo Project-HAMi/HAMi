@@ -449,8 +449,19 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Add profiling support with a dedicated HTTP bind address
 - Add OpenShift and SELinux support, a PodDisruptionBudget for HA scheduler deployments, and chart values for the scheduler kube-qps, kube-burst, kube-timeout and node-lock retry timeout
 - Generate the chart values documentation with helm-docs
+- Add MIG monitoring support for pods that use dynamic MIG
+- Select remote-gpu Lupine server pools by label and add a `securityContext` for the Lupine server
+- Add a redacted HAMi diagnostic bundle collector
+- Hygon: share the HCU core when a pod requests no cores, like NVIDIA (DTK v26.10+)
+
+**Deprecations**
+- `hami_container_device_memory_bytes` is deprecated in v2.11.0 and removed in v2.12.0, use `hami_vgpu_memory_used_bytes`
+- The `limit` label of `hami_resource_quota_used` and `QuotaUsed` is deprecated in v2.11.0 and removed in v2.12.0, use `hami_resource_quota_limit`
 
 **Bug fixes**
 - Keep `HAMI_NODELOCK_EXPIRE` unless `--node-lock-timeout` is set
 - Restore steady-state usage when a pod is replayed after a scheduler restart
+- Check MIG allocations against the registered profiles in the device plugin
+- Skip terminated pods in the per-container vGPU metrics
+- Honor the `disable-core-limit` flag in the device plugin
 
