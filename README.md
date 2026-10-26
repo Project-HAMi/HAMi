@@ -27,171 +27,33 @@ HAMi is a [CNCF Incubating](https://www.cncf.io/projects/) and [CNCF Landscape](
 
 ![CNCF logo](imgs/cncf-logo.png)
 
-## Why HAMi?
+## Documentation
 
-AI infrastructure teams often run into the same Kubernetes accelerator problems: whole GPUs are allocated to small jobs, teams compete for scarce devices, different accelerator vendors expose different operational models, and schedulers lack enough device context to place workloads efficiently.
+- [Architecture](https://project-hami.io/docs/next/core-concepts/architecture)
+- [GPU virtualization](https://project-hami.io/docs/next/core-concepts/gpu-virtualization)
+- [Supported devices and vendor guides](https://project-hami.io/docs/next/userguide/device-supported)
+- [Prerequisites](https://project-hami.io/docs/next/installation/prerequisites)
+- [Install and run a first workload](https://project-hami.io/docs/next/get-started/deploy-with-helm)
+- [Upgrade and migrate values](https://project-hami.io/docs/next/installation/upgrade)
+- [Configuration and operations](https://project-hami.io/docs/next/userguide/configure)
+- [NVIDIA scheduling policies](https://project-hami.io/docs/next/userguide/nvidia-device/scheduling-policy)
+- [NVIDIA dynamic MIG](https://project-hami.io/docs/next/userguide/nvidia-device/dynamic-mig-support)
+- [Device allocation metrics](https://project-hami.io/docs/next/userguide/monitoring/device-allocation)
+- [Device usage metrics](https://project-hami.io/docs/next/userguide/monitoring/real-time-device-usage)
+- [Grafana dashboards](https://project-hami.io/docs/next/userguide/monitoring/grafana-dashboard)
+- [WebUI](https://project-hami.io/docs/next/userguide/hami-webui-user-guide)
+- [Volcano integration](https://project-hami.io/docs/next/installation/how-to-use-volcano-vgpu)
+- [Kueue integration](https://project-hami.io/docs/next/userguide/kueue/how-to-use-kueue)
+- [Benchmarks](https://project-hami.io/docs/next/userguide/benchmark)
+- [Troubleshooting](https://project-hami.io/docs/next/troubleshooting)
+- [Uninstall](https://project-hami.io/docs/next/installation/uninstall)
 
-HAMi provides a Kubernetes-native layer for:
+## Repository resources
 
-- **Device sharing**: allocate a fraction of a physical accelerator by memory, core, or device count.
-- **Resource isolation**: enforce per-workload accelerator memory and compute limits where the device backend supports it.
-- **Device-aware scheduling**: place pods with topology-aware, binpack, spread, and device-specific scheduling policies.
-- **Heterogeneous AI clusters**: manage NVIDIA GPUs, NPUs, HCUs, MLUs, and other accelerator types through one scheduling and allocation workflow.
-- **Zero application changes**: keep using standard Kubernetes resource requests and limits.
-- **Production operations**: expose metrics, dashboards, WebUI, Helm installation, and community-supported deployment guidance.
-
-## Use Cases
-
-- Increase GPU utilization in shared Kubernetes AI clusters.
-- Run multi-tenant notebook, training, and inference workloads on the same accelerator pool.
-- Build private cloud AI platforms with fair device allocation and quota control.
-- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, Kunlunxin, MetaX, Moore Threads, and other vendors.
-- Combine HAMi with Kubernetes schedulers such as kube-scheduler and Volcano for batch AI workloads.
-
-## How It Works
-
-HAMi is composed of a mutating webhook, scheduler extender, device plugins, and device-specific in-container virtualization components.
-
-```text
-Pod submission
-  -> HAMi mutating webhook
-  -> HAMi scheduler filter / score / bind
-  -> device allocation written to pod annotations
-  -> device plugin Allocate()
-  -> container runtime environment
-  -> HAMi monitor and metrics
-```
-
-## Device Virtualization
-
-HAMi lets workloads request only the accelerator resources they need. For example, the following pod asks for one physical NVIDIA GPU with 3 GiB of GPU memory:
-
-```yaml
-resources:
-  limits:
-    nvidia.com/gpu: 1
-    nvidia.com/gpumem: 3000
-```
-
-The workload sees the allocated device resources inside the container, while HAMi coordinates scheduling, allocation, and isolation.
-
-![Before and After Using HAMi](imgs/hami-gpu-sharing-example.png)
-
-> Notes:
->
-> 1. After installing HAMi, the value of `nvidia.com/gpu` registered on the node defaults to the number of vGPUs.
-> 2. When requesting resources in a pod, `nvidia.com/gpu` refers to the number of physical GPUs required by the current pod.
-
-## Supported Devices
-
-HAMi supports multiple heterogeneous accelerator backends, including GPUs, NPUs, HCUs, MLUs, GCUs, XPUs, and more. Device capabilities vary by vendor, model, driver, and hardware generation.
-
-Device backends in this repository: NVIDIA GPU (including MIG), AMD GPU, Huawei Ascend NPU, Cambricon MLU, Hygon HCU, Iluvatar GPU, Kunlunxin XPU, MetaX GPU, Moore Threads GPU, Enflame GCU, Biren GPU, VastAI, AWS Neuron, and remote NVIDIA GPUs served by [Lupine](https://github.com/lupinemachines). Pod examples for each vendor are under [examples/](examples/).
-
-See the current [HAMi supported devices](https://project-hami.io/docs/userguide/device-supported) page for the maintained support matrix.
-
-## Quick Start
-
-### Prerequisites
-
-For the NVIDIA device plugin path, prepare:
-
-- NVIDIA driver >= 440
-- NVIDIA Container Toolkit (the successor to `nvidia-docker2`)
-- NVIDIA configured as the default runtime for containerd, Docker, or CRI-O
-- Kubernetes >= 1.23
-- glibc >= 2.17
-- Linux kernel >= 3.10
-- Helm > 3.0
-
-### Install With Helm
-
-Label GPU nodes so HAMi can manage them:
-
-```bash
-kubectl label nodes <node-name> gpu=on
-```
-
-Add the HAMi Helm repository:
-
-```bash
-helm repo add hami-charts https://project-hami.github.io/HAMi/
-helm repo update
-```
-
-Install HAMi:
-
-```bash
-helm install hami hami-charts/hami -n kube-system
-```
-
-Verify that the scheduler and device plugin are running:
-
-```bash
-kubectl get pods -n kube-system
-```
-
-When `hami-device-plugin` and `hami-scheduler` are both `Running`, submit an example workload:
-
-```bash
-kubectl apply -f examples/nvidia/default_use.yaml
-```
-
-Vendor settings live under `devices.<vendor>` in `values.yaml`. The [chart README](charts/hami/README.md) lists the configurable values. To migrate from the previous layout, follow the [upgrade guide](https://project-hami.io/docs/next/installation/upgrade).
-
-For the complete installation guide and configuration options, see the [HAMi documentation](https://project-hami.io/docs/get-started/deploy-with-helm/).
-
-### Deployment Options
-
-- **High availability**: set `scheduler.leaderElect=true` and `scheduler.replicas` above 1 to run several scheduler replicas behind one leader. A PodDisruptionBudget is created for them.
-- **OpenShift and SELinux**: set `platform.openshift=true` for OpenShift, and `selinux.enabled=true` on SELinux-enabled nodes.
-- **NetworkPolicy**: `scheduler.networkPolicy.enabled=true` restricts access to the scheduler's webhook and `/refit` port. Some CNIs do not match host-networked kube-apiserver traffic against the `namespaceSelector`, which can make the webhook unreachable; with `scheduler.admissionWebhook.failurePolicy=Ignore`, Pods are then admitted without HAMi's changes.
-- **Prometheus Operator**: `prometheus.enabled=true` creates ServiceMonitors for the scheduler and the device plugin when the ServiceMonitor API is available; the device-plugin one also requires `devicePlugin.enabled`.
-
-## Scheduling Policies
-
-HAMi supports multiple scheduling modes for AI workloads:
-
-- **binpack**: pack workloads onto fewer nodes or devices to improve consolidation.
-- **spread**: distribute workloads across nodes or devices to reduce contention.
-- **topology-aware scheduling**: choose device combinations based on GPU topology when supported.
-- **mutex**: allocate only idle GPUs, so a workload does not share a device.
-- **numa**: a sort key that groups devices by NUMA node, chained with binpack or spread. A pod can ask for GPU-to-GPU NUMA co-location with the `nvidia.com/numa-bind` annotation.
-- **dynamic MIG**: create, cache, reuse, and reclaim NVIDIA MIG instances dynamically for supported cards and modes.
-
-Set the cluster defaults with `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` and `gpuSchedulerPolicy`. A pod overrides them with the `hami.io/node-scheduler-policy` and `hami.io/gpu-scheduler-policy` annotations, and the GPU policy accepts a comma-separated combination such as `binpack,numa`. HAMi picks a single node inside Filter, so kube-scheduler's own scoring plugins do not influence placement; to honor a pod's preferred `nodeAffinity`, set `scheduler.defaultSchedulerPolicy.nodeAffinityScoreWeight` (flag `--node-affinity-score-weight`, default `0` = off) and matching nodes gain a bonus proportional to the matched term weights under both node policies.
-
-HAMi works with the default Kubernetes scheduler path and can also be used with Volcano for batch-oriented AI workloads. See the [HAMi website](https://project-hami.io/docs/) for current scheduler integration guides.
-
-## Observability And WebUI
-
-HAMi exposes metrics for monitoring cluster accelerator usage. After installation, metrics are available through the scheduler monitor endpoint:
-
-```text
-http://<scheduler-ip>:<monitor-port>/metrics
-```
-
-The default monitor port is `31993`. You can change it with Helm values such as `--set scheduler.service.monitorPort=<port>`.
-
-HAMi also provides:
-
-- [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) for visual cluster and device management.
-- Agent skills under [skill/](skill/) for debugging GPU pods and summarizing vGPU metrics.
-- [Grafana dashboards](https://project-hami.io/docs/userguide/monitoring/grafana-dashboard) for accelerator monitoring.
-- Benchmark material for evaluating workload behavior and scheduling effects.
-
-![HAMi WebUI](imgs/hami-webui-overview.png)
-
-## Ecosystem Integrations
-
-| Project | What the integration enables |
-| --- | --- |
-| [vLLM](https://github.com/vllm-project/vllm) | Run inference servers with GPU memory caps, enabling multiple models to share one GPU |
-| [Volcano](https://volcano.sh/) | Gang scheduling and queue-based batch scheduling for GPU workloads |
-| [Kueue](https://kueue.sigs.k8s.io/) | HAMi resources exposed to Kueue via ResourceTransformation for batch job queueing |
-| [Prometheus](https://prometheus.io/) | HAMi exposes per-container GPU metrics including memory usage and utilization |
-| [Grafana](https://grafana.com/) | Pre-built dashboard available for visualizing HAMi GPU metrics |
-| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | Can coexist with GPU Operator when HAMi manages scheduling and the Operator manages drivers |
+- [Chart values reference](charts/hami/README.md)
+- [Workload examples](examples/)
+- [Agent skills](skill/)
+- [HAMi-WebUI repository](https://github.com/Project-HAMi/HAMi-WebUI)
 
 ## Roadmap, Governance, And Contributing
 
@@ -201,25 +63,9 @@ To contribute code, documentation, tests, or device backend improvements, read [
 
 ## Community
 
-The HAMi community is open to users, contributors, hardware vendors, and platform teams building Kubernetes-based AI infrastructure.
+For chat channels, mailing lists, meeting schedules, and meeting notes, visit the [HAMi community page](https://project-hami.io/community).
 
-- Website: [project-hami.io](https://project-hami.io)
-- Discord: [Join the HAMi Discord](https://discord.com/invite/Amhy7XmbNq) (recommended)
-- Slack: [#hami-dev on CNCF Slack](https://cloud-native.slack.com/archives/C07T10BU4R2)
-- Mailing list: [hami-project](https://groups.google.com/forum/#!forum/hami-project)
-- [Meeting notes and agenda](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
-- Chinese community meeting: Friday 16:00 UTC+8, weekly, [Meeting link](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- English community meeting: Wednesday 16:00 UTC+8, biweekly, [Meeting link](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
-
-## Talks And References
-
-| Event | Talk |
-| --- | --- |
-| CHINA CLOUD COMPUTING INFRASTRUCTURE DEVELOPER CONFERENCE, Beijing 2024 | [Unlocking heterogeneous AI infrastructure on k8s clusters](https://live.csdn.net/room/csdnnews/3zwDP09S) |
-| KubeDay Japan 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster: Leveraging the Power of HAMi](https://www.youtube.com/watch?v=owoaSb4nZwg) |
-| KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Is Your GPU Really Working Efficiently in the Data Center? N Ways to Improve GPU Usage](https://www.youtube.com/watch?v=ApkyK3zLF5Q) |
-| KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster](https://www.youtube.com/watch?v=kcGXnp_QShs) |
-| KubeCon Europe 2024 | [Cloud Native Batch Computing with Volcano: Updates and Future](https://youtu.be/fVYKk6xSOsw) |
+[Talk materials](https://github.com/Project-HAMi/community/tree/main/talks)
 
 ## License
 
