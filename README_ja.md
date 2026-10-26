@@ -45,7 +45,7 @@ HAMi は Kubernetes ネイティブなレイヤーを提供します：
 - 共有 Kubernetes AI クラスターでの GPU 利用率の向上。
 - 同一のアクセラレータプール上でマルチテナントのノートブック、トレーニング、推論ワークロードを実行。
 - 公平なデバイス割り当てとクォータ制御を備えたプライベートクラウド AI プラットフォームの構築。
-- NVIDIA、Ascend、Cambricon、Hygon、Iluvatar、MetaX、Moore Threads など、複数ベンダーのヘテロジニアスアクセラレータクラスターの運用。
+- NVIDIA、Ascend、Cambricon、Hygon、Iluvatar、Kunlunxin、MetaX、Moore Threads など、複数ベンダーのヘテロジニアスアクセラレータクラスターの運用。
 - バッチ AI ワークロード向けに kube-scheduler や Volcano などの Kubernetes スケジューラと HAMi を組み合わせて使用。
 
 ## 仕組み

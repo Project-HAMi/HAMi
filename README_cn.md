@@ -45,7 +45,7 @@ HAMi 提供了一个 Kubernetes 原生层：
 - 提升共享 Kubernetes AI 集群中的 GPU 利用率。
 - 在同一加速器资源池上运行多租户 Notebook、训练和推理工作负载。
 - 构建具有公平设备分配和配额控制的私有云 AI 平台。
-- 运营跨 NVIDIA、昇腾、寒武纪、海光、天数智芯、沐曦、摩尔线程等厂商的异构加速器集群。
+- 运营跨 NVIDIA、昇腾、寒武纪、海光、天数智芯、昆仑芯、沐曦、摩尔线程等厂商的异构加速器集群。
 - 将 HAMi 与 kube-scheduler、Volcano 等 Kubernetes 调度器结合用于批量 AI 工作负载。
 
 ## 工作原理
