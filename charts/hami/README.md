@@ -279,35 +279,6 @@ vendor are removed.
 For other vendors whose extender resources use `customresources`, update those
 lists when changing resource names or chip definitions.
 
-## Certgen image configuration
-
-The default certgen image uses the Alibaba mirror. `global.imageRegistry` changes
-only the registry; it does not translate repository paths or digest indexes.
-Private mirrors must preserve the configured repository and digest, or you must
-set the corresponding image fields to the mirror's actual values.
-
-To use the upstream registry, configure the complete image coordinates below.
-The upstream registry and Alibaba mirror use different repository paths and
-index digests, so changing only `global.imageRegistry` is insufficient.
-
-```yaml
-scheduler:
-  patch:
-    image:
-      registry: registry.k8s.io
-      repository: ingress-nginx/kube-webhook-certgen
-      tag: v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
-    imageNew:
-      registry: registry.k8s.io
-      repository: ingress-nginx/kube-webhook-certgen
-      tag: v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
-```
-
-Leave `global.imageRegistry` empty to change only certgen, or set it to
-`registry.k8s.io` only when the other chart images are also available there under
-their configured repository paths and digests. Setting the three certgen fields
-does not change the registry configuration of other components.
-
 <!-- BEGIN GENERATED VALUES -->
 
 ## Values
