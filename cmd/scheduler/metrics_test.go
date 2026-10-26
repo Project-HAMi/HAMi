@@ -650,7 +650,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			metricsProvider: provider,
 		}
 		want := `
-# HELP QuotaUsed resourcequota usage for a certain device
+# HELP QuotaUsed resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE QuotaUsed gauge
 QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
 QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096

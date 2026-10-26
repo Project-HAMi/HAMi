@@ -358,7 +358,7 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 	if legacy {
 		legacyQuotaUsed = prometheus.NewDesc(
 			"QuotaUsed",
-			"resourcequota usage for a certain device",
+			"resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)",
 			[]string{"quotanamespace", "quotaName", "limit"}, nil,
 		)
 	}
