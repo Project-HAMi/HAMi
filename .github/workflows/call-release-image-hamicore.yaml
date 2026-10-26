@@ -98,6 +98,9 @@ jobs:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
 
+      - name: Read image pins from version.mk
+        run: grep -E '^(GOLANG|NVIDIA)_IMAGE=' version.mk >> "$GITHUB_ENV"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
@@ -122,8 +125,8 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-              NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
+              GOLANG_IMAGE=${{ env.GOLANG_IMAGE }}
+              NVIDIA_IMAGE=${{ env.NVIDIA_IMAGE }}
               DEST_DIR=/usr/local
             tags: ${{ steps.meta.outputs.tags }}
             push: true
