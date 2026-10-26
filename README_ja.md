@@ -146,7 +146,7 @@ kubectl apply -f examples/nvidia/default_use.yaml
 - **高可用性**：`scheduler.leaderElect=true` を設定し、`scheduler.replicas` を 1 より大きくすると、複数のスケジューラレプリカを 1 つのリーダーの背後で実行できます。PodDisruptionBudget も作成されます。
 - **OpenShift と SELinux**：OpenShift では `platform.openshift=true`、SELinux が有効なノードでは `selinux.enabled=true` を設定します。
 - **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` で、スケジューラの webhook と `/refit` ポートへのアクセスを制限します。一部の CNI は、ホストネットワークの kube-apiserver のトラフィックを `namespaceSelector` で照合しないため、webhook に到達できなくなることがあります。`scheduler.admissionWebhook.failurePolicy=Ignore` の場合、Pod は HAMi による変更なしで受け入れられます。
-- **Prometheus Operator**：`prometheus.enabled=true` で、スケジューラとServiceMonitor API が利用可能な場合に、スケジューラとデバイスプラグインの ServiceMonitor を作成します。デバイスプラグインの ServiceMonitor には `devicePlugin.enabled` も必要です。
+- **Prometheus Operator**：`prometheus.enabled=true` で、ServiceMonitor API が利用可能な場合に、スケジューラとデバイスプラグインの ServiceMonitor を作成します。デバイスプラグインの ServiceMonitor には `devicePlugin.enabled` も必要です。
 
 ## スケジューリングポリシー
 
