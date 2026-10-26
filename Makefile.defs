@@ -21,7 +21,7 @@ endif
 ECHO_GEN=echo "  GEN   $(RELATIVE_DIR)/"
 
 LINT_TRIVY_SEVERITY_LEVEL ?= CRITICAL
-TRIVY_VERSION=0.75.0
+TRIVY_VERSION=0.76.1
 
 .PHONY: print-version
 print-version:

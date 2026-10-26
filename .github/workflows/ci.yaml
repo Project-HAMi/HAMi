@@ -59,7 +59,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.14.0
+          version: v2.15.0
           install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
@@ -246,13 +246,16 @@ jobs:
           basePath: # optional, default is .
           submodulePath: libvgpu
 
+      - name: Read image pins from version.mk
+        run: grep -E '^(GOLANG|NVIDIA)_IMAGE=' version.mk >> "$GITHUB_ENV"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
         with:
-          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -268,8 +271,8 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-            NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
+            GOLANG_IMAGE=${{ env.GOLANG_IMAGE }}
+            NVIDIA_IMAGE=${{ env.NVIDIA_IMAGE }}
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
@@ -298,7 +301,7 @@ jobs:
     needs: [ test, get_info ]
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     env:
-      HELM_VERSION: v3.22.0
+      HELM_VERSION: v3.22.1
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

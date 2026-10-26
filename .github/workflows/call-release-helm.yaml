@@ -6,7 +6,7 @@ name: Call Release Helm Charts
 # and on branch "github_pages", update '/index.yaml' for '/charts/*.tgz'
 
 env:
-  HELM_VERSION: v3.22.0
+  HELM_VERSION: v3.22.1
   MERGE_BRANCH: gh-pages
 on:
   workflow_call:

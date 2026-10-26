@@ -1,7 +1,7 @@
 name: Chart Lint
 
 env:
-  HELM_VERSION: v3.22.0
+  HELM_VERSION: v3.22.1
   HELM_DOCS_VERSION: v1.14.2
 
 on:
@@ -41,7 +41,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
 
       - name: Install helm-docs
         run: |

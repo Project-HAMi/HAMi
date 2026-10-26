@@ -1,5 +1,5 @@
-ARG GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-ARG NVIDIA_IMAGE=nvidia/cuda:13.4.2-cudnn-devel-ubi8@sha256:7bf81df28de77ac76b1415edfa506645118fd72546842c58b50e544a28d69ec2
+ARG GOLANG_IMAGE=golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+ARG NVIDIA_IMAGE=nvidia/cuda:13.4.3-cudnn-devel-ubi8@sha256:53d7fab8667b6524238d2ff5b03b4be788e7afd7c00e5cd15cc2af8f911d8010
 
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
@@ -23,7 +23,7 @@ RUN bash ./build.sh
 # -proprietary package provides libdcgmmoduleprofiling.so.4, which DCGM needs to
 # serve DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO for MIG instances; the monitor dlopens
 # both at runtime.
-FROM debian:bookworm-slim AS dcgm
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS dcgm
 ARG DCGM_DEB=v4.5.0-1
 ARG DCGM_AMD64_SHA256=b6f83b7c3ba3d7b75843402317fea997bfdd53471a668b832f734db4f77d4b6e
 ARG DCGM_ARM64_SHA256=3d6a7bd624ee27ac723a16917187cc7b8d31af07a9c8421f6a3aced051ed1815
