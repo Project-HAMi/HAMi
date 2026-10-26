@@ -236,22 +236,72 @@ type watchedMIGQuerier struct {
 	fakeLatestValuesQuerier
 	watches  int
 	watchErr error
+	cleanups int
 }
 
-func (q *watchedMIGQuerier) WatchMIGEntity(uint) error { q.watches++; return q.watchErr }
+func (q *watchedMIGQuerier) WatchMIGEntity(uint) (func(), error) {
+	q.watches++
+	return func() { q.cleanups++ }, q.watchErr
+}
 func TestMIGProfilingWatchRetriesAndIsRegisteredOnce(t *testing.T) {
 	q := &watchedMIGQuerier{watchErr: errors.New("transient watch failure")}
 	c := newDCGMWholeGPUCollector(q)
 	c.initialized = true
 	c.migHierarchy = map[migHierarchyKey]uint{{parentGpuUuid: "GPU-parent", nvmlInstanceId: 7}: 3}
 	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
-	if q.watches != 1 || c.watched[3] {
+	if q.watches != 1 || c.watched[3] != nil {
 		t.Fatal("failed watch cached")
 	}
 	q.watchErr = nil
 	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
 	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
-	if q.watches != 2 || !c.watched[3] {
+	if q.watches != 2 || c.watched[3] == nil {
 		t.Fatal("successful watch not reused")
+	}
+}
+
+func TestMIGWatchesReclaimedOnChurnAndClose(t *testing.T) {
+	q := &watchedMIGQuerier{}
+	c := newMigTestCollector(q)
+	c.hierarchyQuerier = &fakeHierarchyQuerier{}
+	for i := range 100 {
+		seedMigHierarchy(c, "GPU-parent", 7, uint(i))
+		c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
+		c.refreshMigHierarchy()
+		if len(c.watched) != 0 || q.cleanups != i+1 {
+			t.Fatalf("watch leaked after churn %d", i)
+		}
+	}
+	seedMigHierarchy(c, "GPU-parent", 7, 101)
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real")
+	shutdowns := 0
+	c.shutdown = func() {
+		if len(c.watched) != 0 {
+			t.Error("shutdown preceded watch cleanup")
+		}
+		shutdowns++
+	}
+	c.Close()
+	c.Close()
+	if q.cleanups != 101 || shutdowns != 1 {
+		t.Fatalf("close cleanup=%d shutdown=%d", q.cleanups, shutdowns)
+	}
+	if c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-real") != 0 || q.watches != 101 {
+		t.Fatal("closed collector sampled")
+	}
+}
+
+func TestMIGWatchRecreatedWhenEntityIDIsReused(t *testing.T) {
+	q := &watchedMIGQuerier{}
+	c := newMigTestCollector(q)
+	seedMigHierarchy(c, "GPU-parent", 7, 3)
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-old")
+	c.GpuInstanceSmUtil("GPU-parent", 7, "MIG-new")
+	if q.watches != 2 || q.cleanups != 1 {
+		t.Fatal("reused entity retained stale watch")
+	}
+	c.Close()
+	if q.cleanups != 2 {
+		t.Fatal("replacement watch leaked")
 	}
 }

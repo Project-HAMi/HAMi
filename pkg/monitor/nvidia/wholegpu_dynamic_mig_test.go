@@ -19,6 +19,7 @@ package nvidia
 import (
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,5 +62,34 @@ func TestDynamicMIGRuntimeIdentity(t *testing.T) {
 	c.devices[0].Usedmem = 9984
 	if _, _, ready := resolveDynamicMIGCandidate(c, registry); ready {
 		t.Fatal("inconsistent profile accepted")
+	}
+}
+
+func TestDynamicMIGPendingRetryBoundAndAnnotationUpdate(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pending", Annotations: map[string]string{}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}}
+	candidate := wholeGPUCandidate{pod: pod, container: "main", devices: device.ContainerDevices{{UUID: "GPU-parent", Usedmem: 4864, Usedcores: 15}}}
+	registry := map[string]*device.DeviceInfo{"GPU-parent": {ID: "GPU-parent", Mode: nv.MigMode, Devmem: 40960, MIGProfiles: []device.MigProfile{{Name: "1g.5gb", MemoryMB: 4864}}}}
+	l := &ContainerLister{containers: map[string]*ContainerUsage{}, wholeGPU: &wholeGPUState{nvmlInitialized: true, verdicts: map[string]wholeGPUVerdict{}}}
+	inputs := &wholeGPUInputs{candidates: []wholeGPUCandidate{candidate}, nodeDevs: registry, stillAnnotated: map[string]bool{"pending_main": true}}
+	l.reconcileWholeGPULocked(inputs)
+	pending := l.wholeGPU.migPending["pending_main"]
+	pending.firstSeen = time.Now().Add(-indeterminateRetryWindow - time.Second)
+	l.wholeGPU.migPending["pending_main"] = pending
+	l.reconcileWholeGPULocked(inputs)
+	if l.wholeGPU.migPending["pending_main"].firstSeen != pending.firstSeen {
+		t.Fatal("expired retry window reset")
+	}
+	if len(l.containers) != 0 {
+		t.Fatal("unready instance accepted")
+	}
+	pod.Annotations[nv.MigAllocationsAnnotation] = `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-parent","profile":"1g.5gb","placement":{"start":0,"size":1},"migUUID":"MIG-real","gpuInstanceID":7,"computeInstanceID":0}]`
+	l.reconcileWholeGPULocked(inputs)
+	if len(l.containers) != 1 || len(l.wholeGPU.migPending) != 0 {
+		t.Fatal("annotation update did not retry and confirm")
+	}
+	l.wholeGPU.migPending["gone"] = pending
+	l.reconcileWholeGPULocked(inputs)
+	if len(l.wholeGPU.migPending) != 0 {
+		t.Fatal("orphan retry state leaked")
 	}
 }

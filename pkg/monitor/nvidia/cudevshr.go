@@ -224,6 +224,9 @@ func (l *ContainerLister) Update() error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			l.unmapAll()
+			if l.wholeGPU != nil && l.wholeGPU.dcgm != nil {
+				l.wholeGPU.dcgm.Close()
+			}
 		}
 		return err
 	}

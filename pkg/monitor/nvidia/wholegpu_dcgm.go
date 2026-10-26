@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -87,7 +88,12 @@ type dcgmWholeGPUCollector struct {
 	// refreshed with the field update loop so new MIG instances show up.
 	migHierarchy map[migHierarchyKey]uint
 	hierarchyAt  time.Time
-	watched      map[uint]bool
+	watched      map[uint]func()
+	watchUUIDs   map[uint]string
+	stopCh       chan struct{}
+	doneCh       chan struct{}
+	closed       bool
+	shutdown     func()
 }
 
 // newDCGMWholeGPUCollector returns a collector. Passing nil for q selects the
@@ -115,6 +121,9 @@ type migHierarchyKey struct {
 func (c *dcgmWholeGPUCollector) ensureInit() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("DCGM collector is closed")
+	}
 	if c.initialized {
 		return nil
 	}
@@ -122,12 +131,16 @@ func (c *dcgmWholeGPUCollector) ensureInit() error {
 		return c.initErr
 	}
 	c.lastAttempt = time.Now()
-	if _, err := dcgm.Init(dcgm.Embedded); err != nil {
+	shutdown, err := dcgm.Init(dcgm.Embedded)
+	if err != nil {
 		c.initErr = err
 		klog.Warningf("wholegpu: dcgm embedded init failed, will retry in %s: %v", dcgmInitRetryInterval, err)
 		return c.initErr
 	}
 	c.initialized = true
+	c.shutdown = shutdown
+	c.stopCh = make(chan struct{})
+	c.doneCh = make(chan struct{})
 	c.initErr = nil
 	klog.Infof("wholegpu: dcgm embedded host engine started")
 	go c.fieldUpdateLoop()
@@ -138,12 +151,19 @@ func (c *dcgmWholeGPUCollector) ensureInit() error {
 // engine (EntityGetLatestValues only returns cached samples, so PROF ratios
 // would otherwise go stale) and refreshes the MIG hierarchy cache.
 func (c *dcgmWholeGPUCollector) fieldUpdateLoop() {
+	defer close(c.doneCh)
 	if err := dcgm.UpdateAllFields(); err != nil {
 		klog.V(4).Infof("wholegpu: initial dcgm.UpdateAllFields failed: %v", err)
 	}
 	c.refreshMigHierarchy()
 	tick := time.NewTicker(dcgmFieldUpdateInterval)
-	for range tick.C {
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-tick.C:
+		}
 		if err := dcgm.UpdateAllFields(); err != nil {
 			klog.V(4).Infof("wholegpu: dcgm.UpdateAllFields failed: %v", err)
 		}
@@ -173,6 +193,22 @@ func (c *dcgmWholeGPUCollector) refreshMigHierarchy() {
 		m[key] = entry.Entity.EntityId
 	}
 	c.mu.Lock()
+	live := make(map[uint]bool, len(m))
+	for _, id := range m {
+		live[id] = true
+	}
+	for key, id := range c.migHierarchy {
+		if next, ok := m[key]; !ok || next != id {
+			live[id] = false
+		}
+	}
+	for id, cleanup := range c.watched {
+		if !live[id] {
+			cleanup()
+			delete(c.watched, id)
+			delete(c.watchUUIDs, id)
+		}
+	}
 	c.migHierarchy = m
 	c.hierarchyAt = time.Now()
 	c.mu.Unlock()
@@ -186,25 +222,35 @@ func (c *dcgmWholeGPUCollector) GpuInstanceSmUtil(parentGpuUuid string, nvmlInst
 	if err := c.ensureInit(); err != nil {
 		return 0
 	}
-	entityID, ok := c.lookupMIGEntityID(parentGpuUuid, nvmlInstanceId)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0
+	}
+	entityID, ok := c.migHierarchy[migHierarchyKey{parentGpuUuid: parentGpuUuid, nvmlInstanceId: nvmlInstanceId}]
 	if !ok {
 		klog.V(4).Infof("wholegpu: no DCGM entity for MIG instance %s/%d (uuid %s)", parentGpuUuid, nvmlInstanceId, uuidForLog)
 		return 0
 	}
-	if watcher, ok := c.querier.(interface{ WatchMIGEntity(uint) error }); ok {
-		c.mu.Lock()
+	if watcher, ok := c.querier.(interface{ WatchMIGEntity(uint) (func(), error) }); ok {
 		if c.watched == nil {
-			c.watched = make(map[uint]bool)
+			c.watched = make(map[uint]func())
+			c.watchUUIDs = make(map[uint]string)
 		}
-		if !c.watched[entityID] {
-			if err := watcher.WatchMIGEntity(entityID); err != nil {
-				c.mu.Unlock()
+		if cleanup := c.watched[entityID]; cleanup != nil && c.watchUUIDs[entityID] != uuidForLog {
+			cleanup()
+			delete(c.watched, entityID)
+			delete(c.watchUUIDs, entityID)
+		}
+		if c.watched[entityID] == nil {
+			cleanup, err := watcher.WatchMIGEntity(entityID)
+			if err != nil {
 				klog.Warningf("wholegpu: watch MIG entity %d: %v", entityID, err)
 				return 0
 			}
-			c.watched[entityID] = true
+			c.watched[entityID] = cleanup
+			c.watchUUIDs[entityID] = uuidForLog
 		}
-		c.mu.Unlock()
 	}
 	vals, err := c.querier.EntityGetLatestValues(dcgm.FE_GPU_I, entityID, migProfUtilFields)
 	if err != nil {
@@ -243,24 +289,63 @@ func (c *dcgmWholeGPUCollector) lookupMIGEntityID(parentGpuUuid string, nvmlInst
 }
 
 // WatchMIGEntity registers the profiling counter before reading cached values.
-func (realDCGMQuerier) WatchMIGEntity(entityID uint) error {
+func (realDCGMQuerier) WatchMIGEntity(entityID uint) (func(), error) {
 	group, err := dcgm.CreateGroup(fmt.Sprintf("hami-mig-%d-%d", entityID, time.Now().UnixNano()))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err = dcgm.AddEntityToGroup(group, dcgm.FE_GPU_I, entityID); err != nil {
 		dcgm.DestroyGroup(group)
-		return err
+		return nil, err
 	}
 	fields, err := dcgm.FieldGroupCreate(fmt.Sprintf("hami-prof-%d-%d", entityID, time.Now().UnixNano()), migProfUtilFields)
 	if err != nil {
 		dcgm.DestroyGroup(group)
-		return err
+		return nil, err
 	}
 	if err = dcgm.WatchFieldsWithGroupEx(fields, group, 1000000, 60, 60); err != nil {
 		dcgm.FieldGroupDestroy(fields)
 		dcgm.DestroyGroup(group)
-		return err
+		return nil, err
 	}
-	return nil
+	return func() {
+		if err := dcgm.UnwatchFields(fields, group); err != nil {
+			klog.Warningf("wholegpu: unwatch MIG fields: %v", err)
+		}
+		if err := dcgm.FieldGroupDestroy(fields); err != nil {
+			klog.Warningf("wholegpu: destroy MIG field group: %v", err)
+		}
+		if err := dcgm.DestroyGroup(group); err != nil {
+			klog.Warningf("wholegpu: destroy MIG group: %v", err)
+		}
+	}, nil
+}
+
+// Close stops sampling before releasing watches and the embedded host engine.
+func (c *dcgmWholeGPUCollector) Close() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	if c.stopCh != nil {
+		close(c.stopCh)
+	}
+	done := c.doneCh
+	c.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, cleanup := range c.watched {
+		cleanup()
+		delete(c.watched, id)
+		delete(c.watchUUIDs, id)
+	}
+	if c.shutdown != nil {
+		c.shutdown()
+		c.shutdown = nil
+	}
 }
