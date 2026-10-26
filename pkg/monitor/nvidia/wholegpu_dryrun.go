@@ -136,7 +136,12 @@ func RunWholeGPUDryRun(ctx context.Context, client kubernetes.Interface, nvmllib
 		// No NVML probe: this phase only classifies, and the dry run must stay
 		// usable where device memory is unreadable. Scaling detection is then
 		// best-effort and no container is left pending.
-		verdict, _ := evaluateContainerWholeGPU(candidate.devices, nodeDevs, nil)
+		resolved, registry, ready := resolveDynamicMIGCandidate(candidate, nodeDevs)
+		if !ready {
+			report.Diagnostics = append(report.Diagnostics, WholeGPUDiagnostic{Namespace: candidate.pod.Namespace, Pod: candidate.pod.Name, Container: candidate.container, Status: "pending-mig", Message: "MIG runtime identity is missing or inconsistent"})
+			continue
+		}
+		verdict, _ := evaluateContainerWholeGPU(resolved, registry, nil)
 		if verdict != confirmedWholeGPU {
 			report.Diagnostics = append(report.Diagnostics, wholeGPUVerdictDiagnostic(candidate, verdict, nodeDevs))
 			continue
@@ -146,7 +151,7 @@ func RunWholeGPUDryRun(ctx context.Context, client kubernetes.Interface, nvmllib
 			Namespace: candidate.pod.Namespace,
 			Pod:       candidate.pod.Name,
 			Container: candidate.container,
-			Devices:   makeWholeGPUDeviceReports(candidate.devices),
+			Devices:   makeWholeGPUDeviceReports(resolved),
 		})
 	}
 
