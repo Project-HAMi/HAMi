@@ -17,12 +17,14 @@ limitations under the License.
 package nvidia
 
 import (
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 func TestDynamicMIGRuntimeIdentity(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"syscall"
@@ -594,7 +595,7 @@ func resolveDynamicMIGCandidate(c wholeGPUCandidate, registry map[string]*device
 		return c.devices, registry, true
 	}
 	ci := -1
-	for i := 0; i < len(c.pod.Spec.InitContainers)+len(c.pod.Spec.Containers); i++ {
+	for i := range len(c.pod.Spec.InitContainers) + len(c.pod.Spec.Containers) {
 		if name, ok := containerNameByIndex(c.pod, i); ok && name == c.container {
 			ci = i
 			break
@@ -602,9 +603,7 @@ func resolveDynamicMIGCandidate(c wholeGPUCandidate, registry map[string]*device
 	}
 	resolved := append(device.ContainerDevices(nil), c.devices...)
 	nodes := make(map[string]*device.DeviceInfo, len(registry)+len(resolved))
-	for k, v := range registry {
-		nodes[k] = v
-	}
+	maps.Copy(nodes, registry)
 	for di, dev := range resolved {
 		parent := registry[dev.UUID]
 		if parent == nil || parent.Mode != nv.MigMode {
