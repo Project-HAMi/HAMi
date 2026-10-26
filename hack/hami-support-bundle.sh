@@ -500,7 +500,7 @@ collect_component_pod_metadata() {
 collect_component_logs() {
   local component="$1" optional_empty_detail="${2:-}" selector="app.kubernetes.io/component=hami-$1"
   local list_path="$bundle_dir/artifacts/components/$component-pods.txt" line pod_name count=0
-  local restart_counts previous_id
+  local restart_statuses previous_id container_name restart_count restarted
   collect "$component-log-pods" "components/$component-pods.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o name
   [[ "$dry_run" == false ]] || return 0
   if [[ ! -f "$list_path" ]]; then
@@ -533,12 +533,15 @@ collect_component_logs() {
     collect "$component-logs-$pod_name" "logs/$component/$pod_name.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --all-containers=true --prefix --tail="$tail_lines" --since="$since"
     if [[ "$bundle_limit_reached" == false ]]; then
       previous_id="$component-previous-logs-$pod_name"
-      if restart_counts=$(kubectl "${k[@]}" -n "$namespace" get pod "$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}' {reservation_fd}<&-); then
-        if awk '$1 ~ /^[0-9]+$/ && $1 > 0 { found=1 } END { exit !found }' <<<"$restart_counts"; then
-          collect "$previous_id" "logs/$component/$pod_name.previous.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --previous --all-containers=true --prefix --tail="$tail_lines" --since="$since"
-        else
-          record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" no-restarted-containers
-        fi
+      restarted=false
+      if restart_statuses=$(kubectl "${k[@]}" -n "$namespace" get pod "$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}{range .status.ephemeralContainerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}' {reservation_fd}<&-); then
+        while IFS=$'\t' read -r container_name restart_count; do
+          [[ -n "$container_name" && "$restart_count" =~ ^[0-9]+$ ]] || continue
+          (( restart_count > 0 )) || continue
+          restarted=true
+          collect "$previous_id-$container_name" "logs/$component/$pod_name.$container_name.previous.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" -c "$container_name" --previous --prefix --tail="$tail_lines" --since="$since"
+        done <<<"$restart_statuses"
+        [[ "$restarted" == true ]] || record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" no-restarted-containers
       else
         record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" pod-status-unavailable
       fi

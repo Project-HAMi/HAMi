@@ -59,7 +59,13 @@ if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
   exit 0
 fi
 if [[ " $* " == *"jsonpath="*"restartCount"* ]]; then
-  if [[ " $* " == *"scheduler-"* || " $* " == *" get pod device-plugin-1 "* ]]; then echo 0; else echo 1; fi
+  if [[ " $* " == *"scheduler-"* || " $* " == *" get pod device-plugin-1 "* ]]; then
+    printf 'main\t0\n'
+  elif [[ " $* " == *" get pod device-plugin-2 "* ]]; then
+    printf 'main\t1\nsidecar\t0\n'
+  else
+    printf 'main\t1\n'
+  fi
   exit 0
 fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
@@ -312,7 +318,7 @@ for component in mock-device-plugin lupine-server lupine-session; do
   assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o wide"
   assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o name"
   assert_contains "$KUBECTL_LOG" "logs pod/$component-1 .*--tail=3 --since=1h"
-  assert_contains "$KUBECTL_LOG" "logs pod/$component-1 --previous .*--tail=3 --since=1h"
+  assert_contains "$KUBECTL_LOG" "logs pod/$component-1 -c main --previous .*--tail=3 --since=1h"
   test -f "$bundle/artifacts/components/$component-pod-metadata.txt" || fail "$component Pod metadata was not collected"
 done
 for component in mock-device-plugin lupine-server; do
@@ -332,13 +338,15 @@ assert_contains "$KUBECTL_LOG" '-n tenant-a get pod target -o yaml'
 assert_contains "$KUBECTL_LOG" '-n tenant-a get events --field-selector involvedObject.kind=Pod'
 assert_contains "$KUBECTL_LOG" '-n hami get configmaps'
 assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--tail=3 --since=1h'
-assert_not_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 --previous'
-assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-2 --previous .*--tail=3 --since=1h'
+assert_not_contains "$KUBECTL_LOG" 'logs pod/device-plugin-1 .*--previous'
+assert_contains "$KUBECTL_LOG" 'logs pod/device-plugin-2 -c main --previous .*--tail=3 --since=1h'
+assert_not_contains "$KUBECTL_LOG" 'logs pod/device-plugin-2 -c sidecar --previous'
+assert_not_contains "$KUBECTL_LOG" 'logs .*--previous .*--all-containers'
 assert_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-logs-device-plugin-3"'
 assert_contains "$bundle/manifest.json" '"status":"skipped","collector":"device-plugin-previous-logs-device-plugin-1".*no-restarted-containers'
 assert_not_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-previous-logs-device-plugin-1"'
 test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.txt" || fail 'a Pod log failure stopped later Pod collection'
-test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.previous.txt" || fail 'previous container logs were not collected'
+test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.main.previous.txt" || fail 'previous container logs were not collected'
 assert_no_secret_requests "$KUBECTL_LOG" || fail 'collector requested a Secret resource'
 if grep -Eqi '(^|[[:space:]])(exec|debug|apply|create|delete|patch|replace|scale|set|label|annotate|cordon|drain|taint)([[:space:]]|$)' "$KUBECTL_LOG"; then
   fail 'collector issued a mutating or remote-execution kubectl command'

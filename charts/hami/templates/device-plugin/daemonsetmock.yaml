@@ -4,6 +4,8 @@ kind: DaemonSet
 metadata:
   name: {{ include "hami-vgpu.mock-device-plugin" . }}
   namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-mock-device-plugin
 spec:
   selector:
     matchLabels:
