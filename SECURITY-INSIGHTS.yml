@@ -141,8 +141,9 @@ repository:
           release: false
         results: {}
         comment: |
-          Supply-chain checks on pushes to master and on a schedule, with
-          results published to scorecard.dev and GitHub code scanning.
+          Supply-chain checks on pushes to master, a weekly schedule and
+          branch protection rule changes, with results published to
+          scorecard.dev and uploaded to GitHub code scanning.
       - name: Trivy
         type: SCA
         version: latest
