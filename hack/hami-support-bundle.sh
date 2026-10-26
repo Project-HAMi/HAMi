@@ -494,13 +494,56 @@ collect_component_pod_metadata() {
   collect "$component-pod-metadata" "components/$component-pod-metadata.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o wide
 }
 
+# Discover DaemonSets by either their own component label or the label on their
+# Pod template. The latter keeps diagnostics compatible with older mock charts
+# that labelled Pods but not their DaemonSet resource.
+discover_component_daemonsets() {
+  local component="$1" daemonsets name resource_component template_component
+  if ! daemonsets=$(kubectl "${k[@]}" -n "$namespace" get daemonsets -o 'jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.labels.app\.kubernetes\.io/component}{"|"}{.spec.template.metadata.labels.app\.kubernetes\.io/component}{"\n"}{end}' {reservation_fd}<&-); then
+    return 1
+  fi
+  while IFS='|' read -r name resource_component template_component; do
+    [[ -n "$name" && ( "$resource_component" == "hami-$component" || "$template_component" == "hami-$component" ) ]] || continue
+    printf 'daemonset/%s\n' "$name"
+  done <<<"$daemonsets"
+}
+
+# Check each discovered DaemonSet by name, so template-label fallback works for
+# older charts whose DaemonSet metadata did not carry the component label.
+collect_component_daemonset_rollouts() {
+  local workloads_path="$1" workload daemonset_name status=0
+  while IFS= read -r workload; do
+    [[ "$workload" == daemonset/* ]] || continue
+    daemonset_name=${workload#daemonset/}
+    if [[ ! "$daemonset_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+      printf 'invalid DaemonSet name: %s\n' "$daemonset_name" >&2
+      status=1
+      continue
+    fi
+    kubectl "${k[@]}" -n "$namespace" rollout status "daemonset/$daemonset_name" --timeout=30s {reservation_fd}<&- || status=1
+  done <"$workloads_path"
+  return "$status"
+}
+
+# Request previous output separately for each restarted container while keeping
+# the legacy per-Pod artifact path for existing support-bundle consumers.
+collect_previous_component_logs() {
+  local pod_name="$1" container_name status=0
+  shift
+  for container_name in "$@"; do
+    kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" -c "$container_name" --previous --prefix --tail="$tail_lines" --since="$since" {reservation_fd}<&- || status=1
+  done
+  return "$status"
+}
+
 # Discover component Pods once, sort them, and collect each Pod's logs serially.
 # optional_empty_detail makes an empty optional component explicit in the
 # manifest; required components retain their original empty-list behaviour.
 collect_component_logs() {
   local component="$1" optional_empty_detail="${2:-}" selector="app.kubernetes.io/component=hami-$1"
   local list_path="$bundle_dir/artifacts/components/$component-pods.txt" line pod_name count=0
-  local restart_statuses previous_id container_name restart_count restarted
+  local restart_statuses previous_id container_name restart_count
+  local -a restarted_containers=()
   collect "$component-log-pods" "components/$component-pods.txt" kubectl "${k[@]}" -n "$namespace" get pods -l "$selector" -o name
   [[ "$dry_run" == false ]] || return 0
   if [[ ! -f "$list_path" ]]; then
@@ -533,15 +576,18 @@ collect_component_logs() {
     collect "$component-logs-$pod_name" "logs/$component/$pod_name.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" --all-containers=true --prefix --tail="$tail_lines" --since="$since"
     if [[ "$bundle_limit_reached" == false ]]; then
       previous_id="$component-previous-logs-$pod_name"
-      restarted=false
+      restarted_containers=()
       if restart_statuses=$(kubectl "${k[@]}" -n "$namespace" get pod "$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}{range .status.ephemeralContainerStatuses[*]}{.name}{"\t"}{.restartCount}{"\n"}{end}' {reservation_fd}<&-); then
         while IFS=$'\t' read -r container_name restart_count; do
           [[ -n "$container_name" && "$restart_count" =~ ^[0-9]+$ ]] || continue
           (( restart_count > 0 )) || continue
-          restarted=true
-          collect "$previous_id-$container_name" "logs/$component/$pod_name.$container_name.previous.txt" kubectl "${k[@]}" -n "$namespace" logs "pod/$pod_name" -c "$container_name" --previous --prefix --tail="$tail_lines" --since="$since"
+          restarted_containers+=("$container_name")
         done <<<"$restart_statuses"
-        [[ "$restarted" == true ]] || record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" no-restarted-containers
+        if (( ${#restarted_containers[@]} > 0 )); then
+          collect "$previous_id" "logs/$component/$pod_name.previous.txt" collect_previous_component_logs "$pod_name" "${restarted_containers[@]}"
+        else
+          record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" no-restarted-containers
+        fi
       else
         record skipped "$previous_id" "artifacts/logs/$component/$pod_name.previous.txt" pod-status-unavailable
       fi
@@ -559,19 +605,22 @@ collect_optional_daemonset_component() {
   local empty_logs_detail=component-not-installed
 
   collect_component_pod_metadata "$component"
-  collect "$component-daemonsets" "components/$component-daemonsets.txt" kubectl "${k[@]}" -n "$namespace" get daemonsets -l "$selector" -o name
   if [[ "$dry_run" == true ]]; then
+    collect "$component-daemonsets" "components/$component-daemonsets.txt" kubectl "${k[@]}" -n "$namespace" get daemonsets -o 'jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.labels.app\.kubernetes\.io/component}{"|"}{.spec.template.metadata.labels.app\.kubernetes\.io/component}{"\n"}{end}'
     collect "$component-rollout" "components/$component-rollout.txt" kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l "$selector" --timeout=30s
-  elif [[ -s "$workloads_path" ]]; then
-    empty_logs_detail=no-matching-pods
-    collect "$component-rollout" "components/$component-rollout.txt" kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l "$selector" --timeout=30s
-  elif [[ -f "$workloads_path" ]]; then
-    record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" component-not-installed
-  elif [[ "$bundle_limit_reached" == true ]]; then
-    record limited "$component-rollout" "artifacts/components/$component-rollout.txt" "bundle-byte-limit=$max_bundle_bytes;not-run"
   else
-    empty_logs_detail=workload-discovery-unavailable
-    record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" workload-discovery-unavailable
+    collect "$component-daemonsets" "components/$component-daemonsets.txt" discover_component_daemonsets "$component"
+    if [[ -s "$workloads_path" ]]; then
+      empty_logs_detail=no-matching-pods
+      collect "$component-rollout" "components/$component-rollout.txt" collect_component_daemonset_rollouts "$workloads_path"
+    elif [[ -f "$workloads_path" ]]; then
+      record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" component-not-installed
+    elif [[ "$bundle_limit_reached" == true ]]; then
+      record limited "$component-rollout" "artifacts/components/$component-rollout.txt" "bundle-byte-limit=$max_bundle_bytes;not-run"
+    else
+      empty_logs_detail=workload-discovery-unavailable
+      record skipped "$component-rollout" "artifacts/components/$component-rollout.txt" workload-discovery-unavailable
+    fi
   fi
   collect_component_logs "$component" "$empty_logs_detail"
 }
@@ -623,9 +672,6 @@ collect scheduler-rollout components/scheduler.txt kubectl "${k[@]}" -n "$namesp
 collect device-plugin-rollout components/device-plugin.txt kubectl "${k[@]}" -n "$namespace" rollout status daemonset -l app.kubernetes.io/component=hami-device-plugin --timeout=30s
 collect_component_logs scheduler
 collect_component_logs device-plugin
-collect_optional_daemonset_component mock-device-plugin
-collect_optional_daemonset_component lupine-server
-collect_optional_pod_component lupine-session
 
 # Vendor utilities run only on the host executing this script. They are never
 # run in Kubernetes workloads or presented as diagnostics from a remote node.
@@ -643,6 +689,12 @@ for index in "${!vendor_tools[@]}"; do
     record skipped "vendor-$tool" "artifacts/vendor/$tool.txt" unavailable-on-collector-host
   fi
 done
+
+# Keep host-level vendor diagnostics ahead of optional component logs so a
+# verbose optional workload cannot consume the remaining bundle budget first.
+collect_optional_daemonset_component mock-device-plugin
+collect_optional_daemonset_component lupine-server
+collect_optional_pod_component lupine-session
 
 # Escape controlled manifest fields as JSON strings.
 json_escape() {

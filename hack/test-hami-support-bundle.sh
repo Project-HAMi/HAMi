@@ -36,16 +36,25 @@ if [[ " $* " == *" rollout status "* ]]; then
   echo 'Authorization: Basic Zm9vOmJhcg==' >&2
   exit 1
 fi
+if [[ "${MOCK_MODE:-}" == optional-pod-discovery-unavailable && " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
+  case " $* " in
+    *hami-mock-device-plugin*|*hami-lupine-server*|*hami-lupine-session*) exit 1 ;;
+  esac
+fi
 if [[ ( "${MOCK_MODE:-}" == optional-absent || "${MOCK_MODE:-}" == optional-no-pods ) && " $* " == *" get pods "* ]]; then
   case " $* " in
     *hami-mock-device-plugin*|*hami-lupine-server*|*hami-lupine-session*) exit 0 ;;
   esac
 fi
-if [[ " $* " == *" get daemonsets "* && " $* " == *" -o name "* ]]; then
-  case " $* " in
-    *hami-mock-device-plugin*) [[ "${MOCK_MODE:-}" == optional-absent ]] || echo daemonset/hami-mock-device-plugin ;;
-    *hami-lupine-server*) [[ "${MOCK_MODE:-}" == optional-absent ]] || echo daemonset/hami-lupine-server ;;
-  esac
+if [[ " $* " == *" get daemonsets "* && " $* " != *" -l "* && " $* " == *"jsonpath="* ]]; then
+  [[ "${MOCK_MODE:-}" != optional-workload-discovery-unavailable ]] || exit 1
+  [[ "${MOCK_MODE:-}" != optional-absent ]] || exit 0
+  if [[ "${MOCK_MODE:-}" == legacy-mock-daemonset ]]; then
+    printf 'legacy-mock-device-plugin||hami-mock-device-plugin\n'
+  else
+    printf 'hami-mock-device-plugin|hami-mock-device-plugin|hami-mock-device-plugin\n'
+  fi
+  printf 'hami-lupine-server|hami-lupine-server|hami-lupine-server\n'
   exit 0
 fi
 if [[ " $* " == *" get pods "* && " $* " == *" -o name "* ]]; then
@@ -71,6 +80,11 @@ fi
 if [[ " $* " == *"jsonpath={.spec.nodeName}"* ]]; then echo gpu-node-a; exit 0; fi
 if [[ " $* " == *" logs "* && " $* " == *" --previous "* ]]; then echo 'previous container diagnostics'; exit 0; fi
 if [[ " $* " == *" logs pod/device-plugin-3 "* ]]; then echo 'one Pod log failed' >&2; exit 1; fi
+if [[ "${MOCK_MODE:-}" == optional-large && " $* " == *" logs pod/"* ]]; then
+  case " $* " in
+    *mock-device-plugin*|*lupine-server*|*lupine-session*) head -c "${MOCK_BYTES:-524288}" /dev/zero | tr '\0' x | fold -w 1024; exit 0 ;;
+  esac
+fi
 if [[ "${MOCK_MODE:-}" == large ]]; then
   head -c "${MOCK_BYTES:-4096}" /dev/zero | tr '\0' x
   exit 0
@@ -314,6 +328,7 @@ assert_contains "$bundle/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
 assert_contains "$VENDOR_LOG" '^info$'
 assert_contains "$KUBECTL_LOG" ' get deployments -l app.kubernetes.io/component=hami-scheduler '
 assert_contains "$KUBECTL_LOG" ' get daemonsets -l app.kubernetes.io/component=hami-device-plugin '
+assert_contains "$KUBECTL_LOG" ' get daemonsets -o jsonpath=.*template.*labels'
 for component in mock-device-plugin lupine-server lupine-session; do
   assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o wide"
   assert_contains "$KUBECTL_LOG" " get pods -l app.kubernetes.io/component=hami-$component -o name"
@@ -322,8 +337,7 @@ for component in mock-device-plugin lupine-server lupine-session; do
   test -f "$bundle/artifacts/components/$component-pod-metadata.txt" || fail "$component Pod metadata was not collected"
 done
 for component in mock-device-plugin lupine-server; do
-  assert_contains "$KUBECTL_LOG" " get daemonsets -l app.kubernetes.io/component=hami-$component -o name"
-  assert_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
+  assert_contains "$KUBECTL_LOG" " rollout status daemonset/hami-$component --timeout=30s"
   assert_contains "$bundle/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-rollout\""
 done
 assert_not_contains "$KUBECTL_LOG" 'rollout status .*app.kubernetes.io/component=hami-lupine-session'
@@ -346,7 +360,7 @@ assert_contains "$bundle/manifest.json" '"status":"failed","collector":"device-p
 assert_contains "$bundle/manifest.json" '"status":"skipped","collector":"device-plugin-previous-logs-device-plugin-1".*no-restarted-containers'
 assert_not_contains "$bundle/manifest.json" '"status":"failed","collector":"device-plugin-previous-logs-device-plugin-1"'
 test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.txt" || fail 'a Pod log failure stopped later Pod collection'
-test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.main.previous.txt" || fail 'previous container logs were not collected'
+test -f "$bundle/artifacts/logs/device-plugin/device-plugin-4.previous.txt" || fail 'previous container logs were not collected'
 assert_no_secret_requests "$KUBECTL_LOG" || fail 'collector requested a Secret resource'
 if grep -Eqi '(^|[[:space:]])(exec|debug|apply|create|delete|patch|replace|scale|set|label|annotate|cordon|drain|taint)([[:space:]]|$)' "$KUBECTL_LOG"; then
   fail 'collector issued a mutating or remote-execution kubectl command'
@@ -365,7 +379,7 @@ optional_absent="$tmp/optional-absent-bundle/hami-support-bundle"
 for component in mock-device-plugin lupine-server; do
   assert_contains "$optional_absent/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-rollout\".*component-not-installed"
   assert_contains "$optional_absent/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-logs\".*component-not-installed"
-  assert_not_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component "
+  assert_not_contains "$KUBECTL_LOG" " rollout status daemonset/hami-$component "
 done
 assert_contains "$optional_absent/manifest.json" '"status":"skipped","collector":"lupine-session-logs".*component-not-installed'
 assert_not_contains "$optional_absent/manifest.json" '"status":"failed","collector":"(mock-device-plugin|lupine-server|lupine-session)'
@@ -378,9 +392,47 @@ mkdir "$tmp/optional-no-pods-bundle"
 tar -xzf "$tmp/optional-no-pods-out/hami-support-bundle.tar.gz" -C "$tmp/optional-no-pods-bundle"
 optional_no_pods="$tmp/optional-no-pods-bundle/hami-support-bundle"
 for component in mock-device-plugin lupine-server; do
-  assert_contains "$KUBECTL_LOG" " rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
+  assert_contains "$KUBECTL_LOG" " rollout status daemonset/hami-$component --timeout=30s"
   assert_contains "$optional_no_pods/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-rollout\""
   assert_contains "$optional_no_pods/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-logs\".*no-matching-pods"
+done
+
+# Older chart releases labelled the mock DaemonSet's Pod template but not the
+# DaemonSet itself. Discovery falls back to that template label and rolls out
+# the discovered workload by name.
+: >"$KUBECTL_LOG"
+MOCK_MODE=legacy-mock-daemonset "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/legacy-mock-out" >/dev/null
+mkdir "$tmp/legacy-mock-bundle"
+tar -xzf "$tmp/legacy-mock-out/hami-support-bundle.tar.gz" -C "$tmp/legacy-mock-bundle"
+legacy_mock="$tmp/legacy-mock-bundle/hami-support-bundle"
+assert_contains "$legacy_mock/artifacts/components/mock-device-plugin-daemonsets.txt" '^daemonset/legacy-mock-device-plugin$'
+assert_contains "$KUBECTL_LOG" 'rollout status daemonset/legacy-mock-device-plugin --timeout=30s'
+assert_contains "$legacy_mock/manifest.json" '"status":"failed","collector":"mock-device-plugin-rollout"'
+assert_not_contains "$legacy_mock/manifest.json" '"collector":"mock-device-plugin-rollout".*component-not-installed'
+
+# Optional Pod-listing failures stay distinguishable from a component that is
+# absent, instead of presenting a failed discovery as not-installed.
+: >"$KUBECTL_LOG"
+MOCK_MODE=optional-pod-discovery-unavailable "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/pod-discovery-unavailable-out" >/dev/null
+mkdir "$tmp/pod-discovery-unavailable-bundle"
+tar -xzf "$tmp/pod-discovery-unavailable-out/hami-support-bundle.tar.gz" -C "$tmp/pod-discovery-unavailable-bundle"
+pod_discovery_unavailable="$tmp/pod-discovery-unavailable-bundle/hami-support-bundle"
+for component in mock-device-plugin lupine-server lupine-session; do
+  assert_contains "$pod_discovery_unavailable/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-logs\".*pod-discovery-unavailable"
+  assert_not_contains "$pod_discovery_unavailable/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-logs\""
+done
+
+# Failed optional DaemonSet discovery keeps rollout state distinct while Pod
+# logs continue when their independent discovery succeeds.
+: >"$KUBECTL_LOG"
+MOCK_MODE=optional-workload-discovery-unavailable "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/workload-discovery-unavailable-out" >/dev/null
+mkdir "$tmp/workload-discovery-unavailable-bundle"
+tar -xzf "$tmp/workload-discovery-unavailable-out/hami-support-bundle.tar.gz" -C "$tmp/workload-discovery-unavailable-bundle"
+workload_discovery_unavailable="$tmp/workload-discovery-unavailable-bundle/hami-support-bundle"
+for component in mock-device-plugin lupine-server; do
+  assert_contains "$workload_discovery_unavailable/manifest.json" "\"status\":\"skipped\",\"collector\":\"$component-rollout\".*workload-discovery-unavailable"
+  assert_not_contains "$workload_discovery_unavailable/manifest.json" "\"status\":\"failed\",\"collector\":\"$component-rollout\""
+  test -f "$workload_discovery_unavailable/artifacts/logs/$component/$component-1.txt" || fail "$component logs were not collected after workload discovery failed"
 done
 
 # Prove the Secret API guard recognizes both Kubernetes resource spellings.
@@ -418,6 +470,7 @@ for component in mock-device-plugin lupine-server lupine-session; do
   assert_contains "$tmp/ns-dry.txt" "get pods -l app.kubernetes.io/component=hami-$component -o wide"
   assert_contains "$tmp/ns-dry.txt" "get pods -l app.kubernetes.io/component=hami-$component -o name"
 done
+assert_contains "$tmp/ns-dry.txt" 'get daemonsets -o jsonpath='
 for component in mock-device-plugin lupine-server; do
   assert_contains "$tmp/ns-dry.txt" "rollout status daemonset -l app.kubernetes.io/component=hami-$component --timeout=30s"
 done
@@ -472,6 +525,18 @@ tar -xzf "$tmp/overall-out/hami-support-bundle.tar.gz" -C "$tmp/overall-bundle"
 overall="$tmp/overall-bundle/hami-support-bundle"
 assert_contains "$overall/manifest.json" '"status":"limited"'
 test "$(du -sb "$overall" | awk '{print $1}')" -le 131072 || fail 'uncompressed bundle exceeds overall limit'
+
+# Optional component logs must not pre-empt the host-level vendor diagnostics
+# when the shared bundle budget is close to exhaustion.
+: >"$KUBECTL_LOG"
+MOCK_MODE=optional-large MOCK_BYTES=524288 HAMI_SUPPORT_MAX_BUNDLE_BYTES=1048576 "$root/hack/hami-support-bundle.sh" --kubeconfig "$tmp/config" --context test --namespace hami --output-dir "$tmp/vendor-priority-out" >/dev/null
+mkdir "$tmp/vendor-priority-bundle"
+tar -xzf "$tmp/vendor-priority-out/hami-support-bundle.tar.gz" -C "$tmp/vendor-priority-bundle"
+vendor_priority="$tmp/vendor-priority-bundle/hami-support-bundle"
+test -f "$vendor_priority/artifacts/vendor/npu-smi.txt" || fail 'optional logs exhausted the bundle before vendor diagnostics'
+assert_contains "$vendor_priority/artifacts/vendor/npu-smi.txt" 'npu diagnostics'
+assert_contains "$vendor_priority/manifest.json" '"status":"success","collector":"vendor-npu-smi"'
+assert_contains "$vendor_priority/manifest.json" '"status":"limited"'
 
 # Private staging exists with mode 700 and is removed after interruption.
 mkdir "$tmp/private-staging"
