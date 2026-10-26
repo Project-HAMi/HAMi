@@ -275,19 +275,6 @@ func (c *dcgmWholeGPUCollector) GpuInstanceSmUtil(parentGpuUuid string, nvmlInst
 	return 0
 }
 
-// lookupMIGEntityID returns the DCGM entity ID for a (parent GPU UUID, NVML
-// instance ID) pair, or false if the hierarchy has not been refreshed yet or
-// no matching MIG entity exists.
-func (c *dcgmWholeGPUCollector) lookupMIGEntityID(parentGpuUuid string, nvmlInstanceId uint) (uint, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.migHierarchy == nil {
-		return 0, false
-	}
-	id, ok := c.migHierarchy[migHierarchyKey{parentGpuUuid: parentGpuUuid, nvmlInstanceId: nvmlInstanceId}]
-	return id, ok
-}
-
 // WatchMIGEntity registers the profiling counter before reading cached values.
 func (realDCGMQuerier) WatchMIGEntity(entityID uint) (func(), error) {
 	group, err := dcgm.CreateGroup(fmt.Sprintf("hami-mig-%d-%d", entityID, time.Now().UnixNano()))
