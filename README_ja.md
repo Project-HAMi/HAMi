@@ -8,7 +8,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Project-HAMi/HAMi/badge)](https://scorecard.dev/viewer/?uri=github.com/Project-HAMi/HAMi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
-[![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
+[![codecov](https://app.codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://app.codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
@@ -157,9 +157,9 @@ HAMi は AI ワークロード向けに複数のスケジューリングモー�
 - **トポロジアウェアスケジューリング**：サポートされている場合、GPU トポロジに基づいてデバイスの組み合わせを選択します。
 - **mutex**：空いている GPU のみを割り当て、ワークロードがデバイスを共有しないようにします。
 - **numa**：NUMA ノードでデバイスをグループ化するソートキーで、binpack または spread と組み合わせて使います。Pod は `nvidia.com/numa-bind` アノテーションで GPU 同士の NUMA 同一ノード配置を要求できます。
+- **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 クラスタのデフォルトは `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` と `gpuSchedulerPolicy` で設定します。Pod は `hami.io/node-scheduler-policy` と `hami.io/gpu-scheduler-policy` アノテーションで上書きでき、GPU ポリシーは `binpack,numa` のようなカンマ区切りの組み合わせを受け付けます。
-- **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 HAMi はデフォルトの Kubernetes スケジューラパスと互換性があり、バッチ指向の AI ワークロードに Volcano を組み合わせて使用することもできます。現在のスケジューラ統合ガイドについては、[HAMi Web サイト](https://project-hami.io/docs/)を参照してください。
 
