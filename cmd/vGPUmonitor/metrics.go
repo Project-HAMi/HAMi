@@ -54,10 +54,15 @@ type ClusterManagerCollector struct {
 // Metric and label names follow Prometheus naming best practices:
 // https://prometheus.io/docs/practices/naming/
 var (
+	unknownProcessCountDesc = prometheus.NewDesc(
+		"hami_host_gpu_unknown_process_count",
+		"Distinct live NVML compute/graphics processes not matched to a container allocated this GPU by HAMi; omitted when the inventory fails",
+		[]string{"node", "device_uuid"}, nil,
+	)
 	// Catches a degraded Collect that still returns HTTP 200.
 	collectSuccessDesc = prometheus.NewDesc(
 		"hami_vgpumonitor_collect_success",
-		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0); metrics a GPU does not support are not counted as failures",
+		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0); unsupported optional GPU metrics are skipped; an enabled unknown-process inventory must succeed",
 		[]string{"node"}, nil,
 	)
 
@@ -213,6 +218,7 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 // Describe sends all the metrics descriptors that the collector might use.
 // These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- unknownProcessCountDesc
 	ch <- collectSuccessDesc
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
@@ -248,6 +254,17 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 	success := 1.0
+	if os.Getenv("HAMI_MONITOR_UNKNOWN_PROCESSES") == "true" {
+		counts, err := cc.ClusterManager.containerLister.UnknownProcessCounts()
+		if err != nil {
+			klog.Errorf("Unknown GPU process inventory: %v", err)
+			success = 0
+		}
+		if err := emitUnknownProcessCounts(ch, counts); err != nil {
+			klog.Errorf("Failed to emit unknown GPU process counts: %v", err)
+			success = 0
+		}
+	}
 
 	// Collect GPU information
 	if err := cc.collectGPUInfo(ch); err != nil {
@@ -763,4 +780,15 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
+}
+
+// emitUnknownProcessCounts emits only successful device inventories, including
+// explicit zeroes. Failed inventories are absent from counts.
+func emitUnknownProcessCounts(ch chan<- prometheus.Metric, counts []nvidia.UnknownProcessCount) error {
+	for _, count := range counts {
+		if err := sendMetric(ch, unknownProcessCountDesc, prometheus.GaugeValue, float64(count.Count), os.Getenv(util.NodeNameEnvName), count.UUID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
