@@ -210,14 +210,17 @@ scheduler:
     # writes a self-signed certificate to Secret `<fullname>-scheduler-tls`, and a post-install and post-upgrade hook Job sets its CA on the webhook.
     # Requires `admissionWebhook.enabled`.
     enabled: true
-    # Mirror of registry.k8s.io/ingress-nginx/kube-webhook-certgen.
     imageNew:
-      # -- Registry of the certgen image. `global.imageRegistry` overrides it.
-      registry: "registry.cn-hangzhou.aliyuncs.com"
-      # -- Repository of the ingress-nginx certgen mirror.
-      repository: "google_containers/kube-webhook-certgen"
-      # -- Tag of the certgen image.
-      tag: "v1.6.9"
+      # -- Registry of the certgen image. If `registry.k8s.io` is inaccessible, use `registry.cn-hangzhou.aliyuncs.com`
+      # with the matching repository and tag below before installing or upgrading.
+      # `global.imageRegistry` overrides this field; leave it empty to use this per-component setting.
+      registry: "registry.k8s.io"
+      # -- Repository of the certgen image. For the China mirror, use `google_containers/kube-webhook-certgen`.
+      repository: "ingress-nginx/kube-webhook-certgen"
+      # -- Certgen version and multi-architecture index digest, in `tag@sha256:...` format.
+      # For the China mirror, use `v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989`.
+      # Source and mirror index digests differ; change registry, repository, and tag together.
+      tag: "v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd"
       # -- Pull policy of the certgen image.
       pullPolicy: IfNotPresent
       # -- Names of existing image pull Secrets for the certgen Jobs, added after `global.imagePullSecrets`.
