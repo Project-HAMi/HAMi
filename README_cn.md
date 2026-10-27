@@ -8,7 +8,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Project-HAMi/HAMi/badge)](https://scorecard.dev/viewer/?uri=github.com/Project-HAMi/HAMi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
-[![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
+[![codecov](https://app.codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://app.codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
@@ -45,7 +45,7 @@ HAMi 提供了一个 Kubernetes 原生层：
 - 提升共享 Kubernetes AI 集群中的 GPU 利用率。
 - 在同一加速器资源池上运行多租户 Notebook、训练和推理工作负载。
 - 构建具有公平设备分配和配额控制的私有云 AI 平台。
-- 运营跨 NVIDIA、昇腾、寒武纪、海光、天数智芯、沐曦、摩尔线程等厂商的异构加速器集群。
+- 运营跨 NVIDIA、昇腾、寒武纪、海光、天数智芯、昆仑芯、沐曦、摩尔线程等厂商的异构加速器集群。
 - 将 HAMi 与 kube-scheduler、Volcano 等 Kubernetes 调度器结合用于批量 AI 工作负载。
 
 ## 工作原理
@@ -157,9 +157,9 @@ HAMi 支持多种 AI 工作负载调度模式：
 - **拓扑感知调度**：在支持的情况下，基于 GPU 拓扑选择设备组合。
 - **mutex**：只分配空闲 GPU，使工作负载不与其他任务共享设备。
 - **numa**：按 NUMA 节点对设备分组的排序键，可与 binpack 或 spread 组合使用。Pod 可通过 `nvidia.com/numa-bind` 注解请求 GPU 之间的 NUMA 同节点放置。
+- **动态 MIG**：为支持的显卡和模式动态创建和分配 NVIDIA MIG 实例。
 
 集群默认策略通过 `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` 和 `gpuSchedulerPolicy` 设置。Pod 可用 `hami.io/node-scheduler-policy` 和 `hami.io/gpu-scheduler-policy` 注解覆盖默认值，GPU 策略支持逗号分隔的组合，例如 `binpack,numa`。
-- **动态 MIG**：为支持的显卡和模式动态创建和分配 NVIDIA MIG 实例。
 
 HAMi 兼容默认 Kubernetes 调度路径，也可与 Volcano 配合用于批量 AI 工作负载。请参阅 [HAMi 网站](https://project-hami.io/docs/)获取当前的调度器集成指南。
 

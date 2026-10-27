@@ -8,7 +8,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Project-HAMi/HAMi/badge)](https://scorecard.dev/viewer/?uri=github.com/Project-HAMi/HAMi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
-[![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
+[![codecov](https://app.codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://app.codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
@@ -45,7 +45,7 @@ HAMi は Kubernetes ネイティブなレイヤーを提供します：
 - 共有 Kubernetes AI クラスターでの GPU 利用率の向上。
 - 同一のアクセラレータプール上でマルチテナントのノートブック、トレーニング、推論ワークロードを実行。
 - 公平なデバイス割り当てとクォータ制御を備えたプライベートクラウド AI プラットフォームの構築。
-- NVIDIA、Ascend、Cambricon、Hygon、Iluvatar、MetaX、Moore Threads など、複数ベンダーのヘテロジニアスアクセラレータクラスターの運用。
+- NVIDIA、Ascend、Cambricon、Hygon、Iluvatar、Kunlunxin、MetaX、Moore Threads など、複数ベンダーのヘテロジニアスアクセラレータクラスターの運用。
 - バッチ AI ワークロード向けに kube-scheduler や Volcano などの Kubernetes スケジューラと HAMi を組み合わせて使用。
 
 ## 仕組み
@@ -146,7 +146,7 @@ kubectl apply -f examples/nvidia/default_use.yaml
 - **高可用性**：`scheduler.leaderElect=true` を設定し、`scheduler.replicas` を 1 より大きくすると、複数のスケジューラレプリカを 1 つのリーダーの背後で実行できます。PodDisruptionBudget も作成されます。
 - **OpenShift と SELinux**：OpenShift では `platform.openshift=true`、SELinux が有効なノードでは `selinux.enabled=true` を設定します。
 - **NetworkPolicy**：`scheduler.networkPolicy.enabled=true` で、スケジューラの webhook と `/refit` ポートへのアクセスを制限します。一部の CNI は、ホストネットワークの kube-apiserver のトラフィックを `namespaceSelector` で照合しないため、webhook に到達できなくなることがあります。`scheduler.admissionWebhook.failurePolicy=Ignore` の場合、Pod は HAMi による変更なしで受け入れられます。
-- **Prometheus Operator**：`prometheus.enabled=true` で、スケジューラとServiceMonitor API が利用可能な場合に、スケジューラとデバイスプラグインの ServiceMonitor を作成します。デバイスプラグインの ServiceMonitor には `devicePlugin.enabled` も必要です。
+- **Prometheus Operator**：`prometheus.enabled=true` で、ServiceMonitor API が利用可能な場合に、スケジューラとデバイスプラグインの ServiceMonitor を作成します。デバイスプラグインの ServiceMonitor には `devicePlugin.enabled` も必要です。
 
 ## スケジューリングポリシー
 
@@ -157,9 +157,9 @@ HAMi は AI ワークロード向けに複数のスケジューリングモー�
 - **トポロジアウェアスケジューリング**：サポートされている場合、GPU トポロジに基づいてデバイスの組み合わせを選択します。
 - **mutex**：空いている GPU のみを割り当て、ワークロードがデバイスを共有しないようにします。
 - **numa**：NUMA ノードでデバイスをグループ化するソートキーで、binpack または spread と組み合わせて使います。Pod は `nvidia.com/numa-bind` アノテーションで GPU 同士の NUMA 同一ノード配置を要求できます。
+- **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 クラスタのデフォルトは `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` と `gpuSchedulerPolicy` で設定します。Pod は `hami.io/node-scheduler-policy` と `hami.io/gpu-scheduler-policy` アノテーションで上書きでき、GPU ポリシーは `binpack,numa` のようなカンマ区切りの組み合わせを受け付けます。
-- **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
 HAMi はデフォルトの Kubernetes スケジューラパスと互換性があり、バッチ指向の AI ワークロードに Volcano を組み合わせて使用することもできます。現在のスケジューラ統合ガイドについては、[HAMi Web サイト](https://project-hami.io/docs/)を参照してください。
 
