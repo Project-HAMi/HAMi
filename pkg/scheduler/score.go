@@ -164,6 +164,16 @@ func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 	return config.NodeSchedulerPolicy
 }
 
+// resolvePreferredSchedulingTerm returns the pod's preferred nodeAffinity
+// terms, or nil when the pod declares none. Required terms are not returned:
+// kube-scheduler already enforces them before calling the extender.
+func resolvePreferredSchedulingTerm(task *corev1.Pod) []corev1.PreferredSchedulingTerm {
+	if task.Spec.Affinity == nil || task.Spec.Affinity.NodeAffinity == nil {
+		return nil
+	}
+	return task.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+}
+
 type peakUsageSnapshot struct {
 	used      int64
 	usedcores int64
@@ -365,7 +375,7 @@ type nodeScoreResult struct {
 	err    error
 }
 
-func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, weights util.DeviceScoringWeights) nodeScoreResult {
+func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, pref *policy.PreferredNodeAffinity, weights util.DeviceScoringWeights) nodeScoreResult {
 	viewStatus(*node)
 
 	nodeInfo := node.NodeInfo
@@ -420,6 +430,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	applyPeakUsage(node, appNodeCopy, peakUsage)
 
 	score.OverrideScore(snapshot, userNodePolicy)
+	score.AddNodeAffinityScore(pref, userNodePolicy, config.NodeAffinityScoreWeight)
 	klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 
 	return nodeScoreResult{score: &score}
@@ -443,6 +454,17 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		return nil, err
 	}
 
+	var pref *policy.PreferredNodeAffinity
+	if terms := resolvePreferredSchedulingTerm(task); len(terms) > 0 && config.NodeAffinityScoreWeight != 0 {
+		parsed, err := policy.NewPreferredNodeAffinity(terms)
+		if err != nil {
+			klog.Warningf("ignoring invalid preferred nodeAffinity terms on pod %s/%s: %v", task.Namespace, task.Name, err)
+		}
+		// parsed keeps every valid term even when others were rejected, and is
+		// nil only when no term is usable.
+		pref = parsed
+	}
+
 	userNodePolicy := resolveNodeSchedulerPolicy(task)
 	res := policy.NodeScoreList{
 		Policy:   userNodePolicy,
@@ -460,7 +482,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		go func(nodeID string, node *NodeUsage) {
 			defer wg.Done()
 
-			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, deviceScoringWeights)
+			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, pref, deviceScoringWeights)
 
 			switch {
 			case result.err != nil:

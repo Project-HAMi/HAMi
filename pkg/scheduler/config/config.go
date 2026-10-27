@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"reflect"
 	"slices"
@@ -66,6 +67,10 @@ var (
 
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
+
+	// NodeAffinityScoreWeight is the bonus added to a node's score when it matches the pod's preferred nodeAffinity,
+	// scaled by the matched weight ratio. 0 (the default) disables the bonus.
+	NodeAffinityScoreWeight float32
 
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
@@ -604,4 +609,15 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	klog.Info("Successfully read and parsed config file")
 	return &yamlData, nil
+}
+
+// ValidateNodeAffinityScoreWeight rejects a --node-affinity-score-weight that
+// would corrupt node ordering: a negative weight turns the preferred-node bonus
+// into a penalty, and NaN or Inf make every score comparison meaningless.
+func ValidateNodeAffinityScoreWeight(weight float32) error {
+	w := float64(weight)
+	if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 {
+		return fmt.Errorf("--node-affinity-score-weight must be a finite number >= 0, got %v", weight)
+	}
+	return nil
 }

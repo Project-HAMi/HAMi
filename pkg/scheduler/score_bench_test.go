@@ -199,7 +199,7 @@ func BenchmarkScoreNode(b *testing.B) {
 				node := nodes["node-0"]
 				b.StartTimer()
 
-				result := scheduler.scoreNode("node-0", node, requests, pod, nodePolicy, weights)
+				result := scheduler.scoreNode("node-0", node, requests, pod, nodePolicy, nil, weights)
 				if result.err != nil {
 					b.Fatalf("scoreNode returned an error: %v", result.err)
 				}
@@ -230,7 +230,7 @@ func TestBenchmarkScoreFixturesFit(t *testing.T) {
 
 	nodes = newBenchmarkNodes(1, 4)
 	result := scheduler.scoreNode("node-0", (*nodes)["node-0"], requests, pod,
-		util.NodeSchedulerPolicyBinpack.String(), util.DefaultDeviceScoringWeights())
+		util.NodeSchedulerPolicyBinpack.String(), nil, util.DefaultDeviceScoringWeights())
 	if result.err != nil {
 		t.Fatalf("scoreNode returned an error: %v", result.err)
 	}
@@ -309,7 +309,7 @@ func BenchmarkScoreNodeOccupied(b *testing.B) {
 				occupyBenchmarkNode(node, podsPerGPU)
 				b.StartTimer()
 
-				result := scheduler.scoreNode("node-0", node, requests, pod, nodePolicy, weights)
+				result := scheduler.scoreNode("node-0", node, requests, pod, nodePolicy, nil, weights)
 				if result.err != nil {
 					b.Fatalf("scoreNode returned an error: %v", result.err)
 				}
