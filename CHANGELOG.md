@@ -452,6 +452,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Add MIG monitoring support for pods that use dynamic MIG
 - Select remote-gpu Lupine server pools by label and add a `securityContext` for the Lupine server
 - Add a redacted HAMi diagnostic bundle collector
+- Remote client: add `nvidia-smi` support
 - Hygon: share the HCU core when a pod requests no cores, like NVIDIA (DTK v26.10+)
 
 **Deprecations**
@@ -464,4 +465,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Check MIG allocations against the registered profiles in the device plugin
 - Skip terminated pods in the per-container vGPU metrics
 - Honor the `disable-core-limit` flag in the device plugin
+- Mark every replica and MIG slice of a GPU unhealthy on an XID error in the device plugin
+- Requeue remote-gpu pods that wait for a Lupine fleet change
+- Resolve dynamic MIG identities and watch profiling fields in the monitor
 
