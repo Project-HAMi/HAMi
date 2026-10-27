@@ -45,8 +45,7 @@ spec:
       priorityClassName: system-node-critical
       {{- /* Seccomp only at the Pod level: a Pod-level runAsNonRoot would
              also bind the colocated kube-scheduler container, whose image
-             is not guaranteed to run as non-root. The extender sets its own
-             runAsNonRoot in its container securityContext. */}}
+             is not guaranteed to run as non-root. */}}
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -92,7 +91,19 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
-          {{- with .Values.scheduler.extender.securityContext }}
+          {{- /* Fall back to the shipped defaults when the key is absent:
+                 values reused from a release that predates this value (helm
+                 upgrade --reuse-values) do not contain it, and the extender
+                 must not lose its restrictions there. An explicit empty map
+                 still renders no securityContext. */}}
+          {{- $extenderSecurityContext := dict
+                "allowPrivilegeEscalation" false
+                "capabilities" (dict "drop" (list "ALL"))
+                "seccompProfile" (dict "type" "RuntimeDefault") }}
+          {{- if not (kindIs "invalid" .Values.scheduler.extender.securityContext) }}
+          {{- $extenderSecurityContext = .Values.scheduler.extender.securityContext }}
+          {{- end }}
+          {{- with $extenderSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}

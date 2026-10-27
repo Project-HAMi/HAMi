@@ -151,12 +151,16 @@ scheduler:
       pullSecrets: []
     # -- Resource requests and limits for the scheduler extender container.
     resources: {}
-    # -- Container securityContext of the scheduler extender. These are the
-    # restrictions the extender already runs under when `platform.openshift`
-    # is true; they apply on every platform. Set to `null` in an overriding
-    # values file to render no container securityContext for the extender.
+    # -- Container securityContext of the scheduler extender. The same
+    # restrictions the extender runs under when `platform.openshift` is true,
+    # except `runAsNonRoot`: the extender image sets no user and the chart
+    # sets no `runAsUser`, so requiring a non-root user would keep the Pod
+    # from starting on other platforms. OpenShift still forces non-root
+    # through the SCC; elsewhere, set `runAsNonRoot` and a `runAsUser` here
+    # if the platform can satisfy them. Set to `{}` to render no container
+    # securityContext for the extender. If the key is missing entirely, for
+    # example in values reused from an older release, these defaults apply.
     securityContext:
-      runAsNonRoot: true
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
