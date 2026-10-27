@@ -38,7 +38,7 @@ Return the proper image name
     {{- $image = replace "registry.k8s.io/kube-scheduler:" "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:" $image -}}
   {{- else -}}
     {{- range $repository := list "docker.io/projecthami/hami" "docker.io/projecthami/mock-device-plugin" "ghcr.io/lupinemachines/lupine-server" "ghcr.io/lupinemachines/lupine-client" -}}
-      {{- if hasPrefix (printf "%s:" $repository) $image -}}
+      {{- if or (hasPrefix (printf "%s:" $repository) $image) (hasPrefix (printf "%s@" $repository) $image) -}}
         {{- $image = printf "m.daocloud.io/%s" $image -}}
       {{- end -}}
     {{- end -}}
