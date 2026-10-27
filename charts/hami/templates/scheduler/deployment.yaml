@@ -43,6 +43,13 @@ spec:
     spec:
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
+      {{- /* Seccomp only at the Pod level: a Pod-level runAsNonRoot would
+             also bind the colocated kube-scheduler container, whose image
+             is not guaranteed to run as non-root. The extender sets its own
+             runAsNonRoot in its container securityContext. */}}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
@@ -85,14 +92,9 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
-          {{- if .Values.platform.openshift }}
+          {{- with .Values.scheduler.extender.securityContext }}
           securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            seccompProfile:
-              type: RuntimeDefault
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
             - name: POD_NAME
