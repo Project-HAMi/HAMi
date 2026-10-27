@@ -434,7 +434,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
 **Breaking changes**
 - Vendor settings in the Helm chart moved to `devices.<vendor>`. The previous root-level fields are no longer read, and the chart lists the replacement path for each one
-- The certificate hook Jobs now default to the upstream `registry.k8s.io/ingress-nginx/kube-webhook-certgen` image pinned by digest. If that registry is inaccessible, configure the China mirror before upgrading using the `scheduler.patch.imageNew` settings in [values.yaml](charts/hami/values.yaml). Override the registry, repository, and version/digest together; the source and mirror index digests differ.
+- Chart images now default to upstream repositories. Set `global.imageSource=cn` before installing or upgrading to select the built-in Chinese mirrors. The default HAMi, mock-device-plugin, certgen and Lupine images are pinned by digest; kube-scheduler keeps its cluster-derived tag without an automatic digest pin. A non-empty `global.imageRegistry` takes precedence. Custom repositories and certgen pins retain their configured references; see the source selection and manual override settings in [values.yaml](charts/hami/values.yaml). Thanks to DaoCloud's [public-image-mirror](https://github.com/DaoCloud/public-image-mirror) for providing Docker Hub and GHCR mirrors. The public service is subject to rate limits and congestion. If you deploy in China, use your own mirror whenever possible.
 
 **New features**
 - AMD: default GPU count, memory and cores, device cordon, `gpumem-percentage` memory requests, ResourceQuota check in Fit, `amd.com/numa-bind`, topology-aware policy by XGMI links and NUMA, and a configurable `runtimeClassName`

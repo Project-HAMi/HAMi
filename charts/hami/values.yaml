@@ -1,11 +1,18 @@
 # Chart-wide settings; the description of each one names the components it applies to.
 global:
+  # -- Image source: `upstream` or `cn`. Set `--set global.imageSource=cn` to use Alibaba Cloud for kube-scheduler and the default pinned certgen image,
+  # and `m.daocloud.io` for the upstream HAMi, mock-device-plugin, and Lupine server/client repositories.
+  # Other registries/repositories, explicit remote-GPU `libImage`/`sessionImage`, and supplied `device-config` content are unchanged.
+  # A non-empty `global.imageRegistry` disables source selection. Custom certgen pins and explicitly pinned kube-scheduler images are used unchanged.
+  imageSource: upstream
   # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
   # -- Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
-  # -- Tag used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty. A non-empty per-component tag takes precedence. The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it.
-  imageTag: "v2.10.0"
+  # -- Tag (optionally `tag@sha256:...`) used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty.
+  # The default HAMi image is pinned by digest; an explicit tag replaces the complete value. A non-empty per-component tag takes precedence.
+  # The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it.
+  imageTag: "v2.10.0@sha256:8c45cd84d8df3e6a8fe8c95e0141684973b5015692a0ef87588da05284f34447"
   # -- Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin.
   gpuHookPath: /usr/local
   # -- Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors.
@@ -113,13 +120,12 @@ scheduler:
     enabled: true
     image:
       # -- Registry of the kube-scheduler image. `global.imageRegistry` overrides it.
-      # The default is an Alibaba Cloud mirror of `registry.k8s.io/kube-scheduler`, kept because `registry.k8s.io` is hard to reach from China.
-      # Elsewhere, set `registry: registry.k8s.io` and `repository: kube-scheduler` to pull the upstream image.
-      registry: "registry.cn-hangzhou.aliyuncs.com"
+      # `global.imageSource=cn` selects `registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler` for tag-based upstream references.
+      registry: "registry.k8s.io"
       # -- Repository of the kube-scheduler image.
-      repository: "google_containers/kube-scheduler"
+      repository: "kube-scheduler"
       # -- Tag of the kube-scheduler image. Empty uses the cluster's Kubernetes version without distribution suffixes, such as `v1.31.1` for `v1.31.1+k3s1`.
-      # `global.imageTag` does not apply to it.
+      # It is not pinned by digest automatically. `global.imageTag` does not apply to it.
       tag: ""
       # -- Pull policy of the kube-scheduler image.
       pullPolicy: IfNotPresent
@@ -140,6 +146,8 @@ scheduler:
   extender:
     image:
       # -- Registry of the scheduler extender image. `global.imageRegistry` overrides it.
+      # For `docker.io/projecthami/hami`, set `global.imageSource=cn` and leave `global.imageRegistry` empty
+      # to use `m.daocloud.io/docker.io/projecthami/hami` with the same tag and digest.
       registry: "docker.io"
       # -- Repository of the scheduler extender image.
       repository: "projecthami/hami"
@@ -211,15 +219,16 @@ scheduler:
     # Requires `admissionWebhook.enabled`.
     enabled: true
     imageNew:
-      # -- Registry of the certgen image. If `registry.k8s.io` is inaccessible, use `registry.cn-hangzhou.aliyuncs.com`
-      # with the matching repository and tag below before installing or upgrading.
+      # -- Registry of the certgen image. If `registry.k8s.io` is inaccessible, set `global.imageSource=cn` before installing or upgrading.
+      # For a manual mirror override, use `registry.cn-hangzhou.aliyuncs.com` with the matching repository and tag below.
       # `global.imageRegistry` overrides this field; leave it empty to use this per-component setting.
       registry: "registry.k8s.io"
       # -- Repository of the certgen image. For the China mirror, use `google_containers/kube-webhook-certgen`.
       repository: "ingress-nginx/kube-webhook-certgen"
       # -- Certgen version and multi-architecture index digest, in `tag@sha256:...` format.
       # For the China mirror, use `v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989`.
-      # Source and mirror index digests differ; change registry, repository, and tag together.
+      # `global.imageSource=cn` switches the default pinned reference to the mirror automatically.
+      # Source and mirror index digests differ; for manual overrides, change registry, repository, and tag together.
       tag: "v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd"
       # -- Pull policy of the certgen image.
       pullPolicy: IfNotPresent
@@ -276,6 +285,8 @@ devicePlugin:
       runAsUser: 0
   image:
     # -- NVIDIA device plugin image registry. Overridden by a non-empty `global.imageRegistry`.
+    # For `docker.io/projecthami/hami`, set `global.imageSource=cn` and leave `global.imageRegistry` empty
+    # to use `m.daocloud.io/docker.io/projecthami/hami` with the same tag and digest.
     registry: "docker.io"
     # -- Image repository for the NVIDIA device plugin container and the `selinux-relabel` and
     # `toolkit-validation` init containers when enabled.
@@ -297,6 +308,8 @@ devicePlugin:
   monitor:
     image:
       # -- Monitor image registry. Overridden by a non-empty `global.imageRegistry`.
+      # For `docker.io/projecthami/hami`, set `global.imageSource=cn` and leave `global.imageRegistry` empty
+      # to use `m.daocloud.io/docker.io/projecthami/hami` with the same tag and digest.
       registry: "docker.io"
       # -- Monitor image repository.
       repository: "projecthami/hami"
@@ -796,7 +809,8 @@ devices:
     # -- Client image used to deliver Lupine libraries, libnghttp2, and nvidia-smi for the CUDA/vLLM examples; empty disables delivery.
     # It must contain `/opt/lupine/lib`, `sh`, `cp`, `libnghttp2.so.14`, and `nvidia-smi`. Injection fails when `nvidia-smi` is missing.
     # Match the server version and workload ABI; an empty string disables delivery.
-    clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04"
+    # `global.imageSource=cn` prefixes the upstream Lupine client reference with `m.daocloud.io/`; other repositories are unchanged.
+    clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04@sha256:fe0e8c283fe29b0c8bfb4bbe2a81fac4fabd3a477fe694f31b5a97a996fb028e"
     # -- Image for a relay Pod on each lupine server node, so users can port-forward to the relay.
     # Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation
     # of relays without deleting existing ones.
@@ -812,8 +826,8 @@ devices:
         registry: "ghcr.io"
         # -- Repository of the lupine server container image.
         repository: "lupinemachines/lupine-server"
-        # -- Tag of the lupine server container image; does not inherit `global.imageTag`.
-        tag: "cuda-13.3.1-ubuntu24.04"
+        # -- Tag and digest of the lupine server container image; does not inherit `global.imageTag`.
+        tag: "cuda-13.3.1-ubuntu24.04@sha256:79f023523ed0ea8704b6e3634c5831ed2d4210a0a8c7ed700a3bcdbbf7c9e1a3"
         # -- Pull policy of the lupine server container image: `Always`, `IfNotPresent`, or `Never`.
         pullPolicy: IfNotPresent
       # -- RuntimeClass for lupine server Pods. Set to a class such as `nvidia` when the NVIDIA
