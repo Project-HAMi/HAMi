@@ -565,7 +565,7 @@ vnpus:
     resourceName: "huawei.com/Ascend950DT"
     memoryAllocatable: 98304
     memoryCapacity: 98304
-    aiCore: 0
+    aiCore: 32
 `
 
 	var yamlData Config

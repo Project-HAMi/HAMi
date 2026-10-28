@@ -1009,7 +1009,7 @@ devices:
       resourceName: huawei.com/Ascend950DT
       memoryAllocatable: 98304
       memoryCapacity: 98304
-      aiCore: 0
+      aiCore: 32
     # -- RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset.
     # Empty leaves the Pod unchanged; an existing Pod value is preserved.
     runtimeClassName: ""
