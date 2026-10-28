@@ -392,6 +392,15 @@ var _ = ginkgo.Describe("Nil checks for callbacks", func() {
 			lm.OnDelete(initLease)
 			g.Expect(stopped).Should(g.BeTrue())
 		})
+
+		ginkgo.It("should not call OnStoppedLeading when we were never the holder", func() {
+			anotherLease := acquireLeaseWithNewHost(initLease, "another")
+			lm.OnAdd(anotherLease, true)
+			g.Expect(stopped).Should(g.BeFalse())
+
+			lm.OnDelete(anotherLease)
+			g.Expect(stopped).Should(g.BeFalse())
+		})
 	})
 })
 

@@ -152,8 +152,12 @@ func (m *leaderManager) onUpdate(oldObj, newObj any) {
 
 func (m *leaderManager) onDelete(obj any) {
 	m.leaseLock.Lock()
+	wasHolder := m.isHolderOf(m.observedLease)
 	m.setObservedRecord(nil)
-	callback := m.callbacks.OnStoppedLeading
+	var callback func()
+	if wasHolder {
+		callback = m.callbacks.OnStoppedLeading
+	}
 	m.leaseLock.Unlock()
 
 	if callback != nil {
