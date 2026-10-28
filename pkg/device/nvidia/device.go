@@ -71,6 +71,7 @@ const (
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
 	MpsMode      = "mps"
+	MpsV3Mode    = "mps-v3"
 	// WholeGPUUsedCores is the cores percentage recorded in the
 	// vgpu-devices-allocated annotation when a container holds the entire GPU.
 	// Shared by the device plugin and the monitor as the "whole-GPU" marker.
@@ -621,7 +622,7 @@ func assertNuma(annos map[string]string) bool {
 func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool) {
 	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
-	if ok && !strings.Contains(mode, d.Mode) {
+	if ok && !matchesOperatingMode(mode, d.Mode) {
 		typeCheck = false
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
@@ -1039,7 +1040,14 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
-		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
+		coresreq := k.Coresreq
+		var mpsFits bool
+		coresreq, mpsFits = mpsV3Fits(pod, dev, originReq, tmpDevs[k.Type], coresreq)
+		if !mpsFits {
+			reason[common.CardTypeMismatch]++
+			continue
+		}
+		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
@@ -1082,8 +1090,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
-		if k.Coresreq > 100 || k.Coresreq < 0 {
-			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
+		if coresreq > 100 || coresreq < 0 {
+			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", coresreq)
 			reason[common.CardInsufficientCore]++
 			continue
 		}
@@ -1096,7 +1104,14 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		// A MIG slice is booked and charged its profile's capacity, not the raw request, so resolve
 		// the profile before the quota check and keep it on the tentative slice.
-		usedmem, usedcores := memreq, k.Coresreq
+		usedmem, usedcores := memreq, coresreq
+		if dev.Mode == MpsV3Mode && len(tmpDevs[k.Type]) > 0 {
+			first := tmpDevs[k.Type][0]
+			if first.Usedmem != usedmem || first.Usedcores != usedcores {
+				reason[common.CardTypeMismatch]++
+				continue
+			}
+		}
 		if dev.Mode == MigMode {
 			profile, ok := plannedMigProfile(dev, tmpDevs[k.Type], memreq, preferred)
 			if !ok {
@@ -1114,7 +1129,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		if !fitQuota(pod, quotaDevs, allocated, pod.Namespace, dev.ID, usedmem, usedcores) {
 			reason[common.ResourceQuotaNotFit]++
-			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", coresreq)
 			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
@@ -1122,19 +1137,19 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		if dev.Totalcore-dev.Usedcores < k.Coresreq {
+		if dev.Totalcore-dev.Usedcores < coresreq {
 			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", coresreq)
 			continue
 		}
 		// Coresreq=100 indicates it want this card exclusively
-		if dev.Totalcore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+		if dev.Totalcore == 100 && coresreq == 100 && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
@@ -1162,13 +1177,17 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			if !needTopology {
 				k.Nums--
 			}
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
+			entry := device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,
 				Usedmem:   usedmem,
 				Usedcores: usedcores,
-			})
+			}
+			if dev.Mode == MpsV3Mode {
+				entry.CustomInfo = dev.CustomInfo
+			}
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], entry)
 		}
 		if k.Nums == 0 && !needTopology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)

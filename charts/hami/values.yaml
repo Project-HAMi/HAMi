@@ -441,6 +441,15 @@ devicePlugin:
   # `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires
   # kubelet/CRI support for CDI devices.
   deviceListStrategy: "envvar"
+  # -- Node-local MPS v3 service. Select operatingmode: mps-v3 in nodeConfiguration.
+  # Requires exclusively CDI strategies, Toolkit >=1.20.1, r615/CUDA 13.4 and cgroup v2.
+  mpsV3:
+    enabled: false
+    # -- Persistent host path, mounted at the same path inside the plugin.
+    root: /var/run/hami/mps-v3
+    # -- MPS control binary inside the device-plugin container (PATH lookup if bare).
+    binary: nvidia-cuda-mps-control
+
   # -- (string) Path for NVIDIA CDI hooks in generated CDI specifications. Null omits `NVIDIA_CDI_HOOK_PATH`
   # and keeps the plugin default `/usr/bin/nvidia-ctk`.
   nvidiaHookPath: null

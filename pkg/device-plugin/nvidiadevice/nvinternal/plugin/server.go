@@ -120,6 +120,7 @@ type NvidiaDevicePlugin struct {
 	cdiAnnotationPrefix string
 
 	operatingMode string
+	mpsV3         *mpsV3Manager
 	// Protected by applyMutex; only UUIDs of successfully destroyed instances.
 	pendingCDIRemovals          map[string]struct{}
 	pendingMIGOwnershipRemovals map[string]struct{}
@@ -501,6 +502,12 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 		return err
 	}
 
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		if err := plugin.startMPSV3(); err != nil {
+			return err
+		}
+	}
+
 	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
@@ -540,6 +547,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 		}()
 	}
 
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		plugin.workers.Add(1)
+		go func() { defer plugin.workers.Done(); plugin.runMPSV3Reconciler() }()
+	}
 	return nil
 }
 
@@ -957,6 +968,9 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 	if !needsDisable {
 		return nil
 	}
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		return fmt.Errorf("mps-v3 requires MIG disabled with no pending MIG transition; drain and configure the node before enabling this backend")
+	}
 	pods, detectErr := plugin.listLiveNodePodSnapshot()
 	var inUse map[int]struct{}
 	if detectErr == nil {
@@ -1022,6 +1036,10 @@ func (plugin *NvidiaDevicePlugin) stopLocked() error {
 		plugin.server.Stop()
 	}
 	plugin.workers.Wait()
+	if plugin.mpsV3 != nil {
+		plugin.mpsV3.close()
+		plugin.mpsV3 = nil
+	}
 	if plugin.migMgr != nil {
 		plugin.migMgr.Shutdown()
 	}
@@ -1145,10 +1163,20 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 		return err
 	}
 
+	var mpsTick <-chan time.Time
+	if plugin.mpsV3 != nil {
+		timer := time.NewTicker(5 * time.Second)
+		defer timer.Stop()
+		mpsTick = timer.C
+	}
 	for {
 		select {
 		case <-plugin.stop:
 			return nil
+		case <-mpsTick:
+			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+				return err
+			}
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
@@ -1377,6 +1405,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	defer plugin.applyMutex.Unlock()
 	plugin.migAllocationGeneration++
 	allocationCompleted := false
+	var mpsRollback []string
+	defer func() {
+		if !allocationCompleted && len(mpsRollback) > 0 {
+			plugin.rollbackMPSV3(mpsRollback)
+		}
+	}()
 	if plugin.operatingMode == nvidia.MigMode && plugin.migMgr != nil {
 		// Adopt existing instances before recording the rollback baseline;
 		// a later allocation failure must never release recovered workloads.
@@ -1521,7 +1555,16 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			if plugin.operatingMode != "mig" {
+			if plugin.operatingMode == nvidia.MpsV3Mode {
+				key, created, err := plugin.allocateMPSV3(ctx, current, &currentCtr, devreq, response)
+				if created {
+					mpsRollback = append(mpsRollback, key)
+				}
+				if err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, err
+				}
+			} else if plugin.operatingMode != "mig" {
 				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
@@ -1883,7 +1926,13 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 	if plugin.schedulerConfig.DeviceSplitCount != nil {
 		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
 	}
-	return plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
+	devices := plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
+	if plugin.mpsV3 != nil && !plugin.mpsV3.healthy.Load() {
+		for _, d := range devices {
+			d.Health = kubeletdevicepluginv1beta1.Unhealthy
+		}
+	}
+	return devices
 }
 
 // wholeGPUDisableHAMiCore turns on injecting CUDA_DISABLE_CONTROL=true
