@@ -278,7 +278,10 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 	if err := cc.initNVML(); err != nil {
 		return err
 	}
-	defer nvml.Shutdown()
+	// Do not call nvml.Shutdown() here: NVML is shared across the process with
+	// watchAndFeedback and subsequent container metrics collection in Collect().
+	// Shutting it down on each scrape causes NVML_ERROR_UNINITIALIZED in concurrent
+	// and subsequent NVML calls.
 
 	devnum, err := cc.getDeviceCount()
 	if err != nil {
