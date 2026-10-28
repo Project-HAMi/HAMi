@@ -1,0 +1,151 @@
+suite: Image sources
+templates:
+  - scheduler/deployment.yaml
+  - scheduler/configmap.yaml
+  - scheduler/job-patch/job-createSecret.yaml
+  - scheduler/job-patch/job-patchWebhook.yaml
+  - device-plugin/daemonsetnvidia.yaml
+  - device-plugin/daemonsetmock.yaml
+  - device-plugin/daemonsetlupine.yaml
+  - scheduler/device-configmap.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 31
+set:
+  mockDevicePlugin.enabled: true
+  devices.remotegpu.enabled: true
+tests:
+  - it: keeps upstream images by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.k8s.io/kube-scheduler:v1.31.0
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^docker\.io/projecthami/hami:'
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^docker\.io/projecthami/hami:'
+        template: device-plugin/daemonsetnvidia.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^docker\.io/projecthami/hami:'
+        template: device-plugin/daemonsetnvidia.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^docker\.io/projecthami/mock-device-plugin:'
+        template: device-plugin/daemonsetmock.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
+        template: scheduler/job-patch/job-createSecret.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
+        template: scheduler/job-patch/job-patchWebhook.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^ghcr\.io/lupinemachines/lupine-server:'
+        template: device-plugin/daemonsetlupine.yaml
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+libImage: "docker\.io/projecthami/hami:'
+        template: scheduler/device-configmap.yaml
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+clientImage: "ghcr\.io/lupinemachines/lupine-client:'
+        template: scheduler/device-configmap.yaml
+  - it: uses CN mirrors for the scheduler and device plugins
+    set:
+      global.imageSource: cn
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.31.0
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^m\.daocloud\.io/docker\.io/projecthami/hami:'
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^m\.daocloud\.io/docker\.io/projecthami/hami:'
+        template: device-plugin/daemonsetnvidia.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^m\.daocloud\.io/docker\.io/projecthami/hami:'
+        template: device-plugin/daemonsetnvidia.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^m\.daocloud\.io/docker\.io/projecthami/mock-device-plugin:'
+        template: device-plugin/daemonsetmock.yaml
+  - it: uses the CN certgen digest in both webhook jobs
+    set:
+      global.imageSource: cn
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-webhook-certgen:v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989
+        template: scheduler/job-patch/job-createSecret.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-webhook-certgen:v1.6.9@sha256:78bf4f774a27f29a5e6333c11708ac4645139e7bb2b74aa9e9c4574935f7a989
+        template: scheduler/job-patch/job-patchWebhook.yaml
+  - it: uses CN mirrors for remote GPU images
+    set:
+      global.imageSource: cn
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^m\.daocloud\.io/ghcr\.io/lupinemachines/lupine-server:'
+        template: device-plugin/daemonsetlupine.yaml
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+libImage: "m\.daocloud\.io/docker\.io/projecthami/hami:'
+        template: scheduler/device-configmap.yaml
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+clientImage: "m\.daocloud\.io/ghcr\.io/lupinemachines/lupine-client:'
+        template: scheduler/device-configmap.yaml
+  - it: honors an explicit registry without changing the tag or digest
+    set:
+      global.imageSource: cn
+      global.imageRegistry: docker.io
+      global.imageTag: v1.2.3@sha256:1111111111111111111111111111111111111111111111111111111111111111
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/kube-scheduler:v1.31.0
+        template: scheduler/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v1.2.3@sha256:1111111111111111111111111111111111111111111111111111111111111111
+        template: scheduler/deployment.yaml
+  - it: leaves a custom repository with a similar prefix unchanged
+    set:
+      global.imageSource: cn
+      scheduler.extender.image.repository: projecthami/hami-custom
+      scheduler.extender.image.tag: v1.2.3
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami-custom:v1.2.3
+        template: scheduler/deployment.yaml
+  - it: mirrors a digest-only client reference without changing the digest
+    set:
+      global.imageSource: cn
+      devices.remotegpu.clientImage: ghcr.io/lupinemachines/lupine-client@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+clientImage: "m\.daocloud\.io/ghcr\.io/lupinemachines/lupine-client@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"$'
+        template: scheduler/device-configmap.yaml
+  - it: rejects an unsupported image source
+    template: scheduler/job-patch/job-patchWebhook.yaml
+    set:
+      global.imageSource: invalid
+    asserts:
+      - failedTemplate:
+          errorMessage: global.imageSource must be upstream or cn

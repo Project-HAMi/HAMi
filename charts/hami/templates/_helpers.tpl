@@ -158,10 +158,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "hami.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global) }}
 {{- end -}}
 
-{{- define "hami.scheduler.patch.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.patch.image "global" .Values.global) }}
-{{- end -}}
-
 {{- define "hami.scheduler.patch.new.image" -}}
 {{ include "common.images.image" (dict "imageRoot" .Values.scheduler.patch.imageNew "global" .Values.global) }}
 {{- end -}}
@@ -205,10 +201,6 @@ also be overridden through extraArgs or extraEnvs, so check those too.
 {{- if and (eq .Values.devicePlugin.nvidiaDriverRoot "auto") (contains "cdi-" (join "," $strategies)) -}}
 true
 {{- end -}}
-{{- end -}}
-
-{{- define "hami.scheduler.patch.imagePullSecrets" -}}
-{{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.image) "global" .Values.global) }}
 {{- end -}}
 
 {{- define "hami.scheduler.patch.new.imagePullSecrets" -}}

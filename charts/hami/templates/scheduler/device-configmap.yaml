@@ -82,7 +82,7 @@ data:
       {{- else }}
       libImage: {{ .Values.devices.remotegpu.libImage | quote }}
       {{- end }}
-      clientImage: {{ .Values.devices.remotegpu.clientImage | quote }}
+      clientImage: {{ include "common.images.source" (dict "image" .Values.devices.remotegpu.clientImage "global" .Values.global) | quote }}
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
     {{- end }}
     kunlun:
