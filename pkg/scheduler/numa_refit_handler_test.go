@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"gotest.tools/v3/assert"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -221,19 +223,42 @@ func phaseAwareRefitFixture(t *testing.T, initContainers, containers []corev1.Co
 }
 
 // stubRefitPatch replaces the annotation patch with a capture; returns the
-// captured map and a call counter.
+// captured map and a call counter. Simulates optimistic concurrency: if a pod
+// has a ResourceVersion, it verifies that the caller passes the latest version
+// known to the server, returning a 409 Conflict error on mismatch.
 func stubRefitPatch(t *testing.T, fail error) (map[string]string, *int) {
 	t.Helper()
 	captured := map[string]string{}
 	calls := 0
+	var serverResourceVersion string
 	previous := patchPodAnnotations
-	patchPodAnnotations = func(_ *corev1.Pod, annotations map[string]string) error {
+	patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) (*corev1.Pod, error) {
 		calls++
 		if fail != nil {
-			return fail
+			return nil, fail
+		}
+		if pod.ResourceVersion != "" {
+			if serverResourceVersion == "" {
+				serverResourceVersion = pod.ResourceVersion
+			} else if pod.ResourceVersion != serverResourceVersion {
+				return nil, apierrors.NewConflict(
+					corev1.Resource("pods"),
+					pod.Name,
+					fmt.Errorf("Operation cannot be fulfilled on pods %q: the object has been modified; please apply your changes to the latest version and try again", pod.Name),
+				)
+			}
+			serverResourceVersion = fmt.Sprintf("%s-bumped-%d", pod.ResourceVersion, calls)
 		}
 		maps.Copy(captured, annotations)
-		return nil
+		updated := pod.DeepCopy()
+		if updated.Annotations == nil {
+			updated.Annotations = make(map[string]string)
+		}
+		maps.Copy(updated.Annotations, annotations)
+		if serverResourceVersion != "" {
+			updated.ResourceVersion = serverResourceVersion
+		}
+		return updated, nil
 	}
 	t.Cleanup(func() { patchPodAnnotations = previous })
 	return captured, &calls
@@ -251,10 +276,10 @@ func TestRefitNumaAllocationPatchDeadlineReleasesFilter(t *testing.T) {
 	filterStarted := make(chan struct{})
 	filterDone := make(chan error, 1)
 	previousPatch := patchPodAnnotations
-	patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) error {
+	patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) (*corev1.Pod, error) {
 		close(patchStarted)
 		<-releasePatch
-		return context.DeadlineExceeded
+		return nil, context.DeadlineExceeded
 	}
 	t.Cleanup(func() { patchPodAnnotations = previousPatch })
 
@@ -694,6 +719,118 @@ func TestRefitNumaAllocationSeedsExistingAllocations(t *testing.T) {
 	assert.Equal(t, byUUID["GPU-b"].Usedmem, int64(20000))
 }
 
+func TestRefitNumaAllocationMultiContainerSequential(t *testing.T) {
+	// A multi-container pod where container 0 and container 1 are refitted sequentially.
+	// The second refit must observe container 0's updated annotations and updated ResourceVersion in cache.
+	nodes := newNodeManager()
+	nodes.addNode(refitNode, &device.NodeInfo{
+		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "GPU-a", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-b", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	})
+
+	first := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}}
+	second := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(device.PodSingleDevice{first, second}),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(device.PodSingleDevice{first, second}),
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "first"}, {Name: "second"}}},
+	}
+	pods := device.NewPodManager()
+	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: {first, second}})
+	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
+	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	setupRefitAuth(t, s)
+	captured, calls := stubRefitPatch(t, nil)
+
+	// First refit: container 0 moved to GPU-b
+	req0 := refitTestRequestFor("GPU-b")
+	req0.ContainerIndex = 0
+	req0.ContainerName = "first"
+	resp0 := s.RefitNumaAllocation(context.Background(), req0, validRefitToken)
+	assert.Equal(t, resp0.Succeeded, true, "first refit failed: %s", resp0.FailureReason)
+	assert.Equal(t, *calls, 1)
+
+	// Verify cached pod in podManager has bumped ResourceVersion
+	pi1, _ := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
+	assert.Equal(t, pi1.ResourceVersion, "100-bumped-1")
+
+	// Second refit: container 1 moved to GPU-b
+	req1 := refitTestRequestFor("GPU-b")
+	req1.ContainerIndex = 1
+	req1.ContainerName = "second"
+	resp1 := s.RefitNumaAllocation(context.Background(), req1, validRefitToken)
+	assert.Equal(t, resp1.Succeeded, true, "second refit failed: %s", resp1.FailureReason)
+	assert.Equal(t, *calls, 2)
+
+	// Verify final annotations reflect container 0 on GPU-b and container 1 on GPU-b
+	allocatedAnno := captured[device.SupportDevices[nvidia.NvidiaGPUDevice]]
+	trimmed := strings.TrimSuffix(allocatedAnno, device.OnePodMultiContainerSplitSymbol)
+	parts := strings.Split(trimmed, device.OnePodMultiContainerSplitSymbol)
+	assert.Equal(t, len(parts), 2)
+	assert.Assert(t, strings.Contains(parts[0], "GPU-b"), "container 0 annotation: %s", parts[0])
+	assert.Assert(t, strings.Contains(parts[1], "GPU-b"), "container 1 annotation: %s", parts[1])
+
+	// Also verify decoded PodDevices reflect the refitted GPUs
+	decoded, err := device.DecodePodDevices(device.SupportDevices, captured)
+	assert.NilError(t, err)
+	single := decoded[nvidia.NvidiaGPUDevice]
+	assert.Assert(t, len(single) >= 2)
+	assert.Equal(t, single[0][0].UUID, "GPU-b")
+	assert.Equal(t, single[1][0].UUID, "GPU-b")
+
+	// Verify podManager has latest ResourceVersion
+	pi2, _ := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
+	assert.Equal(t, pi2.ResourceVersion, "100-bumped-1-bumped-2")
+
+	// Verify that if a subsequent refit is attempted with a stale ResourceVersion
+	// (e.g. if cache were not updated), optimistic concurrency triggers a 409 Conflict.
+	stalePod := pod.DeepCopy()
+	stalePod.ResourceVersion = "100" // Stale: server is now at "100-bumped-1-bumped-2"
+	s.podManager.UpdatePod(stalePod)
+	reqStale := refitTestRequestFor("GPU-b")
+	reqStale.ContainerIndex = 1
+	reqStale.ContainerName = "second"
+	respStale := s.RefitNumaAllocation(context.Background(), reqStale, validRefitToken)
+	assert.Equal(t, respStale.Succeeded, false)
+	assert.Assert(t, strings.Contains(respStale.FailureReason, "the object has been modified"), "stale refit should fail with 409 conflict, got: %s", respStale.FailureReason)
+}
+
+func TestPatchPodAnnotationsRealClient(t *testing.T) {
+	// Verifies that the production patchPodAnnotations helper returns the patched
+	// pod object containing the new annotations and updated ResourceVersion from the API server.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-real-patch-pod",
+			Namespace:       "default",
+			ResourceVersion: "100",
+			Annotations: map[string]string{
+				"existing": "val",
+			},
+		},
+	}
+	fakeClient := fake.NewSimpleClientset(pod)
+	previousClient := client.KubeClient
+	client.KubeClient = fakeClient
+	t.Cleanup(func() { client.KubeClient = previousClient })
+
+	newAnnotations := map[string]string{
+		device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU-b,NVIDIA,5000,10:;",
+	}
+	updated, err := patchPodAnnotations(pod, newAnnotations)
+	assert.NilError(t, err)
+	assert.Assert(t, updated != nil)
+	assert.Equal(t, updated.Annotations[device.SupportDevices[nvidia.NvidiaGPUDevice]], "GPU-b,NVIDIA,5000,10:;")
+	assert.Equal(t, updated.Annotations["existing"], "val")
+}
+
 func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 	// GPU-b only has room for one of the two reservations: after the first
 	// refit moves onto it, the second must be refused on capacity.
@@ -1000,10 +1137,10 @@ func testRefitNumaAllocationSerializesInitRelease(t *testing.T, replay bool) {
 	patchStarted := make(chan struct{})
 	releasePatch := make(chan struct{})
 	previousPatch := patchPodAnnotations
-	patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) error {
+	patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) (*corev1.Pod, error) {
 		close(patchStarted)
 		<-releasePatch
-		return errors.New("conflict")
+		return nil, errors.New("conflict")
 	}
 	t.Cleanup(func() { patchPodAnnotations = previousPatch })
 
