@@ -1257,6 +1257,9 @@ func distinctCardCandidates(candidates device.ContainerDevices) device.Container
 
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
 	deviceScoreMap := make(map[string]*device.DevicePairScore)
+	if nodeInfo == nil || nodeInfo.Devices == nil {
+		return deviceScoreMap
+	}
 
 	for _, dev := range nodeInfo.Devices[NvidiaGPUDevice] {
 		deviceScoreMap[dev.ID] = &dev.DevicePairScore
@@ -1276,11 +1279,13 @@ func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerD
 	for _, dev1 := range devices {
 		totalScore := 0
 		scoreMapDev1 := deviceScoreMap[dev1.UUID]
-		for _, dev2 := range devices {
-			if dev1.UUID == dev2.UUID {
-				continue
+		if scoreMapDev1 != nil && scoreMapDev1.Scores != nil {
+			for _, dev2 := range devices {
+				if dev1.UUID == dev2.UUID {
+					continue
+				}
+				totalScore += scoreMapDev1.Scores[dev2.UUID]
 			}
-			totalScore += scoreMapDev1.Scores[dev2.UUID]
 		}
 		if !found || totalScore < worstScore {
 			found = true
@@ -1303,6 +1308,9 @@ func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.Con
 		for i := range len(partition) - 1 {
 			dev1 := partition[i]
 			scoreMapDev1 := deviceScoreMap[dev1.UUID]
+			if scoreMapDev1 == nil || scoreMapDev1.Scores == nil {
+				continue
+			}
 			for z := i + 1; z < len(partition); z++ {
 				dev2 := partition[z]
 				totalScore += scoreMapDev1.Scores[dev2.UUID]

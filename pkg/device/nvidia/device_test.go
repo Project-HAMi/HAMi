@@ -2503,6 +2503,50 @@ func TestComputeBestCombination(t *testing.T) {
 	assert.Equal(t, result[1].UUID, "gpu2")
 }
 
+func TestGetDevicePairScoreMap_Nil(t *testing.T) {
+	assert.Equal(t, len(getDevicePairScoreMap(nil)), 0)
+	assert.Equal(t, len(getDevicePairScoreMap(&device.NodeInfo{})), 0)
+}
+
+func TestComputeWorstSingleCard_NilOrMissingScores(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu0", DevicePairScore: device.DevicePairScore{Scores: nil}},
+				{ID: "gpu1", DevicePairScore: device.DevicePairScore{Scores: nil}},
+			},
+		},
+	}
+	tmpDevs := map[string]device.ContainerDevices{
+		NvidiaGPUDevice: {{UUID: "gpu0"}, {UUID: "gpu1"}},
+	}
+	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice}
+	result := computeWorstSingleCard(nodeInfo, req, tmpDevs)
+	assert.Equal(t, len(result), 1)
+
+	resultNil := computeWorstSingleCard(nil, req, tmpDevs)
+	assert.Equal(t, len(resultNil), 1)
+}
+
+func TestComputeBestCombination_NilOrMissingScores(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu0", DevicePairScore: device.DevicePairScore{Scores: nil}},
+				{ID: "gpu1", DevicePairScore: device.DevicePairScore{Scores: nil}},
+			},
+		},
+	}
+	combinations := []device.ContainerDevices{
+		{{UUID: "gpu0"}, {UUID: "gpu1"}},
+	}
+	result := computeBestCombination(nodeInfo, combinations)
+	assert.Equal(t, len(result), 2)
+
+	resultNil := computeBestCombination(nil, combinations)
+	assert.Equal(t, len(resultNil), 2)
+}
+
 func TestCustomFilterRule_NonMig(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{})
 	devusage := &device.DeviceUsage{Mode: ""}
