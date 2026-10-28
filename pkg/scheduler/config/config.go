@@ -559,7 +559,14 @@ vnpus:
       - name: "vir04"
         memory: 12288
         aiCore: 4
-        aiCPU: 4`
+        aiCPU: 4
+  - chipName: "Ascend950DT"
+    commonWord: "Ascend950DT"
+    resourceName: "huawei.com/Ascend950DT"
+    memoryAllocatable: 98304
+    memoryCapacity: 98304
+    aiCore: 0
+`
 
 	var yamlData Config
 	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)

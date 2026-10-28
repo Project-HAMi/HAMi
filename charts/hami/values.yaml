@@ -1003,6 +1003,13 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
+    # -- Ascend950DT whole-card only placeholder (draft). No vNPU templates, no memory/core resource names.
+    - chipName: Ascend950DT
+      commonWord: Ascend950DT
+      resourceName: huawei.com/Ascend950DT
+      memoryAllocatable: 98304
+      memoryCapacity: 98304
+      aiCore: 0
     # -- RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset.
     # Empty leaves the Pod unchanged; an existing Pod value is preserved.
     runtimeClassName: ""
@@ -1055,6 +1062,7 @@ devices:
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
+      - huawei.com/Ascend950DT
   iluvatar:
     # -- List of Iluvatar device definitions used when `devices.iluvatar.enabled` is true.
     # Each object contains string fields `chipName`, `commonWord`, `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`.

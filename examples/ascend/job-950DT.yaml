@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend950dt-job
+spec:
+  schedulerName: hami-scheduler
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend950DT: 1 # whole-card only (draft placeholder), vNPU not enabled yet
