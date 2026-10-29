@@ -78,6 +78,9 @@ scheduler:
     # -- Default device scoring policy within a node: `binpack`, `spread`, or `topology-aware`.
     # `topology-aware` also makes the NVIDIA device plugin report GPU topology scores. The `hami.io/gpu-scheduler-policy` Pod annotation overrides it.
     gpuSchedulerPolicy: spread
+    # -- (float) Bonus added to the node score for nodes matching a Pod's preferred `nodeAffinity`, scaled by the matched weight ratio (0..1).
+    # `0` disables it. HAMi returns a single node from Filter, so other kube-scheduler score plugins are still ignored. Values above `30` let the preference outweigh GPU usage.
+    nodeAffinityScoreWeight: 0
   # -- Address the scheduler serves Prometheus metrics on, as `[host]:port`. The chart also takes the port from it for the `metrics` container port.
   metricsBindAddress: ":9395"
   # -- Address of the pprof server, used only when `--profiling` is added to `scheduler.extender.extraArgs`. Keep it on loopback and reach it

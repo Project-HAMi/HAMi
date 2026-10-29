@@ -164,6 +164,41 @@ func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 	return config.NodeSchedulerPolicy
 }
 
+// resolvePreferredSchedulingTerm returns the pod's preferred nodeAffinity
+// terms, or nil when the pod declares none. Required terms are not returned:
+// kube-scheduler already enforces them before calling the extender.
+func resolvePreferredSchedulingTerm(task *corev1.Pod) []corev1.PreferredSchedulingTerm {
+	if task.Spec.Affinity == nil || task.Spec.Affinity.NodeAffinity == nil {
+		return nil
+	}
+	return task.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+}
+
+// resolvePreferredNodeAffinity parses the pod's preferred nodeAffinity once per
+// scheduling request. It returns nil when --node-affinity-score-weight is 0 or
+// the pod has no usable preferred term, so scoreNode skips the bonus at no
+// cost. Malformed terms are logged and dropped; the remaining valid terms are
+// still returned.
+//
+// It is a separate function so calcScoreWithOptions assigns the result exactly
+// once. A variable that is reassigned after its declaration is captured by
+// reference in the per-node goroutine closure and escapes to the heap, which
+// costs one allocation per call even when the feature is off.
+func resolvePreferredNodeAffinity(task *corev1.Pod) *policy.PreferredNodeAffinity {
+	if config.NodeAffinityScoreWeight == 0 {
+		return nil
+	}
+	terms := resolvePreferredSchedulingTerm(task)
+	if len(terms) == 0 {
+		return nil
+	}
+	parsed, err := policy.NewPreferredNodeAffinity(terms)
+	if err != nil {
+		klog.Warningf("ignoring invalid preferred nodeAffinity terms on pod %s/%s: %v", task.Namespace, task.Name, err)
+	}
+	return parsed
+}
+
 type peakUsageSnapshot struct {
 	used      int64
 	usedcores int64
@@ -359,13 +394,25 @@ func neuronCorePeak(pod *corev1.Pod, allocations device.PodSingleDevice) int64 {
 	return max(initPeak, sidecars+app)
 }
 
+// currentNode returns the informer's copy of the node, whose labels track
+// `kubectl label` immediately, and falls back to the cached copy otherwise.
+func (s *Scheduler) currentNode(nodeID string, cached *corev1.Node) *corev1.Node {
+	if s.nodeLister == nil {
+		return cached
+	}
+	if n, err := s.nodeLister.Get(nodeID); err == nil {
+		return n
+	}
+	return cached
+}
+
 type nodeScoreResult struct {
 	score  *policy.NodeScore
 	reason string
 	err    error
 }
 
-func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, weights util.DeviceScoringWeights) nodeScoreResult {
+func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, pref *policy.PreferredNodeAffinity, weights util.DeviceScoringWeights) nodeScoreResult {
 	viewStatus(*node)
 
 	nodeInfo := node.NodeInfo
@@ -420,6 +467,10 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	applyPeakUsage(node, appNodeCopy, peakUsage)
 
 	score.OverrideScore(snapshot, userNodePolicy)
+	if pref != nil {
+		score.Node = s.currentNode(nodeID, node.Node)
+	}
+	score.AddNodeAffinityScore(pref, userNodePolicy, config.NodeAffinityScoreWeight)
 	klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 
 	return nodeScoreResult{score: &score}
@@ -443,6 +494,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		return nil, err
 	}
 
+	pref := resolvePreferredNodeAffinity(task)
 	userNodePolicy := resolveNodeSchedulerPolicy(task)
 	res := policy.NodeScoreList{
 		Policy:   userNodePolicy,
@@ -460,7 +512,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		go func(nodeID string, node *NodeUsage) {
 			defer wg.Done()
 
-			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, deviceScoringWeights)
+			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, pref, deviceScoringWeights)
 
 			switch {
 			case result.err != nil:
