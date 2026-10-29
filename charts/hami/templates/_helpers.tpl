@@ -226,7 +226,6 @@ Managed resources list for scheduler extender
 Returns a YAML list that can be used directly or converted to JSON via fromYaml | toJson
 */}}
 {{- define "hami-vgpu.scheduler.managedResources" -}}
-{{- include "hami-vgpu.validateDeviceValues" . -}}
 {{- $resources := list -}}
 {{/* Core NVIDIA resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourceCountName "ignoredByScheduler" true) -}}
@@ -317,9 +316,6 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{/* Resolve the Ascend default mode while accepting the released legacy core flag. */}}
 {{- define "hami-vgpu.ascendVnpuMode" -}}
 {{- $ascend := .Values.devices.ascend -}}
-{{- if hasKey $ascend "enpu" -}}
-  {{- fail "devices.ascend.enpu has been removed; use devices.ascend.hamiVnpuMode (template, hami-core, or enpu) instead" -}}
-{{- end -}}
 {{- if and (hasKey $ascend "hamiVnpuCore") (not (kindIs "bool" $ascend.hamiVnpuCore)) -}}
   {{- fail "devices.ascend.hamiVnpuCore must be a boolean; use devices.ascend.hamiVnpuMode instead" -}}
 {{- end -}}
@@ -341,17 +337,9 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $mode -}}
 {{- end -}}
 
-{{- define "hami-vgpu.validateDeviceValues" -}}
-{{/* Validate values even when device-config.content overrides the generated config. */}}
-{{- $_ := include "hami-vgpu.ascendVnpuMode" . -}}
-{{- $count := .Values.devices.ascend.deviceSplitCount -}}
-{{- $integer := int64 $count -}}
-{{- $numeric := has (kindOf $count) (list "int" "int64" "float64") -}}
-{{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
-  {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
-{{- end -}}
+{{- define "hami-vgpu.validateValues" -}}
 {{/* Reject obsolete paths by presence, including explicit zero, false and empty values. */}}
-{{- $removedRootFields := dict
+{{- $removedFields := dict
   "resourceName" "devices.nvidia.resourceCountName"
   "resourceMem" "devices.nvidia.resourceMemoryName"
   "resourceMemPercentage" "devices.nvidia.resourceMemoryPercentageName"
@@ -360,6 +348,9 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
   "mluResourceName" "devices.cambricon.resourceCountName"
   "mluResourceMem" "devices.cambricon.resourceMemoryName"
   "mluResourceCores" "devices.cambricon.resourceCoreName"
+  "dcuResourceName" "devices.hygon.resourceCountName"
+  "dcuResourceMem" "devices.hygon.resourceMemoryName"
+  "dcuResourceCores" "devices.hygon.resourceCoreName"
   "hcuResourceName" "devices.hygon.resourceCountName"
   "hcuResourceMem" "devices.hygon.resourceMemoryName"
   "hcuResourceCores" "devices.hygon.resourceCoreName"
@@ -375,19 +366,40 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
   "kunlunResourceVMemoryName" "devices.kunlun.resourceVMemoryName"
   "vastaiResourceName" "devices.vastai.resourceCountName"
   "birenResourceName" "devices.biren.resourceCountName"
+  "devicePlugin.deviceSplitCount" "devices.nvidia.deviceSplitCount"
+  "devicePlugin.deviceMemoryScaling" "devices.nvidia.deviceMemoryScaling"
+  "devicePlugin.deviceCoreScaling" "devices.nvidia.deviceCoreScaling"
+  "devicePlugin.preConfiguredDeviceMemory" "devices.nvidia.preConfiguredDeviceMemory"
+  "devicePlugin.enableNumaTopology" "devices.nvidia.enableNumaTopology"
+  "devicePlugin.runtimeClassName" "devices.nvidia.runtimeClassName"
+  "devicePlugin.createRuntimeClass" "devices.nvidia.createRuntimeClass"
+  "devices.ascend.enpu" "devices.ascend.hamiVnpuMode (template, hami-core, or enpu)"
+  "scheduler.patch.image" "scheduler.patch.imageNew"
 -}}
 {{- $errors := list -}}
-{{- range $old := keys $removedRootFields | sortAlpha -}}
-  {{- if hasKey $.Values $old -}}
-    {{- $errors = append $errors (printf "%s has been removed; use %s instead" $old (index $removedRootFields $old)) -}}
+{{- range $old, $new := $removedFields -}}
+  {{- $value := $.Values -}}
+  {{- $present := true -}}
+  {{- range $part := splitList "." $old -}}
+    {{- if not (and (kindIs "map" $value) (hasKey $value $part)) -}}
+      {{- $present = false -}}
+      {{- break -}}
+    {{- end -}}
+    {{- $value = index $value $part -}}
   {{- end -}}
-{{- end -}}
-{{- range $field := list "deviceSplitCount" "deviceMemoryScaling" "deviceCoreScaling" "preConfiguredDeviceMemory" "enableNumaTopology" "runtimeClassName" "createRuntimeClass" -}}
-  {{- if hasKey $.Values.devicePlugin $field -}}
-    {{- $errors = append $errors (printf "devicePlugin.%s has been removed; use devices.nvidia.%s instead" $field $field) -}}
+  {{- if $present -}}
+    {{- $errors = append $errors (printf "%s has been removed; use %s instead" $old $new) -}}
   {{- end -}}
 {{- end -}}
 {{- if $errors -}}
-  {{- fail (printf "Removed device configuration fields:\n%s" (join "\n" $errors)) -}}
+  {{- fail (printf "Removed configuration fields:\n%s" (join "\n" $errors)) -}}
+{{- end -}}
+{{/* Validate values even when device-config.content overrides the generated config. */}}
+{{- $_ := include "hami-vgpu.ascendVnpuMode" . -}}
+{{- $count := .Values.devices.ascend.deviceSplitCount -}}
+{{- $integer := int64 $count -}}
+{{- $numeric := has (kindOf $count) (list "int" "int64" "float64") -}}
+{{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
+  {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
 {{- end -}}
 {{- end -}}
