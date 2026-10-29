@@ -394,6 +394,18 @@ func neuronCorePeak(pod *corev1.Pod, allocations device.PodSingleDevice) int64 {
 	return max(initPeak, sidecars+app)
 }
 
+// currentNode returns the informer's copy of the node, whose labels track
+// `kubectl label` immediately, and falls back to the cached copy otherwise.
+func (s *Scheduler) currentNode(nodeID string, cached *corev1.Node) *corev1.Node {
+	if s.nodeLister == nil {
+		return cached
+	}
+	if n, err := s.nodeLister.Get(nodeID); err == nil {
+		return n
+	}
+	return cached
+}
+
 type nodeScoreResult struct {
 	score  *policy.NodeScore
 	reason string
@@ -455,6 +467,9 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	applyPeakUsage(node, appNodeCopy, peakUsage)
 
 	score.OverrideScore(snapshot, userNodePolicy)
+	if pref != nil {
+		score.Node = s.currentNode(nodeID, node.Node)
+	}
 	score.AddNodeAffinityScore(pref, userNodePolicy, config.NodeAffinityScoreWeight)
 	klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 

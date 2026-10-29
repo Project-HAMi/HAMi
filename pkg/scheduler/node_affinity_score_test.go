@@ -23,6 +23,8 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -163,12 +165,19 @@ func withAffinityWeight(t *testing.T, weight float32) {
 // scores keyed by node so a test can assert on the raw numbers.
 func pickNode(t *testing.T, nodes *map[string]*NodeUsage, pod *corev1.Pod) (string, map[string]float32) {
 	t.Helper()
+	return pickNodeWith(t, &Scheduler{}, nodes, pod)
+}
+
+// pickNodeWith is pickNode with a caller-supplied Scheduler, so a test can
+// wire a node lister into it.
+func pickNodeWith(t *testing.T, s *Scheduler, nodes *map[string]*NodeUsage, pod *corev1.Pod) (string, map[string]float32) {
+	t.Helper()
 	requests := device.PodDeviceRequests{{
 		"hami.io/vgpu-devices-to-allocate": {
 			Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: 10000, Coresreq: 10,
 		},
 	}}
-	scores, err := (&Scheduler{}).calcScoreWithOptions(nodes, requests, pod, map[string]string{}, false, false)
+	scores, err := s.calcScoreWithOptions(nodes, requests, pod, map[string]string{}, false, false)
 	assert.NilError(t, err)
 	if len(scores.NodeList) == 0 {
 		t.Fatal("no node fit the pod")
@@ -343,4 +352,63 @@ func TestResolvePreferredSchedulingTerm(t *testing.T) {
 	terms := resolvePreferredSchedulingTerm(newNodeAffinityTestPod(42, nil))
 	assert.Equal(t, len(terms), 1)
 	assert.Equal(t, terms[0].Weight, int32(42))
+}
+
+// newTestNodeLister returns a NodeLister backed by an in-memory indexer, the
+// same store the shared informer fills, holding the given nodes.
+func newTestNodeLister(t *testing.T, nodes ...*corev1.Node) listerscorev1.NodeLister {
+	t.Helper()
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, n := range nodes {
+		assert.NilError(t, indexer.Add(n))
+	}
+	return listerscorev1.NewNodeLister(indexer)
+}
+
+// The scheduler's node cache only refreshes a Node object when its device
+// handshake changes, so a label-only update (kubectl label) leaves the cached
+// labels stale. Affinity scoring must read the informer's copy instead.
+func TestNodeAffinityUsesInformerLabels(t *testing.T) {
+	withAffinityWeight(t, 100)
+
+	t.Run("label added after caching earns the bonus", func(t *testing.T) {
+		nodes := newNodeAffinityTestNodes()
+		(*nodes)[preferredNode].Node.Labels = nil // cache predates the label
+		live := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: preferredNode, Labels: map[string]string{rackLabel: rackValue},
+		}}
+		s := &Scheduler{nodeLister: newTestNodeLister(t, live)}
+
+		picked, scores := pickNodeWith(t, s, nodes, newNodeAffinityTestPod(100, nil))
+		assert.Equal(t, picked, preferredNode)
+		assertScoreNear(t, scores[preferredNode], float32(100))
+	})
+
+	t.Run("label removed after caching loses the bonus", func(t *testing.T) {
+		nodes := newNodeAffinityTestNodes() // cache still says rack=r1
+		live := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: preferredNode}}
+		s := &Scheduler{nodeLister: newTestNodeLister(t, live)}
+
+		picked, scores := pickNodeWith(t, s, nodes, newNodeAffinityTestPod(100, nil))
+		assert.Equal(t, picked, busyNode)
+		assertScoreNear(t, scores[preferredNode], float32(0))
+	})
+
+	t.Run("node missing from the informer falls back to the cache", func(t *testing.T) {
+		nodes := newNodeAffinityTestNodes() // cache says rack=r1
+		s := &Scheduler{nodeLister: newTestNodeLister(t)}
+
+		picked, scores := pickNodeWith(t, s, nodes, newNodeAffinityTestPod(100, nil))
+		assert.Equal(t, picked, preferredNode)
+		assertScoreNear(t, scores[preferredNode], float32(100))
+	})
+}
+
+func TestCurrentNode(t *testing.T) {
+	cached := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n", ResourceVersion: "1"}}
+	live := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n", ResourceVersion: "2"}}
+
+	assert.Equal(t, (&Scheduler{}).currentNode("n", cached), cached)
+	assert.Equal(t, (&Scheduler{nodeLister: newTestNodeLister(t)}).currentNode("n", cached), cached)
+	assert.Equal(t, (&Scheduler{nodeLister: newTestNodeLister(t, live)}).currentNode("n", cached), live)
 }
