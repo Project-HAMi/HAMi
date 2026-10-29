@@ -7,7 +7,7 @@ global:
   imageSource: upstream
   # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
-  # -- Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
+  # -- Global Docker image pull secrets added to the scheduler, device plugin, webhook patch job, and remote-gpu Pods; the mock device plugin DaemonSet does not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
   # -- Tag (optionally `tag@sha256:...`) used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty.
   # The default HAMi image is pinned by digest; an explicit tag replaces the complete value. A non-empty per-component tag takes precedence.
@@ -815,6 +815,9 @@ devices:
     # Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation
     # of relays without deleting existing ones.
     sessionImage: ""
+    # -- Names of existing image pull Secrets for the session relay Pods, added after
+    # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
+    sessionImagePullSecrets: []
     server:
       # -- Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true.
       # Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose
@@ -830,6 +833,9 @@ devices:
         tag: "cuda-13.3.1-ubuntu24.04@sha256:79f023523ed0ea8704b6e3634c5831ed2d4210a0a8c7ed700a3bcdbbf7c9e1a3"
         # -- Pull policy of the lupine server container image: `Always`, `IfNotPresent`, or `Never`.
         pullPolicy: IfNotPresent
+        # -- Names of existing image pull Secrets for the lupine server Pods, added after
+        # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
+        pullSecrets: []
       # -- RuntimeClass for lupine server Pods. Set to a class such as `nvidia` when the NVIDIA
       # container runtime is not the cluster default.
       # Empty omits the field; independent of `devices.nvidia.runtimeClassName`.
