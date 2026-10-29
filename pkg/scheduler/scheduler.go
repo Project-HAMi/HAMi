@@ -46,6 +46,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
@@ -451,6 +452,24 @@ func (s *Scheduler) onDelNode(obj any) {
 	}
 }
 
+// onUpdateNode notifies register promptly when the hami.io/device-cordon
+// annotation changes, instead of waiting up to 15s for
+// RegisterFromNodeAnnotations' ticker. It ignores every other node change;
+// those still reach register on the ticker, same as before.
+func (s *Scheduler) onUpdateNode(oldObj, newObj any) {
+	oldNode, ok := oldObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	newNode, ok := newObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if oldNode.Annotations[common.DeviceCordonAnnotation] != newNode.Annotations[common.DeviceCordonAnnotation] {
+		s.doNodeNotify()
+	}
+}
+
 // cleanupNodeUsage removes the node from the overviewstatus and printedLog maps
 // to ensure metrics no longer report data for deleted nodes, and that a node
 // recreated under the same name is logged as newly added rather than updated.
@@ -533,6 +552,7 @@ func (s *Scheduler) Start() error {
 	}
 	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: s.onUpdateNode,
 		DeleteFunc: s.onDelNode,
 	})
 	if err != nil {
@@ -626,6 +646,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
 	for _, val := range rawNodes {
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
+		s.refreshCordonAnnotation(val)
 
 		for devhandsk, devInstance := range device.GetDevices() {
 			klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -710,6 +731,30 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	}
 
 	s.synced.Store(true)
+}
+
+// refreshCordonAnnotation keeps the scheduler's cached Node in step with the
+// hami.io/device-cordon annotation on the live, listed Node, independent of
+// each vendor's CheckHealth/needUpdate signal in the loop above. Without this,
+// a cordon or uncordon written to an otherwise-steady node (same GPU count,
+// same register annotation) is silently ignored, because no vendor ever
+// reports needUpdate for a cordon-only change.
+func (s *Scheduler) refreshCordonAnnotation(node *corev1.Node) {
+	cached, err := s.GetNode(node.Name)
+	if err != nil || cached.Node == nil {
+		// Not yet in the cache (or a cache miss); the addNode path below, on
+		// first registration, will set the cordon value, so there is nothing
+		// to refresh yet.
+		return
+	}
+	liveCordon := node.Annotations[common.DeviceCordonAnnotation]
+	cachedCordon := cached.Node.Annotations[common.DeviceCordonAnnotation]
+	if liveCordon == cachedCordon {
+		return
+	}
+	klog.InfoS("Refreshing cached node for device-cordon annotation change",
+		"nodeName", node.Name, "from", cachedCordon, "to", liveCordon)
+	s.refreshNodeObject(node.Name, node)
 }
 
 func (s *Scheduler) updateSchedulerLabel() {
