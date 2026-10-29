@@ -1,0 +1,875 @@
+---
+suite: Breaking change field validation
+templates:
+- validate-values.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 31
+tests:
+- it: rejects resourceName with its replacement path
+  set:
+    resourceName: nvidia.com/gpu
+  asserts:
+  - failedTemplate:
+      errorMessage: resourceName has been removed; use devices.nvidia.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects resourceMem with its replacement path
+  set:
+    resourceMem: nvidia.com/gpumem
+  asserts:
+  - failedTemplate:
+      errorMessage: resourceMem has been removed; use devices.nvidia.resourceMemoryName instead
+  template: validate-values.yaml
+- it: rejects resourceMemPercentage with its replacement path
+  set:
+    resourceMemPercentage: nvidia.com/gpumem-percentage
+  asserts:
+  - failedTemplate:
+      errorMessage: resourceMemPercentage has been removed; use devices.nvidia.resourceMemoryPercentageName instead
+  template: validate-values.yaml
+- it: rejects resourceCores with its replacement path
+  set:
+    resourceCores: nvidia.com/gpucores
+  asserts:
+  - failedTemplate:
+      errorMessage: resourceCores has been removed; use devices.nvidia.resourceCoreName instead
+  template: validate-values.yaml
+- it: rejects resourcePriority with its replacement path
+  set:
+    resourcePriority: nvidia.com/priority
+  asserts:
+  - failedTemplate:
+      errorMessage: resourcePriority has been removed; use devices.nvidia.resourcePriorityName instead
+  template: validate-values.yaml
+- it: rejects mluResourceName with its replacement path
+  set:
+    mluResourceName: cambricon.com/vmlu
+  asserts:
+  - failedTemplate:
+      errorMessage: mluResourceName has been removed; use devices.cambricon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects mluResourceMem with its replacement path
+  set:
+    mluResourceMem: cambricon.com/mlu.smlu.vmemory
+  asserts:
+  - failedTemplate:
+      errorMessage: mluResourceMem has been removed; use devices.cambricon.resourceMemoryName instead
+  template: validate-values.yaml
+- it: rejects mluResourceCores with its replacement path
+  set:
+    mluResourceCores: cambricon.com/mlu.smlu.vcore
+  asserts:
+  - failedTemplate:
+      errorMessage: mluResourceCores has been removed; use devices.cambricon.resourceCoreName instead
+  template: validate-values.yaml
+- it: rejects dcuResourceName with its replacement path
+  set:
+    dcuResourceName: hygon.com/dcunum
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceName has been removed; use devices.hygon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects dcuResourceMem with its replacement path
+  set:
+    dcuResourceMem: hygon.com/dcumem
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceMem has been removed; use devices.hygon.resourceMemoryName instead
+  template: validate-values.yaml
+- it: rejects dcuResourceCores with its replacement path
+  set:
+    dcuResourceCores: hygon.com/dcucores
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceCores has been removed; use devices.hygon.resourceCoreName instead
+  template: validate-values.yaml
+- it: rejects hcuResourceName with its replacement path
+  set:
+    hcuResourceName: hygon.com/hcunum
+  asserts:
+  - failedTemplate:
+      errorMessage: hcuResourceName has been removed; use devices.hygon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects hcuResourceMem with its replacement path
+  set:
+    hcuResourceMem: hygon.com/hcumem
+  asserts:
+  - failedTemplate:
+      errorMessage: hcuResourceMem has been removed; use devices.hygon.resourceMemoryName instead
+  template: validate-values.yaml
+- it: rejects hcuResourceCores with its replacement path
+  set:
+    hcuResourceCores: hygon.com/hcucores
+  asserts:
+  - failedTemplate:
+      errorMessage: hcuResourceCores has been removed; use devices.hygon.resourceCoreName instead
+  template: validate-values.yaml
+- it: rejects metaxResourceName with its replacement path
+  set:
+    metaxResourceName: example.com/metax-count
+  asserts:
+  - failedTemplate:
+      errorMessage: metaxResourceName has been removed; use devices.metax.resourceVCountName instead
+  template: validate-values.yaml
+- it: rejects metaxResourceCore with its replacement path
+  set:
+    metaxResourceCore: example.com/metax-core
+  asserts:
+  - failedTemplate:
+      errorMessage: metaxResourceCore has been removed; use devices.metax.resourceVCoreName instead
+  template: validate-values.yaml
+- it: rejects metaxResourceMem with its replacement path
+  set:
+    metaxResourceMem: example.com/metax-memory
+  asserts:
+  - failedTemplate:
+      errorMessage: metaxResourceMem has been removed; use devices.metax.resourceVMemoryName instead
+  template: validate-values.yaml
+- it: rejects metaxsGPUTopologyAware with its replacement path
+  set:
+    metaxsGPUTopologyAware: 'false'
+  asserts:
+  - failedTemplate:
+      errorMessage: metaxsGPUTopologyAware has been removed; use devices.metax.sgpuTopologyAware instead
+  template: validate-values.yaml
+- it: rejects enflameResourceNameDRSGCU with its replacement path
+  set:
+    enflameResourceNameDRSGCU: example.com/enflame-count
+  asserts:
+  - failedTemplate:
+      errorMessage: enflameResourceNameDRSGCU has been removed; use devices.enflame.resourceNameDRSGCU instead
+  template: validate-values.yaml
+- it: rejects enflameResourceNameGCUMemory with its replacement path
+  set:
+    enflameResourceNameGCUMemory: example.com/enflame-memory
+  asserts:
+  - failedTemplate:
+      errorMessage: enflameResourceNameGCUMemory has been removed; use devices.enflame.resourceNameGCUMemory instead
+  template: validate-values.yaml
+- it: rejects enflameResourceNameGCUCore with its replacement path
+  set:
+    enflameResourceNameGCUCore: example.com/enflame-core
+  asserts:
+  - failedTemplate:
+      errorMessage: enflameResourceNameGCUCore has been removed; use devices.enflame.resourceNameGCUCore instead
+  template: validate-values.yaml
+- it: rejects kunlunResourceName with its replacement path
+  set:
+    kunlunResourceName: example.com/kunlun-count
+  asserts:
+  - failedTemplate:
+      errorMessage: kunlunResourceName has been removed; use devices.kunlun.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects kunlunResourceVCountName with its replacement path
+  set:
+    kunlunResourceVCountName: example.com/kunlun-vcount
+  asserts:
+  - failedTemplate:
+      errorMessage: kunlunResourceVCountName has been removed; use devices.kunlun.resourceVCountName instead
+  template: validate-values.yaml
+- it: rejects kunlunResourceVMemoryName with its replacement path
+  set:
+    kunlunResourceVMemoryName: example.com/kunlun-memory
+  asserts:
+  - failedTemplate:
+      errorMessage: kunlunResourceVMemoryName has been removed; use devices.kunlun.resourceVMemoryName instead
+  template: validate-values.yaml
+- it: rejects vastaiResourceName with its replacement path
+  set:
+    vastaiResourceName: example.com/vastai-count
+  asserts:
+  - failedTemplate:
+      errorMessage: vastaiResourceName has been removed; use devices.vastai.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects birenResourceName with its replacement path
+  set:
+    birenResourceName: example.com/biren-count
+  asserts:
+  - failedTemplate:
+      errorMessage: birenResourceName has been removed; use devices.biren.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects an empty obsolete DCU field even when the replacement is set
+  set:
+    dcuResourceName: ''
+    devices.hygon.resourceCountName: example.com/custom-count
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceName has been removed; use devices.hygon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects an obsolete DCU field set to zero
+  set:
+    dcuResourceMem: 0
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceMem has been removed; use devices.hygon.resourceMemoryName instead
+  template: validate-values.yaml
+- it: rejects an obsolete DCU field set to false
+  set:
+    dcuResourceCores: false
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceCores has been removed; use devices.hygon.resourceCoreName instead
+  template: validate-values.yaml
+- it: still rejects the obsolete HCU fields with their replacement paths
+  set:
+    hcuResourceName: hygon.com/hcunum
+    hcuResourceMem: hygon.com/hcumem
+    hcuResourceCores: hygon.com/hcucores
+  asserts:
+  - failedTemplate:
+      errorMessage: |-
+        hcuResourceCores has been removed; use devices.hygon.resourceCoreName instead
+        hcuResourceMem has been removed; use devices.hygon.resourceMemoryName instead
+        hcuResourceName has been removed; use devices.hygon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects obsolete DCU values when a full device configuration override is used
+  set:
+    dcuResourceName: hygon.com/dcunum
+    device-config.content: |
+      hygon:
+        resourceCountName: example.com/custom-count
+  asserts:
+  - failedTemplate:
+      errorMessage: dcuResourceName has been removed; use devices.hygon.resourceCountName instead
+  template: validate-values.yaml
+- it: rejects devicePlugin.deviceSplitCount with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.deviceSplitCount: 10
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.deviceSplitCount has been removed; use devices.nvidia.deviceSplitCount instead
+- it: rejects devicePlugin.deviceMemoryScaling with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.deviceMemoryScaling: 1
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.deviceMemoryScaling has been removed; use devices.nvidia.deviceMemoryScaling instead
+- it: rejects devicePlugin.deviceCoreScaling with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.deviceCoreScaling: 1
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.deviceCoreScaling has been removed; use devices.nvidia.deviceCoreScaling instead
+- it: rejects devicePlugin.preConfiguredDeviceMemory with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.preConfiguredDeviceMemory: 0
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.preConfiguredDeviceMemory has been removed; use devices.nvidia.preConfiguredDeviceMemory instead
+- it: rejects devicePlugin.enableNumaTopology with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.enableNumaTopology: false
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.enableNumaTopology has been removed; use devices.nvidia.enableNumaTopology instead
+- it: rejects devicePlugin.runtimeClassName with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.runtimeClassName: ''
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.runtimeClassName has been removed; use devices.nvidia.runtimeClassName instead
+- it: rejects devicePlugin.createRuntimeClass with its replacement path
+  template: validate-values.yaml
+  set:
+    devicePlugin.createRuntimeClass: false
+  asserts:
+  - failedTemplate:
+      errorMessage: devicePlugin.createRuntimeClass has been removed; use devices.nvidia.createRuntimeClass instead
+- it: rejects obsolete scheduler patch image registry
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.registry: example.com
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects obsolete scheduler patch image repository
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.repository: custom/certgen
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects obsolete scheduler patch image tag
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.tag: v1.2.3
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects obsolete scheduler patch image pullPolicy
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.pullPolicy: Always
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects obsolete scheduler patch image pullSecrets
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.pullSecrets: []
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects an empty obsolete scheduler patch image object
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image: {}
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects the obsolete scheduler patch image even when the replacement is set
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.repository: old/certgen
+    scheduler.patch.imageNew.repository: new/certgen
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects the obsolete scheduler patch image when scheduler components are disabled
+  template: validate-values.yaml
+  set:
+    scheduler.patch.image.tag: v1
+    scheduler.patch.enabled: false
+    scheduler.kubeScheduler.enabled: false
+  asserts:
+  - failedTemplate:
+      errorMessage: scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects a non-boolean legacy Ascend core flag
+  template: validate-values.yaml
+  set:
+    devices.ascend.hamiVnpuCore: 'false'
+  asserts:
+  - failedTemplate:
+      errorMessage: devices.ascend.hamiVnpuCore must be a boolean; use devices.ascend.hamiVnpuMode instead
+- it: rejects the removed Ascend enpu flag even when false
+  template: validate-values.yaml
+  set:
+    devices.ascend.enpu: false
+  asserts:
+  - failedTemplate:
+      errorMessage: devices.ascend.enpu has been removed; use devices.ascend.hamiVnpuMode (template, hami-core, or enpu) instead
+- it: reports removed fields across all configuration sections together
+  template: validate-values.yaml
+  set:
+    dcuResourceName: hygon.com/dcunum
+    devicePlugin.deviceSplitCount: 0
+    devices.ascend.enpu: false
+    scheduler.patch.image: {}
+  asserts:
+  - failedTemplate:
+      errorMessage: |-
+        dcuResourceName has been removed; use devices.hygon.resourceCountName instead
+        devicePlugin.deviceSplitCount has been removed; use devices.nvidia.deviceSplitCount instead
+        devices.ascend.enpu has been removed; use devices.ascend.hamiVnpuMode (template, hami-core, or enpu) instead
+        scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+---
+suite: Migrated field rendering
+templates:
+- scheduler/device-configmap.yaml
+- scheduler/configmap.yaml
+- scheduler/job-patch/job-createSecret.yaml
+- scheduler/job-patch/job-patchWebhook.yaml
+- device-plugin/daemonsetnvidia.yaml
+- device-plugin/runtime-class.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 31
+tests:
+- it: renders migrated Hygon resource names
+  set:
+    devices.hygon.resourceCountName: example.com/custom-count
+    devices.hygon.resourceMemoryName: example.com/custom-memory
+    devices.hygon.resourceCoreName: example.com/custom-cores
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hygon:\n  resourceCountName: example\.com/custom-count\n  resourceMemoryName: example\.com/custom-memory\n  resourceCoreName: example\.com/custom-cores\n'
+  template: scheduler/device-configmap.yaml
+- it: renders migrated image settings for scheduler/job-patch/job-createSecret.yaml
+  template: scheduler/job-patch/job-createSecret.yaml
+  set:
+    scheduler.patch.imageNew.registry: example.com
+    scheduler.patch.imageNew.repository: custom/certgen
+    scheduler.patch.imageNew.tag: v1.2.3
+    scheduler.patch.imageNew.pullPolicy: Always
+    scheduler.patch.imageNew.pullSecrets:
+    - custom-pull-secret
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].image
+      value: example.com/custom/certgen:v1.2.3
+  - equal:
+      path: spec.template.spec.containers[0].imagePullPolicy
+      value: Always
+  - contains:
+      path: spec.template.spec.imagePullSecrets
+      content:
+        name: custom-pull-secret
+- it: renders migrated image settings for scheduler/job-patch/job-patchWebhook.yaml
+  template: scheduler/job-patch/job-patchWebhook.yaml
+  set:
+    scheduler.patch.imageNew.registry: example.com
+    scheduler.patch.imageNew.repository: custom/certgen
+    scheduler.patch.imageNew.tag: v1.2.3
+    scheduler.patch.imageNew.pullPolicy: Always
+    scheduler.patch.imageNew.pullSecrets:
+    - custom-pull-secret
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].image
+      value: example.com/custom/certgen:v1.2.3
+  - equal:
+      path: spec.template.spec.containers[0].imagePullPolicy
+      value: Always
+  - contains:
+      path: spec.template.spec.imagePullSecrets
+      content:
+        name: custom-pull-secret
+- it: preserves the legacy Ascend core flag true
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.ascend.hamiVnpuCore: true
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hamiVnpuMode: "hami-core"'
+- it: preserves the legacy Ascend core flag false
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.ascend.hamiVnpuCore: false
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hamiVnpuMode: "template"'
+- it: uses the explicit Ascend mode over the legacy flag
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.ascend.hamiVnpuCore: true
+    devices.ascend.hamiVnpuMode: enpu
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hamiVnpuMode: "enpu"'
+- it: renders the migrated MetaX topology flag from a string
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.metax.sgpuTopologyAware: 'false'
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  sgpuTopologyAware: false$"
+- it: renders the migrated MetaX topology flag from a boolean
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.metax.sgpuTopologyAware: false
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  sgpuTopologyAware: false$"
+- it: accepts extraEnvs as legacy empty objects
+  template: device-plugin/daemonsetnvidia.yaml
+  set:
+    devicePlugin.extraEnvs: {}
+    devicePlugin.monitor.extraEnvs: {}
+  asserts:
+  - isKind:
+      of: DaemonSet
+- it: accepts extraEnvs as empty lists
+  template: device-plugin/daemonsetnvidia.yaml
+  set:
+    devicePlugin.extraEnvs: []
+    devicePlugin.monitor.extraEnvs: []
+  asserts:
+  - isKind:
+      of: DaemonSet
+- it: renders extraEnvs lists for both the device plugin and monitor
+  template: device-plugin/daemonsetnvidia.yaml
+  set:
+    devicePlugin.extraEnvs:
+    - name: CUSTOM_PLUGIN_ENV
+      value: plugin
+    devicePlugin.monitor.extraEnvs:
+    - name: CUSTOM_MONITOR_ENV
+      value: monitor
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: CUSTOM_PLUGIN_ENV
+        value: plugin
+  - contains:
+      path: spec.template.spec.containers[1].env
+      content:
+        name: CUSTOM_MONITOR_ENV
+        value: monitor
+- it: uses HCU resource defaults after removing the v2.10 DCU overrides
+  template: scheduler/device-configmap.yaml
+  set: {}
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hygon:\n  resourceCountName: hygon\.com/hcunum\n  resourceMemoryName: hygon\.com/hcumem\n  resourceCoreName: hygon\.com/hcucores\n'
+- it: registers enflame resources with empty customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.enflame.enabled: true
+    devices.enflame.resourceNameDRSGCU: example.com/enflame-0
+    devices.enflame.resourceNameGCUMemory: example.com/enflame-1
+    devices.enflame.resourceNameGCUCore: example.com/enflame-2
+    devices.enflame.resourceNameGCU: example.com/enflame-3
+    devices.enflame.customresources: []
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-0\\n.*name: example\\.com/enflame\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-1\\n.*name: example\\.com/enflame\\-1\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-2\\n.*name: example\\.com/enflame\\-2\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-3$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-3\\n.*name: example\\.com/enflame\\-3\\n"
+- it: registers enflame resources with copied standard and additional customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.enflame.enabled: true
+    devices.enflame.resourceNameDRSGCU: example.com/enflame-0
+    devices.enflame.resourceNameGCUMemory: example.com/enflame-1
+    devices.enflame.resourceNameGCUCore: example.com/enflame-2
+    devices.enflame.resourceNameGCU: example.com/enflame-3
+    devices.enflame.customresources:
+    - example.com/enflame-0
+    - example.com/enflame-1
+    - example.com/enflame-2
+    - example.com/enflame-3
+    - example.com/enflame-extra
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-0\\n.*name: example\\.com/enflame\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-1\\n.*name: example\\.com/enflame\\-1\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-2\\n.*name: example\\.com/enflame\\-2\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-3$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-3\\n.*name: example\\.com/enflame\\-3\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-extra$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/enflame\\-extra\\n.*name: example\\.com/enflame\\-extra\\n"
+- it: registers enflame resources with disabled customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.enflame.enabled: false
+    devices.enflame.resourceNameDRSGCU: example.com/enflame-0
+    devices.enflame.resourceNameGCUMemory: example.com/enflame-1
+    devices.enflame.resourceNameGCUCore: example.com/enflame-2
+    devices.enflame.resourceNameGCU: example.com/enflame-3
+    devices.enflame.customresources:
+    - example.com/enflame-0
+    - example.com/enflame-1
+    - example.com/enflame-2
+    - example.com/enflame-3
+    - example.com/enflame-extra
+  asserts:
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-3$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/enflame\\-extra$"
+- it: registers kunlun resources with empty customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.kunlun.enabled: true
+    devices.kunlun.resourceCountName: example.com/kunlun-0
+    devices.kunlun.resourceVCountName: example.com/kunlun-1
+    devices.kunlun.resourceVMemoryName: example.com/kunlun-2
+    devices.kunlun.customresources: []
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-0\\n.*name: example\\.com/kunlun\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-1\\n.*name: example\\.com/kunlun\\-1\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-2\\n.*name: example\\.com/kunlun\\-2\\n"
+- it: registers kunlun resources with copied standard and additional customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.kunlun.enabled: true
+    devices.kunlun.resourceCountName: example.com/kunlun-0
+    devices.kunlun.resourceVCountName: example.com/kunlun-1
+    devices.kunlun.resourceVMemoryName: example.com/kunlun-2
+    devices.kunlun.customresources:
+    - example.com/kunlun-0
+    - example.com/kunlun-1
+    - example.com/kunlun-2
+    - example.com/kunlun-extra
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-0\\n.*name: example\\.com/kunlun\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-1\\n.*name: example\\.com/kunlun\\-1\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-2\\n.*name: example\\.com/kunlun\\-2\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-extra$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/kunlun\\-extra\\n.*name: example\\.com/kunlun\\-extra\\n"
+- it: registers kunlun resources with disabled customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.kunlun.enabled: false
+    devices.kunlun.resourceCountName: example.com/kunlun-0
+    devices.kunlun.resourceVCountName: example.com/kunlun-1
+    devices.kunlun.resourceVMemoryName: example.com/kunlun-2
+    devices.kunlun.customresources:
+    - example.com/kunlun-0
+    - example.com/kunlun-1
+    - example.com/kunlun-2
+    - example.com/kunlun-extra
+  asserts:
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-1$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-2$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/kunlun\\-extra$"
+- it: registers vastai resources with empty customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.vastai.enabled: true
+    devices.vastai.resourceCountName: example.com/vastai-0
+    devices.vastai.customresources: []
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/vastai\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/vastai\\-0\\n.*name: example\\.com/vastai\\-0\\n"
+- it: registers vastai resources with copied standard and additional customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.vastai.enabled: true
+    devices.vastai.resourceCountName: example.com/vastai-0
+    devices.vastai.customresources:
+    - example.com/vastai-0
+    - example.com/vastai-extra
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/vastai\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/vastai\\-0\\n.*name: example\\.com/vastai\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/vastai\\-extra$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/vastai\\-extra\\n.*name: example\\.com/vastai\\-extra\\n"
+- it: registers vastai resources with disabled customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.vastai.enabled: false
+    devices.vastai.resourceCountName: example.com/vastai-0
+    devices.vastai.customresources:
+    - example.com/vastai-0
+    - example.com/vastai-extra
+  asserts:
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/vastai\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/vastai\\-extra$"
+- it: registers biren resources with empty customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.biren.enabled: true
+    devices.biren.resourceCountName: example.com/biren-0
+    devices.biren.customresources: []
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/biren\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/biren\\-0\\n.*name: example\\.com/biren\\-0\\n"
+- it: registers biren resources with copied standard and additional customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.biren.enabled: true
+    devices.biren.resourceCountName: example.com/biren-0
+    devices.biren.customresources:
+    - example.com/biren-0
+    - example.com/biren-extra
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/biren\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/biren\\-0\\n.*name: example\\.com/biren\\-0\\n"
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/biren\\-extra$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?s)name: example\\.com/biren\\-extra\\n.*name: example\\.com/biren\\-extra\\n"
+- it: registers biren resources with disabled customresources
+  template: scheduler/configmap.yaml
+  set:
+    devices.biren.enabled: false
+    devices.biren.resourceCountName: example.com/biren-0
+    devices.biren.customresources:
+    - example.com/biren-0
+    - example.com/biren-extra
+  asserts:
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/biren\\-0$"
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: "(?m)^\\s+name: example\\.com/biren\\-extra$"
+- it: renders an enabled migrated MetaX topology flag from a string
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.metax.sgpuTopologyAware: 'true'
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  sgpuTopologyAware: true$"
+- it: renders an enabled migrated MetaX topology flag from a boolean
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.metax.sgpuTopologyAware: true
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  sgpuTopologyAware: true$"
+- it: renders all migrated NVIDIA device plugin settings and creates the runtime class
+  set:
+    devices.nvidia.deviceSplitCount: 20
+    devices.nvidia.deviceMemoryScaling: 1.5
+    devices.nvidia.deviceCoreScaling: 2
+    devices.nvidia.preConfiguredDeviceMemory: 4096
+    devices.nvidia.enableNumaTopology: true
+    devices.nvidia.runtimeClassName: custom-nvidia
+    devices.nvidia.createRuntimeClass: true
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  deviceSplitCount: 20$"
+    template: scheduler/device-configmap.yaml
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  deviceMemoryScaling: 1\\.5$"
+    template: scheduler/device-configmap.yaml
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  deviceCoreScaling: 2$"
+    template: scheduler/device-configmap.yaml
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  preConfiguredDeviceMemory: 4096$"
+    template: scheduler/device-configmap.yaml
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: "(?m)^  enableNumaTopology: true$"
+    template: scheduler/device-configmap.yaml
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: '(?m)^  runtimeClassName: "custom-nvidia"$'
+    template: scheduler/device-configmap.yaml
+  - equal:
+      path: spec.template.spec.runtimeClassName
+      value: custom-nvidia
+    template: device-plugin/daemonsetnvidia.yaml
+  - equal:
+      path: metadata.name
+      value: custom-nvidia
+    template: device-plugin/runtime-class.yaml
+  - equal:
+      path: handler
+      value: nvidia
+    template: device-plugin/runtime-class.yaml
