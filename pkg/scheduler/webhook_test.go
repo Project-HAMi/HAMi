@@ -1842,6 +1842,7 @@ func initRemoteGPUWebhookDevice(t *testing.T) string {
 	oldMemory := remotegpu.RemoteGPUResourceMemory
 	oldLibImage := remotegpu.RemoteGPULibImage
 	oldSessionImage := remotegpu.RemoteGPUSessionImage
+	oldSessionImagePullSecrets := remotegpu.RemoteGPUSessionImagePullSecrets
 	dev := remotegpu.InitRemoteGPUDevice(remotegpu.RemoteGPUConfig{
 		ResourceCountName:  "hami.io/remote-gpu",
 		ResourceMemoryName: "hami.io/remote-gpu-memory",
@@ -1853,6 +1854,7 @@ func initRemoteGPUWebhookDevice(t *testing.T) string {
 		remotegpu.RemoteGPUResourceMemory = oldMemory
 		remotegpu.RemoteGPULibImage = oldLibImage
 		remotegpu.RemoteGPUSessionImage = oldSessionImage
+		remotegpu.RemoteGPUSessionImagePullSecrets = oldSessionImagePullSecrets
 	})
 	return remotegpu.RemoteGPUResourceCount
 }

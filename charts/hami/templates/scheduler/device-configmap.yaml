@@ -83,6 +83,11 @@ data:
       {{- end }}
       clientImage: {{ include "common.images.source" (dict "image" .Values.devices.remotegpu.clientImage "global" .Values.global) | quote }}
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
+      {{- $sessionImagePullSecrets := concat (.Values.global.imagePullSecrets | default (list)) (.Values.devices.remotegpu.sessionImagePullSecrets | default (list)) }}
+      {{- with $sessionImagePullSecrets }}
+      sessionImagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
     {{- end }}
     kunlun:
       resourceCountName: {{ .Values.devices.kunlun.resourceCountName }}

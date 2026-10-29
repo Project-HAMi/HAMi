@@ -234,6 +234,19 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
 }
 
+func TestLoadConfigRemoteGPUSessionImagePullSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "device-config.yaml")
+	config := "remotegpu:\n  sessionImagePullSecrets:\n    - global-registry\n    - session-registry\n"
+	assert.NilError(t, os.WriteFile(path, []byte(config), 0o600))
+
+	configData, err := LoadConfig(path)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, configData.RemoteGPUConfig.SessionImagePullSecrets, []string{
+		"global-registry",
+		"session-registry",
+	})
+}
+
 func TestLoadConfigRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
 		name    string
