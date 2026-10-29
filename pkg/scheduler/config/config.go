@@ -560,6 +560,7 @@ vnpus:
         memory: 12288
         aiCore: 4
         aiCPU: 4
+  # Ascend950DT 9582 whole-card configuration.
   - chipName: "Ascend950DT"
     commonWord: "Ascend950DT"
     resourceName: "huawei.com/Ascend950DT"

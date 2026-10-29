@@ -857,6 +857,7 @@ devices:
     # The named template must be supported by the driver; editing these numbers does not create a new driver template.
     # The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected.
     # See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing).
+    # <br>The Ascend950DT entry is for the 9582 SKU with 96 GiB HBM and requires a compatible separately deployed device plugin.
     # @default -- Per-chip capacities and templates; see [values.yaml](values.yaml).
     configs:
     - chipName: 910A
@@ -1003,7 +1004,7 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
-    # -- Ascend950DT whole-card only placeholder (draft). No vNPU templates, no memory/core resource names.
+    # Ascend950DT 9582 whole-card configuration; vNPU templates and memory/core resource names are not defined.
     - chipName: Ascend950DT
       commonWord: Ascend950DT
       resourceName: huawei.com/Ascend950DT
