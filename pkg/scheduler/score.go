@@ -174,6 +174,31 @@ func resolvePreferredSchedulingTerm(task *corev1.Pod) []corev1.PreferredScheduli
 	return task.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 }
 
+// resolvePreferredNodeAffinity parses the pod's preferred nodeAffinity once per
+// scheduling request. It returns nil when --node-affinity-score-weight is 0 or
+// the pod has no usable preferred term, so scoreNode skips the bonus at no
+// cost. Malformed terms are logged and dropped; the remaining valid terms are
+// still returned.
+//
+// It is a separate function so calcScoreWithOptions assigns the result exactly
+// once. A variable that is reassigned after its declaration is captured by
+// reference in the per-node goroutine closure and escapes to the heap, which
+// costs one allocation per call even when the feature is off.
+func resolvePreferredNodeAffinity(task *corev1.Pod) *policy.PreferredNodeAffinity {
+	if config.NodeAffinityScoreWeight == 0 {
+		return nil
+	}
+	terms := resolvePreferredSchedulingTerm(task)
+	if len(terms) == 0 {
+		return nil
+	}
+	parsed, err := policy.NewPreferredNodeAffinity(terms)
+	if err != nil {
+		klog.Warningf("ignoring invalid preferred nodeAffinity terms on pod %s/%s: %v", task.Namespace, task.Name, err)
+	}
+	return parsed
+}
+
 type peakUsageSnapshot struct {
 	used      int64
 	usedcores int64
@@ -454,17 +479,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		return nil, err
 	}
 
-	var pref *policy.PreferredNodeAffinity
-	if terms := resolvePreferredSchedulingTerm(task); len(terms) > 0 && config.NodeAffinityScoreWeight != 0 {
-		parsed, err := policy.NewPreferredNodeAffinity(terms)
-		if err != nil {
-			klog.Warningf("ignoring invalid preferred nodeAffinity terms on pod %s/%s: %v", task.Namespace, task.Name, err)
-		}
-		// parsed keeps every valid term even when others were rejected, and is
-		// nil only when no term is usable.
-		pref = parsed
-	}
-
+	pref := resolvePreferredNodeAffinity(task)
 	userNodePolicy := resolveNodeSchedulerPolicy(task)
 	res := policy.NodeScoreList{
 		Policy:   userNodePolicy,
