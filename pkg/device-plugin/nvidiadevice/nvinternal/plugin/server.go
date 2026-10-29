@@ -134,6 +134,11 @@ type NvidiaDevicePlugin struct {
 	// NVML; Start/Stop pair Init and Shutdown. The annotation reconciler runs
 	// only when operatingMode == "mig".
 	migMgr *MigInstanceManager
+	// registeredMig holds what was last registered for each MIG card. Allocate
+	// checks a slice against it because the allocation annotation is not proof
+	// that the scheduler chose that profile.
+	registeredMigMu sync.RWMutex
+	registeredMig   map[string]registeredMigCard
 	// migPrimed records completed authoritative startup recovery, reset and CDI
 	// publication. Cached adoption alone must not mark this work complete.
 	migPrimed bool
@@ -1492,6 +1497,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			if err := plugin.validateContainerAllocation(&currentCtr, devreq); err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+			}
+			if plugin.operatingMode == "mig" {
+				if err := plugin.validateMigAllocation(current, &currentCtr); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+				}
 			}
 			requestIDs, err := plugin.GetContainerDeviceStrArray(devreq, current, currentCtr.Name)
 			if err != nil {

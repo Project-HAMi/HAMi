@@ -157,7 +157,7 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 * Run and pass `make verify`
 
-For Helm chart or chart-validation changes, use Helm v3.22.0 and also run `make verify_chart`.
+For Helm chart or chart-validation changes, use Helm v3.22.1 and also run `make verify_chart`.
 This target lints and renders the chart with its default values, runs the existing Trivy scan,
 and verifies that the chart and application versions match.
 
@@ -169,10 +169,13 @@ and Chart Lint CI. Values without descriptions are omitted for now; strict
 documentation checking is disabled. Add a description with `# -- Description`
 immediately above the value.
 
-For changes to a package that has benchmarks, also run `make bench`. CI runs the benchmarks to
-confirm they still execute; it does not compare timings, because shared runners are too noisy for
-that. When a change is about performance and you want numbers to quote, raise the benchmark time
-with `BENCHTIME=1s make bench`.
+For changes to a package that has benchmarks, also run `make bench`. For pull requests, CI compares
+the benchmark output with the PR base and reports the result with `benchstat`. It gates only the
+documented `B/op` and `allocs/op` thresholds in `hack/bench-policy.tsv`; wall-time changes remain
+informational because shared runners are too noisy for timing gates. When a change is about
+performance and you want numbers to quote, raise the benchmark time with `BENCHTIME=1s make bench`.
+Changing that policy is an intentional baseline update and requires rationale in the PR for
+maintainer approval.
 
 ## Issue and PR Lifecycle
 

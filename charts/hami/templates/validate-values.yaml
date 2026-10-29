@@ -1,1 +1,1 @@
-{{- include "hami-vgpu.validateDeviceValues" . -}}
+{{- include "hami-vgpu.validateValues" . -}}

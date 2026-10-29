@@ -109,7 +109,7 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
-		`Container device memory usage in bytes`,
+		"Container device memory usage in bytes (DEPRECATED: use hami_vgpu_memory_used_bytes, deprecated in v2.11.0, removed in v2.12.0)",
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
@@ -524,6 +524,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 	// Iterate through each Pod
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		podContainers, found := containerMap[string(pod.UID)]
 		if !found {
 			klog.V(5).Infof("No containers found for pod %s/%s", pod.Namespace, pod.Name)
@@ -654,6 +659,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 	}
 	failed := 0
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
 			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)

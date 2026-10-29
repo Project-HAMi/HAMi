@@ -72,6 +72,10 @@ test:
 bench:
 	bash hack/bench.sh
 
+.PHONY: test-bench-compare
+test-bench-compare:
+	bash hack/test-bench-compare.sh
+
 .PHONY: test-support-bundle
 test-support-bundle:
 	bash hack/test-hami-support-bundle.sh

@@ -108,6 +108,9 @@ func TestCollectContainerMetrics(t *testing.T) {
 	if len(want) != 0 {
 		t.Errorf("expected metrics not emitted: %v", want)
 	}
+	if !strings.Contains(ctrDeviceMemorydesc.String(), "DEPRECATED: use hami_vgpu_memory_used_bytes") {
+		t.Errorf("hami_container_device_memory_bytes should be marked deprecated: %s", ctrDeviceMemorydesc)
+	}
 }
 
 func TestCollectContainerMetricsNoKernelActivity(t *testing.T) {

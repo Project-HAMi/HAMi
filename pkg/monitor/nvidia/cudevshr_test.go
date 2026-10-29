@@ -812,3 +812,32 @@ func TestMappedUsageRemainsValidUntilUnlock(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheDirectoryRecoveryKeepsDCGMAliveUntilClose(t *testing.T) {
+	previous := wholeGPUDisableHAMiCore
+	wholeGPUDisableHAMiCore = false
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = previous })
+	collector := newMigTestCollector(&fakeLatestValuesQuerier{})
+	cleanups, shutdowns := 0, 0
+	collector.watched = map[uint]func(){1: func() { cleanups++ }}
+	collector.shutdown = func() { shutdowns++ }
+	path := filepath.Join(t.TempDir(), "cache")
+	l := &ContainerLister{containerPath: path, containers: map[string]*ContainerUsage{}, podLister: newTestPodLister(), wholeGPU: &wholeGPUState{dcgm: collector}, stopCh: make(chan struct{})}
+	defer l.Close()
+	if err := l.Update(); !os.IsNotExist(err) {
+		t.Fatalf("expected missing directory: %v", err)
+	}
+	if collector.closed || cleanups != 0 || shutdowns != 0 {
+		t.Fatal("missing directory closed DCGM")
+	}
+	assert.NilError(t, os.Mkdir(path, 0755))
+	assert.NilError(t, l.Update())
+	if collector.closed {
+		t.Fatal("directory recovery lost collector")
+	}
+	l.Close()
+	l.Close()
+	if !collector.closed || cleanups != 1 || shutdowns != 1 {
+		t.Fatalf("close failed: closed=%v cleanups=%d shutdowns=%d", collector.closed, cleanups, shutdowns)
+	}
+}

@@ -54,7 +54,7 @@ const (
 // against and should not call this.
 func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, allocated ContainerDevices, cardMemory CardMemoryMB, cores CoresUnit) error {
 	for _, each := range allocated {
-		limit, bounded := requestedMemoryMB(req, each.UUID, cardMemory)
+		limit, bounded := RequestedMemoryMB(req, each.UUID, cardMemory)
 		if bounded && each.Usedmem > limit {
 			return fmt.Errorf("container %s is allocated %d MB on device %s but requests %d MB",
 				ctrName, each.Usedmem, each.UUID, limit)
@@ -67,9 +67,9 @@ func ValidateContainerAllocation(ctrName string, req ContainerDeviceRequest, all
 	return nil
 }
 
-// requestedMemoryMB returns the memory the request entitles the container to on
+// RequestedMemoryMB returns the memory the request entitles the container to on
 // the named card, and whether the request bounds it at all.
-func requestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int64, bool) {
+func RequestedMemoryMB(req ContainerDeviceRequest, uuid string, cardMemory CardMemoryMB) (int64, bool) {
 	// A container can carry both. Every backend sizes the slice from the
 	// percentage only while Memreq is zero, so the absolute request has to win
 	// here too, or an allocation the scheduler sized from it is rejected.

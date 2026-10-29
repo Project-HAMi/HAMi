@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -111,6 +113,7 @@ type wholeGPUState struct {
 	// utilization to this container. Phys-unreadable pendings do not
 	// consume this window; see causePhysUnreadable.
 	firstSeenAt map[string]time.Time
+	migPending  map[string]migPendingRetry
 
 	// ownedContainerKeys tracks keys in ContainerLister.containers that were
 	// installed by reconcileWholeGPULocked. Only these keys are garbage-collected
@@ -338,7 +341,11 @@ func (l *ContainerLister) prefetchWholeGPUInputs(pods []*corev1.Pod) *wholeGPUIn
 		// evaluation entirely, sparing the registry GET.
 		if state.nvmlInitialized {
 			for _, cand := range annotated {
-				if _, cached := state.verdicts[string(cand.pod.UID)+"_"+cand.container]; !cached {
+				key := string(cand.pod.UID) + "_" + cand.container
+				if pending, ok := state.migPending[key]; ok && pending.signature == migCandidateSignature(cand) && time.Since(pending.firstSeen) > indeterminateRetryWindow {
+					continue
+				}
+				if _, cached := state.verdicts[key]; !cached {
 					inputs.candidates = append(inputs.candidates, cand)
 				}
 			}
@@ -395,7 +402,23 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 				if _, cached := state.verdicts[key]; cached {
 					continue
 				}
-				verdict, cause := evaluateContainerWholeGPU(cand.devices, inputs.nodeDevs, state.physTotalMiB)
+				if state.migPending == nil {
+					state.migPending = make(map[string]migPendingRetry)
+				}
+				signature := migCandidateSignature(cand)
+				pending, seen := state.migPending[key]
+				if seen && pending.signature == signature && now.Sub(pending.firstSeen) > indeterminateRetryWindow {
+					continue
+				}
+				resolved, registry, ready := resolveDynamicMIGCandidate(cand, inputs.nodeDevs)
+				if !ready {
+					if !seen || pending.signature != signature {
+						state.migPending[key] = migPendingRetry{signature: signature, firstSeen: now}
+					}
+					continue
+				}
+				delete(state.migPending, key)
+				verdict, cause := evaluateContainerWholeGPU(resolved, registry, state.physTotalMiB)
 				if verdict == indeterminate && cause == causeRegistryMiss {
 					// Registry misses are forgery-sensitive, so their wait
 					// is capped: past the window the verdict locks to
@@ -414,8 +437,8 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 					continue
 				}
 
-				uuids := make([]string, len(cand.devices))
-				for i, cd := range cand.devices {
+				uuids := make([]string, len(resolved))
+				for i, cd := range resolved {
 					uuids[i] = cd.UUID
 				}
 				if existing, ok := l.containers[key]; ok && existing.data != nil {
@@ -432,6 +455,11 @@ func (l *ContainerLister) reconcileWholeGPULocked(inputs *wholeGPUInputs) {
 		}
 	}
 
+	for key := range state.migPending {
+		if !inputs.stillAnnotated[key] {
+			delete(state.migPending, key)
+		}
+	}
 	for key := range state.ownedContainerKeys {
 		if !inputs.stillAnnotated[key] {
 			delete(l.containers, key)
@@ -571,4 +599,76 @@ func containerNameByIndex(pod *corev1.Pod, idx int) (string, bool) {
 		return "", false
 	}
 	return pod.Spec.Containers[idx].Name, true
+}
+
+// resolveDynamicMIGCandidate joins scheduler reservations with realized runtime
+// identities. Pending identities remain retryable rather than caching rejection.
+func resolveDynamicMIGCandidate(c wholeGPUCandidate, registry map[string]*device.DeviceInfo) (device.ContainerDevices, map[string]*device.DeviceInfo, bool) {
+	allocations, err := nv.DecodeMigAllocations(c.pod.Annotations[nv.MigAllocationsAnnotation])
+	if err != nil {
+		return nil, nil, false
+	}
+	if len(allocations) == 0 {
+		for _, dev := range c.devices {
+			if parent := registry[dev.UUID]; parent != nil && parent.Mode == nv.MigMode && strings.HasPrefix(dev.UUID, "GPU-") {
+				return nil, nil, false
+			}
+		}
+		return c.devices, registry, true
+	}
+	ci := -1
+	for i := range len(c.pod.Spec.InitContainers) + len(c.pod.Spec.Containers) {
+		if name, ok := containerNameByIndex(c.pod, i); ok && name == c.container {
+			ci = i
+			break
+		}
+	}
+	resolved := append(device.ContainerDevices(nil), c.devices...)
+	nodes := make(map[string]*device.DeviceInfo, len(registry)+len(resolved))
+	maps.Copy(nodes, registry)
+	for di, dev := range resolved {
+		parent := registry[dev.UUID]
+		if parent == nil || parent.Mode != nv.MigMode {
+			continue
+		}
+		found := false
+		for _, a := range allocations {
+			if a.ContainerIndex != ci || a.DeviceIndex != di {
+				continue
+			}
+			if a.GPUUUID != dev.UUID || !strings.HasPrefix(a.MigUUID, "MIG-") {
+				return nil, nil, false
+			}
+			valid := false
+			for _, profile := range parent.MIGProfiles {
+				if profile.Name == a.Profile && profile.MemoryMB == dev.Usedmem {
+					valid = true
+				}
+			}
+			if !valid {
+				return nil, nil, false
+			}
+			resolved[di].UUID = a.MigUUID
+			instance := *parent
+			instance.ID = a.MigUUID
+			instance.Devmem = dev.Usedmem
+			nodes[a.MigUUID] = &instance
+			found = true
+			break
+		}
+		if !found {
+			return nil, nil, false
+		}
+	}
+	return resolved, nodes, true
+}
+
+// migPendingRetry bounds retries for one version of the allocation annotations.
+type migPendingRetry struct {
+	signature string
+	firstSeen time.Time
+}
+
+func migCandidateSignature(c wholeGPUCandidate) string {
+	return c.pod.Annotations[nv.AllocatedDevicesAnnotation] + "\x00" + c.pod.Annotations[nv.MigAllocationsAnnotation]
 }

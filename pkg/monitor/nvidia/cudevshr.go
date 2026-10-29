@@ -362,6 +362,9 @@ func (l *ContainerLister) Close() {
 		l.mutex.Lock()
 		defer l.mutex.Unlock()
 		l.unmapAll()
+		if l.wholeGPU != nil && l.wholeGPU.dcgm != nil {
+			l.wholeGPU.dcgm.Close()
+		}
 	})
 }
 

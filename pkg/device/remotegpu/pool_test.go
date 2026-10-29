@@ -29,9 +29,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // stubFleet points the pool at a fixed set of nodes and pods for one test.
@@ -654,4 +658,113 @@ func TestPool_RefreshDoesNotBlockReservedDuringAServerFetch(t *testing.T) {
 	}
 	close(release)
 	<-refreshDone
+}
+
+// A pod Fit refused must be requeued once the fleet changes, because
+// kube-scheduler does not requeue it on that change by itself.
+func TestPool_NudgesRefusedPodWhenFleetChanges(t *testing.T) {
+	nodes := []corev1.Node{}
+	stubFleet(t, nodes, nil, nil)
+	nudged := make(chan []waiter, 1)
+	prev := nudgePods
+	nudgePods = func(pods []waiter, _ uint64) []waiter { nudged <- pods; return nil }
+	t.Cleanup(func() { nudgePods = prev })
+
+	dev := InitRemoteGPUDevice(testConfig())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}
+	dev.WaitForFleet(pod, dev.FleetRevision())
+
+	// Nothing changed: the refused pod stays untouched.
+	dev.pool.snapshot(context.Background())
+	select {
+	case <-nudged:
+		t.Fatal("pod nudged without a fleet change")
+	default:
+	}
+
+	nodes = append(nodes, lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}))
+	stubFleet(t, nodes, nil, nil)
+	dev.pool.mu.Lock()
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.mu.Unlock()
+	dev.pool.snapshot(context.Background())
+	select {
+	case got := <-nudged:
+		assert.Equal(t, len(got), 1)
+		assert.Equal(t, got[0].namespace+"/"+got[0].name, "ns/p")
+	case <-time.After(time.Second):
+		t.Fatal("refused pod was not nudged after the fleet changed")
+	}
+}
+
+// A nudge that could not reach the pod must not forget it.
+func TestPool_KeepsPodsTheNudgeFailedFor(t *testing.T) {
+	p := newPool(DefaultLupinePort)
+	p.wait(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}, 0)
+	p.wait(nil, 0)
+	p.wait(&corev1.Pod{}, 0)
+	p.mu.Lock()
+	taken := p.takeWaiting()
+	p.mu.Unlock()
+	assert.Equal(t, len(taken), 1)
+	assert.Equal(t, len(p.waiting), 0)
+
+	p.requeue(taken)
+	assert.Equal(t, len(p.waiting), 1)
+}
+
+// A pod refused long ago, such as one deleted while it waited, is dropped on
+// the next refresh even when the fleet never changes.
+func TestPool_PrunesStaleWaitersOnRefresh(t *testing.T) {
+	stubFleet(t, nil, nil, nil)
+	p := newPool(DefaultLupinePort)
+	p.waiting["old"] = waiter{uid: "old", at: time.Now().Add(-2 * waitingTTL)}
+	p.waiting["new"] = waiter{uid: "new", at: time.Now()}
+	p.refresh(context.Background())
+	_, oldKept := p.waiting["old"]
+	_, newKept := p.waiting["new"]
+	assert.Assert(t, !oldKept && newKept)
+}
+
+func TestApiNudgePods(t *testing.T) {
+	prev := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = prev })
+
+	client.KubeClient = nil
+	w := waiter{uid: "uid-1", namespace: "ns", name: "p"}
+	assert.Equal(t, len(apiNudgePods([]waiter{w}, 3)), 1, "no client: keep the pod")
+
+	live := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p"}}
+	cs := fake.NewClientset(live)
+	client.KubeClient = cs
+	gone := waiter{uid: "uid-2", namespace: "ns", name: "gone"}
+	assert.Equal(t, len(apiNudgePods([]waiter{w, gone}, 3)), 0, "patched or already gone")
+	got, err := client.KubeClient.CoreV1().Pods("ns").Get(context.Background(), "p", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, got.Annotations[RetryAnno], "3")
+
+	cs.PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("apiserver down")
+	})
+	assert.Equal(t, len(apiNudgePods([]waiter{w}, 4)), 1, "failed patch: keep the pod")
+}
+
+// A pod refused on a fleet that changed before it registered missed that
+// change's nudge, so it is nudged at once instead of waiting.
+func TestPool_NudgesPodRefusedOnStaleFleet(t *testing.T) {
+	nudged := make(chan []waiter, 1)
+	prev := nudgePods
+	nudgePods = func(pods []waiter, _ uint64) []waiter { nudged <- pods; return nil }
+	t.Cleanup(func() { nudgePods = prev })
+
+	p := newPool(DefaultLupinePort)
+	p.fleetRev = 2
+	p.wait(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p", UID: "uid-1"}}, 1)
+	select {
+	case got := <-nudged:
+		assert.Equal(t, len(got), 1)
+	case <-time.After(time.Second):
+		t.Fatal("pod refused on a stale fleet was not nudged")
+	}
+	assert.Equal(t, len(p.waiting), 0)
 }

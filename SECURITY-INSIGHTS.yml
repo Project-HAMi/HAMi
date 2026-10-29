@@ -1,6 +1,6 @@
 header:
   schema-version: 2.0.0
-  last-updated: '2026-10-13'
+  last-updated: '2026-10-25'
   last-reviewed: '2026-07-22'
   url: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY-INSIGHTS.yml
   comment: |
@@ -130,6 +130,20 @@ repository:
         results: {}
         comment: |
           Static analysis on pull requests via GitHub Actions.
+      - name: OpenSSF Scorecard
+        type: SCA
+        version: latest
+        rulesets:
+          - built-in
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          Supply-chain checks on pushes to master, a weekly schedule and
+          branch protection rule changes, with results published to
+          scorecard.dev and uploaded to GitHub code scanning.
       - name: Trivy
         type: SCA
         version: latest

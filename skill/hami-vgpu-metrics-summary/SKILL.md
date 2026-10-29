@@ -200,7 +200,7 @@ These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
 **Per-container vGPU runtime metrics**
 - `hami_vgpu_memory_used_bytes` — vGPU memory usage per container
 - `hami_vgpu_memory_limit_bytes` — vGPU memory limit per container
-- `hami_container_device_memory_bytes` — container device memory usage
+- `hami_container_device_memory_bytes` — container device memory usage (deprecated in v2.11.0, removed in v2.12.0; use `hami_vgpu_memory_used_bytes` instead)
 - `hami_container_device_utilization_ratio` — container device SM utilization
 - `hami_container_last_kernel_elapsed_seconds` — seconds since last kernel execution
 - `hami_vgpu_memory_context_bytes` — memory context size
@@ -767,14 +767,14 @@ If the user asks in English, answer in English.
 | `hami_node_gpu_mig_instance_info` / `nodeGPUMigInstance` | MIG/MPS sharing-mode instance information | device |
 | `hami_vgpu_core_allocated_ratio` / `vGPUCoreAllocated` | GPU core share allocated to a pod on one device | pod/device |
 | `hami_vgpu_memory_allocated_bytes` / `vGPUMemoryAllocated` | GPU memory allocated to a pod on one device | pod/device |
-| `hami_resource_quota_used` / `QuotaUsed` | Namespace-level quota usage | namespace |
+| `hami_resource_quota_used` / `QuotaUsed` | Namespace-level quota usage (the `limit` label is deprecated in v2.11.0, removed in v2.12.0; use `hami_resource_quota_limit` instead) | namespace |
 | `hami_resource_quota_limit` | Namespace-level quota limit | namespace |
 | `hami_host_gpu_memory_used_bytes` / `HostGPUMemoryUsage` | Runtime physical GPU memory used from vGPU monitor | runtime/device |
 | `hami_host_gpu_utilization_ratio` / `HostCoreUtilization` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
 | `hami_host_gpu_memory_controller_utilization_ratio` | Runtime GPU memory controller utilization from vGPU monitor | runtime/device |
 | `hami_vgpu_memory_used_bytes` / `vGPU_device_memory_usage_in_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_limit_bytes` / `vGPU_device_memory_limit_in_bytes` | Runtime per-container vGPU memory limit from vGPU monitor | runtime/container |
-| `hami_container_device_memory_bytes` / `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor | runtime/container |
+| `hami_container_device_memory_bytes` / `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor (`hami_container_device_memory_bytes` is deprecated in v2.11.0, removed in v2.12.0; use `hami_vgpu_memory_used_bytes`) | runtime/container |
 | `hami_container_device_utilization_ratio` / `Device_utilization_desc_of_container` | Container device SM utilization from vGPU monitor | runtime/container |
 | `hami_container_last_kernel_elapsed_seconds` / `Device_last_kernel_of_container` | Seconds since last kernel execution from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_context_bytes` | Memory context size from vGPU monitor | runtime/container |
@@ -798,7 +798,7 @@ If the user asks in English, answer in English.
 | `hami_*memory*_bytes` and legacy memory allocation metrics | bytes |
 | `GPUDeviceSharedNum > 1` or `hami_gpu_shared_count > 1` | multiple containers share the same GPU |
 | `nodeGPUMemoryPercentage = 1` or `hami_node_gpu_memory_allocated_ratio = 1` | device memory fully allocated |
-| `QuotaUsed limit=0` or `hami_resource_quota_used limit=0` | limit absent/unset/unreported, usage still valid |
+| `QuotaUsed limit=0` with no `hami_resource_quota_limit` series for the quota | limit absent/unset/unreported, usage still valid |
 | only `hami_host_gpu_*` / `hami_vgpu_memory_used_bytes` present | runtime monitor metrics only, not full scheduler allocation view |
 
 ---

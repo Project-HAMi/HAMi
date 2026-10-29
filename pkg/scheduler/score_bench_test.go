@@ -211,6 +211,34 @@ func BenchmarkScoreNode(b *testing.B) {
 	}
 }
 
+// TestBenchmarkScoreFixturesFit keeps the benchmark fixtures on the successful
+// scheduling path. Without this check, a fixture change could make a benchmark
+// measure rejection handling instead of score calculation.
+func TestBenchmarkScoreFixturesFit(t *testing.T) {
+	scheduler := &Scheduler{}
+	pod := newBenchmarkPod(0)
+	requests := newBenchmarkRequests(0)
+
+	nodes := newBenchmarkNodes(2, 4)
+	scores, err := scheduler.calcScoreWithOptions(nodes, requests, pod, make(map[string]string), false, false)
+	if err != nil {
+		t.Fatalf("calcScoreWithOptions returned an error: %v", err)
+	}
+	if len(scores.NodeList) != 2 {
+		t.Fatalf("calcScoreWithOptions returned %d fitting nodes, want 2", len(scores.NodeList))
+	}
+
+	nodes = newBenchmarkNodes(1, 4)
+	result := scheduler.scoreNode("node-0", (*nodes)["node-0"], requests, pod,
+		util.NodeSchedulerPolicyBinpack.String(), util.DefaultDeviceScoringWeights())
+	if result.err != nil {
+		t.Fatalf("scoreNode returned an error: %v", result.err)
+	}
+	if result.score == nil {
+		t.Fatalf("scoreNode did not fit the benchmark pod: %s", result.reason)
+	}
+}
+
 // benchTenantPod includes nested fields to exercise Pod copying costs.
 func benchTenantPod(index int) *corev1.Pod {
 	envs := make([]corev1.EnvVar, 0, 20)
