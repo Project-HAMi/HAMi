@@ -17,19 +17,23 @@ limitations under the License.
 package main
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
@@ -708,6 +712,70 @@ hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpu
 		"hami_resource_quota_limit",
 	); err != nil {
 		t.Fatalf("unexpected unconfigured limit collecting result:\n%s", err)
+	}
+}
+
+func TestClusterManagerCollectorQuotaLimitScaledByMemoryFactor(t *testing.T) {
+	const (
+		ns       = "team-scaled"
+		memName  = "nvidia.com/gpumem"
+		coreName = "nvidia.com/gpucores"
+	)
+
+	prevDevices, prevTypes := device.DevicesMap, device.DevicesToHandle
+	prevRequests, prevSupport := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices)
+	prevMemoryFactor := nvidia.MemoryFactor
+	t.Cleanup(func() {
+		device.DevicesMap, device.DevicesToHandle = prevDevices, prevTypes
+		device.InRequestDevices, device.SupportDevices = prevRequests, prevSupport
+		nvidia.MemoryFactor = prevMemoryFactor
+	})
+	if err := config.InitDevicesWithConfig(&config.Config{NvidiaConfig: nvidia.NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           memName,
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             coreName,
+		DefaultGPUNum:                1,
+		MemoryFactor:                 1024,
+	}}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	qm := device.NewQuotaManager()
+	rq := &corev1.ResourceQuota{}
+	rq.Name = "gpu"
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(10, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(50, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+	t.Cleanup(func() {
+		qm.DelQuota(rq)
+		delete(qm.Quotas, ns)
+	})
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: qm,
+		podManager:   device.NewPodManager(),
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  &ClusterManager{LegacyMetrics: false},
+		metricsProvider: provider,
+	}
+	want := `
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpucores"} 50
+hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpumem"} 10240
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_resource_quota_limit",
+	); err != nil {
+		t.Fatalf("unexpected scaled limit collecting result:\n%s", err)
 	}
 }
 

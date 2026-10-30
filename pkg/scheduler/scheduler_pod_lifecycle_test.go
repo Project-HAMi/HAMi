@@ -607,7 +607,7 @@ func TestPodReplayRestoresInitContainerUsage(t *testing.T) {
 					}
 					require.Equal(t, wantMemory, replayQuotaUsage(s, pod.Namespace, "hami.io/gpumem"))
 					require.Equal(t, wantCores, replayQuotaUsage(s, pod.Namespace, "hami.io/gpucores"))
-					if fit := s.quotaManager.FitQuota(pod.Namespace, 10000, 1, 0, nvidia.NvidiaGPUDevice); fit != (wantMemory+10000 <= 25000) {
+					if fit := s.quotaManager.FitQuota(pod.Namespace, 10000, 0, nvidia.NvidiaGPUDevice); fit != (wantMemory+10000 <= 25000) {
 						t.Errorf("quota fit = %t with restored usage %d", fit, wantMemory)
 					}
 				}

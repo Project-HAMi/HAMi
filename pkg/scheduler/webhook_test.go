@@ -543,6 +543,22 @@ func mluPod(ns string, vmemory, vcore string) *corev1.Pod {
 	}
 }
 
+func addQuota(t *testing.T, qm *device.QuotaManager, ns, resourceName, limit string) {
+	t.Helper()
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "limits", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			corev1.ResourceName("limits." + resourceName): resource.MustParse(limit),
+		}},
+	}
+	qm.AddQuota(rq)
+	t.Cleanup(func() {
+		qm.DelQuota(rq)
+		delete(qm.Quotas, ns)
+	})
+}
+
 // Quota used to be checked for NVIDIA only, so a namespace limit on any other
 // vendor's memory or cores was silently ignored.
 func TestFitResourceQuotaNonNvidia(t *testing.T) {
@@ -578,20 +594,12 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 
 	// One MLU vmemory unit is 256 MiB, so a limit of 100 units leaves room for
 	// 25600 MiB. Comparing the request against the raw 100 would deny every pod.
-	qm.Quotas["mlu-mem"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100, LimitSet: true},
-	}
+	addQuota(t, qm, "mlu-mem", "cambricon.com/mlu.smlu.vmemory", "100")
 	qm.Quotas["mlu-core"] = &device.DeviceQuota{
 		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50, LimitSet: true},
 	}
-	qm.Quotas["hcu-mem"] = &device.DeviceQuota{
-		"hygon.com/hcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
-	}
-	t.Cleanup(func() {
-		for _, ns := range []string{"mlu-mem", "mlu-core", "hcu-mem"} {
-			delete(qm.Quotas, ns)
-		}
-	})
+	addQuota(t, qm, "hcu-mem", "hygon.com/hcumem", "1000")
+	t.Cleanup(func() { delete(qm.Quotas, "mlu-core") })
 
 	hcuPod := func(ns, hcumem string) *corev1.Pod {
 		return &corev1.Pod{
@@ -717,10 +725,7 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 
 	qm := device.NewQuotaManager()
 	// 60 units is 15360 MiB of headroom.
-	qm.Quotas["mlu-multi"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60, LimitSet: true},
-	}
-	t.Cleanup(func() { delete(qm.Quotas, "mlu-multi") })
+	addQuota(t, qm, "mlu-multi", "cambricon.com/mlu.smlu.vmemory", "60")
 
 	pod := mluPod("mlu-multi", "40", "")
 	pod.Spec.Containers[0].Resources.Limits["cambricon.com/mlu"] = resource.MustParse("2")
@@ -816,10 +821,7 @@ func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
 	}
 
 	qm := device.NewQuotaManager()
-	qm.Quotas["ascend"] = &device.DeviceQuota{
-		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192, LimitSet: true},
-	}
-	t.Cleanup(func() { delete(qm.Quotas, "ascend") })
+	addQuota(t, qm, "ascend", "huawei.com/Ascend910B-memory", "8192")
 
 	// Requesting -core keeps the raw scaled value instead of rounding to a
 	// template, which makes the arithmetic here easy to follow.
