@@ -29,6 +29,42 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+func TestCheckHealth(t *testing.T) {
+	const countName = "aws.amazon.com/neuron"
+	dev := InitAWSNeuronDevice(AWSNeuronConfig{
+		ResourceCountName: countName,
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	})
+	node := func(name string, capacity, allocatable int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{}, Allocatable: corev1.ResourceList{}},
+		}
+		if capacity > 0 {
+			n.Status.Capacity[countName] = *resource.NewQuantity(capacity, resource.DecimalSI)
+		}
+		if allocatable > 0 {
+			n.Status.Allocatable[countName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		return n
+	}
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		wantHealthy bool
+	}{
+		{"all devices allocatable", node("aws-healthy", 4, 4), true},
+		{"all devices unhealthy: capacity kept, allocatable zero", node("aws-unhealthy", 4, 0), false},
+		{"no neuron resource at all", node("aws-none", 0, 0), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			healthy, _ := dev.CheckHealth(AWSNeuronDevice, tc.node)
+			assert.Equal(t, tc.wantHealthy, healthy)
+		})
+	}
+}
+
 func Test_MutateAdmission(t *testing.T) {
 	tests := []struct {
 		name string

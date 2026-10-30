@@ -126,61 +126,34 @@ func TestGCUDevices_MutateAdmission(t *testing.T) {
 }
 
 func TestGCUDevices_CheckHealth(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			devType string
-			node    *corev1.Node
+	InitGCUDevice(EnflameConfig{ResourceNameGCU: "enflame.com/gcu"})
+	dev := &GCUDevices{}
+	node := func(name string, capacity, allocatable int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{}, Allocatable: corev1.ResourceList{}},
 		}
-		wantHealthy     bool
-		wantSchedulable bool
-	}{
-		{
-			name: "Node with GCU resources",
-			args: struct {
-				devType string
-				node    *corev1.Node
-			}{
-				devType: "GCU",
-				node: &corev1.Node{
-					Status: corev1.NodeStatus{
-						Capacity: corev1.ResourceList{
-							"enflame.com/gcu": *resource.NewQuantity(2, resource.DecimalSI),
-						},
-					},
-				},
-			},
-			wantHealthy:     true,
-			wantSchedulable: true,
-		},
-		{
-			name: "Node without GCU resources",
-			args: struct {
-				devType string
-				node    *corev1.Node
-			}{
-				devType: "GCU",
-				node: &corev1.Node{
-					Status: corev1.NodeStatus{
-						Capacity: corev1.ResourceList{},
-					},
-				},
-			},
-			wantHealthy:     false,
-			wantSchedulable: true,
-		},
+		if capacity > 0 {
+			n.Status.Capacity["enflame.com/gcu"] = *resource.NewQuantity(capacity, resource.DecimalSI)
+		}
+		if allocatable > 0 {
+			n.Status.Allocatable["enflame.com/gcu"] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		return n
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			config := EnflameConfig{
-				ResourceNameGCU: "enflame.com/gcu",
-			}
-			InitGCUDevice(config)
-			dev := &GCUDevices{}
-			healthy, schedulable := dev.CheckHealth(test.args.devType, test.args.node)
-			assert.Equal(t, healthy, test.wantHealthy)
-			assert.Equal(t, schedulable, test.wantSchedulable)
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		wantHealthy bool
+	}{
+		{"all GCUs allocatable", node("gcu-healthy", 2, 2), true},
+		{"all GCUs unhealthy: capacity kept, allocatable zero", node("gcu-unhealthy", 2, 0), false},
+		{"no GCU resource at all", node("gcu-none", 0, 0), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			healthy, _ := dev.CheckHealth("GCU", tc.node)
+			assert.Equal(t, tc.wantHealthy, healthy)
 		})
 	}
 }
