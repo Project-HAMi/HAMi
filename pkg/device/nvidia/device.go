@@ -989,7 +989,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	}
 
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
 }
 
 // cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID

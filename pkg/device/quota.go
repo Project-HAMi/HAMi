@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"math"
 	"strings"
 	"sync"
 
@@ -61,7 +62,7 @@ func NewQuotaManager() *QuotaManager {
 	return &localCache
 }
 
-func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int64, coresreq int64, deviceName string) bool {
+func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceName string) bool {
 	devs, ok := GetDevices()[deviceName]
 	if !ok {
 		return true
@@ -78,13 +79,9 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int64, cor
 	}
 	memQuota, ok := (*dq)[memResourceName]
 	if ok {
-		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq, "memoryFactor", memoryFactor)
-		limit := memQuota.Limit
-		if memoryFactor > 1 {
-			limit = limit * memoryFactor
-		}
-		if memQuota.LimitSet && memQuota.Used+memreq > limit {
-			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
+		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
+		if memQuota.LimitSet && memQuota.Used+memreq > memQuota.Limit {
+			klog.V(4).InfoS("resourceMem quota not fitted", "limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
@@ -212,6 +209,25 @@ func IsManagedQuota(quotaName string) bool {
 	return false
 }
 
+// scaledQuotaLimit converts a ResourceQuota limit into the unit Used is
+// recorded in, using the memoryFactor of the backend that owns resourceName.
+// A limit that overflows int64 once scaled is treated as unlimited.
+func scaledQuotaLimit(resourceName string, limit int64) int64 {
+	for _, val := range GetDevices() {
+		names := val.GetResourceNames()
+		if names.ResourceMemoryName != resourceName || names.MemoryFactor <= 1 {
+			continue
+		}
+		if limit > math.MaxInt64/names.MemoryFactor {
+			klog.ErrorS(nil, "quota limit overflows int64 after applying memory factor; treating it as unlimited",
+				"resource", resourceName, "raw", limit, "factor", names.MemoryFactor)
+			return math.MaxInt64
+		}
+		return limit * names.MemoryFactor
+	}
+	return limit
+}
+
 func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
@@ -317,7 +333,7 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 			if !ok {
 				continue
 			}
-			newObjLimits[dn] = value
+			newObjLimits[dn] = scaledQuotaLimit(dn, value)
 			affectedResources[dn] = struct{}{}
 			klog.V(4).InfoS("quota set:", "quotaName", quota.Name, "idx=", idx, "val", value)
 		}
