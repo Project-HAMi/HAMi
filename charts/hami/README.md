@@ -516,6 +516,9 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devices.remotegpu.clientImage | string | `"ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04@sha256:fe0e8c283fe29b0c8bfb4bbe2a81fac4fabd3a477fe694f31b5a97a996fb028e"` | Client image used to deliver Lupine libraries, libnghttp2, and nvidia-smi for the CUDA/vLLM examples; empty disables delivery. It must contain `/opt/lupine/lib`, `sh`, `cp`, `libnghttp2.so.14`, and `nvidia-smi`. Injection fails when `nvidia-smi` is missing. Match the server version and workload ABI; an empty string disables delivery. `global.imageSource=cn` prefixes the upstream Lupine client reference with `m.daocloud.io/`; other repositories are unchanged. |
 | devices.remotegpu.sessionImage | string | `""` | Image for a relay Pod on each lupine server node, so users can port-forward to the relay. Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation of relays without deleting existing ones. |
 | devices.remotegpu.sessionImagePullSecrets | list | `[]` | Names of existing image pull Secrets for the session relay Pods, added after `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace. |
+| devices.remotegpu.monitor.enabled | bool | `true` | Enable the remote GPU monitor container in chart-managed Lupine server Pods |
+| devices.remotegpu.monitor.port | int | `31993` | Remote GPU monitor HTTP port on the server node |
+| devices.remotegpu.monitor.resources | object | `{}` | Remote GPU monitor container resources |
 | devices.remotegpu.server.enabled | bool | `true` | Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true. Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose label names its own port is left to a server managed outside the chart. False leaves server deployment to the operator without disabling remote GPU scheduling. |
 | devices.remotegpu.server.image.registry | string | `"ghcr.io"` | Registry of the lupine server container image. `global.imageRegistry` overrides it. |
 | devices.remotegpu.server.image.repository | string | `"lupinemachines/lupine-server"` | Repository of the lupine server container image. |
@@ -544,9 +547,6 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | legacyMetrics | bool | `false` | Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility. |
 | prometheus.enabled | bool | `false` | Create scheduler and device-plugin ServiceMonitors when the API is available. The device-plugin ServiceMonitor also requires `devicePlugin.enabled`. For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`. |
 | device-config.content | string | `""` | Full replacement of device-config.yaml; takes precedence over a bundled file and values. This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides. Please note that extender resources still use `devices.*`, keep resource names consistent. Values validation still applies. |
-| devices.remotegpu.monitor.enabled | bool | `true` | Enable the remote GPU monitor container in chart-managed Lupine server Pods |
-| devices.remotegpu.monitor.port | int | `31993` | Remote GPU monitor HTTP port on the server node |
-| devices.remotegpu.monitor.resources | object | `{}` | Remote GPU monitor container resources |
 
 <!-- END GENERATED VALUES -->
 
