@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository. `AGENTS.md` links to this file.
 
 ## Project Overview
 
@@ -87,6 +87,23 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 - Image and tool versions are pinned in `version.mk`, `hack/verify-staticcheck.sh` and the workflows; HAMi-core is the `libvgpu` submodule
 - E2E tests use Ginkgo/Gomega (`test/e2e/`)
 - Annotations use the `hami.io/` prefix
+
+## Documentation changes
+
+Detailed user documentation belongs in the [HAMi website repository](https://github.com/Project-HAMi/website). For installation, upgrades, configuration, device behavior, operational procedures, troubleshooting, and examples that explain these topics, update the relevant website guide and submit a PR there. Link the website PR from the related HAMi PR when applicable, subject to the user's authorization to publish.
+
+Development and design documents intended for the wider community must be submitted to `docs/developers/` in the website repository, not committed to this repository. English-only documentation is acceptable.
+
+Keep `README.md`, `README_cn.md`, and `README_ja.md` focused on the project overview and navigation. Keep the hand-written portion of `charts/hami/README.md` focused on Chart documentation links. Do not add detailed guides or duplicate website content in these files as part of a feature or bug fix. README edits should be limited to necessary overview corrections, link maintenance, or an explicitly requested README change.
+
+## Chart values reference
+
+The complete, generated values table stays in `charts/hami/README.md`. Keep it up to date when changing Chart values; the documentation guidance above does not prohibit generated updates.
+
+- Edit defaults and parameter descriptions in `charts/hami/values.yaml`.
+- Do not hand-edit the block between `<!-- BEGIN GENERATED VALUES -->` and `<!-- END GENERATED VALUES -->`.
+- From the repository root, run `make update-helm-chart-docs`, then `make verify-helm-chart-docs`. Use these targets rather than invoking `helm-docs` directly, because the template reads the existing README to preserve its hand-written content.
+- Keep scenario guidance and configuration examples on the website. Do not copy the full generated values table into the website or maintain translated copies of it.
 
 ## AI Assistance Disclosure
 
