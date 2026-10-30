@@ -252,7 +252,19 @@ func (dev *AWSNeuronDevices) checkType(n device.ContainerDeviceRequest) (bool, b
 }
 
 func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	countQty := n.Status.Allocatable[corev1.ResourceName(dev.resourceCountName)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCountName)]
+	coreCapacityQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCoreName)]
+	count := countQty.Value()
+	capacity := capacityQty.Value()
+	coreCapacity := coreCapacityQty.Value()
+	// Core capacity drives per-device core count and mask in GetNodeDevices, so
+	// include it in the update signature: otherwise a core-capacity change with a
+	// steady device count would leave the cached geometry stale.
+	return device.AllocatableHealth(devType, n.Name, count, count, fmt.Sprintf("%d/%d", capacity, coreCapacity))
 }
 
 func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {

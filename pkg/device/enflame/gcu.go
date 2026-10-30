@@ -56,8 +56,14 @@ func (dev *GCUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (
 }
 
 func (dev *GCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	count, _ := n.Status.Capacity.Name(corev1.ResourceName(EnflameResourceNameGCU), resource.DecimalSI).AsInt64()
-	return count > 0, true
+	if n == nil {
+		return false, false
+	}
+	countQty := n.Status.Allocatable[corev1.ResourceName(EnflameResourceNameGCU)]
+	capacityQty := n.Status.Capacity[corev1.ResourceName(EnflameResourceNameGCU)]
+	count := countQty.Value()
+	capacity := capacityQty.Value()
+	return device.AllocatableHealth(devType, n.Name, count, count, fmt.Sprintf("%d", capacity))
 }
 
 func (dev *GCUDevices) NodeCleanUp(nn string) error {
