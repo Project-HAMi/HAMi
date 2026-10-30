@@ -33,7 +33,7 @@ fullnameOverride: ""
 namespaceOverride: ""
 
 platform:
-  # -- Enable when deploying HAMi on OpenShift. Applies restricted security contexts to the scheduler extender and webhook jobs, and omits `scheduler.patch.runAsUser` so OpenShift can assign job UIDs.
+  # -- Enable when deploying HAMi on OpenShift. Applies restricted security contexts to the webhook jobs, and omits `scheduler.patch.runAsUser` so OpenShift can assign job UIDs.
   openshift: false
 
 openshift:
@@ -162,6 +162,22 @@ scheduler:
       pullSecrets: []
     # -- Resource requests and limits for the scheduler extender container.
     resources: {}
+    # -- Container securityContext of the scheduler extender. `runAsNonRoot`
+    # is not among these defaults: the extender image sets no user and the
+    # chart sets no `runAsUser`, so requiring a non-root user would keep the
+    # Pod from starting on regular clusters. When `platform.openshift` is
+    # true, the chart adds `runAsNonRoot` to these defaults, because the
+    # platform assigns the Pod a user ID; on other platforms, set it here
+    # together with a `runAsUser` if wanted. Set to `false` to render no
+    # container securityContext for the extender. If the key is missing
+    # entirely, for example in values reused from an older release, these
+    # defaults apply.
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
     # -- Extra command-line flags for the scheduler extender, appended after the flags the chart generates,
     # such as `--profiling` to serve pprof on `scheduler.profilingBindAddress`.
     extraArgs:
