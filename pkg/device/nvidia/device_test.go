@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -3918,4 +3919,166 @@ func TestMemoryPercentage_InvalidRequestBehindValidLimit(t *testing.T) {
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.Assert(t, err != nil)
 	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}
+
+func TestFit_TopologyWithNumaBindingSucceedsAcrossBoundaries(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// Multi-NUMA node: NUMA 0 has 1 available GPU, NUMA 1 has 2 available GPUs.
+	// When iterated in reverse (dev-3, dev-2, dev-1, dev-0), candidates in NUMA 1
+	// must not be discarded when transitioning to NUMA 0 in topology mode.
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 10, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0}, // Unavailable
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-3", Index: 3, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 50, "dev-3": 50}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 50, "dev-3": 50}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-1": 50, "dev-3": 100}}},
+				{ID: "dev-3", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-1": 50, "dev-2": 100}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-2"])
+	assert.Assert(t, uuids["dev-3"])
+}
+
+func TestFit_TopologyWithNumaBindingPicksBestNumaNode(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// NUMA 0 has dev-0, dev-1 (pair score 100)
+	// NUMA 1 has dev-2, dev-3 (pair score 600 - NVLink)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-3", Index: 3, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-3": 600}}},
+				{ID: "dev-3", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 600}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-2"])
+	assert.Assert(t, uuids["dev-3"])
+}
+
+func TestFit_TopologyWithNumaBindingRejectsSplitCandidates(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// 2 devices on different NUMA nodes (dev-0 on NUMA 0, dev-1 on NUMA 1)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, _, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, "NumaNotFit"), "expected NumaNotFit in reason: %s", reason)
+}
+
+func TestFit_TopologyWithNumaBindingInsufficientCandidatesExcludesNumaNotFit(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// Only 1 eligible device on the node, but request requires 2 devices.
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0"},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, _, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, !strings.Contains(reason, "NumaNotFit"), "reason should not contain NumaNotFit when candidates are insufficient: %s", reason)
+	assert.Assert(t, strings.Contains(reason, common.AllocatedCardsInsufficientRequest), "expected AllocatedCardsInsufficientRequest in reason: %s", reason)
 }
