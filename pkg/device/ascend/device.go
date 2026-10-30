@@ -889,7 +889,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	if npu.isAscend950DT() && (vnpuMode != VNPUModeHamiCore || k.Nums != 1 || k.Memreq <= 0 || k.Coresreq <= 0) {
-		return false, nil, "Ascend950DT requires explicit hami-core, one device and positive memory/core quotas"
+		return false, nil, "Ascend950DT requires explicit hami-core, one device and positive memory/core quotas; Ascend950DT has no vNPU templates (driver: \"This device does not support setting create-vnpu\"), hard slicing is unavailable"
 	}
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 	isENPU := isENPUMode(vnpuMode)
