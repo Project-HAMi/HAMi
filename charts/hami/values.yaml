@@ -1004,21 +1004,7 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
-    # 950DT SKU comparison chart grouping only; these values are unmeasured and are not validated on hardware:
-    # - 36 AI cores: 144 GiB (DT_9591, DT_95A1); 96 GiB (DT_9592, DT_9595, DT_95A2); 64 GiB (DT_9596)
-    # - 32 AI cores: 144 GiB (DT_9581); 126* GiB (DT_9583); 96 GiB (DT_9582, DT_9582x, DT_9585); 84 GiB (DT_9584, DT_9587); 64 GiB (DT_9586); 56 GiB (DT_9588)
-    # - 28 AI cores: 144 GiB (DT_9571); 126* GiB (DT_9573); 96 GiB (DT_9572, DT_9575); 84 GiB (DT_9574, DT_9577); 64 GiB (DT_9576); 56 GiB (DT_9578)
-    # - 8 AI cores: 24 GiB (DT_950x); 16 GiB (DT_950y)
-    # The chart's `126*` marker is unexplained. Do not enable these as separate entries: their chipName would repeat `Ascend950DT`.
-    # Example for a homogeneous DT_9581 node, after verifying its actual DCMI identity and capacity:
-    # - chipName: Ascend950DT
-    #   commonWord: Ascend950DT
-    #   resourceName: huawei.com/Ascend950DT
-    #   memoryAllocatable: 147456  # MiB, estimated from 144 GiB
-    #   memoryCapacity: 147456
-    #   aiCore: 32
-    # Replace the 9582 entry if using a verified alternative; do not enable both entries together.
-    # Ascend950DT 9582 whole-card configuration; vNPU templates and memory/core resource names are not defined.
+    # Ascend950DT 9582 whole-card configuration; see ../../docs/ascend/950dt-sku-reference.md for other SKU estimates.
     - chipName: Ascend950DT
       commonWord: Ascend950DT
       resourceName: huawei.com/Ascend950DT
