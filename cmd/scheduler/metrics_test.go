@@ -724,11 +724,9 @@ func TestClusterManagerCollectorQuotaLimitScaledByMemoryFactor(t *testing.T) {
 
 	prevDevices, prevTypes := device.DevicesMap, device.DevicesToHandle
 	prevRequests, prevSupport := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices)
-	prevMemoryFactor := nvidia.MemoryFactor
 	t.Cleanup(func() {
 		device.DevicesMap, device.DevicesToHandle = prevDevices, prevTypes
 		device.InRequestDevices, device.SupportDevices = prevRequests, prevSupport
-		nvidia.MemoryFactor = prevMemoryFactor
 	})
 	if err := config.InitDevicesWithConfig(&config.Config{NvidiaConfig: nvidia.NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",

@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/klog/v2"
 )
 
@@ -211,27 +212,25 @@ func IsManagedQuota(quotaName string) bool {
 
 // scaledQuotaLimit converts a ResourceQuota limit into the unit Used is
 // recorded in, using the memoryFactor of the backend that owns resourceName.
-// A limit that overflows int64 once scaled is treated as unlimited.
-func scaledQuotaLimit(resourceName string, limit int64) int64 {
+// It reports false when the scaled limit overflows int64.
+func scaledQuotaLimit(resourceName string, limit int64) (int64, bool) {
 	for _, val := range GetDevices() {
 		names := val.GetResourceNames()
 		if names.ResourceMemoryName != resourceName || names.MemoryFactor <= 1 {
 			continue
 		}
 		if limit > math.MaxInt64/names.MemoryFactor {
-			klog.ErrorS(nil, "quota limit overflows int64 after applying memory factor; treating it as unlimited",
-				"resource", resourceName, "raw", limit, "factor", names.MemoryFactor)
-			return math.MaxInt64
+			return 0, false
 		}
-		return limit * names.MemoryFactor
+		return limit * names.MemoryFactor, true
 	}
-	return limit
+	return limit, true
 }
 
 func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	q.addQuotaLocked(quota)
+	q.addQuotaLocked(quota, true)
 	q.logQuotasLocked()
 }
 
@@ -255,7 +254,9 @@ func (q *QuotaManager) UpdateQuota(oldQuota, newQuota *corev1.ResourceQuota) {
 		q.delQuotaLocked(oldQuota)
 	}
 	if newQuota != nil {
-		q.addQuotaLocked(newQuota)
+		// Warnings are repeated only when the limits themselves change.
+		hardChanged := oldQuota == nil || !equality.Semantic.DeepEqual(oldQuota.Spec.Hard, newQuota.Spec.Hard)
+		q.addQuotaLocked(newQuota, hardChanged)
 	}
 	q.logQuotasLocked()
 }
@@ -315,7 +316,7 @@ func isScopedQuota(quota *corev1.ResourceQuota) bool {
 }
 
 // addQuotaLocked requires q.mutex to be held.
-func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
+func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota, logOverflow bool) {
 	if quota == nil || isScopedQuota(quota) {
 		return
 	}
@@ -333,7 +334,15 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 			if !ok {
 				continue
 			}
-			newObjLimits[dn] = scaledQuotaLimit(dn, value)
+			scaled, ok := scaledQuotaLimit(dn, value)
+			if !ok {
+				if logOverflow {
+					klog.ErrorS(nil, "quota limit overflows int64 after applying memory factor",
+						"namespace", quota.Namespace, "quotaName", quota.Name, "resource", idx, "raw", value)
+				}
+				continue
+			}
+			newObjLimits[dn] = scaled
 			affectedResources[dn] = struct{}{}
 			klog.V(4).InfoS("quota set:", "quotaName", quota.Name, "idx=", idx, "val", value)
 		}

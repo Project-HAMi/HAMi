@@ -39,13 +39,11 @@ func TestDevicePluginForResourceDisableCoreLimit(t *testing.T) {
 	previousDevices, previousTypes := device.DevicesMap, device.DevicesToHandle
 	previousRequests, previousSupport := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices)
 	previousHandshake := maps.Clone(util.HandshakeAnnos)
-	previousMemoryFactor := nvidia.MemoryFactor
 	previousConfigFile := ConfigFile
 	t.Cleanup(func() {
 		device.DevicesMap, device.DevicesToHandle = previousDevices, previousTypes
 		device.InRequestDevices, device.SupportDevices = previousRequests, previousSupport
 		util.HandshakeAnnos = previousHandshake
-		nvidia.MemoryFactor = previousMemoryFactor
 		ConfigFile = previousConfigFile
 	})
 
