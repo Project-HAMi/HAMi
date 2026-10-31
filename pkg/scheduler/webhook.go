@@ -367,8 +367,8 @@ func fitResourceQuota(pod *corev1.Pod) error {
 			continue
 		}
 
-		klog.V(5).Infof("Checking quota for device %s: memory %d, cores %d, factor %d", deviceName, memoryReq, coresReq, resourceNames.MemoryFactor)
-		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, resourceNames.MemoryFactor, coresReq, deviceName) {
+		klog.V(5).Infof("Checking quota for device %s: memory %d, cores %d", deviceName, memoryReq, coresReq)
+		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
 			return fmt.Errorf("exceeding resource quota for device %s", deviceName)
 		}

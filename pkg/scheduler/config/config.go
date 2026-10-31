@@ -351,6 +351,8 @@ func validateConfig(config *Config) error {
 func validateRegisteredDevices(devices map[string]device.Devices) error {
 	var errs []error
 	owners := make(map[string]string, len(devices))
+	memoryOwners := make(map[string]string, len(devices))
+	memoryFactors := make(map[string]int64, len(devices))
 
 	for _, commonWord := range slices.Sorted(maps.Keys(devices)) {
 		dev := devices[commonWord]
@@ -378,6 +380,16 @@ func validateRegisteredDevices(devices map[string]device.Devices) error {
 
 		if names.MemoryFactor < 0 {
 			errs = append(errs, fmt.Errorf("%s: memoryFactor must not be negative, got %d", commonWord, names.MemoryFactor))
+		}
+
+		if names.ResourceMemoryName != "" {
+			factor := max(names.MemoryFactor, 1)
+			if previous, taken := memoryOwners[names.ResourceMemoryName]; !taken {
+				memoryOwners[names.ResourceMemoryName] = commonWord
+				memoryFactors[names.ResourceMemoryName] = factor
+			} else if memoryFactors[names.ResourceMemoryName] != factor {
+				errs = append(errs, fmt.Errorf("%s and %s both claim memory resource %q with different memoryFactor values; its quota limit cannot be scaled for both", previous, commonWord, names.ResourceMemoryName))
+			}
 		}
 
 		if names.ResourceCountName == "" {

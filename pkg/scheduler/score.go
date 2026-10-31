@@ -460,7 +460,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 		return nodeScoreResult{reason: reason}
 	}
 	if cores := neuronCorePeak(task, score.Devices[awsneuron.AWSNeuronDevice]); cores > 0 &&
-		!s.quotaManager.FitQuota(task.Namespace, 0, 1, cores, awsneuron.AWSNeuronDevice) {
+		!s.quotaManager.FitQuota(task.Namespace, 0, cores, awsneuron.AWSNeuronDevice) {
 		return nodeScoreResult{reason: "AWS NeuronCore quota exceeded"}
 	}
 

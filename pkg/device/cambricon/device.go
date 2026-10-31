@@ -433,7 +433,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 		}
 	}
 
-	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, CambriconMLUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, core, CambriconMLUDevice)
 }
 
 func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {

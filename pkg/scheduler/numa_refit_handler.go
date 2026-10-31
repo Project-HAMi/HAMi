@@ -98,7 +98,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	if len(req.AllowedDeviceUUIDs) > maxAllowedDeviceUUIDs {
 		return numaRefitFailure(nil, "refit request carries %d allowed devices, limit is %d", len(req.AllowedDeviceUUIDs), maxAllowedDeviceUUIDs)
 	}
-	refitDevice, ok := device.GetDevices()[req.DeviceType]
+	_, ok := device.GetDevices()[req.DeviceType]
 	if !ok {
 		return numaRefitFailure(nil, "unknown device type %q", req.DeviceType)
 	}
@@ -258,8 +258,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 			quotaCores += d.Usedcores
 		}
 	}
-	resourceNames := refitDevice.GetResourceNames()
-	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, resourceNames.MemoryFactor, quotaCores, req.DeviceType) {
+	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, quotaCores, req.DeviceType) {
 		return failWithQuotaRestore("refit would exceed the %s resource quota in namespace %s", req.DeviceType, pod.Namespace)
 	}
 

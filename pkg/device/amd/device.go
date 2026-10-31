@@ -435,7 +435,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 			mem += val.Usedmem
 		}
 	}
-	return device.GetLocalCache().FitQuota(ns, mem, 1, 0, AMDDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, 0, AMDDevice)
 }
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {

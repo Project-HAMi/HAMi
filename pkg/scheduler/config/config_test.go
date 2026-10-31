@@ -728,6 +728,22 @@ func Test_validateRegisteredDevices(t *testing.T) {
 			},
 		},
 		{
+			name: "two backends sharing a memory resource with different factors",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1024}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 2}},
+			},
+			wantErr: `A and B both claim memory resource "shared.com/mem"`,
+		},
+		{
+			// Factors of 0 and 1 both mean the request is not scaled.
+			name: "sharing a memory resource with the same factor is allowed",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem"}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1}},
+			},
+		},
+		{
 			name: "negative memory factor",
 			devices: map[string]device.Devices{
 				"A": stubDevices{names: device.ResourceNames{ResourceCountName: "a.com/gpu", MemoryFactor: -1}},
