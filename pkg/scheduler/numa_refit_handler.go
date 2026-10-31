@@ -40,23 +40,22 @@ import (
 // newer update to the same annotations (for example Allocate consuming a
 // to-allocate entry). Conflicts fail the refit; there is no retry with
 // cached values. Also a test seam.
-var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) error {
+var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) (*corev1.Pod, error) {
 	metadata := map[string]any{"annotations": annotations}
 	if pod.ResourceVersion != "" {
 		metadata["resourceVersion"] = pod.ResourceVersion
 	}
 	payload, err := json.Marshal(map[string]any{"metadata": metadata})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// The refit holds the allocation lock that Filter also takes, so this
 	// call must not block scheduling on an unreachable API server. The
 	// device plugin gives up after numaRefitTimeout anyway.
 	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
 	defer cancel()
-	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
+	return client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(ctx, pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
-	return err
 }
 
 // maxAllowedDeviceUUIDs bounds the allowed set a refit request may carry.
@@ -278,9 +277,12 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		device.InRequestDevices[req.DeviceType]: pendingValue,
 		device.SupportDevices[req.DeviceType]:   allocatedValue,
 	}
-	if err := patchPodAnnotations(pod, annotations); err != nil {
+	updatedPod, err := patchPodAnnotations(pod, annotations)
+	if err != nil {
 		return failWithQuotaRestore("cannot patch pod annotations: %v", err)
 	}
+	pod = updatedPod
+	s.podManager.UpdatePod(updatedPod)
 
 	// Rebuild the in-memory reservation from the patched annotations exactly
 	// like the informer's add path does, so cached accounting and the
