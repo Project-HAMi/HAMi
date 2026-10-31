@@ -31,20 +31,27 @@ import (
 
 func TestCheckHealth(t *testing.T) {
 	const countName = "aws.amazon.com/neuron"
+	const coreName = "aws.amazon.com/neuroncore"
 	dev := InitAWSNeuronDevice(AWSNeuronConfig{
 		ResourceCountName: countName,
-		ResourceCoreName:  "aws.amazon.com/neuroncore",
+		ResourceCoreName:  coreName,
 	})
-	node := func(name string, capacity, allocatable int64) *corev1.Node {
+	node := func(name string, countCap, countAlloc, coreCap, coreAlloc int64) *corev1.Node {
 		n := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{}, Allocatable: corev1.ResourceList{}},
 		}
-		if capacity > 0 {
-			n.Status.Capacity[countName] = *resource.NewQuantity(capacity, resource.DecimalSI)
+		if countCap > 0 {
+			n.Status.Capacity[countName] = *resource.NewQuantity(countCap, resource.DecimalSI)
 		}
-		if allocatable > 0 {
-			n.Status.Allocatable[countName] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		if countAlloc > 0 {
+			n.Status.Allocatable[countName] = *resource.NewQuantity(countAlloc, resource.DecimalSI)
+		}
+		if coreCap > 0 {
+			n.Status.Capacity[coreName] = *resource.NewQuantity(coreCap, resource.DecimalSI)
+		}
+		if coreAlloc > 0 {
+			n.Status.Allocatable[coreName] = *resource.NewQuantity(coreAlloc, resource.DecimalSI)
 		}
 		return n
 	}
@@ -53,9 +60,11 @@ func TestCheckHealth(t *testing.T) {
 		node        *corev1.Node
 		wantHealthy bool
 	}{
-		{"all devices allocatable", node("aws-healthy", 4, 4), true},
-		{"all devices unhealthy: capacity kept, allocatable zero", node("aws-unhealthy", 4, 0), false},
-		{"no neuron resource at all", node("aws-none", 0, 0), false},
+		{"nil node", nil, false},
+		{"count and core allocatable", node("aws-healthy", 4, 4, 8, 8), true},
+		{"count unhealthy: capacity kept, allocatable zero", node("aws-count-zero", 4, 0, 8, 8), false},
+		{"core unhealthy: cores dropped from allocatable", node("aws-core-zero", 4, 4, 8, 0), false},
+		{"no neuron resource at all", node("aws-none", 0, 0, 0, 0), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,6 +85,7 @@ func TestCheckHealth_CoreCapacityChangeTriggersUpdate(t *testing.T) {
 		}
 		n.Status.Allocatable[countName] = *resource.NewQuantity(count, resource.DecimalSI)
 		n.Status.Capacity[countName] = *resource.NewQuantity(count, resource.DecimalSI)
+		n.Status.Allocatable[coreName] = *resource.NewQuantity(coreCap, resource.DecimalSI)
 		n.Status.Capacity[coreName] = *resource.NewQuantity(coreCap, resource.DecimalSI)
 		return n
 	}
@@ -89,6 +99,39 @@ func TestCheckHealth_CoreCapacityChangeTriggersUpdate(t *testing.T) {
 	// geometry would go stale unless this is treated as a change.
 	if _, update := dev.CheckHealth(AWSNeuronDevice, node(4, 16)); !update {
 		t.Fatalf("core capacity change should need an update")
+	}
+}
+
+func TestCheckHealth_ReregistersAfterUnhealthy(t *testing.T) {
+	const countName = "aws.amazon.com/neuron"
+	const coreName = "aws.amazon.com/neuroncore"
+	dev := InitAWSNeuronDevice(AWSNeuronConfig{ResourceCountName: countName, ResourceCoreName: coreName})
+	node := func(countAlloc, coreAlloc int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "aws-rereg"},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{}, Allocatable: corev1.ResourceList{}},
+		}
+		n.Status.Capacity[countName] = *resource.NewQuantity(4, resource.DecimalSI)
+		n.Status.Capacity[coreName] = *resource.NewQuantity(8, resource.DecimalSI)
+		if countAlloc > 0 {
+			n.Status.Allocatable[countName] = *resource.NewQuantity(countAlloc, resource.DecimalSI)
+		}
+		if coreAlloc > 0 {
+			n.Status.Allocatable[coreName] = *resource.NewQuantity(coreAlloc, resource.DecimalSI)
+		}
+		return n
+	}
+	// Healthy: the node registers and needs an update.
+	if healthy, update := dev.CheckHealth(AWSNeuronDevice, node(4, 8)); !healthy || !update {
+		t.Fatalf("healthy node should be healthy and need an update, got healthy=%v update=%v", healthy, update)
+	}
+	// All devices leave Allocatable: unhealthy, and registration is forgotten.
+	if healthy, _ := dev.CheckHealth(AWSNeuronDevice, node(0, 0)); healthy {
+		t.Fatalf("node with no allocatable devices should be unhealthy")
+	}
+	// Devices return: the node must be healthy again and re-register (need update).
+	if healthy, update := dev.CheckHealth(AWSNeuronDevice, node(4, 8)); !healthy || !update {
+		t.Fatalf("recovered node should be healthy and need an update again, got healthy=%v update=%v", healthy, update)
 	}
 }
 

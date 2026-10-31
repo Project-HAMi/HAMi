@@ -255,16 +255,24 @@ func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	if n == nil {
 		return false, false
 	}
-	countQty := n.Status.Allocatable[corev1.ResourceName(dev.resourceCountName)]
-	capacityQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCountName)]
-	coreCapacityQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCoreName)]
-	count := countQty.Value()
-	capacity := capacityQty.Value()
-	coreCapacity := coreCapacityQty.Value()
-	// Core capacity drives per-device core count and mask in GetNodeDevices, so
-	// include it in the update signature: otherwise a core-capacity change with a
-	// steady device count would leave the cached geometry stale.
-	return device.AllocatableHealth(devType, n.Name, count, count, fmt.Sprintf("%d/%d", capacity, coreCapacity))
+	countAllocQty := n.Status.Allocatable[corev1.ResourceName(dev.resourceCountName)]
+	coreAllocQty := n.Status.Allocatable[corev1.ResourceName(dev.resourceCoreName)]
+	countCapQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCountName)]
+	coreCapQty := n.Status.Capacity[corev1.ResourceName(dev.resourceCoreName)]
+	countAlloc := countAllocQty.Value()
+	coreAlloc := coreAllocQty.Value()
+	countCap := countCapQty.Value()
+	coreCap := coreCapQty.Value()
+	// Both resources must be allocatable: GetNodeDevices derives each device's core
+	// count and mask from the neuroncore resource, so a node that still advertises
+	// the device count but has no allocatable cores cannot actually run Neuron pods.
+	allocatable := countAlloc
+	if coreAlloc <= 0 {
+		allocatable = 0
+	}
+	// Both capacities drive the device geometry in GetNodeDevices, so fold them into
+	// the update signature to refresh the cache when either changes.
+	return device.AllocatableHealth(devType, n.Name, allocatable, countAlloc, fmt.Sprintf("%d/%d", countCap, coreCap))
 }
 
 func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {

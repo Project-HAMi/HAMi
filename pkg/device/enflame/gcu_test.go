@@ -142,18 +142,23 @@ func TestGCUDevices_CheckHealth(t *testing.T) {
 		return n
 	}
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		wantHealthy bool
+		name            string
+		node            *corev1.Node
+		wantHealthy     bool
+		wantNeedsUpdate bool
 	}{
-		{"all GCUs allocatable", node("gcu-healthy", 2, 2), true},
-		{"all GCUs unhealthy: capacity kept, allocatable zero", node("gcu-unhealthy", 2, 0), false},
-		{"no GCU resource at all", node("gcu-none", 0, 0), false},
+		// A freshly observed healthy node reports healthy and needs an update
+		// so the scheduler (re)reads its devices.
+		{"all GCUs allocatable", node("gcu-healthy", 2, 2), true, true},
+		{"all GCUs unhealthy: capacity kept, allocatable zero", node("gcu-unhealthy", 2, 0), false, false},
+		{"no GCU resource at all", node("gcu-none", 0, 0), false, false},
+		{"nil node", nil, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			healthy, _ := dev.CheckHealth("GCU", tc.node)
+			healthy, needsUpdate := dev.CheckHealth("GCU", tc.node)
 			assert.Equal(t, tc.wantHealthy, healthy)
+			assert.Equal(t, tc.wantNeedsUpdate, needsUpdate)
 		})
 	}
 }
