@@ -821,6 +821,15 @@ devices:
     # -- Names of existing image pull Secrets for the session relay Pods, added after
     # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
     sessionImagePullSecrets: []
+    monitor:
+      # Independent container in the Lupine server Pod. Uses devicePlugin.monitor.image.
+      # The image must include remoteGPUmonitor; Lupine must expose LUPINE_WORKLOAD_ID as client_id.
+      # -- Enable the remote GPU monitor container in chart-managed Lupine server Pods
+      enabled: true
+      # -- Remote GPU monitor HTTP port on the server node
+      port: 31993
+      # -- Remote GPU monitor container resources
+      resources: {}
     server:
       # -- Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true.
       # Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose
