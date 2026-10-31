@@ -1046,7 +1046,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if numa && prevnuma != dev.Numa {
+		if numa && !needTopology && prevnuma != dev.Numa {
 			if k.Nums != originReq {
 				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
@@ -1164,32 +1164,79 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 	}
 	if needTopology {
-		if len(tmpDevs[k.Type]) == int(originReq) {
-			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
-			recordMigPlans(devices, tmpDevs[k.Type], preferred)
-			return true, tmpDevs, ""
+		candidates := tmpDevs
+		if distinct := distinctCardCandidates(tmpDevs[k.Type]); len(distinct) >= int(originReq) {
+			candidates = map[string]device.ContainerDevices{k.Type: distinct}
 		}
-		if len(tmpDevs[k.Type]) > int(originReq) {
-			// A MIG card appears once per free slot; duplicates only inflate the
-			// combination space and win zero-score ties. Collapse when cards suffice.
-			candidates := tmpDevs
-			if distinct := distinctCardCandidates(tmpDevs[k.Type]); len(distinct) >= int(originReq) {
-				candidates = map[string]device.ContainerDevices{k.Type: distinct}
+		if assertNuma(pod.GetAnnotations()) {
+			byID := make(map[string]*device.DeviceUsage, len(devices))
+			for _, d := range devices {
+				byID[d.ID] = d
+			}
+			numaGroups := make(map[int]device.ContainerDevices)
+			for _, c := range candidates[k.Type] {
+				numaNode := -1
+				if d := byID[c.UUID]; d != nil {
+					numaNode = d.Numa
+				}
+				numaGroups[numaNode] = append(numaGroups[numaNode], c)
 			}
 			if originReq == 1 {
-				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
-				tmpDevs[k.Type] = lowestDevices
-				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+				if len(candidates[k.Type]) >= 1 {
+					lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
+					tmpDevs[k.Type] = lowestDevices
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+					recordMigPlans(devices, tmpDevs[k.Type], preferred)
+					return true, tmpDevs, ""
+				}
 			} else {
-				// If requesting multiple devices, select the best combination of cards.
-				combinations := generateCombinations(request, candidates)
-				combination := computeBestCombination(nodeInfo, combinations)
-				tmpDevs[k.Type] = combination
-				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+				var numaNodes []int
+				for numaNode := range numaGroups {
+					numaNodes = append(numaNodes, numaNode)
+				}
+				sort.Ints(numaNodes)
+				var combinations []device.ContainerDevices
+				for _, numaNode := range numaNodes {
+					group := numaGroups[numaNode]
+					if len(group) >= int(originReq) {
+						combinations = append(combinations, generateCombinations(request, map[string]device.ContainerDevices{k.Type: group})...)
+					}
+				}
+				if len(combinations) > 0 {
+					combination := computeBestCombination(nodeInfo, combinations)
+					tmpDevs[k.Type] = combination
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+					recordMigPlans(devices, tmpDevs[k.Type], preferred)
+					return true, tmpDevs, ""
+				}
+				if len(candidates[k.Type]) >= int(originReq) {
+					reason[common.NumaNotFit] += len(tmpDevs[k.Type])
+					return false, tmpDevs, common.GenReason(reason, len(devices))
+				}
 			}
-			recordMigPlans(devices, tmpDevs[k.Type], preferred)
-			return true, tmpDevs, ""
+		} else {
+			if len(candidates[k.Type]) == int(originReq) {
+				tmpDevs[k.Type] = candidates[k.Type]
+				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+				recordMigPlans(devices, tmpDevs[k.Type], preferred)
+				return true, tmpDevs, ""
+			}
+			if len(candidates[k.Type]) > int(originReq) {
+				if originReq == 1 {
+					// If requesting a device, select the card with the worst connection to other cards (lowest total score).
+					lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
+					tmpDevs[k.Type] = lowestDevices
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+				} else {
+					// If requesting multiple devices, select the best combination of cards.
+					combinations := generateCombinations(request, candidates)
+					combination := computeBestCombination(nodeInfo, combinations)
+					tmpDevs[k.Type] = combination
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+				}
+				recordMigPlans(devices, tmpDevs[k.Type], preferred)
+				return true, tmpDevs, ""
+			}
 		}
 	}
 	if len(tmpDevs[k.Type]) > 0 {
