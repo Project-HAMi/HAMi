@@ -14,5 +14,5 @@ tests:
         template: scheduler/device-configmap.yaml
       - matchRegex:
           path: data["config.yaml"]
-          pattern: '(?s)name: huawei\.com/Ascend950DT\n\s+- ignoredByScheduler: true\n\s+name: mthreads\.com/vgpu'
+          pattern: '(?m)^\s*- ignoredByScheduler: true\n\s+name: huawei\.com/Ascend950DT\s*$'
         template: scheduler/configmap.yaml
