@@ -866,6 +866,7 @@ devices:
     # The named template must be supported by the driver; editing these numbers does not create a new driver template.
     # The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected.
     # See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing).
+    # <br>The Ascend950DT entry is for the 9582 SKU with 96 GiB HBM and requires a compatible separately deployed device plugin.
     # @default -- Per-chip capacities and templates; see [values.yaml](values.yaml).
     configs:
     - chipName: 910A
@@ -1012,6 +1013,13 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
+    # Ascend950DT 9582 whole-card configuration; see ../../docs/ascend/950dt-sku-reference.md for other SKU estimates.
+    - chipName: Ascend950DT
+      commonWord: Ascend950DT
+      resourceName: huawei.com/Ascend950DT
+      memoryAllocatable: 98304
+      memoryCapacity: 98304
+      aiCore: 32
     # -- RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset.
     # Empty leaves the Pod unchanged; an existing Pod value is preserved.
     runtimeClassName: ""
@@ -1064,6 +1072,7 @@ devices:
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
+      - huawei.com/Ascend950DT
   iluvatar:
     # -- List of Iluvatar device definitions used when `devices.iluvatar.enabled` is true.
     # Each object contains string fields `chipName`, `commonWord`, `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`.
