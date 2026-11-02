@@ -54,6 +54,17 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
+      {{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.monitor.enabled }}
+      # Lupine server nodes publish host GPU metrics from remoteGPUmonitor.
+      # This DaemonSet stays off those nodes, so vGPUmonitor does not publish the same series.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: hami.io/lupine-server
+                    operator: DoesNotExist
+      {{- end }}
       {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
         {{- if .Values.selinux.enabled }}

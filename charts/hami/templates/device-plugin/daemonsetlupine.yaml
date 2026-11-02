@@ -28,6 +28,7 @@ spec:
       {{- include "hami.remotegpu.server.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devices.remotegpu.monitor.enabled }}
       serviceAccountName: {{ include "hami-vgpu.fullname" . }}-remote-monitor
+      automountServiceAccountToken: false
       {{- end }}
       {{- if .Values.devices.remotegpu.server.runtimeClassName }}
       runtimeClassName: {{ .Values.devices.remotegpu.server.runtimeClassName }}
@@ -98,6 +99,10 @@ spec:
           ports:
             - name: remote-metrics
               containerPort: {{ .Values.devices.remotegpu.monitor.port }}
+          volumeMounts:
+            - name: remote-monitor-kube-api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
@@ -117,4 +122,24 @@ spec:
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}
         {{- end }}
+      {{- if .Values.devices.remotegpu.monitor.enabled }}
+      volumes:
+        - name: remote-monitor-kube-api
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3607
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
+      {{- end }}
 {{- end }}

@@ -1,0 +1,8 @@
+suite: Remote GPU device plugin placement
+templates:
+  - device-plugin/daemonsetnvidia.yaml
+tests:
+  - it: schedules the device plugin normally when remote GPU is disabled
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity

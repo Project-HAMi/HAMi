@@ -29,13 +29,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
+	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func main() {
@@ -49,6 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 }
+
 func run(node, source, bind string) error {
 	if node == "" {
 		return fmt.Errorf("node name is required")
@@ -63,9 +67,20 @@ func run(node, source, bind string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	factory := informers.NewSharedInformerFactory(client, 0)
+	factory := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+		options.LabelSelector = remote.RemoteGPUPodLabel + "=true"
+	}))
 	pods := factory.Core().V1().Pods()
 	informer := pods.Informer()
+	if err := informer.SetTransform(func(obj any) (any, error) {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return obj, nil
+		}
+		return trimPod(pod), nil
+	}); err != nil {
+		return err
+	}
 	factory.Start(ctx.Done())
 	registry := prometheus.NewRegistry()
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": "vGPU"}, registry).MustRegister(&remotegpu.Collector{Node: node, URL: source, Pods: func() ([]*corev1.Pod, error) {
@@ -74,17 +89,7 @@ func run(node, source, bind string) error {
 		}
 		return pods.Lister().List(labels.Everything())
 	}})
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if !informer.HasSynced() {
-			http.Error(w, "Pod cache not synchronized", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-	server := &http.Server{Addr: bind, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: bind, Handler: newServeMux(informer.HasSynced, registry), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -97,4 +102,66 @@ func run(node, source, bind string) error {
 		return nil
 	}
 	return err
+}
+
+func newServeMux(ready func() bool, registry *prometheus.Registry) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if ready == nil || !ready() {
+			http.Error(w, "Pod cache not synchronized", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	return mux
+}
+
+// trimPod keeps the fields the collector reads. The informer still receives
+// every labeled Pod; this only shrinks the local cache.
+func trimPod(pod *corev1.Pod) *corev1.Pod {
+	out := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            pod.Name,
+			Namespace:       pod.Namespace,
+			UID:             pod.UID,
+			ResourceVersion: pod.ResourceVersion,
+			Annotations:     map[string]string{},
+		},
+		Spec:   corev1.PodSpec{NodeName: pod.Spec.NodeName},
+		Status: corev1.PodStatus{Phase: pod.Status.Phase},
+	}
+	if v := pod.Annotations[util.AssignedNodeAnnotations]; v != "" {
+		out.Annotations[util.AssignedNodeAnnotations] = v
+	}
+	if v := pod.Annotations[remote.AllocatedAnnos]; v != "" {
+		out.Annotations[remote.AllocatedAnnos] = v
+	}
+	out.Spec.InitContainers = trimContainers(pod.Spec.InitContainers)
+	out.Spec.Containers = trimContainers(pod.Spec.Containers)
+	for _, st := range pod.Status.InitContainerStatuses {
+		trimmed := corev1.ContainerStatus{Name: st.Name}
+		if st.State.Terminated != nil {
+			trimmed.State.Terminated = &corev1.ContainerStateTerminated{ExitCode: st.State.Terminated.ExitCode}
+		}
+		out.Status.InitContainerStatuses = append(out.Status.InitContainerStatuses, trimmed)
+	}
+	return out
+}
+
+func trimContainers(in []corev1.Container) []corev1.Container {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]corev1.Container, len(in))
+	for i, c := range in {
+		out[i] = corev1.Container{Name: c.Name, RestartPolicy: c.RestartPolicy}
+		for _, env := range c.Env {
+			if env.Name == "CUDA_DEVICE_MEMORY_LIMIT" {
+				out[i].Env = append(out[i].Env, corev1.EnvVar{Name: env.Name, Value: env.Value})
+			}
+		}
+	}
+	return out
 }

@@ -18,6 +18,7 @@ limitations under the License.
 package remotegpu
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,17 +39,20 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/metrics"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const maxScrapeBytes = 16 << 20
 
+var defaultHTTPClient = &http.Client{Timeout: 3 * time.Second}
+
 var memory = metrics.ContainerMemory
 var memoryLimit = metrics.ContainerMemoryLimit
-var deviceMemory = metrics.ContainerDeviceMemory
 var utilization = metrics.ContainerUtilization
 var hostMemory = metrics.HostMemory
 var hostUtilization = metrics.HostUtilization
 var success = prometheus.NewDesc("hami_remote_gpumonitor_collect_success", "Whether Lupine scraping and Pod attribution succeeded", []string{"node"}, nil)
+var droppedSamples = prometheus.NewDesc("hami_remote_gpumonitor_dropped_samples", "Lupine samples omitted from the last scrape", []string{"node", "reason"}, nil)
 
 // Collector never stores previous samples: failures cannot replay stale usage.
 // Pods must be backed by a synchronized informer. Node is the GPU server node.
@@ -55,24 +60,50 @@ type Collector struct {
 	Node, URL string
 	Client    *http.Client
 	Pods      func() ([]*corev1.Pod, error)
+
+	mu          sync.Mutex
+	lastFailure string
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{memory, memoryLimit, deviceMemory, utilization, hostMemory, hostUtilization, success} {
+	for _, d := range []*prometheus.Desc{memory, memoryLimit, utilization, hostMemory, hostUtilization, success, droppedSamples} {
 		ch <- d
 	}
 }
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
-	metrics, err := c.collect()
+	samples, err := c.collect()
 	value := 1.0
 	if err != nil {
 		value = 0
-		klog.ErrorS(err, "remote GPU metrics collection failed", "node", c.Node)
+		c.recordFailure(err)
+	} else {
+		c.recordSuccess()
 	}
-	for _, m := range metrics {
+	for _, m := range samples {
 		ch <- m
 	}
 	ch <- prometheus.MustNewConstMetric(success, prometheus.GaugeValue, value, c.Node)
+}
+
+func (c *Collector) recordFailure(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	msg := err.Error()
+	if c.lastFailure == msg {
+		return
+	}
+	c.lastFailure = msg
+	klog.ErrorS(err, "remote GPU metrics collection failed", "node", c.Node)
+}
+
+func (c *Collector) recordSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastFailure == "" {
+		return
+	}
+	c.lastFailure = ""
+	klog.InfoS("remote GPU metrics collection recovered", "node", c.Node)
 }
 
 func (c *Collector) collect() ([]prometheus.Metric, error) {
@@ -84,7 +115,7 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 	}
 	client := c.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultHTTPClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -102,7 +133,7 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 		return nil, fmt.Errorf("lupine metrics exceeded size limit")
 	}
 	parser := expfmt.NewTextParser(model.UTF8Validation)
-	families, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
+	families, err := parser.TextToMetricFamilies(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +145,11 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 	if err != nil {
 		return nil, err
 	}
-	return adapt(c.Node, families, pods)
+	samples, dropped := adapt(c.Node, families, pods)
+	for reason, n := range dropped {
+		samples = append(samples, prometheus.MustNewConstMetric(droppedSamples, prometheus.GaugeValue, float64(n), c.Node, reason))
+	}
+	return samples, nil
 }
 
 func labels(m *dto.Metric) map[string]string {
@@ -137,12 +172,17 @@ type allocation struct {
 	limit  float64
 }
 
-// Match UID, exact container name and GPU allocation on this server. A Pod
-// recreated under the same name, or a sample from another server, cannot match.
+// allocations follows the scheduler's podManager. A Pod counts once HAMi has
+// written hami.io/vgpu-node, including before it is bound and while it is
+// still Pending or terminating. Succeeded, Failed, and deleted Pods do not.
+// After non-sidecar init containers succeed, their devices are released.
 func allocations(node string, pods []*corev1.Pod) map[string]map[string]allocation {
 	out := map[string]map[string]allocation{}
 	for _, pod := range pods {
-		if pod.UID == "" || pod.Spec.NodeName == "" || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		if pod == nil || pod.UID == "" || util.IsPodInTerminatedState(pod) {
+			continue
+		}
+		if pod.Annotations[util.AssignedNodeAnnotations] == "" {
 			continue
 		}
 		pd, err := device.DecodePodDevices(map[string]string{remote.RemoteGPUDevice: remote.AllocatedAnnos}, pod.Annotations)
@@ -150,9 +190,14 @@ func allocations(node string, pods []*corev1.Pod) map[string]map[string]allocati
 			continue
 		}
 		containers := append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...)
+		numInit := len(pod.Spec.InitContainers)
+		releaseInit := util.AllNonSidecarInitContainersSucceeded(pod)
 		for i, devices := range pd[remote.RemoteGPUDevice] {
 			if i >= len(containers) {
 				break
+			}
+			if releaseInit && i < numInit && !util.IsSidecarContainer(&containers[i]) {
+				continue
 			}
 			for index, d := range devices {
 				server, uuid, ok := strings.Cut(d.UUID, "/")
@@ -181,8 +226,10 @@ func allocations(node string, pods []*corev1.Pod) map[string]map[string]allocati
 
 type sampleKey struct{ workload, uuid string }
 
-func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Pod) ([]prometheus.Metric, error) {
+func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Pod) ([]prometheus.Metric, map[string]int) {
 	out := []prometheus.Metric{}
+	dropped := map[string]int{}
+	drop := func(reason string) { dropped[reason]++ }
 	emit := func(d *prometheus.Desc, v float64, ls []string) {
 		out = append(out, prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v, ls...))
 	}
@@ -195,11 +242,13 @@ func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Po
 				continue
 			}
 			if seen[l["device_uuid"]] {
-				return nil, fmt.Errorf("duplicate host GPU sample")
+				drop("duplicate")
+				continue
 			}
 			seen[l["device_uuid"]] = true
 			if desc == hostUtilization && v > 100 {
-				return nil, fmt.Errorf("invalid host utilization")
+				drop("invalid_utilization")
+				continue
 			}
 			emit(desc, v, []string{node, l["device_index"], l["device_uuid"], l["device_type"]})
 		}
@@ -217,18 +266,17 @@ func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Po
 			if _, ok := assigned[l["client_id"]][l["device_uuid"]]; !ok {
 				continue
 			}
-			if l["client_id"] == "" {
-				continue
-			}
 			// Lupine already merges processes with identical source labels.
 			// Different process names can still belong to the same container.
 			key := [6]string{l["client_id"], l["client_address"], l["client_hostname"], l["client_name"], l["device_uuid"], l["device_index"]}
 			if seen[key] {
-				return nil, fmt.Errorf("duplicate client GPU sample")
+				drop("duplicate")
+				continue
 			}
 			seen[key] = true
 			if desc == utilization && v > 100 {
-				return nil, fmt.Errorf("invalid client utilization")
+				drop("invalid_utilization")
+				continue
 			}
 			sums[sampleKey{l["client_id"], l["device_uuid"]}] += v
 		}
@@ -238,12 +286,10 @@ func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Po
 				v = math.Min(v, 100)
 			}
 			if math.IsInf(v, 0) {
-				return nil, fmt.Errorf("container GPU usage overflow")
+				drop("overflow")
+				continue
 			}
 			emit(desc, v, a.labels)
-			if desc == memory {
-				emit(deviceMemory, v, a.labels)
-			}
 		}
 	}
 	for _, devices := range assigned {
@@ -253,5 +299,5 @@ func adapt(node string, families map[string]*dto.MetricFamily, pods []*corev1.Po
 			}
 		}
 	}
-	return out, nil
+	return out, dropped
 }

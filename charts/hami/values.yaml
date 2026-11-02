@@ -829,7 +829,12 @@ devices:
       # -- Remote GPU monitor HTTP port on the server node
       port: 31993
       # -- Remote GPU monitor container resources
-      resources: {}
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
     server:
       # -- Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true.
       # Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose

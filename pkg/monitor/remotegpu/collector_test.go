@@ -33,13 +33,17 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func allocatedPod() *corev1.Pod {
 	pd := device.PodDevices{remote.RemoteGPUDevice: device.PodSingleDevice{
 		{}, {{UUID: "gpu-node/GPU-a", Type: remote.RemoteGPUDevice, Usedmem: 4096}}, {{UUID: "gpu-node/GPU-a", Type: remote.RemoteGPUDevice, Usedmem: 4096}},
 	}}
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("uid-1"), Namespace: "ns", Name: "worker", Annotations: map[string]string{remote.AllocatedAnnos: device.EncodePodSingleDevice(pd[remote.RemoteGPUDevice])}}, Spec: corev1.PodSpec{NodeName: "cpu-node", InitContainers: []corev1.Container{{Name: "setup"}}, Containers: []corev1.Container{{Name: "a"}, {Name: "b"}}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("uid-1"), Namespace: "ns", Name: "worker", Annotations: map[string]string{
+		remote.AllocatedAnnos:        device.EncodePodSingleDevice(pd[remote.RemoteGPUDevice]),
+		util.AssignedNodeAnnotations: "cpu-node",
+	}}, Spec: corev1.PodSpec{NodeName: "cpu-node", InitContainers: []corev1.Container{{Name: "setup"}}, Containers: []corev1.Container{{Name: "a"}, {Name: "b"}}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
 }
 
 const fixture = `# TYPE lupine_monitor_nvml_up gauge
@@ -94,9 +98,9 @@ func checkAttribution(t *testing.T, fixture string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms, err := adapt("gpu-node", families, []*corev1.Pod{allocatedPod()})
-	if err != nil {
-		t.Fatal(err)
+	ms, dropped := adapt("gpu-node", families, []*corev1.Pod{allocatedPod()})
+	if len(dropped) != 0 {
+		t.Fatalf("dropped samples: %v", dropped)
 	}
 	values := map[string]float64{}
 	for _, m := range ms {
@@ -115,7 +119,6 @@ func checkAttribution(t *testing.T, fixture string) {
 	}
 	check(memory, "a", 300)
 	check(memory, "b", 400)
-	check(deviceMemory, "a", 300)
 	check(utilization, "a", 100)
 	check(memoryLimit, "a", 4096*1024*1024)
 	for _, m := range ms {
@@ -129,10 +132,7 @@ func checkAttribution(t *testing.T, fixture string) {
 	// Same Pod name with a new UID must not receive the old process's usage.
 	pod := allocatedPod()
 	pod.UID = "uid-2"
-	ms, err = adapt("gpu-node", families, []*corev1.Pod{pod})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ms, _ = adapt("gpu-node", families, []*corev1.Pod{pod})
 	for _, m := range ms {
 		if m.Desc() == memory {
 			t.Fatal("recreated Pod inherited stale usage")
@@ -145,6 +145,11 @@ func checkAttribution(t *testing.T, fixture string) {
 	pod.Status.Phase = corev1.PodSucceeded
 	if len(allocations("gpu-node", []*corev1.Pod{pod})) != 0 {
 		t.Fatal("accepted completed Pod")
+	}
+	pod = allocatedPod()
+	pod.Status.Phase = corev1.PodFailed
+	if len(allocations("gpu-node", []*corev1.Pod{pod})) != 0 {
+		t.Fatal("accepted failed Pod")
 	}
 }
 func TestScrapeFailureDoesNotReplayUsage(t *testing.T) {
@@ -191,14 +196,89 @@ func TestQuotaAndInitContainerAllocation(t *testing.T) {
 		t.Fatalf("incorrect init container mapping: %v", got)
 	}
 }
-func TestDuplicateSourceSeriesRejected(t *testing.T) {
+func TestDuplicateSourceSeriesDropped(t *testing.T) {
 	parser := expfmt.NewTextParser(model.UTF8Validation)
 	text := fixture + `lupine_client_device_memory_used_bytes{client_id="uid-1/a",client_name="p1",device_uuid="GPU-a"} 100` + "\n"
 	fs, err := parser.TextToMetricFamilies(strings.NewReader(text))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ms, err := adapt("gpu-node", fs, []*corev1.Pod{allocatedPod()}); err == nil || len(ms) != 0 {
-		t.Fatal("duplicate process sample was double counted")
+	ms, dropped := adapt("gpu-node", fs, []*corev1.Pod{allocatedPod()})
+	if dropped["duplicate"] != 1 {
+		t.Fatalf("duplicate count: %v", dropped)
+	}
+	for _, m := range ms {
+		if m.Desc() != memory {
+			continue
+		}
+		d := &dto.Metric{}
+		if err := m.Write(d); err != nil {
+			t.Fatal(err)
+		}
+		if labels(d)["container"] == "a" && d.GetGauge().GetValue() != 300 {
+			t.Fatalf("duplicate sample changed container usage to %v", d.GetGauge().GetValue())
+		}
+	}
+}
+
+func TestInvalidUtilizationDropped(t *testing.T) {
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	text := strings.Replace(fixture, `device_uuid="GPU-a"} 60`, `device_uuid="GPU-a"} 150`, 1)
+	fs, err := parser.TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dropped := adapt("gpu-node", fs, []*corev1.Pod{allocatedPod()})
+	if dropped["invalid_utilization"] != 1 {
+		t.Fatalf("invalid utilization count: %v", dropped)
+	}
+}
+
+func TestAllocationsFollowSchedulerAccounting(t *testing.T) {
+	pending := allocatedPod()
+	pending.Spec.NodeName = ""
+	pending.Status.Phase = corev1.PodPending
+	if len(allocations("gpu-node", []*corev1.Pod{pending})) == 0 {
+		t.Fatal("dropped a scheduled Pod that is still Pending")
+	}
+
+	unassigned := allocatedPod()
+	delete(unassigned.Annotations, util.AssignedNodeAnnotations)
+	if len(allocations("gpu-node", []*corev1.Pod{unassigned})) != 0 {
+		t.Fatal("counted a Pod the scheduler has not assigned")
+	}
+
+	now := metav1.Now()
+	terminating := allocatedPod()
+	terminating.DeletionTimestamp = &now
+	if len(allocations("gpu-node", []*corev1.Pod{terminating})) == 0 {
+		t.Fatal("dropped a terminating Pod")
+	}
+
+	pod := allocatedPod()
+	pod.Annotations[remote.AllocatedAnnos] = device.EncodePodSingleDevice(device.PodSingleDevice{
+		{{UUID: "gpu-node/GPU-a", Type: remote.RemoteGPUDevice, Usedmem: 2048}},
+		{{UUID: "gpu-node/GPU-a", Type: remote.RemoteGPUDevice, Usedmem: 4096}},
+		{},
+	})
+	if _, ok := allocations("gpu-node", []*corev1.Pod{pod})["uid-1/setup"]; !ok {
+		t.Fatal("running init container allocation was dropped")
+	}
+	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name:  "setup",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+	}}
+	got := allocations("gpu-node", []*corev1.Pod{pod})
+	if _, ok := got["uid-1/setup"]; ok {
+		t.Fatal("finished init container still occupies a limit")
+	}
+	if _, ok := got["uid-1/a"]; !ok {
+		t.Fatal("app container limit was dropped with the init container")
+	}
+
+	always := corev1.ContainerRestartPolicyAlways
+	pod.Spec.InitContainers[0].RestartPolicy = &always
+	if _, ok := allocations("gpu-node", []*corev1.Pod{pod})["uid-1/setup"]; !ok {
+		t.Fatal("sidecar init container was released")
 	}
 }

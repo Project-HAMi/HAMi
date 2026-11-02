@@ -518,7 +518,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devices.remotegpu.sessionImagePullSecrets | list | `[]` | Names of existing image pull Secrets for the session relay Pods, added after `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace. |
 | devices.remotegpu.monitor.enabled | bool | `true` | Enable the remote GPU monitor container in chart-managed Lupine server Pods |
 | devices.remotegpu.monitor.port | int | `31993` | Remote GPU monitor HTTP port on the server node |
-| devices.remotegpu.monitor.resources | object | `{}` | Remote GPU monitor container resources |
+| devices.remotegpu.monitor.resources | object | `{"limits":{"memory":"256Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}` | Remote GPU monitor container resources |
 | devices.remotegpu.server.enabled | bool | `true` | Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true. Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose label names its own port is left to a server managed outside the chart. False leaves server deployment to the operator without disabling remote GPU scheduling. |
 | devices.remotegpu.server.image.registry | string | `"ghcr.io"` | Registry of the lupine server container image. `global.imageRegistry` overrides it. |
 | devices.remotegpu.server.image.repository | string | `"lupinemachines/lupine-server"` | Repository of the lupine server container image. |

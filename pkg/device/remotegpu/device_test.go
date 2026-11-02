@@ -890,28 +890,39 @@ func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	assert.Assert(t, reason != "")
 }
 
-// Reinvocation and user-supplied reserved variables must not break kubelet's
-// ordered expansion; each container receives its own identity.
+func TestMutateAdmission_RejectsUserWorkloadIdentity(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{Name: "worker", Env: []corev1.EnvVar{{Name: lupineWorkloadIDEnv, Value: "user-value"}, {Name: remotePodUIDEnv, Value: "user-uid"}}, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+	pod := &corev1.Pod{}
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.ErrorContains(t, err, lupineWorkloadIDEnv)
+	assert.Equal(t, ctr.Env[0].Value, "user-value")
+	assert.Equal(t, pod.Labels[RemoteGPUPodLabel], "")
+}
+
+// Reinvocation keeps a single ordered pair, and each container gets its own identity.
 func TestMutateAdmissionWorkloadIdentity(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	for _, name := range []string{"worker", "sidecar"} {
-		ctr := &corev1.Container{Name: name, Env: []corev1.EnvVar{{Name: lupineWorkloadIDEnv, Value: "user-value"}, {Name: "HAMI_REMOTE_POD_UID", Value: "user-uid"}}, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+		ctr := &corev1.Container{Name: name, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+		pod := &corev1.Pod{}
 		for range 2 {
-			_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+			_, err := dev.MutateAdmission(ctr, pod)
 			assert.NilError(t, err)
 		}
+		assert.Equal(t, pod.Labels[RemoteGPUPodLabel], "true")
 		var uidIndex, workloadIndex int
 		var uidCount, workloadCount int
 		for i, env := range ctr.Env {
 			switch env.Name {
-			case "HAMI_REMOTE_POD_UID":
+			case remotePodUIDEnv:
 				uidIndex = i
 				uidCount++
 				assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.uid")
 			case lupineWorkloadIDEnv:
 				workloadIndex = i
 				workloadCount++
-				assert.Equal(t, env.Value, "$(HAMI_REMOTE_POD_UID)/"+name)
+				assert.Equal(t, env.Value, "$("+remotePodUIDEnv+")/"+name)
 			}
 		}
 		assert.Equal(t, uidCount, 1)
