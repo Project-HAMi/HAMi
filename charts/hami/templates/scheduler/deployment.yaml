@@ -43,6 +43,12 @@ spec:
     spec:
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
+      {{- /* Seccomp only at the Pod level: a Pod-level runAsNonRoot would
+             also bind the colocated kube-scheduler container, whose image
+             is not guaranteed to run as non-root. */}}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
@@ -85,14 +91,35 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
-          {{- if .Values.platform.openshift }}
+          {{- /* Fall back to the shipped defaults when the key is absent:
+                 values reused from a release that predates this value (helm
+                 upgrade --reuse-values) do not contain it, and the extender
+                 must not lose its restrictions there. Setting the value to
+                 false renders no securityContext. On OpenShift the extender
+                 also gets runAsNonRoot, as it did when this context was
+                 hardcoded for the platform, unless the value sets it itself:
+                 the platform assigns the Pod a user ID, while on other
+                 platforms the image sets no user and the chart no runAsUser,
+                 so requiring one there would keep the Pod from starting. */}}
+          {{- $extenderSecurityContext := dict
+                "allowPrivilegeEscalation" false
+                "capabilities" (dict "drop" (list "ALL"))
+                "seccompProfile" (dict "type" "RuntimeDefault") }}
+          {{- $configuredSecurityContext := .Values.scheduler.extender.securityContext }}
+          {{- if kindIs "bool" $configuredSecurityContext }}
+          {{- if not $configuredSecurityContext }}
+          {{- $extenderSecurityContext = dict }}
+          {{- end }}
+          {{- else if not (kindIs "invalid" $configuredSecurityContext) }}
+          {{- $extenderSecurityContext = $configuredSecurityContext }}
+          {{- end }}
+          {{- if and .Values.platform.openshift $extenderSecurityContext (not (hasKey $extenderSecurityContext "runAsNonRoot")) }}
+          {{- $extenderSecurityContext = deepCopy $extenderSecurityContext }}
+          {{- $_ := set $extenderSecurityContext "runAsNonRoot" true }}
+          {{- end }}
+          {{- with $extenderSecurityContext }}
           securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            seccompProfile:
-              type: RuntimeDefault
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
             - name: POD_NAME
