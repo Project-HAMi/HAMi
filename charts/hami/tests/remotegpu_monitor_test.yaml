@@ -30,15 +30,11 @@ tests:
       - equal:
           path: spec.template.spec.containers[1].resources.limits.memory
           value: 256Mi
-  - it: keeps the nvidia device plugin off lupine server nodes
+  - it: keeps the device plugin pod when the remote monitor is enabled
     template: device-plugin/daemonsetnvidia.yaml
     asserts:
-      - equal:
-          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
-          value: hami.io/lupine-server
-      - equal:
-          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].operator
-          value: DoesNotExist
+      - notExists:
+          path: spec.template.spec.affinity
   - it: keeps vGPUmonitor on lupine nodes when the remote monitor is disabled
     template: device-plugin/daemonsetnvidia.yaml
     set:

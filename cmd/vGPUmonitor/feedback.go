@@ -144,10 +144,15 @@ func Observe(lister *nvidia.ContainerLister) {
 
 func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan struct{}, lockExistFn func() bool) error {
 	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+	var nvmlOn bool
+	shutdownNVML := func() {
+		if !nvmlOn {
+			return
+		}
+		nvml.Shutdown()
+		nvmlOn = false
 	}
-	defer nvml.Shutdown()
+	defer shutdownNVML()
 
 	// Catches a lock already held on restart, mid-apply.
 	if lockExistFn() {
@@ -174,6 +179,19 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 			}
 
 		case <-ticker.C:
+			// A lupine server node publishes host metrics from remoteGPUmonitor.
+			// Drop NVML while that label is set, and pick it up again if the
+			// device plugin removes the label.
+			if lister.OnLupineServer(ctx) {
+				shutdownNVML()
+				continue
+			}
+			if !nvmlOn {
+				if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+					return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+				}
+				nvmlOn = true
+			}
 			if err := lister.Update(); err != nil {
 				klog.Errorf("Failed to update container list: %v", err)
 				continue

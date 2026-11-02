@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -227,6 +228,15 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
+	if cc.standingBy() {
+		// Host metrics for this node come from remoteGPUmonitor. Stay serving
+		// /metrics so the pod stays ready, and publish nothing about the GPU.
+		klog.V(4).Info("vGPUmonitor idle on lupine server node")
+		if err := sendMetric(ch, collectSuccessDesc, prometheus.GaugeValue, 1, os.Getenv(util.NodeNameEnvName)); err != nil {
+			klog.Errorf("Failed to send collect success metric: %v", err)
+		}
+		return
+	}
 	success := 1.0
 	if os.Getenv("HAMI_MONITOR_UNKNOWN_PROCESSES") == "true" {
 		counts, err := cc.ClusterManager.containerLister.UnknownProcessCounts()
@@ -263,6 +273,13 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	klog.Info("Finished collecting metrics for vGPUMonitor")
+}
+
+func (cc ClusterManagerCollector) standingBy() bool {
+	if cc.ClusterManager == nil || cc.ClusterManager.containerLister == nil {
+		return false
+	}
+	return cc.ClusterManager.containerLister.OnLupineServer(context.Background())
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {
