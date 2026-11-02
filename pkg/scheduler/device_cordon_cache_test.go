@@ -186,3 +186,78 @@ func Test_register_UncordonAfterRegistrationReachesFit(t *testing.T) {
 	fit, reason = fitsOneGPU(t, s)
 	require.True(t, fit, "the cordon was removed, so the pod must fit; reason %q", reason)
 }
+
+// The tests below exercise onUpdateNode, refreshNodeObject and
+// refreshCordonAnnotation directly. The two tests above seed the node
+// lister's indexer without starting the informer, so the informer's own
+// UpdateFunc is never invoked by them, and they only ever call
+// refreshCordonAnnotation/refreshNodeObject on a node already in the cache.
+
+// onUpdateNode must request a register pass when the cordon annotation
+// changes, so the change reaches Fit() without waiting for the ticker.
+func Test_onUpdateNode_NotifiesOnCordonChange(t *testing.T) {
+	s, _ := newCordonTestScheduler(t)
+
+	s.onUpdateNode(cordonTestNode(""), cordonTestNode("GPU-0,GPU-1"))
+
+	select {
+	case <-s.nodeNotify:
+	default:
+		t.Fatal("expected a node notification when the cordon annotation changed")
+	}
+}
+
+// onUpdateNode must not request a register pass for a node update that
+// leaves the cordon annotation alone, so it doesn't flood the notify
+// channel on every unrelated node change.
+func Test_onUpdateNode_NoNotifyWhenCordonUnchanged(t *testing.T) {
+	s, _ := newCordonTestScheduler(t)
+
+	s.onUpdateNode(cordonTestNode("GPU-0,GPU-1"), cordonTestNode("GPU-0,GPU-1"))
+
+	select {
+	case <-s.nodeNotify:
+		t.Fatal("did not expect a node notification when the cordon annotation did not change")
+	default:
+	}
+}
+
+// onUpdateNode receives informer callback objects as `any`; a cache
+// DeletedFinalStateUnknown or similar on either side must be ignored rather
+// than panicking.
+func Test_onUpdateNode_IgnoresNonNodeObjects(t *testing.T) {
+	s, _ := newCordonTestScheduler(t)
+
+	require.NotPanics(t, func() { s.onUpdateNode("not-a-node", cordonTestNode("")) })
+	require.NotPanics(t, func() { s.onUpdateNode(cordonTestNode(""), "not-a-node") })
+
+	select {
+	case <-s.nodeNotify:
+		t.Fatal("did not expect a node notification from a malformed old or new object")
+	default:
+	}
+}
+
+// refreshNodeObject must do nothing for a nil Node rather than panic or
+// clear the cached one.
+func Test_refreshNodeObject_NilNodeIsNoop(t *testing.T) {
+	s, indexer := newCordonTestScheduler(t)
+	require.NoError(t, indexer.Add(cordonTestNode("GPU-0,GPU-1")))
+	s.register(labels.Everything())
+
+	before := cachedCordon(t, s)
+	require.NotPanics(t, func() { s.refreshNodeObject(cordonTestNodeName, nil) })
+	require.Equal(t, before, cachedCordon(t, s), "a nil node must leave the cache untouched")
+}
+
+// refreshNodeObject must not create a cache entry for a node that was never
+// registered; only addNode does that.
+func Test_refreshNodeObject_UnknownNodeIsNoop(t *testing.T) {
+	s, _ := newCordonTestScheduler(t)
+
+	require.NotPanics(t, func() {
+		s.refreshNodeObject("node-never-registered", cordonTestNode("GPU-0"))
+	})
+	_, err := s.GetNode("node-never-registered")
+	require.Error(t, err, "refreshNodeObject must not create a cache entry for an unregistered node")
+}
