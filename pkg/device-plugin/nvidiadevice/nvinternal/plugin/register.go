@@ -188,10 +188,17 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
 		}
+
+		// Fallback for DeviceSplitCount to prevent nil pointer panic
+		deviceSplitCount := 10
+		if plugin.schedulerConfig.DeviceSplitCount != nil {
+			deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+		}
+
 		info := &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
-			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
+			Count:   int32(deviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: devcore,
 			Type:    Model,

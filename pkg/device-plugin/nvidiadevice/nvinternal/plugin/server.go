@@ -1819,5 +1819,9 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
-	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
+	deviceSplitCount := 10 // Default value from HAMi docs
+	if plugin.schedulerConfig.DeviceSplitCount != nil {
+		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+	}
+	return plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
 }
