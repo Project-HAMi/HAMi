@@ -17,6 +17,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -46,6 +48,10 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 		clientSet *kubernetes.Clientset
 		newPod    *corev1.Pod
 		nodeName  string
+		// oldLabel and hadLabel keep the node's gpu label from before the
+		// tests, so AfterAll can leave the node as it found it.
+		oldLabel string
+		hadLabel bool
 	)
 
 	podLimit := utils.GPUPodMemory + " " + utils.GPUPodMemoryUnit
@@ -57,6 +63,10 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 		nodeName, err = utils.GetGPUNode(clientSet)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to find GPU node")
 		fmt.Printf("Using GPU node: %s\n", nodeName)
+
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		oldLabel, hadLabel = node.Labels[utils.GPUNodeLabelKey]
 
 		ginkgo.By("Adding node labeling")
 		_, err = utils.AddNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey, utils.GPUNodeLabelValue)
@@ -75,6 +85,12 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.AfterAll(func() {
+		if hadLabel {
+			ginkgo.By("Restoring node labeling")
+			_, err := utils.AddNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey, oldLabel)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return
+		}
 		ginkgo.By("Deleting node labeling")
 		_, err := utils.RemoveNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
