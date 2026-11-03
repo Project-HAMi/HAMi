@@ -297,8 +297,9 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		if _, ok := s.podManager.ReplacePodDevices(key, effective); ok {
 			s.quotaManager.AddUsage(pod, effective)
 		} else {
-			// The pod left the cache between lookup and update; the informer
-			// rebuilds accounting from the patched annotations on re-add.
+			// Pod removals take allocLock, so the pod cannot leave the cache
+			// while the refit holds it. This only guards against a future
+			// caller that removes pods without the lock.
 			klog.InfoS("pod left the scheduler cache during NUMA refit; annotations remain authoritative", "pod", klog.KObj(pod))
 		}
 	} else {

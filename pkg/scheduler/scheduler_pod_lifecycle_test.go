@@ -375,8 +375,8 @@ func Test_onUpdatePod_ReportsUndecodableInitShrink(t *testing.T) {
 // Unrelated Pod events must not wait for allocation or NUMA refit operations.
 func TestPodWithoutAssignmentDoesNotWaitForAllocLock(t *testing.T) {
 	initReplayDevices(t)
-	for _, event := range []string{"add", "update"} {
-		for _, state := range []string{"pending", "running", "terminating"} {
+	for _, event := range []string{"add", "update", "delete"} {
+		for _, state := range []string{"pending", "running", "terminating", "terminated"} {
 			t.Run(event+"/"+state, func(t *testing.T) {
 				s := NewScheduler()
 				pod := &corev1.Pod{
@@ -391,6 +391,9 @@ func TestPodWithoutAssignmentDoesNotWaitForAllocLock(t *testing.T) {
 					now := metav1.Now()
 					pod.DeletionTimestamp = &now
 				}
+				if state == "terminated" {
+					pod.Status.Phase = corev1.PodSucceeded
+				}
 				s.allocLock.Lock()
 				done := make(chan struct{})
 				t.Cleanup(func() {
@@ -402,10 +405,13 @@ func TestPodWithoutAssignmentDoesNotWaitForAllocLock(t *testing.T) {
 					}
 				})
 				go func() {
-					if event == "add" {
+					switch event {
+					case "add":
 						s.onAddPod(pod)
-					} else {
+					case "update":
 						s.onUpdatePod(pod.DeepCopy(), pod)
+					default:
+						s.onDelPod(pod)
 					}
 					close(done)
 				}()
