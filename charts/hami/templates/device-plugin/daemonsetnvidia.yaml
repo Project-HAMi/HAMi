@@ -260,7 +260,12 @@ spec:
             - {{ . }}
             {{- end }}
             - --metrics-bind-address={{ .Values.devicePlugin.monitor.metricsBindAddress }}
-          {{- with .Values.devicePlugin.monitor.securityContext }}
+          {{- $monitorSecurityContext := deepCopy (.Values.devicePlugin.monitor.securityContext | default dict) }}
+          {{- if .Values.devicePlugin.monitor.migInstanceAccess }}
+          {{- $_ := set $monitorSecurityContext "privileged" true }}
+          {{- $_ := set $monitorSecurityContext "allowPrivilegeEscalation" true }}
+          {{- end }}
+          {{- with $monitorSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -323,6 +328,10 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            {{- if .Values.devicePlugin.monitor.migInstanceAccess }}
+            - name: nvidia-caps
+              mountPath: /dev/nvidia-caps
+            {{- end }}
             {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
             - name: driver-root
               mountPath: /driver-root
@@ -344,6 +353,12 @@ spec:
         - name: hosttmp
           hostPath:
             path: /tmp
+        {{- if .Values.devicePlugin.monitor.migInstanceAccess }}
+        - name: nvidia-caps
+          hostPath:
+            path: /dev/nvidia-caps
+            type: DirectoryOrCreate
+        {{- end }}
         - name: dockers
           hostPath:
             path: /run/docker
