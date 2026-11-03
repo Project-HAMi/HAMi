@@ -49,9 +49,11 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 		newPod    *corev1.Pod
 		nodeName  string
 		// oldLabel and hadLabel keep the node's gpu label from before the
-		// tests, so AfterAll can leave the node as it found it.
-		oldLabel string
-		hadLabel bool
+		// tests, so AfterAll can leave the node as it found it. labelRead
+		// stays false if BeforeAll failed before it could read the label.
+		oldLabel  string
+		hadLabel  bool
+		labelRead bool
 	)
 
 	podLimit := utils.GPUPodMemory + " " + utils.GPUPodMemoryUnit
@@ -67,6 +69,7 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		oldLabel, hadLabel = node.Labels[utils.GPUNodeLabelKey]
+		labelRead = true
 
 		ginkgo.By("Adding node labeling")
 		_, err = utils.AddNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey, utils.GPUNodeLabelValue)
@@ -85,6 +88,10 @@ var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.AfterAll(func() {
+		if !labelRead {
+			// The label was never read, so its old value is unknown. Leave it alone.
+			return
+		}
 		if hadLabel {
 			ginkgo.By("Restoring node labeling")
 			_, err := utils.AddNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey, oldLabel)
