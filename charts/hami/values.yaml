@@ -349,6 +349,8 @@ devicePlugin:
       capabilities:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
+    # mig instance monitoring requires privileged access, if you don't use mig, you can set this to false.
+    migInstanceAccess: true
     # -- Resource requests and limits for the monitor container.
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
