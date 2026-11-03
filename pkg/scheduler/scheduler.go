@@ -95,8 +95,9 @@ type Scheduler struct {
 	synced atomic.Bool
 
 	// allocLock serializes reservation mutations between Filter, the NUMA
-	// refit (RefitNumaAllocation), and pod adds/updates that release init-container
-	// usage, so these paths cannot observe or produce half-applied accounting.
+	// refit (RefitNumaAllocation), pod adds/updates that release init-container
+	// usage, and removals of tracked pods, so these paths cannot observe or
+	// produce half-applied accounting.
 	allocLock sync.Mutex
 
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
@@ -249,9 +250,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
 	if util.IsPodInTerminatedState(pod) {
 		// Terminal objects can omit annotations; remove any cached usage first.
-		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
-			s.quotaManager.RmUsage(pod, pi.Devices)
-		}
+		s.removePodAllocation(pod)
 		return
 	}
 	assignedNodeName, ok := pod.Annotations[util.AssignedNodeAnnotations]
@@ -309,9 +308,7 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if util.IsPodInTerminatedState(newPod) {
 		// Terminated update objects can omit annotations, but cached usage must
 		// still be removed to avoid leaving completed Pod allocations accounted.
-		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
-			s.quotaManager.RmUsage(newPod, pi.Devices)
-		}
+		s.removePodAllocation(newPod)
 		return
 	}
 
@@ -410,6 +407,20 @@ func (s *Scheduler) onDelPod(obj any) {
 
 	// Delete notifications can contain incomplete Pod objects. The cached
 	// allocation, keyed by the immutable UID, is the cleanup source of truth.
+	s.removePodAllocation(pod)
+}
+
+// removePodAllocation drops a pod's cached allocation and its quota usage.
+// It takes allocLock because a NUMA refit releases the pod's quota usage and
+// adds it back under that lock; a removal in between would subtract the usage
+// twice and eat into other pods' usage in the namespace (#3027). Pods the
+// scheduler does not track return without waiting for the lock.
+func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
+	if _, tracked := s.podManager.GetPod(pod); !tracked {
+		return
+	}
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
@@ -1114,9 +1125,7 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 }
 
 func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
-	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
-		s.quotaManager.RmUsage(pod, pi.Devices)
-	}
+	s.removePodAllocation(pod)
 }
 
 func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {

@@ -1072,6 +1072,91 @@ func testRefitNumaAllocationSerializesInitRelease(t *testing.T, replay bool) {
 	assert.Equal(t, (*dq)[resourceNames.ResourceMemoryName].Used, int64(20000))
 }
 
+// A pod removed while its refit holds allocLock must leave the namespace quota
+// exactly once, after the refit has added the pod's usage back (#3027).
+func TestRefitNumaAllocationSerializesPodRemoval(t *testing.T) {
+	for _, event := range []string{"delete", "terminated add", "terminated update", "bind cleanup"} {
+		t.Run(event, func(t *testing.T) {
+			s, pod := refitFixture(t, 40000)
+			resourceNames := device.GetDevices()[nvidia.NvidiaGPUDevice].GetResourceNames()
+			s.quotaManager.AddUsage(pod, device.PodDevices{nvidia.NvidiaGPUDevice: {{{
+				UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30,
+			}}}})
+			other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "other-pod", Name: "other-pod", Namespace: pod.Namespace}}
+			s.quotaManager.AddUsage(other, device.PodDevices{nvidia.NvidiaGPUDevice: {{{
+				UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 15000, Usedcores: 20,
+			}}}})
+
+			patchStarted := make(chan struct{})
+			releasePatch := make(chan struct{})
+			previousPatch := patchPodAnnotations
+			patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) error {
+				close(patchStarted)
+				<-releasePatch
+				return nil
+			}
+			t.Cleanup(func() { patchPodAnnotations = previousPatch })
+
+			refitDone := make(chan device.NumaRefitResponse, 1)
+			go func() {
+				refitDone <- s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+			}()
+			select {
+			case <-patchStarted:
+			case <-time.After(time.Second):
+				t.Fatal("refit did not reach the annotation patch")
+			}
+
+			finished := pod.DeepCopy()
+			finished.Status.Phase = corev1.PodSucceeded
+			removeStarted := make(chan struct{})
+			removeDone := make(chan struct{})
+			go func() {
+				close(removeStarted)
+				switch event {
+				case "delete":
+					s.onDelPod(pod)
+				case "terminated add":
+					s.onAddPod(finished)
+				case "terminated update":
+					s.onUpdatePod(pod, finished)
+				default:
+					s.cleanupStalePodAllocation(pod)
+				}
+				close(removeDone)
+			}()
+			<-removeStarted
+
+			removeInterleaved := false
+			select {
+			case <-removeDone:
+				removeInterleaved = true
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releasePatch)
+
+			select {
+			case response := <-refitDone:
+				assert.Equal(t, response.Succeeded, true, response.FailureReason)
+			case <-time.After(time.Second):
+				t.Fatal("refit did not finish after the patch was released")
+			}
+			select {
+			case <-removeDone:
+			case <-time.After(time.Second):
+				t.Fatal("pod removal did not finish after the refit released allocLock")
+			}
+
+			assert.Check(t, !removeInterleaved, "pod removal ran while the refit held allocLock")
+			_, cached := s.podManager.GetPod(pod)
+			assert.Equal(t, cached, false)
+			quota := s.quotaManager.GetResourceQuota()[pod.Namespace]
+			assert.Equal(t, (*quota)[resourceNames.ResourceMemoryName].Used, int64(15000))
+			assert.Equal(t, (*quota)[resourceNames.ResourceCoreName].Used, int64(20))
+		})
+	}
+}
+
 // initRefitFixture builds a scheduler tracking one pod whose PodDevices span an
 // init container (index 0) and two app containers (indices 1 and 2), each
 // reserving 5000 of GPU-a. With numInit=1, CollapseInitContainerUsage folds the
