@@ -155,12 +155,15 @@ scheduler:
     # is not among these defaults: the extender image sets no user and the
     # chart sets no `runAsUser`, so requiring a non-root user would keep the
     # Pod from starting on regular clusters. When `platform.openshift` is
-    # true, the chart adds `runAsNonRoot` to these defaults, because the
-    # platform assigns the Pod a user ID; on other platforms, set it here
-    # together with a `runAsUser` if wanted. Set to `false` to render no
-    # container securityContext for the extender. If the key is missing
-    # entirely, for example in values reused from an older release, these
-    # defaults apply.
+    # true, the chart adds `runAsNonRoot` to the rendered context, because
+    # the platform assigns the Pod a user ID; on other platforms, set it
+    # here together with a `runAsUser` if wanted. Set to `false` to render
+    # no container securityContext for the extender on any platform.
+    # Setting it to `null` in an overriding values file renders none
+    # outside OpenShift. A missing key, as in values reused from a release
+    # that predates this value (`helm upgrade --reuse-values`), keeps what
+    # that release rendered: no context outside OpenShift, and on
+    # OpenShift the defaults here plus `runAsNonRoot`.
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:

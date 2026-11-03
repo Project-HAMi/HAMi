@@ -1,0 +1,96 @@
+suite: scheduler deployment extender securityContext
+templates:
+  - templates/scheduler/deployment.yaml
+  - templates/scheduler/configmap.yaml
+  - templates/scheduler/device-configmap.yaml
+release:
+  name: hami
+  namespace: hami-system
+tests:
+  - it: renders the default extender securityContext and no Pod-level one
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      - isNull:
+          path: spec.template.spec.securityContext
+      - isNull:
+          path: spec.template.spec.containers[0].securityContext
+  - it: adds runAsNonRoot to the extender securityContext on OpenShift
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      platform.openshift: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      - isNull:
+          path: spec.template.spec.securityContext
+      - isNull:
+          path: spec.template.spec.containers[0].securityContext
+  - it: renders no extender securityContext when the value is set to null
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      scheduler.extender.securityContext: null
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[1].securityContext
+  - it: renders no extender securityContext when the value is false
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      scheduler.extender.securityContext: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[1].securityContext
+  - it: renders no extender securityContext on OpenShift when the value is false
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      platform.openshift: true
+      scheduler.extender.securityContext: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[1].securityContext
+  - it: merges a partial extender securityContext with the defaults
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      scheduler.extender.securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
