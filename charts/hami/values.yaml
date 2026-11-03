@@ -350,7 +350,7 @@ devicePlugin:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
     # -- MIG instance monitoring requires privileged access for the monitor container; if you don't use MIG, you can set this to false.
-    migInstanceAccess: true
+    migInstanceAccess: false
     # -- Resource requests and limits for the monitor container.
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.

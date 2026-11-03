@@ -143,7 +143,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devicePlugin.monitor.extraArgs | list | `["-v=4"]` | Additional monitor command-line arguments as a list of strings. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
 | devicePlugin.monitor.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]}}` | Security context for the monitor container. |
-| devicePlugin.monitor.migInstanceAccess | bool | `true` | MIG instance monitoring requires privileged access for the monitor container; if you don't use MIG, you can set this to false. |
+| devicePlugin.monitor.migInstanceAccess | bool | `false` | MIG instance monitoring requires privileged access for the monitor container; if you don't use MIG, you can set this to false. |
 | devicePlugin.monitor.resources | object | `{}` | Resource requests and limits for the monitor container. |
 | devicePlugin.numaRefit.enabled | bool | `false` | NUMA alignment refit (#2080): when enabled, the device plugin asks the scheduler to re-run its fit over the NUMA-restricted device set kubelet allows, keeping scheduler accounting authoritative. Requires devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node configuration; pods opt in with the hami.io/numa-alignment annotation (best-effort or strict). Disabled by default: mismatches are only logged. |
 | devicePlugin.numaRefit.schedulerEndpoint | string | `""` | Scheduler base URL override. Defaults to the in-cluster scheduler service, `https://<release>-scheduler.<namespace>.svc:<scheduler.service.httpPort>`. |
