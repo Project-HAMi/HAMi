@@ -186,13 +186,18 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		}
 		Model = nvidia.NormalizeDeviceModel(Model)
 		devcore := int64(100)
-		if !isMigMode {
+		if !isMigMode && plugin.schedulerConfig.DeviceCoreScaling != nil {
 			devcore = int64(*plugin.schedulerConfig.DeviceCoreScaling * 100)
 		}
+		deviceSplitCount := uint(10)
+		if plugin.schedulerConfig.DeviceSplitCount != nil {
+			deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+		}
+
 		info := &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
-			Count:   int64(*plugin.schedulerConfig.DeviceSplitCount),
+			Count:   int64(deviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: devcore,
 			Type:    Model,

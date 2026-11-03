@@ -1772,3 +1772,17 @@ func TestLoadNodeConfigFailurePreservesRemoteLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestApiDevices_NilSplitCount(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		schedulerConfig: &config.DeviceConfig{
+			DeviceSplitCount: nil,
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("apiDevices panicked with nil DeviceSplitCount: %v", r)
+		}
+	}()
+	_ = plugin.apiDevices()
+}
