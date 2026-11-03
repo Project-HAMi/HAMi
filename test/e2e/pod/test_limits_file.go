@@ -1,0 +1,137 @@
+/*
+Copyright 2026 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package e2e
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/test/utils"
+)
+
+const (
+	// checkLimitsFile prints whether the container has the limits file.
+	checkLimitsFile = "[ -e /overrideEnv ] && echo present || echo absent"
+
+	// freshNvidiaSMI runs nvidia-smi with an empty environment, the way SSH,
+	// su -, sudo and cron start a session. It removes the pod's shared cache
+	// first, so the limit can't come from a process that ran before.
+	freshNvidiaSMI = `rm -f /usr/local/vgpu/usage.cache && ` +
+		`env -i "$(command -v nvidia-smi)" --query-gpu=memory.total --format=csv,noheader 2>/dev/null`
+)
+
+var _ = ginkgo.Describe("Limits file E2E Tests", ginkgo.Ordered, func() {
+	var (
+		clientSet *kubernetes.Clientset
+		newPod    *corev1.Pod
+		nodeName  string
+	)
+
+	podLimit := utils.GPUPodMemory + " " + utils.GPUPodMemoryUnit
+
+	ginkgo.BeforeAll(func() {
+		clientSet = utils.GetClientSet()
+
+		var err error
+		nodeName, err = utils.GetGPUNode(clientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Failed to find GPU node")
+		fmt.Printf("Using GPU node: %s\n", nodeName)
+
+		ginkgo.By("Adding node labeling")
+		_, err = utils.AddNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey, utils.GPUNodeLabelValue)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		ginkgo.By("Waiting for device-plugin to register healthy GPU devices")
+		err = utils.WaitForDevicePluginReady(clientSet, nodeName, 5*time.Minute, 2*time.Second)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "device-plugin did not become ready on node %s", nodeName)
+	})
+
+	ginkgo.AfterEach(func() {
+		if newPod != nil {
+			ginkgo.By("Cleanup pod after each test")
+			cleanupPod(newPod, clientSet)
+		}
+	})
+
+	ginkgo.AfterAll(func() {
+		ginkgo.By("Deleting node labeling")
+		_, err := utils.RemoveNodeLabel(clientSet, nodeName, utils.GPUNodeLabelKey)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("mounts the limits file and limits a process with an empty environment", func() {
+		newPod = limitsTestPod("")
+		createAndVerifyPod(newPod, clientSet)
+
+		ginkgo.By("Reading /overrideEnv")
+		output, err := utils.KubectlExecInPod(newPod.Namespace, newPod.Name, "cat /overrideEnv")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(string(output)).To(gomega.ContainSubstring("CUDA_DEVICE_MEMORY_LIMIT_0=" + utils.GPUPodMemory + "m"))
+		gomega.Expect(string(output)).To(gomega.ContainSubstring("CUDA_DEVICE_MEMORY_SHARED_CACHE=/usr/local/vgpu/usage.cache"))
+		gomega.Expect(string(output)).To(gomega.ContainSubstring("HAMI_LIMITS_FORMAT=1"))
+
+		ginkgo.By("Checking /overrideEnv is read-only")
+		_, err = utils.KubectlExecInPod(newPod.Namespace, newPod.Name, "echo x >> /overrideEnv")
+		gomega.Expect(err).To(gomega.HaveOccurred(), "/overrideEnv should not be writable")
+
+		ginkgo.By("Checking the limit with an empty environment")
+		output, err = utils.KubectlExecInPod(newPod.Namespace, newPod.Name, freshNvidiaSMI)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(strings.TrimSpace(string(output))).To(gomega.Equal(podLimit))
+	})
+
+	ginkgo.It("mounts no limits file when the pod asks for env", func() {
+		newPod = limitsTestPod(string(nvidia.LimitDeliveryEnv))
+		createAndVerifyPod(newPod, clientSet)
+
+		output, err := utils.KubectlExecInPod(newPod.Namespace, newPod.Name, checkLimitsFile)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(strings.TrimSpace(string(output))).To(gomega.Equal("absent"))
+
+		ginkgo.By("Checking an empty environment is not limited in env mode")
+		output, err = utils.KubectlExecInPod(newPod.Namespace, newPod.Name, freshNvidiaSMI)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(strings.TrimSpace(string(output))).NotTo(gomega.Equal(podLimit))
+	})
+
+	ginkgo.It("ignores an unknown annotation value and mounts the limits file", func() {
+		newPod = limitsTestPod("ENV")
+		createAndVerifyPod(newPod, clientSet)
+
+		output, err := utils.KubectlExecInPod(newPod.Namespace, newPod.Name, checkLimitsFile)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(strings.TrimSpace(string(output))).To(gomega.Equal("present"))
+	})
+})
+
+// limitsTestPod returns the default test pod, with the limit-delivery
+// annotation set when delivery is not empty.
+func limitsTestPod(delivery string) *corev1.Pod {
+	pod := utils.Pod.DeepCopy()
+	pod.Name += utils.GetRandom()
+	if delivery != "" {
+		pod.Annotations = map[string]string{nvidia.LimitDeliveryAnnotation: delivery}
+	}
+	return pod
+}
