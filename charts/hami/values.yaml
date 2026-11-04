@@ -10,9 +10,9 @@ global:
   # -- Global Docker image pull secrets added to the scheduler, device plugin, webhook patch job, and remote-gpu Pods; the mock device plugin DaemonSet does not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
   # -- Tag (optionally `tag@sha256:...`) used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty.
-  # The default HAMi image is pinned by digest; an explicit tag replaces the complete value. A non-empty per-component tag takes precedence.
+  # An explicit tag replaces the complete value. A non-empty per-component tag takes precedence.
   # The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it.
-  imageTag: "v2.10.0@sha256:8c45cd84d8df3e6a8fe8c95e0141684973b5015692a0ef87588da05284f34447"
+  imageTag: "v2.11.0"
   # -- Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin.
   gpuHookPath: /usr/local
   # -- Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors.
