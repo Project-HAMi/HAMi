@@ -45,6 +45,7 @@ func TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods(t *testing.T) {
 		{name: "evicted", replace: true, mutate: func(p *corev1.Pod) {
 			p.Status.Phase, p.Status.Reason = corev1.PodFailed, "Evicted"
 		}},
+		{name: "failed without an eviction reason", replace: true, mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodFailed }},
 		{name: "completed", replace: true, mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodSucceeded }},
 		{name: "old image", replace: true, mutate: func(p *corev1.Pod) { p.Spec.Containers[0].Image = "alpine/socat:old" }},
 		{name: "pending old image", replace: true, mutate: func(p *corev1.Pod) {
@@ -52,6 +53,9 @@ func TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods(t *testing.T) {
 			p.Spec.Containers[0].Image = "alpine/socat:old"
 		}},
 		{name: "missing relay", replace: true, mutate: func(p *corev1.Pod) { p.Spec.Containers[0].Name = "other" }},
+		{name: "changed endpoint with the current image", replace: true, mutate: func(p *corev1.Pod) {
+			p.Spec.Containers[0].Env[0].Value = "10.0.0.5:9999"
+		}},
 		{name: "running"},
 		{name: "pending", mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodPending }},
 		{name: "unknown phase", mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodUnknown }},
@@ -128,13 +132,18 @@ func TestReconcileSessionStubs_WaitsForGracefulRecovery(t *testing.T) {
 	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
 
 	// Keep the old Pod in the tracker until its graceful deletion completes.
-	deletes := 0
+	creates, deletes := 0, 0
+	c.PrependReactor("create", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		creates++
+		return false, nil, nil
+	})
 	c.PrependReactor("delete", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 		deletes++
 		return true, nil, nil
 	})
 	dev.ReconcileSessionStubs(context.Background())
 	assert.Equal(t, deletes, 1)
+	assert.Equal(t, creates, 1)
 	assert.Equal(t, stubsIn(t, c)[0].UID, stub.UID)
 
 	terminating := stub.DeepCopy()
@@ -143,10 +152,12 @@ func TestReconcileSessionStubs_WaitsForGracefulRecovery(t *testing.T) {
 	assert.NilError(t, c.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), terminating, "kube-system"))
 	dev.ReconcileSessionStubs(context.Background())
 	assert.Equal(t, deletes, 1, "an in-progress deletion is not requested again")
+	assert.Equal(t, creates, 1, "a terminating relay must not trigger another create")
 	assert.Equal(t, stubsIn(t, c)[0].UID, stub.UID)
 
 	assert.NilError(t, c.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "kube-system", stub.Name))
 	dev.ReconcileSessionStubs(context.Background())
+	assert.Equal(t, creates, 2, "one replacement is created after deletion completes")
 	got := stubsIn(t, c)
 	assert.Equal(t, len(got), 1)
 	assert.Assert(t, got[0].UID != stub.UID)
