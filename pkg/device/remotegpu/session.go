@@ -94,11 +94,14 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	for i := range existing.Items {
 		stub := &existing.Items[i]
 		node := stub.Labels[sessionStubLabel]
+		if stub.DeletionTimestamp != nil {
+			// The fixed name cannot be reused until graceful deletion finishes.
+			delete(wanted, node)
+			continue
+		}
 		endpoint, keep := wanted[node]
-		// A stub whose endpoint or pull credentials changed is replaced rather
-		// than edited, since the fields that carry them cannot be changed on a
-		// running pod.
-		if keep && stubEndpoint(stub) == endpoint && sessionPullSecretsMatch(stub, RemoteGPUSessionImagePullSecrets) {
+		// Replace terminal relays and relays whose managed configuration changed.
+		if keep && sessionStubMatches(stub, endpoint, RemoteGPUSessionImage, RemoteGPUSessionImagePullSecrets) {
 			delete(wanted, node)
 			continue
 		}
@@ -134,6 +137,19 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 		}
 		klog.InfoS("remotegpu: session stub ready", "node", node, "endpoint", endpoint)
 	}
+}
+
+func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []string) bool {
+	if stub.Status.Phase == corev1.PodFailed || stub.Status.Phase == corev1.PodSucceeded ||
+		stubEndpoint(stub) != endpoint || !sessionPullSecretsMatch(stub, pullSecrets) {
+		return false
+	}
+	for i := range stub.Spec.Containers {
+		if stub.Spec.Containers[i].Name == "relay" {
+			return stub.Spec.Containers[i].Image == image
+		}
+	}
+	return false
 }
 
 // stubEndpoint reports which server a stub was built to relay to.
