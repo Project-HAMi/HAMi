@@ -234,6 +234,19 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
 }
 
+func TestLoadConfigRemoteGPUSessionImagePullSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "device-config.yaml")
+	config := "remotegpu:\n  sessionImagePullSecrets:\n    - global-registry\n    - session-registry\n"
+	assert.NilError(t, os.WriteFile(path, []byte(config), 0o600))
+
+	configData, err := LoadConfig(path)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, configData.RemoteGPUConfig.SessionImagePullSecrets, []string{
+		"global-registry",
+		"session-registry",
+	})
+}
+
 func TestLoadConfigRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -712,6 +725,22 @@ func Test_validateRegisteredDevices(t *testing.T) {
 			devices: map[string]device.Devices{
 				"A": stubDevices{names: device.ResourceNames{}},
 				"B": stubDevices{names: device.ResourceNames{}},
+			},
+		},
+		{
+			name: "two backends sharing a memory resource with different factors",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1024}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 2}},
+			},
+			wantErr: `A and B both claim memory resource "shared.com/mem"`,
+		},
+		{
+			// Factors of 0 and 1 both mean the request is not scaled.
+			name: "sharing a memory resource with the same factor is allowed",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem"}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1}},
 			},
 		},
 		{

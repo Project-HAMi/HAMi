@@ -34,4 +34,8 @@ type RemoteGPUConfig struct {
 	// it, so a user never forwards to the server itself. It needs socat on the
 	// path. Leave it empty to run no session stubs.
 	SessionImage string `yaml:"sessionImage"`
+	// SessionImagePullSecrets names image pull Secrets in the scheduler's
+	// namespace for session relay Pods. Global chart secrets precede
+	// RemoteGPU-specific secrets in this list.
+	SessionImagePullSecrets []string `yaml:"sessionImagePullSecrets"`
 }

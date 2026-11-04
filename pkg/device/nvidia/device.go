@@ -91,7 +91,6 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
-	MemoryFactor             int64 = 1
 )
 
 // GPUCoreUtilizationPolicy is set nvidia gpu core isolation policy.
@@ -227,7 +226,6 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	if err := ValidateMigProfileAllowlist(nvconfig.MigProfileAllowlist); err != nil {
 		klog.Fatalf("invalid MIG profile allowlist: %v", err)
 	}
-	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
 		config:                nvconfig,
 		ReportedGPUNum:        make(map[string]int64),
@@ -989,7 +987,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	}
 
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
 }
 
 // cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID

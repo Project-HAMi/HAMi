@@ -80,11 +80,12 @@ const (
 )
 
 var (
-	RemoteGPUResourceCount  string
-	RemoteGPUResourceMemory string
-	RemoteGPUClientImage    string
-	RemoteGPULibImage       string
-	RemoteGPUSessionImage   string
+	RemoteGPUResourceCount           string
+	RemoteGPUResourceMemory          string
+	RemoteGPUClientImage             string
+	RemoteGPULibImage                string
+	RemoteGPUSessionImage            string
+	RemoteGPUSessionImagePullSecrets []string
 
 	errNoClient               = errors.New("kubernetes client is not initialized")
 	errNoRegistration         = errors.New("node has no decodable GPU registration")
@@ -107,6 +108,7 @@ func InitRemoteGPUDevice(config RemoteGPUConfig) *RemoteGPUDevices {
 	RemoteGPULibImage = config.LibImage
 	RemoteGPUClientImage = config.ClientImage
 	RemoteGPUSessionImage = config.SessionImage
+	RemoteGPUSessionImagePullSecrets = append([]string(nil), config.SessionImagePullSecrets...)
 	port := config.DefaultPort
 	if port <= 0 || port > 65535 {
 		port = DefaultLupinePort

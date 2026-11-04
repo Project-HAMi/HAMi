@@ -1,0 +1,14 @@
+# Requires an Ascend device plugin that supports Ascend950DT (9582).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend950dt-job
+spec:
+  schedulerName: hami-scheduler
+  containers:
+    - name: vllm-ascend
+      image: quay.io/ascend/vllm-ascend:v0.30.0rc2-a5-openeuler
+      command: ["sleep", "infinity"]
+      resources:
+        limits:
+          huawei.com/Ascend950DT: 1 # One whole NPU

@@ -1,0 +1,73 @@
+suite: Monitor MIG instance access
+templates:
+  - scheduler/configmap.yaml
+  - scheduler/device-configmap.yaml
+  - device-plugin/daemonsetnvidia.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 31
+tests:
+  - it: keeps the monitor unprivileged without the caps mount by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["SYS_ADMIN"]
+        template: device-plugin/daemonsetnvidia.yaml
+      - notContains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: nvidia-caps
+            mountPath: /dev/nvidia-caps
+        template: device-plugin/daemonsetnvidia.yaml
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: nvidia-caps
+            hostPath:
+              path: /dev/nvidia-caps
+              type: DirectoryOrCreate
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: runs the monitor privileged with the host nvidia-caps mounted when enabled
+    set:
+      devicePlugin.monitor.migInstanceAccess: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            privileged: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["SYS_ADMIN"]
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: nvidia-caps
+            mountPath: /dev/nvidia-caps
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: nvidia-caps
+            hostPath:
+              path: /dev/nvidia-caps
+              type: DirectoryOrCreate
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: grants privileges even without a configured security context
+    set:
+      devicePlugin.monitor.migInstanceAccess: true
+      devicePlugin.monitor.securityContext: null
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].securityContext
+          value:
+            privileged: true
+            allowPrivilegeEscalation: true
+        template: device-plugin/daemonsetnvidia.yaml

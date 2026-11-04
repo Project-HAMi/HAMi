@@ -196,6 +196,7 @@ These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
 - `hami_host_gpu_memory_used_bytes` — physical GPU memory usage
 - `hami_host_gpu_utilization_ratio` — physical GPU core utilization (0-100)
 - `hami_host_gpu_memory_controller_utilization_ratio` — GPU memory controller utilization
+- `hami_host_gpu_unknown_process_count` — current count (Gauge) of distinct compute/graphics processes not matched to a container allocated that GPU by HAMi. Opt-in: `HAMI_MONITOR_UNKNOWN_PROCESSES=true` and `devicePlugin.hostPID=true`. Known MIG/MPS/remote modes are skipped; failed supported-device inventories omit the sample and set `hami_vgpumonitor_collect_success` to 0. Unknown does not imply unauthorized use.
 
 **Per-container vGPU runtime metrics**
 - `hami_vgpu_memory_used_bytes` — vGPU memory usage per container

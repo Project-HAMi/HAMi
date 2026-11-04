@@ -1,283 +1,26 @@
-# HAMi Helm Chart Values Documentation
+# HAMi Helm Chart
 
-This document provides detailed descriptions of all configurable values parameters for the HAMi Helm Chart.
+The HAMi chart deploys the scheduler and chart-managed device plugins for Kubernetes.
 
-Device configuration fields use `devices.<vendor>` and match the field names in `device-config.yaml`. Supply the current field paths in a values file when upgrading; the previous root-level device fields are no longer read. Supplying removed fields fails chart rendering and lists every old field with its replacement path.
+## Documentation
 
-## Upgrade to v2.11
+| Task | Guide |
+| --- | --- |
+| Prepare the cluster and device nodes | [Prerequisites](https://project-hami.io/docs/next/installation/prerequisites) |
+| Install HAMi | [Installation](https://project-hami.io/docs/next/installation/online-installation) |
+| Upgrade an existing release and migrate values | [Upgrade](https://project-hami.io/docs/next/installation/upgrade) |
+| Configure devices and scheduling | [Configuration](https://project-hami.io/docs/next/userguide/configure) |
+| Profile the scheduler | [Scheduler profiling](https://project-hami.io/docs/next/userguide/configure#scheduler-profiling) |
+| Configure vGPU cache cleanup | [vGPU cache garbage collection](https://project-hami.io/docs/next/userguide/configure#vgpu-cache-garbage-collection) |
+| Reload device configuration | [Reload configuration](https://project-hami.io/docs/next/userguide/configure#configuration-reload) |
+| Diagnose a deployment | [Troubleshooting](https://project-hami.io/docs/next/troubleshooting) |
+| Remove HAMi | [Uninstall](https://project-hami.io/docs/next/installation/uninstall) |
 
-Device-specific Helm values use `devices.<vendor>`. Move your existing overrides
-to the paths below before upgrading. The `device-config.yaml` format read by
-HAMi and the device plugins is unchanged.
+These links open **Next**, the documentation for the development branch.
+For a released chart, select the matching documentation version on the website.
+Use the language selector to switch between English and Chinese.
 
-### Field migration table
-
-The previous fields are no longer read. The chart rejects them even when their
-value is `0`, `false`, or empty. Move each value to its new path and remove the
-old field.
-
-| Old Helm value | New Helm value |
-|----------------|----------------|
-| `resourceName` | `devices.nvidia.resourceCountName` |
-| `resourceMem` | `devices.nvidia.resourceMemoryName` |
-| `resourceMemPercentage` | `devices.nvidia.resourceMemoryPercentageName` |
-| `resourceCores` | `devices.nvidia.resourceCoreName` |
-| `resourcePriority` | `devices.nvidia.resourcePriorityName` |
-| `mluResourceName` | `devices.cambricon.resourceCountName` |
-| `mluResourceMem` | `devices.cambricon.resourceMemoryName` |
-| `mluResourceCores` | `devices.cambricon.resourceCoreName` |
-| `hcuResourceName` | `devices.hygon.resourceCountName` |
-| `hcuResourceMem` | `devices.hygon.resourceMemoryName` |
-| `hcuResourceCores` | `devices.hygon.resourceCoreName` |
-| `metaxResourceName` | `devices.metax.resourceVCountName` |
-| `metaxResourceCore` | `devices.metax.resourceVCoreName` |
-| `metaxResourceMem` | `devices.metax.resourceVMemoryName` |
-| `metaxsGPUTopologyAware` | `devices.metax.sgpuTopologyAware` |
-| `enflameResourceNameDRSGCU` | `devices.enflame.resourceNameDRSGCU` |
-| `enflameResourceNameGCUMemory` | `devices.enflame.resourceNameGCUMemory` |
-| `enflameResourceNameGCUCore` | `devices.enflame.resourceNameGCUCore` |
-| `kunlunResourceName` | `devices.kunlun.resourceCountName` |
-| `kunlunResourceVCountName` | `devices.kunlun.resourceVCountName` |
-| `kunlunResourceVMemoryName` | `devices.kunlun.resourceVMemoryName` |
-| `vastaiResourceName` | `devices.vastai.resourceCountName` |
-| `birenResourceName` | `devices.biren.resourceCountName` |
-| `devicePlugin.deviceSplitCount` | `devices.nvidia.deviceSplitCount` |
-| `devicePlugin.deviceMemoryScaling` | `devices.nvidia.deviceMemoryScaling` |
-| `devicePlugin.deviceCoreScaling` | `devices.nvidia.deviceCoreScaling` |
-| `devicePlugin.preConfiguredDeviceMemory` | `devices.nvidia.preConfiguredDeviceMemory` |
-| `devicePlugin.enableNumaTopology` | `devices.nvidia.enableNumaTopology` |
-| `devicePlugin.runtimeClassName` | `devices.nvidia.runtimeClassName` |
-| `devicePlugin.createRuntimeClass` | `devices.nvidia.createRuntimeClass` |
-
-Keep `scheduler.overwriteEnv` and other `devicePlugin` settings at their existing
-paths, including `enabled`, images, `deviceListStrategy`, `migStrategy`,
-`disablecorelimit`, and `nodeConfiguration`.
-
-For Enflame, Kunlun, Vastai, and Biren, standard extender resources are now
-added from the named device resource fields. Their `customresources` lists
-contain only additional resources and default to `[]`. Remove any copied
-standard-resource entries from these lists and keep the extra resources you
-need. Standard resources are included even when `customresources` is empty.
-
-### Back up the current configuration
-
-These examples use release `hami` in namespace `kube-system`. Replace the release,
-namespace, and ConfigMap names with those used by your installation.
-
-Export the release's user-supplied values and back up the device ConfigMap:
-
-```bash
-helm get values hami -n kube-system -o yaml > previous-values.yaml
-kubectl get configmap hami-scheduler-device -n kube-system -o yaml > device-config-backup.yaml
-```
-
-If you use node configuration, back up its ConfigMap too. Use the external
-ConfigMap name instead when `devicePlugin.nodeConfiguration.externalConfigName`
-is set:
-
-```bash
-kubectl get configmap hami-device-plugin -n kube-system -o yaml > node-config-backup.yaml
-```
-
-### Prepare the values file
-
-Create `my-values.yaml` from the saved user values. Apply the field migrations
-above and keep all other settings required by your installation.
-
-If you edited a ConfigMap manually, transfer only the settings you need to keep
-into the corresponding Helm values. Store node settings in
-`devicePlugin.nodeConfiguration.config` or your external ConfigMap. Do not
-restore the entire old ConfigMap over the new one, because this can overwrite
-new chart defaults.
-
-### Upgrade with the migrated values
-
-Update the chart repository and upgrade using the new chart defaults and your
-migrated values:
-
-```bash
-helm repo update hami-charts
-helm upgrade hami hami-charts/hami \
-  --namespace kube-system \
-  --version 2.11.0 \
-  --reset-values \
-  --values my-values.yaml
-```
-
-Replace `2.11.0` with the v2.11 patch version you want to install. `--reset-values`
-discards the release's previous values. Include every override you need to keep
-in `my-values.yaml` or the other values files passed to this command.
-
-Avoid `--reuse-values` and `--reset-then-reuse-values` during this migration.
-They can carry removed fields into the new chart and cause rendering to fail.
-
-After upgrading, check the generated ConfigMaps and the scheduler and device
-plugin rollout status. If you changed only the NVIDIA node configuration,
-restart the NVIDIA device plugin to load it:
-
-```bash
-kubectl rollout restart daemonset/hami-device-plugin -n kube-system
-kubectl rollout status daemonset/hami-device-plugin -n kube-system
-```
-
-## Scheduler Configuration
-
-### Scheduler profiling
-
-Profiling is disabled by default. To enable it, include `--profiling` in the
-scheduler's extra arguments while retaining any other arguments you need:
-
-```yaml
-scheduler:
-  profilingBindAddress: "127.0.0.1:6060"
-  extender:
-    extraArgs:
-      - --debug
-      - -v=4
-      - --profiling
-```
-
-The dedicated profiling listener serves plain HTTP and defaults to loopback.
-The scheduler Service does not expose its port. Access it using port-forwarding:
-
-```bash
-kubectl -n kube-system port-forward pod/<scheduler-pod> 6060:6060
-```
-
-Then open `http://127.0.0.1:6060/debug/pprof/` locally.
-
-Previously, enabling profiling exposed pprof on the scheduler's cluster-facing
-HTTP server. Those routes are now available only on the dedicated profiling
-listener. Operators using the old endpoint must switch to port-forwarding or
-explicitly set `scheduler.profilingBindAddress` to a non-loopback address.
-Changing this address does not expose pprof through the scheduler Service;
-the old Service endpoint still returns 404 for pprof routes. For non-loopback
-access, reach the Pod IP and profiling port through an appropriately restricted
-network path, or use the Pod port-forward shown above.
-Non-loopback binding logs a security warning: pprof has no authentication and
-can expose process diagnostics. Restrict network access if you choose to expose
-it. With profiling disabled, the bind address is ignored and no profiling
-listener is started.
-
-## Device Plugin Configuration
-
-### vGPU Cache Garbage Collection
-
-The chart passes `devicePlugin.vgpuCache.gracePeriod` to the Device Plugin as
-`HAMI_VGPU_CACHE_GRACE_PERIOD`. Use a Go duration string such as `"30s"`, `"5m"`,
-or `"1h"`. An omitted or empty value uses `"5m"`. An invalid duration string logs
-a warning and uses `"5m"`; negative durations prevent Device Plugin startup.
-`"0s"` removes the grace period, **not** garbage collection: deletion still
-requires live Pod confirmation and the existing safety checks.
-
-```yaml
-devicePlugin:
-  monitor:
-    resyncInterval: "30s"
-  vgpuCache:
-    gracePeriod: "5m"
-```
-
-**Migration:** `devicePlugin.monitor.resyncInterval` / `HAMI_RESYNC_INTERVAL`
-no longer controls Device Plugin directory GC. If you previously used a custom
-monitor resync value to tune cleanup, set `devicePlugin.vgpuCache.gracePeriod`
-explicitly to retain that GC grace period. For deployments without Helm, set
-`HAMI_VGPU_CACHE_GRACE_PERIOD` on the Device Plugin container. Without the new
-setting, GC uses `5m`, regardless of monitor resync. The monitor retains its
-existing resync and mmap-release behavior and does not delete directories.
-
-This setting does not change the GC scan interval, confirmation retry backoff,
-or the five-failure limit for directory deletion.
-
-### NVIDIA driver discovery
-
-When `devicePlugin.nvidiaDriverRoot=auto`, the device plugin reads
-`/run/nvidia/validations/driver-ready`. If the file is absent, HAMi assumes a
-host-installed driver and uses `/` for both the driver and device roots. When
-HAMi starts before GPU Operator validation completes, wait for GPU Operator to
-become ready and restart the HAMi device plugin DaemonSet.
-
-The detected roots only describe the host paths that the device plugin returns
-to the runtime: `NVIDIA_DRIVER_ROOT` is used in generated CDI specifications and
-`NVIDIA_DEV_ROOT` is used for `DeviceSpec.HostPath` when
-`devicePlugin.passDeviceSpecsEnabled=true`. The device plugin itself initializes
-NVML and discovers GPUs through the driver libraries and device nodes that the
-NVIDIA Container Toolkit injects into its container, so the chart mounts only
-the GPU Operator validation directory read-only. This requires the device
-plugin Pod to run with the NVIDIA runtime, either because it is the node's
-default container runtime or through `devices.nvidia.runtimeClassName`.
-
-CDI specifications must reference the host driver layout, which can differ
-from the layout inside the device plugin container. When
-`devicePlugin.deviceListStrategy` includes a `cdi-*` strategy, the chart
-additionally mounts the host root read-only at `/host`; the device plugin uses
-that mount directly for host-installed drivers, or appends the GPU Operator
-path suffix (`/run/nvidia/driver`) for GPU Operator installations. Set
-`devicePlugin.nvidiaDriverRoot` explicitly to mount only the driver root instead.
-
-## Device Configuration
-
-### Huawei Ascend
-
-Set `devices.ascend.hamiVnpuMode` to choose the global default. The chart renders
-it as `vnpus.hamiVnpuMode` in the scheduler configuration. Empty uses `template`,
-or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore: true` is present.
-An explicit mode always takes precedence over that legacy flag. Direct scheduler
-configuration has the same fallback for `vnpus.hamiVnpuCore`. Unknown modes are
-rejected. Replace the former `devices.ascend.enpu: true` with
-`devices.ascend.hamiVnpuMode: enpu`.
-
-The device plugin's `hami-vnpu-core` and `hami.io/enpu` node annotations override
-the corresponding capability with `"true"` or `"false"`; absent annotations use
-the global mode. ENPU requires the companion Ascend device plugin with ENPU
-support. In a mixed cluster, use `devices.ascend.hamiVnpuMode: template` and enable
-ENPU only on the intended nodes through the separately deployed plugin's node
-configuration (`hamiVnpuMode: enpu`). The plugin publishes the corresponding
-`hami.io/enpu` annotation; changing the Node annotation alone does not change
-the plugin's mode and is overwritten by its next report.
-
-Pods select ENPU explicitly with `huawei.com/vnpu-mode: enpu`. The scheduler also
-accepts `ubs-virt` and `vcann-rt`, matching the mode aliases in the companion
-[device plugin's `podUsesENPU`](https://github.com/maverick-woo/ascend-device-plugin/blob/5afdaec52dfd628a05066bfbbf0f39e2c47e3281/internal/server/server.go#L116-L125).
-Use `enpu` for new workloads. All three names use the same single-DIE admission,
-exact memory allocation, and policy-isolation rules.
-
-Set `huawei.com/enpu-policy` on a Pod to override `devices.ascend.enpuPolicy`.
-Admission records the selected policy on the Pod so later changes to the default
-do not change existing tenants' policies. Invalid policies are rejected.
-
-## Device Config Overrides
-
-Device configuration defaults are defined in `values.yaml`. Override individual
-fields under `devices.<vendor>` in your own values file. The chart keeps the
-existing runtime field names: `devices.ascend.configs` renders as `vnpus.configs`,
-and `devices.iluvatar.configs` renders as `iluvatars`.
-
-```yaml
-devices:
-  nvidia:
-    defaultMemory: 4096
-    defaultCores: 50
-  hygon:
-    memoryFactor: 2
-```
-
-Lists such as `migProfileAllowlist`, Ascend `configs`, and Iluvatar `configs`
-replace the corresponding default list in full.
-
-Configuration precedence remains `device-config.content`, then a bundled
-`files/device-config.yaml`, then the configuration generated from values.
-`device-config.content` replaces the complete document; it does not merge with
-`devices.*`.
-
-For Enflame, Kunlun, Vastai, and Biren, the scheduler extender's standard
-resources follow the named device resource fields. Their `customresources`
-lists add extra resource names and default to `[]`. Standard resources are
-always included when the vendor is enabled, and duplicate names within each
-vendor are removed.
-
-For other vendors whose extender resources use `customresources`, update those
-lists when changing resource names or chip definitions.
+The complete values reference below lists the parameters and defaults from [values.yaml](values.yaml).
 
 <!-- BEGIN GENERATED VALUES -->
 
@@ -289,7 +32,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 |-----|------|---------|-------------|
 | global.imageSource | string | `"upstream"` | Image source: `upstream` or `cn`. Set `--set global.imageSource=cn` to use Alibaba Cloud for kube-scheduler and the default pinned certgen image, and `m.daocloud.io` for the upstream HAMi, mock-device-plugin, and Lupine server/client repositories. Other registries/repositories, explicit remote-GPU `libImage`/`sessionImage`, and supplied `device-config` content are unchanged. A non-empty `global.imageRegistry` disables source selection. Custom certgen pins and explicitly pinned kube-scheduler images are used unchanged. |
 | global.imageRegistry | string | `""` | Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries. |
-| global.imagePullSecrets | list | `[]` | Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`. |
+| global.imagePullSecrets | list | `[]` | Global Docker image pull secrets added to the scheduler, device plugin, webhook patch job, and remote-gpu Pods; the mock device plugin DaemonSet does not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`. |
 | global.imageTag | string | `"v2.11.0"` | Tag (optionally `tag@sha256:...`) used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty. An explicit tag replaces the complete value. A non-empty per-component tag takes precedence. The kube-scheduler, webhook patch, mock device plugin and remote-gpu images do not use it. |
 | global.gpuHookPath | string | `"/usr/local"` | Directory prefix on the node where the NVIDIA vGPU hook files are installed (`<gpuHookPath>/vgpu`). Only used by the NVIDIA device plugin. |
 | global.labels | object | `{}` | Labels added to the scheduler Deployment and PodDisruptionBudget, the NVIDIA and remote-gpu DaemonSets, and the ServiceMonitors. |
@@ -311,6 +54,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | scheduler.overwriteEnv | string | `"false"` | Default for whether the admission webhook hides devices from containers that request none: `NVIDIA_VISIBLE_DEVICES=none` for NVIDIA and an empty `ASCEND_VISIBLE_DEVICES` for Ascend. The Pod annotations `hami.io/overwrite-env` and `hami.io/overwrite-env-containers` override it. |
 | scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy | string | `"binpack"` | Default node scoring policy: `binpack` fills busy nodes first, `spread` prefers idle ones. The `hami.io/node-scheduler-policy` Pod annotation overrides it. |
 | scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy | string | `"spread"` | Default device scoring policy within a node: `binpack`, `spread`, or `topology-aware`. `topology-aware` also makes the NVIDIA device plugin report GPU topology scores. The `hami.io/gpu-scheduler-policy` Pod annotation overrides it. |
+| scheduler.defaultSchedulerPolicy.nodeAffinityScoreWeight | float | `0` | Bonus added to the node score for nodes matching a Pod's preferred `nodeAffinity`, scaled by the matched weight ratio (0..1). `0` disables it. HAMi returns a single node from Filter, so other kube-scheduler score plugins are still ignored. Values above `30` let the preference outweigh GPU usage. |
 | scheduler.metricsBindAddress | string | `":9395"` | Address the scheduler serves Prometheus metrics on, as `[host]:port`. The chart also takes the port from it for the `metrics` container port. |
 | scheduler.profilingBindAddress | string | `"127.0.0.1:6060"` | Address of the pprof server, used only when `--profiling` is added to `scheduler.extender.extraArgs`. Keep it on loopback and reach it with `kubectl port-forward`. |
 | scheduler.kubeQPS | string | `""` | Queries per second the scheduler may send to kube-apiserver. Empty keeps the client default of 5. Raise it, with `kubeBurst`, on large clusters. |
@@ -399,6 +143,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devicePlugin.monitor.extraArgs | list | `["-v=4"]` | Additional monitor command-line arguments as a list of strings. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |
 | devicePlugin.monitor.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]}}` | Security context for the monitor container. |
+| devicePlugin.monitor.migInstanceAccess | bool | `false` | MIG instance monitoring requires privileged access for the monitor container; if you don't use MIG, you can set this to false. |
 | devicePlugin.monitor.resources | object | `{}` | Resource requests and limits for the monitor container. |
 | devicePlugin.numaRefit.enabled | bool | `false` | NUMA alignment refit (#2080): when enabled, the device plugin asks the scheduler to re-run its fit over the NUMA-restricted device set kubelet allows, keeping scheduler accounting authoritative. Requires devices.nvidia.enableNumaTopology plus the per-node enablegetpreferredallocation node configuration; pods opt in with the hami.io/numa-alignment annotation (best-effort or strict). Disabled by default: mismatches are only logged. |
 | devicePlugin.numaRefit.schedulerEndpoint | string | `""` | Scheduler base URL override. Defaults to the in-cluster scheduler service, `https://<release>-scheduler.<namespace>.svc:<scheduler.service.httpPort>`. |
@@ -514,16 +259,18 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devices.remotegpu.libImage | string | `nil` | HAMi-core image for the client's library-copy init container, used to enforce positive memory requests. Must provide `sh`, `cp`, and `/k8s-vgpu/lib/nvidia/libvgpu.so.*`. Leave unset or null to use the device plugin image, including its registry and tag overrides. Set to `""` to skip library injection and use memory requests only as placement filters. An explicit image reference is used unchanged. |
 | devices.remotegpu.clientImage | string | `"ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04@sha256:fe0e8c283fe29b0c8bfb4bbe2a81fac4fabd3a477fe694f31b5a97a996fb028e"` | Client image used to deliver Lupine libraries, libnghttp2, and nvidia-smi for the CUDA/vLLM examples; empty disables delivery. It must contain `/opt/lupine/lib`, `sh`, `cp`, `libnghttp2.so.14`, and `nvidia-smi`. Injection fails when `nvidia-smi` is missing. Match the server version and workload ABI; an empty string disables delivery. `global.imageSource=cn` prefixes the upstream Lupine client reference with `m.daocloud.io/`; other repositories are unchanged. |
 | devices.remotegpu.sessionImage | string | `""` | Image for a relay Pod on each lupine server node, so users can port-forward to the relay. Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation of relays without deleting existing ones. |
+| devices.remotegpu.sessionImagePullSecrets | list | `[]` | Names of existing image pull Secrets for the session relay Pods, added after `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace. |
 | devices.remotegpu.server.enabled | bool | `true` | Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true. Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose label names its own port is left to a server managed outside the chart. False leaves server deployment to the operator without disabling remote GPU scheduling. |
 | devices.remotegpu.server.image.registry | string | `"ghcr.io"` | Registry of the lupine server container image. `global.imageRegistry` overrides it. |
 | devices.remotegpu.server.image.repository | string | `"lupinemachines/lupine-server"` | Repository of the lupine server container image. |
 | devices.remotegpu.server.image.tag | string | `"cuda-13.3.1-ubuntu24.04@sha256:79f023523ed0ea8704b6e3634c5831ed2d4210a0a8c7ed700a3bcdbbf7c9e1a3"` | Tag and digest of the lupine server container image; does not inherit `global.imageTag`. |
 | devices.remotegpu.server.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of the lupine server container image: `Always`, `IfNotPresent`, or `Never`. |
+| devices.remotegpu.server.image.pullSecrets | list | `[]` | Names of existing image pull Secrets for the lupine server Pods, added after `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace. |
 | devices.remotegpu.server.runtimeClassName | string | `""` | RuntimeClass for lupine server Pods. Set to a class such as `nvidia` when the NVIDIA container runtime is not the cluster default. Empty omits the field; independent of `devices.nvidia.runtimeClassName`. |
 | devices.remotegpu.server.tolerations | list | `[]` | Kubernetes tolerations for lupine server Pods, as a list of objects with key, operator, value, effect, and optional tolerationSeconds. |
 | devices.remotegpu.server.securityContext | object | `{}` | Container securityContext of the lupine server. Set `privileged: true` on hosts where the NVIDIA container toolkit has accept-nvidia-visible-devices-envvar-when-unprivileged=false, otherwise NVIDIA_VISIBLE_DEVICES is ignored and the server sees no GPU. |
 | devices.remotegpu.server.resources | object | `{}` | Kubernetes resource requests and limits for the lupine server container, for example `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`. |
-| devices.ascend.configs | list | Per-chip capacities and templates; see [values.yaml](values.yaml). | Per-chip objects shared with the separately deployed Ascend device plugin as `vnpus.configs`; overrides replace the whole list. String `chipName` must match the detected chip name; string `commonWord` identifies the HAMi device type. `resourceName`, `resourceMemoryName`, and `resourceCoreName` are resource-name strings for Pod device-count, memory, and core requests. Pod counts are non-negative integers. Memory requests and `memoryAllocatable`, `memoryCapacity`, and template `memory` use integer MiB (16384 = 16 GiB), without a `Gi` suffix. `memoryAllocatable` is usable memory; `memoryCapacity` is full-device capacity. `memoryFactor` is an integer request multiplier, applied only above 1. <br>Pod core requests in `hami-core`/`enpu` mode are integer percentages, 0-100 (`40` means 40%); ENPU treats 0 or omission as 100%. Configured `aiCore`/`aiCPU` values are integer hardware core counts, not percentages or virtual-device slots. `templates` lists driver slice definitions: a string `name`, integer `memory`, and optional integer `aiCore`/`aiCPU`. The named template must be supported by the driver; editing these numbers does not create a new driver template. The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected. See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing). |
+| devices.ascend.configs | list | Per-chip capacities and templates; see [values.yaml](values.yaml). | Per-chip objects shared with the separately deployed Ascend device plugin as `vnpus.configs`; overrides replace the whole list. String `chipName` must match the detected chip name; string `commonWord` identifies the HAMi device type. `resourceName`, `resourceMemoryName`, and `resourceCoreName` are resource-name strings for Pod device-count, memory, and core requests. Pod counts are non-negative integers. Memory requests and `memoryAllocatable`, `memoryCapacity`, and template `memory` use integer MiB (16384 = 16 GiB), without a `Gi` suffix. `memoryAllocatable` is usable memory; `memoryCapacity` is full-device capacity. `memoryFactor` is an integer request multiplier, applied only above 1. <br>Pod core requests in `hami-core`/`enpu` mode are integer percentages, 0-100 (`40` means 40%); ENPU treats 0 or omission as 100%. Configured `aiCore`/`aiCPU` values are integer hardware core counts, not percentages or virtual-device slots. `templates` lists driver slice definitions: a string `name`, integer `memory`, and optional integer `aiCore`/`aiCPU`. The named template must be supported by the driver; editing these numbers does not create a new driver template. The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected. See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing). <br>The Ascend950DT entry is for the 9582 SKU with 96 GiB HBM and requires a compatible separately deployed device plugin. |
 | devices.ascend.runtimeClassName | string | `""` | RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset. Empty leaves the Pod unchanged; an existing Pod value is preserved. |
 | devices.ascend.hamiVnpuMode | string | `""` | Default VNPU mode: `template`, `hami-core` (alias: `hamiCore`), or `enpu`. Node capability annotations take priority. An empty or null value uses `template`, or `hami-core` when the deprecated `devices.ascend.hamiVnpuCore` is true. An explicit mode takes precedence over that flag; unknown modes are rejected. |
 | devices.ascend.deviceSplitCount | int | `10` | Positive integer virtual-device slots per physical Ascend NPU in hami-core and ENPU modes. Requires an ascend-device-plugin version supporting vnpus.deviceSplitCount (introduced in [#144](https://github.com/Project-HAMi/ascend-device-plugin/pull/144)). A positive node vDeviceCount takes precedence; ENPU is capped at 100. Template mode keeps its template calculation. |

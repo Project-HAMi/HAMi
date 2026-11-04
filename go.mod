@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/NVIDIA/go-dcgm v1.4702.0
+	github.com/NVIDIA/go-dcgm v1.4712.1
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.13.0
 	github.com/NVIDIA/go-nvml v0.13.4-1
@@ -27,16 +27,17 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	golang.org/x/tools v0.52.0
-	google.golang.org/grpc v1.84.0
+	google.golang.org/grpc v1.85.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/v3 v3.5.2
-	k8s.io/api v0.37.1
-	k8s.io/apimachinery v0.37.1
-	k8s.io/client-go v0.37.1
+	k8s.io/api v0.37.2
+	k8s.io/apimachinery v0.37.2
+	k8s.io/client-go v0.37.2
+	k8s.io/component-helpers v0.37.2
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-scheduler v0.37.1
-	k8s.io/kubelet v0.37.1
+	k8s.io/kube-scheduler v0.37.2
+	k8s.io/kubelet v0.37.2
 	sigs.k8s.io/controller-runtime v0.25.2
 	tags.cncf.io/container-device-interface v1.1.1
 	tags.cncf.io/container-device-interface/specs-go v1.1.1
@@ -45,7 +46,7 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.26.0 // indirect
+	github.com/bits-and-blooms/bitset v1.28.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -90,7 +91,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect

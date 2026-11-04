@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +37,10 @@ const (
 	sessionStubLabel = "hami.io/lupine-session"
 
 	sessionStubPrefix = "lupine-session-"
+	// sessionPullSecretsAnno records the scheduler-owned pull-secret list. It
+	// lets reconciliation detect configuration changes without comparing an
+	// empty desired list to ServiceAccount secrets injected by the apiserver.
+	sessionPullSecretsAnno = "hami.io/lupine-session-image-pull-secrets"
 
 	// podNamespaceEnv is where the scheduler learns its own namespace, the
 	// same variable pkg/scheduler reads to find its peers.
@@ -90,9 +95,10 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 		stub := &existing.Items[i]
 		node := stub.Labels[sessionStubLabel]
 		endpoint, keep := wanted[node]
-		// A stub whose endpoint moved is replaced rather than edited, since the
-		// fields that carry it cannot be changed on a running pod.
-		if keep && stubEndpoint(stub) == endpoint {
+		// A stub whose endpoint or pull credentials changed is replaced rather
+		// than edited, since the fields that carry them cannot be changed on a
+		// running pod.
+		if keep && stubEndpoint(stub) == endpoint && sessionPullSecretsMatch(stub, RemoteGPUSessionImagePullSecrets) {
 			delete(wanted, node)
 			continue
 		}
@@ -109,7 +115,7 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	}
 
 	for node, endpoint := range wanted {
-		stub, err := sessionStub(namespace, node, endpoint, RemoteGPUSessionImage)
+		stub, err := sessionStub(namespace, node, endpoint, RemoteGPUSessionImage, RemoteGPUSessionImagePullSecrets)
 		if err != nil {
 			klog.ErrorS(err, "remotegpu: cannot build a session stub", "node", node, "endpoint", endpoint)
 			continue
@@ -142,7 +148,25 @@ func stubEndpoint(stub *corev1.Pod) string {
 	return ""
 }
 
-func sessionStub(namespace, node, endpoint, image string) (*corev1.Pod, error) {
+func sessionPullSecretsMatch(stub *corev1.Pod, names []string) bool {
+	configured, managed := stub.Annotations[sessionPullSecretsAnno]
+	if len(names) == 0 {
+		// Ignore PodSpec.ImagePullSecrets here: ServiceAccount admission may
+		// populate it when the scheduler did not configure any secrets.
+		return !managed
+	}
+	if !managed || configured != strings.Join(names, ",") || len(stub.Spec.ImagePullSecrets) != len(names) {
+		return false
+	}
+	for i, name := range names {
+		if stub.Spec.ImagePullSecrets[i].Name != name {
+			return false
+		}
+	}
+	return true
+}
+
+func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) (*corev1.Pod, error) {
 	// The stub answers on the port its server does, so the port a user
 	// forwards is the one they would have used against the server itself.
 	_, port, err := net.SplitHostPort(endpoint)
@@ -153,10 +177,19 @@ func sessionStub(namespace, node, endpoint, image string) (*corev1.Pod, error) {
 	if err != nil {
 		return nil, err
 	}
+	var imagePullSecrets []corev1.LocalObjectReference
+	for _, name := range pullSecrets {
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: name})
+	}
+	var annotations map[string]string
+	if len(pullSecrets) > 0 {
+		annotations = map[string]string{sessionPullSecretsAnno: strings.Join(pullSecrets, ",")}
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      sessionStubPrefix + node,
-			Namespace: namespace,
+			Name:        sessionStubPrefix + node,
+			Namespace:   namespace,
+			Annotations: annotations,
 			Labels: map[string]string{
 				sessionStubLabel:               node,
 				"app.kubernetes.io/component":  "hami-lupine-session",
@@ -171,8 +204,9 @@ func sessionStub(namespace, node, endpoint, image string) (*corev1.Pod, error) {
 			NodeName: node,
 			// Whatever keeps other workloads off a lupine node must not keep
 			// that node's own relay off it.
-			Tolerations:   []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-			RestartPolicy: corev1.RestartPolicyAlways,
+			Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			RestartPolicy:    corev1.RestartPolicyAlways,
+			ImagePullSecrets: imagePullSecrets,
 			Containers: []corev1.Container{{
 				Name:    "relay",
 				Image:   image,

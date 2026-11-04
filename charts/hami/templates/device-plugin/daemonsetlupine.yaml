@@ -25,6 +25,7 @@ spec:
         hami.io/webhook: ignore
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
     spec:
+      {{- include "hami.remotegpu.server.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devices.remotegpu.server.runtimeClassName }}
       runtimeClassName: {{ .Values.devices.remotegpu.server.runtimeClassName }}
       {{- end }}

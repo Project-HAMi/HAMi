@@ -7,7 +7,7 @@ global:
   imageSource: upstream
   # -- Global Docker image registry that replaces the registry of every HAMi image, overriding the per-component `*.image.registry` settings. Leave empty to keep the per-component registries.
   imageRegistry: ""
-  # -- Global Docker image pull secrets added to the scheduler, device plugin and webhook patch job pods; the remote-gpu and mock device plugin DaemonSets do not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
+  # -- Global Docker image pull secrets added to the scheduler, device plugin, webhook patch job, and remote-gpu Pods; the mock device plugin DaemonSet does not use them. Each entry is the name of an existing docker-registry Secret, e.g. `myRegistryKeySecretName`.
   imagePullSecrets: []
   # -- Tag (optionally `tag@sha256:...`) used by the scheduler extender, device plugin and monitor images when their own `*.image.tag` is empty.
   # An explicit tag replaces the complete value. A non-empty per-component tag takes precedence.
@@ -78,6 +78,9 @@ scheduler:
     # -- Default device scoring policy within a node: `binpack`, `spread`, or `topology-aware`.
     # `topology-aware` also makes the NVIDIA device plugin report GPU topology scores. The `hami.io/gpu-scheduler-policy` Pod annotation overrides it.
     gpuSchedulerPolicy: spread
+    # -- (float) Bonus added to the node score for nodes matching a Pod's preferred `nodeAffinity`, scaled by the matched weight ratio (0..1).
+    # `0` disables it. HAMi returns a single node from Filter, so other kube-scheduler score plugins are still ignored. Values above `30` let the preference outweigh GPU usage.
+    nodeAffinityScoreWeight: 0
   # -- Address the scheduler serves Prometheus metrics on, as `[host]:port`. The chart also takes the port from it for the `metrics` container port.
   metricsBindAddress: ":9395"
   # -- Address of the pprof server, used only when `--profiling` is added to `scheduler.extender.extraArgs`. Keep it on loopback and reach it
@@ -346,6 +349,8 @@ devicePlugin:
       capabilities:
         drop: ["ALL"]
         add: ["SYS_ADMIN"]
+    # -- MIG instance monitoring requires privileged access for the monitor container; if you don't use MIG, you can set this to false.
+    migInstanceAccess: false
     # -- Resource requests and limits for the monitor container.
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
@@ -693,11 +698,11 @@ devices:
         profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
       - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
         profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "4g.20gb", "7g.40gb" ]
-      - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
+      - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB", "A100 80GB PCIe"]
         profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.79gb" ]
-      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB", "H100 80GB HBM3", "H100 PCIe"]
         profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "4g.40gb", "7g.80gb" ]
-      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB", "H100 NVL"]
         profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "4g.47gb", "7g.94gb" ]
       - models: [ "H20", "H100 on GH200"]
         profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "4g.48gb", "7g.96gb" ]
@@ -815,6 +820,9 @@ devices:
     # Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation
     # of relays without deleting existing ones.
     sessionImage: ""
+    # -- Names of existing image pull Secrets for the session relay Pods, added after
+    # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
+    sessionImagePullSecrets: []
     server:
       # -- Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true.
       # Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose
@@ -830,6 +838,9 @@ devices:
         tag: "cuda-13.3.1-ubuntu24.04@sha256:79f023523ed0ea8704b6e3634c5831ed2d4210a0a8c7ed700a3bcdbbf7c9e1a3"
         # -- Pull policy of the lupine server container image: `Always`, `IfNotPresent`, or `Never`.
         pullPolicy: IfNotPresent
+        # -- Names of existing image pull Secrets for the lupine server Pods, added after
+        # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
+        pullSecrets: []
       # -- RuntimeClass for lupine server Pods. Set to a class such as `nvidia` when the NVIDIA
       # container runtime is not the cluster default.
       # Empty omits the field; independent of `devices.nvidia.runtimeClassName`.
@@ -857,6 +868,7 @@ devices:
     # The named template must be supported by the driver; editing these numbers does not create a new driver template.
     # The boolean `superPod` enables Ascend910C module pairing: non-ENPU requests of 1 become 2; other odd counts are rejected.
     # See [single-card soft-slicing workload examples](https://project-hami.io/docs/next/userguide/ascend-device/examples/allocate-soft-slicing#single-card-soft-slicing).
+    # <br>The Ascend950DT entry is for the 9582 SKU with 96 GiB HBM and requires a compatible separately deployed device plugin.
     # @default -- Per-chip capacities and templates; see [values.yaml](values.yaml).
     configs:
     - chipName: 910A
@@ -1003,6 +1015,13 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
+    # Ascend950DT 9582 whole-card configuration; see ../../docs/ascend/950dt-sku-reference.md for other SKU estimates.
+    - chipName: Ascend950DT
+      commonWord: Ascend950DT
+      resourceName: huawei.com/Ascend950DT
+      memoryAllocatable: 98304
+      memoryCapacity: 98304
+      aiCore: 32
     # -- RuntimeClass name to set on Pods requesting Ascend resources when their `spec.runtimeClassName` is unset.
     # Empty leaves the Pod unchanged; an existing Pod value is preserved.
     runtimeClassName: ""
@@ -1055,6 +1074,7 @@ devices:
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
+      - huawei.com/Ascend950DT
   iluvatar:
     # -- List of Iluvatar device definitions used when `devices.iluvatar.enabled` is true.
     # Each object contains string fields `chipName`, `commonWord`, `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`.

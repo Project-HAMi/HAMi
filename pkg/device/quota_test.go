@@ -16,6 +16,8 @@ limitations under the License.
 package device
 
 import (
+	"bytes"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -23,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
 
 type MockDevices struct {
@@ -98,6 +101,19 @@ func initTest() {
 	}
 }
 
+// initScaledTest adds a backend that records memory at 256 MiB per unit, like
+// Cambricon.
+func initScaledTest() {
+	initTest()
+	DevicesMap["MLU"] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+			ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+			MemoryFactor:       256,
+		},
+	}
+}
+
 func TestNewQuotaManagerSingleton(t *testing.T) {
 	var wg sync.WaitGroup
 	var managers [2]*QuotaManager
@@ -132,31 +148,23 @@ func TestFitQuota(t *testing.T) {
 	}
 
 	// Should fit
-	if !qm.FitQuota(ns, 500, 1, 100, deviceName) {
+	if !qm.FitQuota(ns, 500, 100, deviceName) {
 		t.Error("FitQuota should return true when within limits")
 	}
 	// Should not fit memory
-	if qm.FitQuota(ns, 1500, 1, 100, deviceName) {
+	if qm.FitQuota(ns, 1500, 100, deviceName) {
 		t.Error("FitQuota should return false when memory exceeds limit")
 	}
 	// Should not fit core
-	if qm.FitQuota(ns, 500, 1, 300, deviceName) {
+	if qm.FitQuota(ns, 500, 300, deviceName) {
 		t.Error("FitQuota should return false when core exceeds limit")
 	}
-	// Should fit memory with factor
-	if !qm.FitQuota(ns, 1000, 2, 100, deviceName) {
-		t.Error("FitQuota should return true")
-	}
-	// Should not fit memory with factor
-	if qm.FitQuota(ns, 5000, 2, 100, deviceName) {
-		t.Error("FitQuota should return false when memory exceeds limit")
-	}
 	// Should fit if namespace not present
-	if !qm.FitQuota("otherns", 1500, 1, 100, deviceName) {
+	if !qm.FitQuota("otherns", 1500, 100, deviceName) {
 		t.Error("FitQuota should return true if namespace not present")
 	}
 	// Should fit if device not present
-	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
+	if !qm.FitQuota(ns, 1000, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
 	}
 }
@@ -176,8 +184,35 @@ func TestFitQuotaExplicitZeroBlocks(t *testing.T) {
 	qm.AddQuota(rq)
 
 	// The explicit zero must block any positive request, not be read as "unlimited".
-	if qm.FitQuota(ns, 500, 1, 0, "NVIDIA") {
+	if qm.FitQuota(ns, 500, 0, "NVIDIA") {
 		t.Error(`FitQuota admitted a 500 request under limits.nvidia.com/gpumem: "0"; an explicit zero quota must block`)
+	}
+}
+
+func TestFitQuotaUsesScaledLimit(t *testing.T) {
+	initScaledTest()
+	qm := NewQuotaManager()
+	ns := "team-scaled-fit"
+	memName := "cambricon.com/mlu.smlu.vmemory"
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "scaled", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(100, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(rq)
+
+	// 100 units are 25600 MiB, and requests arrive already scaled
+	// Should fit at the scaled limit
+	if !qm.FitQuota(ns, 25600, 0, "MLU") {
+		t.Error("FitQuota should return true when memory equals the scaled limit")
+	}
+	// Should not fit above the scaled limit
+	if qm.FitQuota(ns, 25601, 0, "MLU") {
+		t.Error("FitQuota should return false when memory exceeds the scaled limit")
 	}
 }
 
@@ -274,6 +309,128 @@ func TestAddQuotaAndDelQuota(t *testing.T) {
 	}
 }
 
+func TestAddQuotaScalesMemoryLimit(t *testing.T) {
+	initScaledTest()
+	qm := NewQuotaManager()
+	ns := "team-scaled-limit"
+	memName := "cambricon.com/mlu.smlu.vmemory"
+	coreName := "cambricon.com/mlu.smlu.vcore"
+	nvMemName := "nvidia.com/gpumem"
+
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "scaled", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName):   *resource.NewQuantity(100, resource.DecimalSI),
+				corev1.ResourceName("limits." + coreName):  *resource.NewQuantity(50, resource.DecimalSI),
+				corev1.ResourceName("limits." + nvMemName): *resource.NewQuantity(2000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(rq)
+
+	// Used is recorded after memoryFactor, so the limit is stored the same way
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 100*256 {
+		t.Errorf("expected memory limit %d, got %d", 100*256, got)
+	}
+	if got := (*qm.Quotas[ns])[coreName].Limit; got != 50 {
+		t.Errorf("expected core limit 50 (cores are not scaled), got %d", got)
+	}
+	if got := (*qm.Quotas[ns])[nvMemName].Limit; got != 2000 {
+		t.Errorf("expected memory limit 2000 for a backend without memoryFactor, got %d", got)
+	}
+}
+
+func TestAddQuotaIgnoresOverflowingLimit(t *testing.T) {
+	initScaledTest()
+	var buf bytes.Buffer
+	klog.SetOutput(&buf)
+	klog.LogToStderr(false)
+	defer klog.LogToStderr(true)
+
+	ns := "team-overflow-limit"
+	memName := "cambricon.com/mlu.smlu.vmemory"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	quotaWith := func(mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(mem, resource.DecimalSI),
+			}},
+		}
+	}
+	const msg = "quota limit overflows int64 after applying memory factor"
+
+	// A limit that overflows int64 once scaled is ignored and logged.
+	old := quotaWith(40000000000000000)
+	qm.AddQuota(old)
+	if dq := qm.Quotas[ns]; dq != nil {
+		if q := (*dq)[memName]; q != nil && q.LimitSet {
+			t.Errorf("expected no memory limit, got %d", q.Limit)
+		}
+	}
+	if !strings.Contains(buf.String(), msg) {
+		t.Errorf("AddQuota did not log the overflowing limit")
+	}
+
+	// A status-only update keeps the same limits and does not log again.
+	buf.Reset()
+	statusOnly := old.DeepCopy()
+	statusOnly.Status.Used = corev1.ResourceList{corev1.ResourceName("limits." + memName): resource.MustParse("1")}
+	qm.UpdateQuota(old, statusOnly)
+	if strings.Contains(buf.String(), msg) {
+		t.Errorf("a status-only update logged the overflow again")
+	}
+
+	// Changing the limits logs again.
+	buf.Reset()
+	qm.UpdateQuota(statusOnly, quotaWith(50000000000000000))
+	if !strings.Contains(buf.String(), msg) {
+		t.Errorf("an update that changes the limits did not log the overflow")
+	}
+}
+
+func TestUpdateQuotaScalesMemoryLimit(t *testing.T) {
+	initScaledTest()
+	ns := "update-scaled"
+	memName := "cambricon.com/mlu.smlu.vmemory"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	quotaWith := func(mem int64) *corev1.ResourceQuota {
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + memName): *resource.NewQuantity(mem, resource.DecimalSI),
+			}},
+		}
+	}
+
+	old := quotaWith(100)
+	qm.AddQuota(old)
+
+	// Raising the limit scales the new value too.
+	qm.UpdateQuota(old, quotaWith(200))
+	if got := (*qm.Quotas[ns])[memName].Limit; got != 200*256 {
+		t.Errorf("memory limit = %d, want %d", got, 200*256)
+	}
+
+	// Deleting the quota releases the scaled limit.
+	qm.DelQuota(quotaWith(200))
+	if got := (*qm.Quotas[ns])[memName]; got.Limit != 0 || got.LimitSet {
+		t.Errorf("memory limit = %d (set %v), want 0 and unset after delete", got.Limit, got.LimitSet)
+	}
+
+	// Updating a limit to one that overflows int64 once scaled drops it.
+	qm.AddQuota(old)
+	qm.UpdateQuota(old, quotaWith(40000000000000000))
+	if got := (*qm.Quotas[ns])[memName]; got.LimitSet {
+		t.Errorf("memory limit = %d, want unset once the scaled limit overflows", got.Limit)
+	}
+}
+
 func TestDelQuotaNonLimitsKey(t *testing.T) {
 	initTest()
 	qm := NewQuotaManager()
@@ -349,7 +506,7 @@ func TestUpdateQuotaKeepsLimitEnforced(t *testing.T) {
 
 	wg.Go(func() {
 		for range 50000 {
-			if qm.FitQuota(ns, 1, 1, 0, "NVIDIA") {
+			if qm.FitQuota(ns, 1, 0, "NVIDIA") {
 				atomic.AddInt64(&wrongAdmits, 1)
 			}
 		}
