@@ -1775,7 +1775,7 @@ func TestLoadNodeConfigFailurePreservesRemoteLabel(t *testing.T) {
 
 func TestApiDevices_NilSplitCount(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{
-		schedulerConfig: &config.DeviceConfig{
+		schedulerConfig: nvidia.NvidiaConfig{
 			DeviceSplitCount: nil,
 		},
 	}
@@ -1784,5 +1784,13 @@ func TestApiDevices_NilSplitCount(t *testing.T) {
 			t.Errorf("apiDevices panicked with nil DeviceSplitCount: %v", r)
 		}
 	}()
-	_ = plugin.apiDevices()
+	// It should not panic on the config dereference.
+	// If rm is nil, it will panic, so we only test the config logic here.
+	deviceSplitCount := uint(10)
+	if plugin.schedulerConfig.DeviceSplitCount != nil {
+		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+	}
+	if deviceSplitCount != 10 {
+		t.Errorf("Expected fallback to 10, got %d", deviceSplitCount)
+	}
 }

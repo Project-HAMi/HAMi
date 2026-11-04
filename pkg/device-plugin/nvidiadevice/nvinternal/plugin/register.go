@@ -163,7 +163,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		}
 
 		registeredmem := int64(memoryTotal / 1024 / 1024)
-		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
+		if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
 			registeredmem = int64(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
 			klog.V(3).Infof("Device id=%v: MemoryScaling=%v, registeredmem=%v", idx, *plugin.schedulerConfig.DeviceMemoryScaling, registeredmem)
 		}

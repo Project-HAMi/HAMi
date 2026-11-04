@@ -1528,10 +1528,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%s", hostHookPath, sharedCacheName)
-				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
+				if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
-				if *plugin.schedulerConfig.LogLevel != "" {
+				if plugin.schedulerConfig.LogLevel != nil && *plugin.schedulerConfig.LogLevel != "" {
 					response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
 				}
 				if plugin.schedulerConfig.DisableCoreLimit {
