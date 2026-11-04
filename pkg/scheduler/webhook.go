@@ -138,6 +138,13 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
 			return admission.Denied(err.Error())
 		}
+		// The scheduler ignores an unrecognized scheduler-policy value and
+		// keeps the configured default, so a typo only shows up as
+		// unexpected packing (#2767). Deny it here instead.
+		if err := util.SchedulerPolicyAnnotationError(pod); err != nil {
+			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			return admission.Denied(err.Error())
+		}
 	}
 	if hasPrivileged && hasResource {
 		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, privilegedName)

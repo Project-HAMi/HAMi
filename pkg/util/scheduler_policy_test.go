@@ -137,3 +137,57 @@ func TestGetGPUSchedulerPolicyByPodNormalizesAcceptedValues(t *testing.T) {
 	// be normalized on the way out as well.
 	assert.Equal(t, GetGPUSchedulerPolicyByPod(" binpack ", nil), "binpack")
 }
+
+func TestSchedulerPolicyAnnotationError(t *testing.T) {
+	podWith := func(annotations map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: "p", Namespace: "default", Annotations: annotations,
+		}}
+	}
+
+	tests := []struct {
+		name        string
+		pod         *corev1.Pod
+		wantMessage string
+	}{
+		{name: "nil pod", pod: nil},
+		{name: "no annotations", pod: podWith(nil)},
+		{name: "valid gpu policy", pod: podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpack"})},
+		{name: "padded chain", pod: podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpack, numa"})},
+		{name: "valid node policy", pod: podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: " spread "})},
+		{
+			name:        "typo in gpu policy",
+			pod:         podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpakc"}),
+			wantMessage: GPUSchedulerPolicyAnnotationKey,
+		},
+		{
+			name:        "empty gpu policy",
+			pod:         podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: ""}),
+			wantMessage: GPUSchedulerPolicyAnnotationKey,
+		},
+		{
+			name:        "numa is not a node policy",
+			pod:         podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: "numa"}),
+			wantMessage: NodeSchedulerPolicyAnnotationKey,
+		},
+		{
+			name: "gpu typo is reported before a valid node policy",
+			pod: podWith(map[string]string{
+				GPUSchedulerPolicyAnnotationKey:  "binpakc",
+				NodeSchedulerPolicyAnnotationKey: "binpack",
+			}),
+			wantMessage: GPUSchedulerPolicyAnnotationKey,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := SchedulerPolicyAnnotationError(tt.pod)
+			if tt.wantMessage == "" {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantMessage)
+			assert.ErrorContains(t, err, "invalid")
+		})
+	}
+}
