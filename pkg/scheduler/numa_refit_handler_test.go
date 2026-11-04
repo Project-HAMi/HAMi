@@ -1297,7 +1297,7 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 		},
 		{
 			name:    "node unavailable",
-			prepare: func(s *Scheduler, _ *corev1.Pod) { s.nodeManager.rmNode(refitNode) },
+			prepare: func(s *Scheduler, _ *corev1.Pod) { s.rmNode(refitNode) },
 			want:    refitFailureSample("NVIDIA", "lookup"),
 		},
 		{
