@@ -1084,7 +1084,7 @@ devices:
     # See [Iluvatar workload examples](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#running-iluvatar-jobs).
     # Overrides replace the whole list; supply complete objects because omitted fields are not filled from defaults. An empty list removes all Iluvatar device definitions.
     # A non-empty `device-config.content` or bundled `files/device-config.yaml` takes precedence over this list.
-    # @default -- Device definitions for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
+    # @default -- Device definitions for MR-V100, MR-V100A, MR-V50, MR-V50A, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     configs:
       - chipName: MR-V100
         commonWord: MR-V100
@@ -1122,7 +1122,7 @@ devices:
     # -- Resource-name strings delegated to the HAMi scheduler extender so kube-scheduler skips its own checks for these Iluvatar resources.
     # Used only when both `devices.iluvatar.enabled` and `scheduler.kubeScheduler.enabled` are true.
     # Include the resource names from `devices.iluvatar.configs`; they are not added automatically. Overrides replace the whole list.
-    # @default -- Count, core, and memory resource names for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
+    # @default -- Count, core, and memory resource names for MR-V100, MR-V100A, MR-V50, MR-V50A, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     customresources:
       - iluvatar.ai/BI-V100-vgpu
       - iluvatar.ai/BI-V100.vCore
