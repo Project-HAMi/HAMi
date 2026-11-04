@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -24,14 +25,14 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/klog/v2"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/klog/v2"
 )
 
 type AMDDevices struct {
@@ -419,14 +420,18 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 // against the namespace ResourceQuota. Only memory is checked: the core quota
 // counts the CUs the plugin masks while a request is a percentage.
 func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int64) bool {
+	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
+	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
+	return device.GetLocalCache().FitQuota(ns, quotaMemory(pod, allocated, cur), 0, AMDDevice)
+}
+
+func quotaMemory(pod *corev1.Pod, allocated *device.PodDevices, cur device.ContainerDevices) int64 {
 	hypo := device.PodDevices{}
 	if allocated != nil {
 		for devType, podSingle := range *allocated {
 			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
 		}
 	}
-	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
-	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
 	hypo[AMDDevice] = append(hypo[AMDDevice], cur)
 
 	var mem int64
@@ -435,7 +440,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 			mem += val.Usedmem
 		}
 	}
-	return device.GetLocalCache().FitQuota(ns, mem, 0, AMDDevice)
+	return mem
 }
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
@@ -534,7 +539,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 			memReq = dev.Totalmem
 		}
 		// topology mode collects more candidates than it allocates, so a candidate is
-		// checked alone here and the chosen combination is checked as a whole below
+		// checked alone here and combinations are checked as a whole below.
 		quotaDevs := tmpDevs
 		if topology {
 			quotaDevs = nil
@@ -620,16 +625,39 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		}
 	}
 	if topology && len(tmpDevs[k.Type]) >= int(originReq) {
-		if best, ok := bestLinkedCombination(devices, tmpDevs[k.Type], int(originReq), assertNuma(pod.GetAnnotations())); ok {
-			for i, c := range best {
-				if !fitQuota(pod, map[string]device.ContainerDevices{AMDDevice: best[:i]}, allocated, pod.Namespace, c.UUID, c.Usedmem) {
-					reason[common.ResourceQuotaNotFit]++
-					return false, tmpDevs, common.GenReason(reason, len(devices))
-				}
+		var quota *combinationQuota
+		quotaRejected := false
+		fitsMemory := func(mem int64) bool {
+			return device.GetLocalCache().FitQuota(pod.Namespace, mem, 0, AMDDevice)
+		}
+		// If all candidates fit together, every subset fits and scoring needs no quota checks.
+		if !fitsMemory(quotaMemory(pod, allocated, tmpDevs[k.Type])) {
+			baseMemory := quotaMemory(pod, allocated, nil)
+			quota = &combinationQuota{cost: make(map[string]int64, len(tmpDevs[k.Type]))}
+			for _, c := range tmpDevs[k.Type] {
+				// Collapsed memory is additive across UUIDs. Init memory on this UUID
+				// may already cover part or all of the request, so cache the increment.
+				quota.cost[c.UUID] = quotaMemory(pod, allocated, device.ContainerDevices{c}) - baseMemory
+			}
+			quota.fits = func(mem int64) bool {
+				ok := fitsMemory(baseMemory + mem)
+				quotaRejected = quotaRejected || !ok
+				return ok
+			}
+		}
+		if best, ok := bestLinkedCombination(devices, tmpDevs[k.Type], int(originReq), assertNuma(pod.GetAnnotations()), quota); ok {
+			// Quota may have changed while scoring; recheck the selected allocation.
+			if !fitsMemory(quotaMemory(pod, allocated, best)) {
+				reason[common.ResourceQuotaNotFit]++
+				return false, tmpDevs, common.GenReason(reason, len(devices))
 			}
 			tmpDevs[k.Type] = best
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
+		}
+		if quotaRejected {
+			reason[common.ResourceQuotaNotFit]++
+			return false, tmpDevs, common.GenReason(reason, len(devices))
 		}
 		reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 	}
@@ -643,16 +671,22 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 const (
 	xgmiPairScore = 4 // an XGMI link outweighs sharing a NUMA node
 	numaPairScore = 1
-	// Past this many candidates the number of combinations is no longer small; take the first ones.
+	// Past this many candidates, use a bounded fallback instead of exhaustive scoring.
 	maxCombinationCandidates = 16
 )
+
+type combinationQuota struct {
+	cost map[string]int64
+	fits func(int64) bool
+}
 
 // bestLinkedCombination picks n of the candidate GPUs that are most tightly
 // connected: each XGMI-linked pair counts xgmiPairScore and each pair on one
 // known NUMA node numaPairScore. With numaBind every pick has to share a NUMA
 // node, so each NUMA node is searched on its own. A group of more than
-// maxCombinationCandidates takes its first n. Ties keep the earliest candidates.
-func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.ContainerDevices, n int, numaBind bool) (device.ContainerDevices, bool) {
+// maxCombinationCandidates takes its first n, or its least costly n if needed
+// to fit quota. Ties keep the earliest candidates.
+func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.ContainerDevices, n int, numaBind bool, quota *combinationQuota) (device.ContainerDevices, bool) {
 	byID := make(map[string]*device.DeviceUsage, len(devices))
 	for _, d := range devices {
 		byID[d.ID] = d
@@ -681,7 +715,7 @@ func bestLinkedCombination(devices []*device.DeviceUsage, candidates device.Cont
 		if len(group) < n {
 			continue
 		}
-		picked, score := bestInGroup(byID, group, n)
+		picked, score := bestInGroup(byID, group, n, quota)
 		if score > bestScore {
 			bestScore, out = score, picked
 		}
@@ -710,39 +744,63 @@ func groupScore(byID map[string]*device.DeviceUsage, group device.ContainerDevic
 	return score
 }
 
-// bestInGroup returns the n devices of group with the best score.
-func bestInGroup(byID map[string]*device.DeviceUsage, group device.ContainerDevices, n int) (device.ContainerDevices, int) {
+// bestInGroup selects n quota-feasible devices, scoring exhaustively up to the candidate limit.
+func bestInGroup(byID map[string]*device.DeviceUsage, group device.ContainerDevices, n int, quota *combinationQuota) (device.ContainerDevices, int) {
 	if len(group) > maxCombinationCandidates {
 		first := slices.Clone(group[:n])
+		if quota != nil {
+			fits := func(chosen device.ContainerDevices) bool {
+				var mem int64
+				for _, c := range chosen {
+					mem += quota.cost[c.UUID]
+				}
+				return quota.fits(mem)
+			}
+			if !fits(first) {
+				ordered := slices.Clone(group)
+				slices.SortStableFunc(ordered, func(a, b device.ContainerDevice) int {
+					return cmp.Compare(quota.cost[a.UUID], quota.cost[b.UUID])
+				})
+				copy(first, ordered[:n])
+				if !fits(first) {
+					return nil, -1
+				}
+			}
+		}
 		return first, groupScore(byID, first)
 	}
-	var best []int
+	var best device.ContainerDevices
 	bestScore := -1
-	pick := make([]int, 0, n)
-	var walk func(start int)
-	walk = func(start int) {
+	pick := make(device.ContainerDevices, 0, n)
+	var walk func(start, score int, mem int64)
+	walk = func(start, score int, mem int64) {
 		if len(pick) == n {
-			chosen := make(device.ContainerDevices, 0, n)
-			for _, i := range pick {
-				chosen = append(chosen, group[i])
-			}
-			if score := groupScore(byID, chosen); score > bestScore {
-				bestScore, best = score, slices.Clone(pick)
+			if score > bestScore && (quota == nil || quota.fits(mem)) {
+				if best == nil {
+					best = make(device.ContainerDevices, n)
+				}
+				bestScore = score
+				copy(best, pick)
 			}
 			return
 		}
 		for i := start; i <= len(group)-(n-len(pick)); i++ {
-			pick = append(pick, i)
-			walk(i + 1)
+			c := group[i]
+			addedScore := 0
+			for _, p := range pick {
+				addedScore += pairScore(byID[p.UUID], byID[c.UUID])
+			}
+			var addedMemory int64
+			if quota != nil {
+				addedMemory = quota.cost[c.UUID]
+			}
+			pick = append(pick, c)
+			walk(i+1, score+addedScore, mem+addedMemory)
 			pick = pick[:len(pick)-1]
 		}
 	}
-	walk(0)
-	out := make(device.ContainerDevices, 0, n)
-	for _, i := range best {
-		out = append(out, group[i])
-	}
-	return out, bestScore
+	walk(0, 0, 0)
+	return best, bestScore
 }
 
 // cuPerWGP returns how many CUs the device plugin allocates together, as
