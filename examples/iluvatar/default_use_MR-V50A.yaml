@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: MR-V50A-poddemo
+  name: mr-v50a-poddemo
 spec:
   restartPolicy: Never
   containers:
-  - name: MR-V50A-poddemo
+  - name: mr-v50a-poddemo
     image: registry.iluvatar.com.cn:10443/saas/mr-bi150-4.3.0-x86-ubuntu22.04-py3.10-base-base:v1.0
     command:
     - bash
