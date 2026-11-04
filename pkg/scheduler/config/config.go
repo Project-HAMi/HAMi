@@ -46,6 +46,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -112,6 +113,7 @@ type Config struct {
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	BirenConfig     biren.BirenConfig         `yaml:"biren"`
+	TecoConfig      tecorigin.TecoConfig      `yaml:"tecorigin"`
 	RemoteGPUConfig remotegpu.RemoteGPUConfig `yaml:"remotegpu"`
 	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
@@ -254,6 +256,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return biren.InitBirenDevice(birenConfig), nil
 		}, config.BirenConfig},
+		{tecorigin.TecoDevice, tecorigin.TecoCommonWord, func(cfg any) (device.Devices, error) {
+			tecoConfig, ok := cfg.(tecorigin.TecoConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", tecorigin.TecoCommonWord)
+			}
+			return tecorigin.InitTecoDevice(tecoConfig), nil
+		}, config.TecoConfig},
 		{remotegpu.RemoteGPUDevice, remotegpu.RemoteGPUCommonWord, func(cfg any) (device.Devices, error) {
 			remoteGPUConfig, ok := cfg.(remotegpu.RemoteGPUConfig)
 			if !ok {
@@ -311,6 +320,7 @@ func anyDeviceConfigured(config *Config) bool {
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
+		!reflect.DeepEqual(config.TecoConfig, tecorigin.TecoConfig{}) ||
 		!reflect.DeepEqual(config.RemoteGPUConfig, remotegpu.RemoteGPUConfig{}) ||
 		len(config.VNPUs.Configs) > 0
 }

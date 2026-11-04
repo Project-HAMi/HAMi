@@ -43,6 +43,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 )
 
@@ -100,6 +101,8 @@ iluvatars:
   resourceCoreName: iluvatar.ai/BI-V100.vCore
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
+tecorigin:
+  resourceCountName: "tecorigin.com/gpucore"
 vnpus:
   hamiVnpuCore: false
   configs:
@@ -220,6 +223,7 @@ func Test_LoadConfig(t *testing.T) {
 		{"Metax Config", createMetaxConfig(), configData.MetaxConfig},
 		{"Enflame Config", createEnflameConfig(), configData.EnflameConfig},
 		{"Kunlun Config", createKunlunConfig(), configData.KunlunConfig},
+		{"Tecorigin Config", createTecoriginConfig(), configData.TecoConfig},
 	}
 
 	for _, test := range dataDrivenTests {
@@ -371,6 +375,12 @@ func createKunlunConfig() kunlun.KunlunConfig {
 	}
 }
 
+func createTecoriginConfig() tecorigin.TecoConfig {
+	return tecorigin.TecoConfig{
+		ResourceCountName: "tecorigin.com/gpucore",
+	}
+}
+
 func createVNPUConfigs() ascend.VNPUs {
 	return ascend.VNPUs{
 		Configs: []ascend.VNPUConfig{
@@ -511,6 +521,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		amd.AMDDevice:                amd.AMDDevice,
 		vastai.VastaiDevice:          vastai.VastaiCommonWord,
 		biren.BirenDevice:            biren.BirenCommonWord,
+		tecorigin.TecoDevice:         tecorigin.TecoCommonWord,
 		remotegpu.RemoteGPUDevice:    remotegpu.RemoteGPUCommonWord,
 	}
 
@@ -596,6 +607,9 @@ func Test_validateConfig(t *testing.T) {
 	birenOnly := &Config{
 		BirenConfig: biren.BirenConfig{ResourceCountName: "birentech.com/gpu"},
 	}
+	tecoriginOnly := &Config{
+		TecoConfig: tecorigin.TecoConfig{ResourceCountName: "tecorigin.com/gpucore"},
+	}
 
 	coresTooHigh := &Config{
 		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultCores: 101},
@@ -621,6 +635,7 @@ func Test_validateConfig(t *testing.T) {
 		{"Empty config", emptyConfig, "all configurations are empty"},
 		{"Vastai only", vastaiOnly, ""},
 		{"Biren only", birenOnly, ""},
+		{"Tecorigin only", tecoriginOnly, ""},
 		{"DefaultCores above 100", coresTooHigh, "defaultCores is a percentage"},
 		{"DefaultCores negative", coresNegative, "defaultCores is a percentage"},
 		{"DefaultMemory negative", memoryNegative, "defaultMemory must not be negative"},
