@@ -1242,7 +1242,7 @@ func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
 			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("n-%d", i)})
 		}
 		start := time.Now()
-		got, ok := bestLinkedCombination(devices, candidates, 8, true)
+		got, ok := bestLinkedCombination(devices, candidates, 8, true, nil)
 		assert.Equal(t, true, ok)
 		assert.Assert(t, time.Since(start) < time.Second, "40 candidates must not be searched exhaustively")
 		numa := map[int]bool{}
@@ -1275,7 +1275,7 @@ func TestFitTopologyQuotaAndNumaGroups(t *testing.T) {
 			devices = append(devices, &device.DeviceUsage{ID: fmt.Sprintf("g-%d", i), Numa: numa, CustomInfo: info})
 			candidates = append(candidates, device.ContainerDevice{UUID: fmt.Sprintf("g-%d", i)})
 		}
-		got, ok := bestLinkedCombination(devices, candidates, 4, true)
+		got, ok := bestLinkedCombination(devices, candidates, 4, true, nil)
 		assert.Equal(t, true, ok)
 		for _, c := range got {
 			var i int
