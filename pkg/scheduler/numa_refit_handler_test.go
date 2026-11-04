@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"gotest.tools/v3/assert"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -1184,6 +1186,105 @@ func TestRefitNumaAllocationCallerAuthentication(t *testing.T) {
 			assert.Assert(t, strings.Contains(response.FailureReason, "caller authentication"), "reason: %s", response.FailureReason)
 			assert.Equal(t, *calls, 0)
 			assert.Equal(t, trackedUUID(t, s), "GPU-a")
+		})
+	}
+}
+
+// refitFailureSample is the exposition of one refit failure counted once.
+func refitFailureSample(deviceType, reason string) string {
+	return fmt.Sprintf(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type=%q,failure_reason=%q,phase="refit"} 1
+`, deviceType, reason)
+}
+
+// TestRefitNumaAllocationOutcomeMetrics checks the refit phase of the
+// scheduler outcome counters: a move counts as an allocation, a no-op is not
+// counted, a refusal of an authenticated, valid request counts once under its
+// reason, and refusals before that are not counted.
+func TestRefitNumaAllocationOutcomeMetrics(t *testing.T) {
+	tests := []struct {
+		name       string
+		gpuBDevmem int64
+		allowed    []string
+		patchErr   error
+		token      string
+		mutate     func(*device.NumaRefitRequest)
+		want       string
+	}{
+		{
+			name: "moved",
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="refit"} 1
+`,
+		},
+		{
+			name:    "already allowed",
+			allowed: []string{"GPU-a", "GPU-b"},
+		},
+		{
+			name:       "no allowed device fits",
+			gpuBDevmem: 16000,
+			want:       refitFailureSample("NVIDIA", "no_fit"),
+		},
+		{
+			name:     "patch conflict",
+			patchErr: apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, refitPodName, errors.New("the object has been modified")),
+			want:     refitFailureSample("NVIDIA", "conflict"),
+		},
+		{
+			name:     "patch failure",
+			patchErr: errors.New("apiserver unavailable"),
+			want:     refitFailureSample("NVIDIA", "annotation_patch"),
+		},
+		{
+			name:   "untracked pod",
+			mutate: func(r *device.NumaRefitRequest) { r.PodUID = "other-uid" },
+			want:   refitFailureSample("NVIDIA", "lookup"),
+		},
+		{
+			name:   "pod identity mismatch",
+			mutate: func(r *device.NumaRefitRequest) { r.PodName = "other-name" },
+			want:   refitFailureSample("NVIDIA", "identity"),
+		},
+		{
+			name:  "failed caller authentication",
+			token: wrongSARefitToken,
+		},
+		{
+			name:   "unregistered device type",
+			mutate: func(r *device.NumaRefitRequest) { r.DeviceType = "NoSuchVendor" },
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gpuBDevmem := test.gpuBDevmem
+			if gpuBDevmem == 0 {
+				gpuBDevmem = 40000
+			}
+			s, _ := refitFixture(t, gpuBDevmem)
+			stubRefitPatch(t, test.patchErr)
+			allowed := test.allowed
+			if allowed == nil {
+				allowed = []string{"GPU-b"}
+			}
+			request := refitTestRequestFor(allowed...)
+			if test.mutate != nil {
+				test.mutate(&request)
+			}
+			token := test.token
+			if token == "" {
+				token = validRefitToken
+			}
+
+			s.RefitNumaAllocation(context.Background(), request, token)
+
+			assert.NilError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
+				"hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
 		})
 	}
 }
