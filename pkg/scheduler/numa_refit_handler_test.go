@@ -92,6 +92,14 @@ func registerStubServerPod(pod *corev1.Pod) {
 	stubServerPods[key] = pod.DeepCopy()
 }
 
+// unregisterStubServerPod removes pod from the stub API server, so getPod
+// no longer finds it.
+func unregisterStubServerPod(pod *corev1.Pod) {
+	stubServerPodsMu.Lock()
+	defer stubServerPodsMu.Unlock()
+	delete(stubServerPods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+}
+
 // stubGetPod installs a test replacement for getPod that resolves pods registered
 // in stubServerPods or falls back to client.KubeClient. It registers cleanup with t.
 func stubGetPod(t *testing.T, pods ...*corev1.Pod) {
@@ -1211,6 +1219,8 @@ func TestRefitNumaAllocationOutcomeMetrics(t *testing.T) {
 		patchErr   error
 		token      string
 		mutate     func(*device.NumaRefitRequest)
+		prepare    func(s *Scheduler, pod *corev1.Pod)
+		server     func(pod *corev1.Pod)
 		want       string
 	}{
 		{
@@ -1251,6 +1261,53 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 			want:   refitFailureSample("NVIDIA", "identity"),
 		},
 		{
+			name:   "live pod deleted",
+			server: unregisterStubServerPod,
+			want:   refitFailureSample("NVIDIA", "lookup"),
+		},
+		{
+			name: "live pod replaced",
+			server: func(pod *corev1.Pod) {
+				replacement := pod.DeepCopy()
+				replacement.UID = "replacement-uid"
+				registerStubServerPod(replacement)
+			},
+			want: refitFailureSample("NVIDIA", "identity"),
+		},
+		{
+			name: "undecodable pending annotation",
+			prepare: func(_ *Scheduler, pod *corev1.Pod) {
+				pod.Annotations[device.InRequestDevices[nvidia.NvidiaGPUDevice]] = "GPU-a,NVIDIA,bad,30:;"
+			},
+			want: refitFailureSample("NVIDIA", "internal"),
+		},
+		{
+			name: "undecodable allocated annotation",
+			prepare: func(_ *Scheduler, pod *corev1.Pod) {
+				pod.Annotations[device.SupportDevices[nvidia.NvidiaGPUDevice]] = "GPU-a,NVIDIA,bad,30:;"
+			},
+			want: refitFailureSample("NVIDIA", "internal"),
+		},
+		{
+			name: "no recorded allocation",
+			prepare: func(_ *Scheduler, pod *corev1.Pod) {
+				pod.Annotations[device.SupportDevices[nvidia.NvidiaGPUDevice]] = device.EncodePodSingleDevice(device.PodSingleDevice{{}})
+			},
+			want: refitFailureSample("NVIDIA", "lookup"),
+		},
+		{
+			name:    "node unavailable",
+			prepare: func(s *Scheduler, _ *corev1.Pod) { s.nodeManager.rmNode(refitNode) },
+			want:    refitFailureSample("NVIDIA", "lookup"),
+		},
+		{
+			name: "invalid scoring weights",
+			prepare: func(_ *Scheduler, pod *corev1.Pod) {
+				pod.Annotations[util.DeviceScoringWeightsAnnotationKey] = "slot=1,core=1"
+			},
+			want: refitFailureSample("NVIDIA", "internal"),
+		},
+		{
 			name:  "failed caller authentication",
 			token: wrongSARefitToken,
 		},
@@ -1266,8 +1323,16 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 			if gpuBDevmem == 0 {
 				gpuBDevmem = 40000
 			}
-			s, _ := refitFixture(t, gpuBDevmem)
+			s, pod := refitFixture(t, gpuBDevmem)
 			stubRefitPatch(t, test.patchErr)
+			if test.prepare != nil {
+				test.prepare(s, pod)
+				s.podManager.UpdatePod(pod)
+				registerStubServerPod(pod)
+			}
+			if test.server != nil {
+				test.server(pod)
+			}
 			allowed := test.allowed
 			if allowed == nil {
 				allowed = []string{"GPU-b"}
