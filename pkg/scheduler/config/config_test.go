@@ -83,11 +83,21 @@ iluvatars:
   resourceCountName: iluvatar.ai/MR-V100-vgpu
   resourceMemoryName: iluvatar.ai/MR-V100.vMem
   resourceCoreName: iluvatar.ai/MR-V100.vCore
+- chipName: MR-V100A
+  commonWord: MR-V100A
+  resourceCountName: iluvatar.ai/MR-V100A-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V100A.vMem
+  resourceCoreName: iluvatar.ai/MR-V100A.vCore
 - chipName: MR-V50
   commonWord: MR-V50
   resourceCountName: iluvatar.ai/MR-V50-vgpu
   resourceMemoryName: iluvatar.ai/MR-V50.vMem
   resourceCoreName: iluvatar.ai/MR-V50.vCore
+- chipName: MR-V50A
+  commonWord: MR-V50A
+  resourceCountName: iluvatar.ai/MR-V50A-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V50A.vMem
+  resourceCoreName: iluvatar.ai/MR-V50A.vCore
 - chipName: BI-V150
   commonWord: BI-V150
   resourceCountName: iluvatar.ai/BI-V150-vgpu
@@ -461,11 +471,25 @@ func createIluvatarConfigs() []iluvatar.IluvatarConfig {
 			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
 		},
 		{
+			ChipName:           "MR-V100A",
+			CommonWord:         "MR-V100A",
+			ResourceCountName:  "iluvatar.ai/MR-V100A-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100A.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100A.vCore",
+		},
+		{
 			ChipName:           "MR-V50",
 			CommonWord:         "MR-V50",
 			ResourceCountName:  "iluvatar.ai/MR-V50-vgpu",
 			ResourceMemoryName: "iluvatar.ai/MR-V50.vMem",
 			ResourceCoreName:   "iluvatar.ai/MR-V50.vCore",
+		},
+		{
+			ChipName:           "MR-V50A",
+			CommonWord:         "MR-V50A",
+			ResourceCountName:  "iluvatar.ai/MR-V50A-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V50A.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V50A.vCore",
 		},
 		{
 			ChipName:           "BI-V150",
