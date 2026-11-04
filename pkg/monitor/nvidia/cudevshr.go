@@ -199,12 +199,14 @@ func (l *ContainerLister) PodLister() corelisters.PodLister {
 
 const lupineServerLookupTTL = 5 * time.Second
 
-// OnLupineServer reports whether this node carries hami.io/lupine-server.
-// vGPUmonitor stands by while the label is set: the remote monitor on the
-// lupine server pod publishes host GPU metrics for that node. A failed lookup
-// leaves the monitor running, so a blip talking to the API does not silence a
-// normal GPU node. The device plugin adds and removes the label as the
-// operating mode changes, and the answer is cached for a few seconds.
+// OnLupineServer reports whether this node is a chart-managed lupine server.
+// That is hami.io/lupine-server present with an empty value. A non-empty value
+// is an operator-chosen port for an externally managed server; those nodes
+// keep collecting. vGPUmonitor stands by on chart-managed nodes so the remote
+// monitor can publish host GPU metrics. A failed lookup leaves the monitor
+// running, so a blip talking to the API does not silence a normal GPU node.
+// The device plugin adds and removes the label as the operating mode changes,
+// and the answer is cached for a few seconds.
 func (l *ContainerLister) OnLupineServer(ctx context.Context) bool {
 	if l == nil {
 		return false
@@ -224,9 +226,9 @@ func (l *ContainerLister) OnLupineServer(ctx context.Context) bool {
 	}
 	if !l.lupineKnown || l.lupineOn != on {
 		if on {
-			klog.InfoS("vGPUmonitor standing by; node is a lupine server", "node", l.nodeName)
+			klog.InfoS("vGPUmonitor standing by; node is a chart-managed lupine server", "node", l.nodeName)
 		} else if l.lupineKnown {
-			klog.InfoS("vGPUmonitor resuming; node is no longer a lupine server", "node", l.nodeName)
+			klog.InfoS("vGPUmonitor resuming; node is no longer a chart-managed lupine server", "node", l.nodeName)
 		}
 	}
 	l.lupineOn = on
@@ -248,8 +250,12 @@ func (l *ContainerLister) lookupLupineServer(ctx context.Context) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	_, ok := node.Labels[remotegpu.LupineServerLabel]
-	return ok, nil
+	val, ok := node.Labels[remotegpu.LupineServerLabel]
+	if !ok {
+		return false, nil
+	}
+	// Empty value: chart-managed. Non-empty: custom port; keep collecting.
+	return val == "", nil
 }
 
 // SetLupineServerForTest replaces the node lookup. Use only in tests.

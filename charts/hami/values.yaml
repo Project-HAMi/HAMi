@@ -825,7 +825,7 @@ devices:
       # Independent container in the Lupine server Pod. Uses devicePlugin.monitor.image.
       # The image must include remoteGPUmonitor; Lupine must expose LUPINE_WORKLOAD_ID as client_id.
       # -- Enable the remote GPU monitor container in chart-managed Lupine server Pods
-      enabled: true
+      enabled: false
       # -- Remote GPU monitor HTTP port on the server node
       port: 31993
       # -- Remote GPU monitor container resources

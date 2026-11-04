@@ -179,9 +179,10 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 			}
 
 		case <-ticker.C:
-			// A lupine server node publishes host metrics from remoteGPUmonitor.
-			// Drop NVML while that label is set, and pick it up again if the
-			// device plugin removes the label.
+			// Chart-managed lupine servers (empty hami.io/lupine-server) may
+			// publish host metrics from remoteGPUmonitor. Drop NVML while that
+			// label is empty, and pick it up again if the device plugin removes
+			// the label or sets a custom port.
 			if lister.OnLupineServer(ctx) {
 				shutdownNVML()
 				continue

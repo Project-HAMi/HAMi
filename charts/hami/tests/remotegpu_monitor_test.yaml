@@ -7,8 +7,18 @@ templates:
 set:
   devices.remotegpu.enabled: true
 tests:
+  - it: omits the remote monitor sidecar by default
+    template: device-plugin/daemonsetlupine.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: lupine-server
+      - notExists:
+          path: spec.template.spec.containers[1]
   - it: gives the monitor its own token and a memory limit
     template: device-plugin/daemonsetlupine.yaml
+    set:
+      devices.remotegpu.monitor.enabled: true
     asserts:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
@@ -32,13 +42,13 @@ tests:
           value: 256Mi
   - it: keeps the device plugin pod when the remote monitor is enabled
     template: device-plugin/daemonsetnvidia.yaml
+    set:
+      devices.remotegpu.monitor.enabled: true
     asserts:
       - notExists:
           path: spec.template.spec.affinity
   - it: keeps vGPUmonitor on lupine nodes when the remote monitor is disabled
     template: device-plugin/daemonsetnvidia.yaml
-    set:
-      devices.remotegpu.monitor.enabled: false
     asserts:
       - notExists:
           path: spec.template.spec.affinity
