@@ -32,6 +32,9 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
+// TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods checks lifecycle and
+// configuration recovery without replacing relays for kubelet restarts or
+// admission-injected additions.
 func TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods(t *testing.T) {
 	const desiredImage = "alpine/socat:new"
 	tests := []struct {
@@ -112,6 +115,8 @@ func TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods(t *testing.T) {
 	}
 }
 
+// TestReconcileSessionStubs_WaitsForGracefulRecovery checks that the fixed relay
+// name is reused only after the old Pod disappears.
 func TestReconcileSessionStubs_WaitsForGracefulRecovery(t *testing.T) {
 	stub, err := sessionStub("kube-system", "gpu-a", "10.0.0.5:14833", "alpine/socat:old", nil)
 	assert.NilError(t, err)
@@ -148,6 +153,8 @@ func TestReconcileSessionStubs_WaitsForGracefulRecovery(t *testing.T) {
 	assert.Equal(t, got[0].Spec.Containers[0].Image, cfg.SessionImage)
 }
 
+// TestReconcileSessionStubs_PreservesLeaderReplacement checks that a stale
+// UID-conditioned delete leaves another leader's replacement intact.
 func TestReconcileSessionStubs_PreservesLeaderReplacement(t *testing.T) {
 	stub, err := sessionStub("kube-system", "gpu-a", "10.0.0.5:14833", "alpine/socat:test", nil)
 	assert.NilError(t, err)

@@ -139,6 +139,8 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	}
 }
 
+// sessionStubMatches reports whether a nonterminal relay has the desired
+// scheduler-managed configuration. Container restarts are left to the kubelet.
 func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []string) bool {
 	if stub.Status.Phase == corev1.PodFailed || stub.Status.Phase == corev1.PodSucceeded ||
 		stubEndpoint(stub) != endpoint || !sessionPullSecretsMatch(stub, pullSecrets) {
