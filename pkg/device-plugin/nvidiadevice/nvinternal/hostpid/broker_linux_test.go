@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -27,15 +28,30 @@ import (
 
 const subprocessHelperEnvironment = "HAMI_HOSTPID_BROKER_HELPER"
 
+const admissionExitHelperEnvironment = "HAMI_HOSTPID_ADMISSION_EXIT_HELPER"
+
 const externalCClientEnvironment = "HAMI_HOSTPID_C_CLIENT"
 
 const externalCStormEnvironment = "HAMI_HOSTPID_C_STORM"
 
+const externalCAdmissionEnvironment = "HAMI_HOSTPID_C_ADMISSION"
+
 func startTestBroker(t *testing.T) (*Broker, string) {
+	return startTestBrokerWithAdmission(t, 0)
+}
+
+func startTestBrokerWithAdmission(t *testing.T,
+	permits int) (*Broker, string) {
+	return startTestBrokerWithLimits(t, maxHandlers, permits)
+}
+
+func startTestBrokerWithLimits(t *testing.T, handlerLimit int,
+	permits int) (*Broker, string) {
 	t.Helper()
 	directory := t.TempDir()
 	socketPath := filepath.Join(directory, "broker.sock")
-	broker, err := listen(socketPath, os.Geteuid())
+	broker, err := listenWithLimits(socketPath, os.Geteuid(), handlerLimit,
+		permits)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -52,6 +68,58 @@ func startTestBroker(t *testing.T) (*Broker, string) {
 		}
 	})
 	return broker, socketPath
+}
+
+func acquireDriverAdmission(socketPath string,
+	timeout time.Duration) (net.Conn, uint16, uint32, error) {
+	return acquireDriverAdmissionCommand(socketPath, timeout,
+		commandAcquireDriverInit)
+}
+
+func acquireDriverAdmissionCommand(socketPath string, timeout time.Duration,
+	command uint16) (net.Conn, uint16, uint32, error) {
+	connection, err := net.DialTimeout("unix", socketPath, timeout)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if err := connection.SetDeadline(time.Now().Add(timeout)); err != nil {
+		_ = connection.Close()
+		return nil, 0, 0, err
+	}
+	request := []byte{'H', 'P', 'I', 'D', 0, 1,
+		byte(command >> 8), byte(command)}
+	if _, err := connection.Write(request); err != nil {
+		_ = connection.Close()
+		return nil, 0, 0, err
+	}
+	response := make([]byte, responseSize)
+	if _, err := io.ReadFull(connection, response); err != nil {
+		_ = connection.Close()
+		return nil, 0, 0, err
+	}
+	if string(response[:4]) != "HPID" ||
+		binary.BigEndian.Uint16(response[4:6]) != protocolVersion {
+		_ = connection.Close()
+		return nil, 0, 0, errors.New("invalid broker response")
+	}
+	return connection, binary.BigEndian.Uint16(response[6:8]),
+		binary.BigEndian.Uint32(response[8:12]), nil
+}
+
+func openAdmissionRequest(t *testing.T, socketPath string,
+	command uint16) net.Conn {
+	t.Helper()
+	connection, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := []byte{'H', 'P', 'I', 'D', 0, 1,
+		byte(command >> 8), byte(command)}
+	if _, err := connection.Write(request); err != nil {
+		_ = connection.Close()
+		t.Fatal(err)
+	}
+	return connection
 }
 
 func queryBroker(socketPath string) (uint16, uint32, error) {
@@ -133,6 +201,40 @@ func TestBrokerExternalCClientStorm(t *testing.T) {
 	}
 }
 
+func TestBrokerExternalCAdmissionContract(t *testing.T) {
+	clientPath := os.Getenv(externalCAdmissionEnvironment)
+	if clientPath == "" {
+		t.Skip("HAMI_HOSTPID_C_ADMISSION is not set")
+	}
+	t.Run("bounded storm", func(t *testing.T) {
+		_, socketPath := startTestBrokerWithAdmission(t, 5)
+		command := exec.Command(clientPath, "storm", socketPath,
+			"64", "4", "5")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("C admission storm failed: %v\n%s", err, output)
+		}
+	})
+	t.Run("process death", func(t *testing.T) {
+		_, socketPath := startTestBrokerWithAdmission(t, 2)
+		command := exec.Command(clientPath, "death", socketPath)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("C admission process-death test failed: %v\n%s",
+				err, output)
+		}
+	})
+	t.Run("disabled", func(t *testing.T) {
+		_, socketPath := startTestBroker(t)
+		command := exec.Command(clientPath, "disabled", socketPath)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("C disabled admission test failed: %v\n%s", err,
+				output)
+		}
+	})
+}
+
 func TestBrokerSubprocessHelper(t *testing.T) {
 	socketPath := os.Getenv(subprocessHelperEnvironment)
 	if socketPath == "" {
@@ -148,12 +250,44 @@ func TestBrokerSubprocessHelper(t *testing.T) {
 	}
 }
 
+func TestBrokerDriverAdmissionReleasesOnProcessExit(t *testing.T) {
+	_, socketPath := startTestBrokerWithAdmission(t, 2)
+	command := exec.Command(os.Args[0],
+		"-test.run=^TestBrokerAdmissionExitHelper$")
+	command.Env = append(os.Environ(),
+		admissionExitHelperEnvironment+"="+socketPath)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, output)
+	}
+	connection, status, _, err := acquireDriverAdmission(socketPath,
+		time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("admission after process exit: status=%d err=%v",
+			status, err)
+	}
+	_ = connection.Close()
+}
+
+func TestBrokerAdmissionExitHelper(t *testing.T) {
+	socketPath := os.Getenv(admissionExitHelperEnvironment)
+	if socketPath == "" {
+		return
+	}
+	connection, status, _, err := acquireDriverAdmission(socketPath,
+		time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("admission: status=%d err=%v", status, err)
+	}
+	_ = connection
+}
+
 func TestBrokerRejectsInvalidRequest(t *testing.T) {
 	_, socketPath := startTestBroker(t)
 	tests := map[string][]byte{
 		"magic":   {'B', 'A', 'D', '!', 0, 1, 0, 1},
 		"version": {'H', 'P', 'I', 'D', 0, 2, 0, 1},
-		"command": {'H', 'P', 'I', 'D', 0, 1, 0, 2},
+		"command": {'H', 'P', 'I', 'D', 0, 1, 0, 5},
 	}
 	for name, request := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -176,6 +310,463 @@ func TestBrokerRejectsInvalidRequest(t *testing.T) {
 				t.Fatalf("got PID %d", pid)
 			}
 		})
+	}
+}
+
+func TestBrokerReportsDisabledDriverAdmission(t *testing.T) {
+	_, socketPath := startTestBroker(t)
+	connection, status, payload, err := acquireDriverAdmission(socketPath,
+		time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if status != statusUnavailable || payload != 0 {
+		t.Fatalf("status=%d payload=%d", status, payload)
+	}
+}
+
+func TestBrokerBoundsAndReleasesDriverAdmission(t *testing.T) {
+	broker, socketPath := startTestBrokerWithAdmission(t, 3)
+	first, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("first admission: status=%d err=%v", status, err)
+	}
+	defer first.Close()
+	second, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("second admission: status=%d err=%v", status, err)
+	}
+	defer second.Close()
+	if got := broker.admission.activeCount(); got != 2 {
+		t.Fatalf("active admissions=%d, want 2", got)
+	}
+
+	type result struct {
+		connection net.Conn
+		status     uint16
+		err        error
+	}
+	thirdResult := make(chan result, 1)
+	go func() {
+		connection, status, _, err := acquireDriverAdmission(socketPath,
+			2*time.Second)
+		thirdResult <- result{connection: connection, status: status, err: err}
+	}()
+	select {
+	case result := <-thirdResult:
+		if result.connection != nil {
+			_ = result.connection.Close()
+		}
+		t.Fatalf("third admission did not wait: status=%d err=%v",
+			result.status, result.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-thirdResult:
+		if result.err != nil || result.status != statusOK {
+			t.Fatalf("third admission: status=%d err=%v",
+				result.status, result.err)
+		}
+		_ = result.connection.Close()
+	case <-time.After(time.Second):
+		t.Fatal("third admission was not granted after release")
+	}
+}
+
+func TestBrokerReservesReleaseCapacity(t *testing.T) {
+	broker, socketPath := startTestBrokerWithAdmission(t, 2)
+	retain, status, _, err := acquireDriverAdmissionCommand(socketPath,
+		time.Second, commandAcquireDriverRetain)
+	if err != nil || status != statusOK {
+		t.Fatalf("first retain admission: status=%d err=%v", status, err)
+	}
+	defer retain.Close()
+
+	type result struct {
+		connection net.Conn
+		status     uint16
+		err        error
+	}
+	secondRetain := make(chan result, 1)
+	go func() {
+		connection, status, _, err := acquireDriverAdmissionCommand(
+			socketPath, 2*time.Second, commandAcquireDriverRetain)
+		secondRetain <- result{connection: connection, status: status, err: err}
+	}()
+	select {
+	case got := <-secondRetain:
+		if got.connection != nil {
+			_ = got.connection.Close()
+		}
+		t.Fatalf("second retain did not wait: status=%d err=%v",
+			got.status, got.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release, status, _, err := acquireDriverAdmissionCommand(socketPath,
+		time.Second, commandAcquireDriverRelease)
+	if err != nil || status != statusOK {
+		t.Fatalf("release admission: status=%d err=%v", status, err)
+	}
+	if got := broker.admission.activeCount(); got != 2 {
+		t.Fatalf("active admissions=%d, want 2", got)
+	}
+	if err := release.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-secondRetain:
+		if got.connection != nil {
+			_ = got.connection.Close()
+		}
+		t.Fatalf("release slot admitted another retain: status=%d err=%v",
+			got.status, got.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := retain.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-secondRetain:
+		if got.err != nil || got.status != statusOK {
+			t.Fatalf("second retain: status=%d err=%v", got.status, got.err)
+		}
+		_ = got.connection.Close()
+	case <-time.After(time.Second):
+		t.Fatal("second retain was not granted after forward release")
+	}
+}
+
+func TestBrokerDriverAdmissionConcurrentBound(t *testing.T) {
+	const permits = 4
+	const forwardPermits = permits - 1
+	const clients = 64
+	_, socketPath := startTestBrokerWithAdmission(t, permits)
+	var active atomic.Int32
+	var maximum atomic.Int32
+	errorsChannel := make(chan error, clients)
+	var waitGroup sync.WaitGroup
+
+	for range clients {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			connection, status, _, err := acquireDriverAdmission(socketPath,
+				3*time.Second)
+			if err != nil || status != statusOK {
+				errorsChannel <- fmt.Errorf("status=%d err=%v", status, err)
+				return
+			}
+			current := active.Add(1)
+			for {
+				observed := maximum.Load()
+				if current <= observed || maximum.CompareAndSwap(observed, current) {
+					break
+				}
+			}
+			if current > forwardPermits {
+				errorsChannel <- fmt.Errorf("active admissions=%d", current)
+			}
+			time.Sleep(2 * time.Millisecond)
+			active.Add(-1)
+			_ = connection.Close()
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsChannel)
+	for err := range errorsChannel {
+		t.Error(err)
+	}
+	if maximum.Load() != forwardPermits {
+		t.Fatalf("maximum active admissions=%d, want %d",
+			maximum.Load(), forwardPermits)
+	}
+}
+
+func TestBrokerAdmissionIgnoresClientBytes(t *testing.T) {
+	broker, socketPath := startTestBrokerWithAdmission(t, 2)
+	connection, status, _, err := acquireDriverAdmission(socketPath,
+		time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("admission: status=%d err=%v", status, err)
+	}
+	defer func() { _ = connection.Close() }()
+	if got := broker.admission.activeCount(); got != 1 {
+		t.Fatalf("active admissions=%d, want 1", got)
+	}
+
+	if _, err := connection.Write([]byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := broker.admission.activeCount(); got != 1 {
+		t.Fatalf("client data released the lease: active=%d", got)
+	}
+
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for broker.admission.activeCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("lease was not released after the client closed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestBrokerRejectsAdmissionAboveHandlerBudget(t *testing.T) {
+	const handlerLimit = 8
+	broker, socketPath := startTestBrokerWithLimits(t, handlerLimit, 2)
+	budget := admissionHandlerBudget(handlerLimit)
+	connections := make([]net.Conn, 0, budget)
+	defer func() {
+		for _, connection := range connections {
+			_ = connection.Close()
+		}
+	}()
+	for range budget {
+		connections = append(connections,
+			openAdmissionRequest(t, socketPath, commandAcquireDriverInit))
+	}
+	deadline := time.Now().Add(time.Second)
+	for broker.admissionHandlers.Load() != int64(budget) {
+		if time.Now().After(deadline) {
+			t.Fatalf("admission handlers=%d, want %d",
+				broker.admissionHandlers.Load(), budget)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	rejected := openAdmissionRequest(t, socketPath,
+		commandAcquireDriverInit)
+	defer func() { _ = rejected.Close() }()
+	if err := rejected.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, responseSize)
+	if _, err := io.ReadFull(rejected, response); err != nil {
+		t.Fatal(err)
+	}
+	if status := binary.BigEndian.Uint16(response[6:8]); status !=
+		statusUnavailable {
+		t.Fatalf("admission above the handler budget: status=%d", status)
+	}
+
+	status, pid, err := queryBroker(socketPath)
+	if err != nil || status != statusOK || pid != uint32(os.Getpid()) {
+		t.Fatalf("PID query under admission pressure: status=%d pid=%d err=%v",
+			status, pid, err)
+	}
+}
+
+func TestDriverAdmissionCancelsQueuedWaiter(t *testing.T) {
+	controller := newDriverAdmissionController(2)
+	shutdown := make(chan struct{})
+	idle := make(chan struct{})
+	if !controller.acquire(driverAdmissionRetain, idle, shutdown) {
+		t.Fatal("initial admission was not granted")
+	}
+
+	connectionDone := make(chan struct{})
+	result := make(chan bool, 1)
+	go func() {
+		result <- controller.acquire(driverAdmissionInit, connectionDone,
+			shutdown)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		controller.mutex.Lock()
+		queued := len(controller.queues[driverAdmissionInit])
+		controller.mutex.Unlock()
+		if queued == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("admission request did not queue")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(connectionDone)
+	select {
+	case granted := <-result:
+		if granted {
+			t.Fatal("canceled admission was granted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled admission did not return")
+	}
+	if got := controller.activeCount(); got != 1 {
+		t.Fatalf("active admissions=%d, want 1", got)
+	}
+
+	controller.release(driverAdmissionRetain)
+	if !controller.acquire(driverAdmissionInit, idle, shutdown) {
+		t.Fatal("admission after cancellation was not granted")
+	}
+}
+
+func TestDriverAdmissionPrioritizesLifecycleCompletion(t *testing.T) {
+	controller := newDriverAdmissionController(2)
+	connectionDone := make(chan struct{})
+	shutdown := make(chan struct{})
+	if !controller.acquire(driverAdmissionRetain, connectionDone, shutdown) {
+		t.Fatal("initial admission was not granted")
+	}
+
+	order := make(chan driverAdmissionPriority, 2)
+	releaseGates := map[driverAdmissionPriority]chan struct{}{
+		driverAdmissionInit:   make(chan struct{}),
+		driverAdmissionRetain: make(chan struct{}),
+	}
+	for _, priority := range []driverAdmissionPriority{
+		driverAdmissionInit,
+		driverAdmissionRetain,
+	} {
+		priority := priority
+		go func() {
+			if !controller.acquire(priority, connectionDone, shutdown) {
+				return
+			}
+			order <- priority
+			<-releaseGates[priority]
+			controller.release(priority)
+		}()
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		controller.mutex.Lock()
+		queued := len(controller.queues[driverAdmissionInit]) +
+			len(controller.queues[driverAdmissionRetain])
+		controller.mutex.Unlock()
+		if queued == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("admission requests did not queue")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if !controller.acquire(driverAdmissionRelease, connectionDone, shutdown) {
+		t.Fatal("reserved release admission was not granted")
+	}
+	if got := controller.activeCount(); got != 2 {
+		t.Fatalf("active admissions=%d, want 2", got)
+	}
+	controller.release(driverAdmissionRelease)
+	controller.release(driverAdmissionRetain)
+	for _, expected := range []driverAdmissionPriority{
+		driverAdmissionRetain,
+		driverAdmissionInit,
+	} {
+		select {
+		case got := <-order:
+			if got != expected {
+				t.Fatalf("grant priority=%d, want %d", got, expected)
+			}
+			close(releaseGates[got])
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for priority %d", expected)
+		}
+	}
+}
+
+func TestDriverAdmissionBoundsRetainPriorityBurst(t *testing.T) {
+	controller := newDriverAdmissionController(2)
+	controller.mutex.Lock()
+	controller.retainPriorityGrants = maximumRetainPriorityBurst
+	controller.queues[driverAdmissionRetain] = append(
+		controller.queues[driverAdmissionRetain],
+		&driverAdmissionWaiter{granted: make(chan struct{})})
+	controller.queues[driverAdmissionInit] = append(
+		controller.queues[driverAdmissionInit],
+		&driverAdmissionWaiter{granted: make(chan struct{})})
+	priority, ok := controller.nextForwardPriorityLocked()
+	controller.mutex.Unlock()
+	if !ok || priority != driverAdmissionInit {
+		t.Fatalf("priority=%d valid=%v, want initialization", priority, ok)
+	}
+}
+
+func TestBrokerDriverAdmissionDoesNotExpire(t *testing.T) {
+	_, socketPath := startTestBrokerWithAdmission(t, 2)
+	first, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("first admission: status=%d err=%v", status, err)
+	}
+	defer first.Close()
+
+	result := make(chan error, 1)
+	go func() {
+		connection, status, _, err := acquireDriverAdmission(socketPath,
+			500*time.Millisecond)
+		if connection != nil {
+			_ = connection.Close()
+		}
+		if err == nil && status != statusOK {
+			err = fmt.Errorf("status=%d", status)
+		}
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("queued admission completed while the lease was active: %v",
+			err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatalf("queued admission after release: %v", err)
+	}
+}
+
+func TestBrokerCloseBoundsDriverAdmission(t *testing.T) {
+	directory := t.TempDir()
+	socketPath := filepath.Join(directory, "broker.sock")
+	broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- broker.Serve() }()
+
+	connection, status, _, err := acquireDriverAdmission(socketPath,
+		time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("admission: status=%d err=%v", status, err)
+	}
+	begin := time.Now()
+	if err := broker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("close took %s", elapsed)
+	}
+	if err := <-serveResult; err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.Close()
+}
+
+func TestBrokerRejectsInvalidAdmissionLimit(t *testing.T) {
+	directory := t.TempDir()
+	socketPath := filepath.Join(directory, "broker.sock")
+	for _, permits := range []int{-1, 1, MaximumDriverAdmissionPermits + 1} {
+		broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers,
+			permits)
+		if err == nil {
+			_ = broker.Close()
+			t.Fatalf("accepted admission permits %d", permits)
+		}
 	}
 }
 

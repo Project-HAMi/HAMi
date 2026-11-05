@@ -25,19 +25,210 @@ import (
 )
 
 const (
-	transactionTimeout  = 500 * time.Millisecond
-	activeProbeTimeout  = 50 * time.Millisecond
-	acceptRetryInitial  = 5 * time.Millisecond
-	acceptRetryMaximum  = time.Second
-	maxHandlers         = 512
-	serverDirectoryMode = 0o711
-	serverSocketMode    = 0o666
-	serverLockMode      = 0o600
+	transactionTimeout         = 500 * time.Millisecond
+	activeProbeTimeout         = 50 * time.Millisecond
+	acceptRetryInitial         = 5 * time.Millisecond
+	acceptRetryMaximum         = time.Second
+	maxHandlers                = 512
+	pidHandlerReserve          = 64
+	serverDirectoryMode        = 0o711
+	serverSocketMode           = 0o666
+	serverLockMode             = 0o600
+	maximumRetainPriorityBurst = 8
 )
 
 type socketIdentity struct {
 	device uint64
 	inode  uint64
+}
+
+type driverAdmissionPriority uint8
+
+const (
+	driverAdmissionRelease driverAdmissionPriority = iota
+	driverAdmissionRetain
+	driverAdmissionInit
+	driverAdmissionPriorityCount
+)
+
+type driverAdmissionWaiterState uint8
+
+const (
+	driverAdmissionPending driverAdmissionWaiterState = iota
+	driverAdmissionGranted
+	driverAdmissionCanceled
+)
+
+type driverAdmissionWaiter struct {
+	granted chan struct{}
+	state   driverAdmissionWaiterState
+}
+
+type driverAdmissionController struct {
+	mutex                sync.Mutex
+	forwardPermits       int
+	activeForward        int
+	releaseActive        bool
+	retainPriorityGrants int
+	queues               [driverAdmissionPriorityCount][]*driverAdmissionWaiter
+	closed               bool
+}
+
+func newDriverAdmissionController(permits int) *driverAdmissionController {
+	if permits == 0 {
+		return nil
+	}
+	return &driverAdmissionController{forwardPermits: permits - 1}
+}
+
+func admissionPriority(command uint16) (driverAdmissionPriority, bool) {
+	switch command {
+	case commandAcquireDriverInit:
+		return driverAdmissionInit, true
+	case commandAcquireDriverRetain:
+		return driverAdmissionRetain, true
+	case commandAcquireDriverRelease:
+		return driverAdmissionRelease, true
+	default:
+		return 0, false
+	}
+}
+
+func (controller *driverAdmissionController) acquire(
+	priority driverAdmissionPriority, connectionDone <-chan struct{},
+	shutdown <-chan struct{}) bool {
+	waiter := &driverAdmissionWaiter{granted: make(chan struct{})}
+	controller.mutex.Lock()
+	if controller.closed {
+		controller.mutex.Unlock()
+		return false
+	}
+	controller.queues[priority] = append(controller.queues[priority], waiter)
+	controller.grantLocked()
+	controller.mutex.Unlock()
+
+	select {
+	case <-waiter.granted:
+		return true
+	case <-connectionDone:
+		return controller.cancelOrObserveGrant(waiter)
+	case <-shutdown:
+		return controller.cancelOrObserveGrant(waiter)
+	}
+}
+
+func (controller *driverAdmissionController) cancelOrObserveGrant(
+	waiter *driverAdmissionWaiter) bool {
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+	if waiter.state == driverAdmissionPending {
+		waiter.state = driverAdmissionCanceled
+		controller.grantLocked()
+		return false
+	}
+	return waiter.state == driverAdmissionGranted
+}
+
+func (controller *driverAdmissionController) release(
+	priority driverAdmissionPriority) {
+	controller.mutex.Lock()
+	if priority == driverAdmissionRelease {
+		controller.releaseActive = false
+	} else if controller.activeForward > 0 {
+		controller.activeForward--
+	}
+	controller.grantLocked()
+	controller.mutex.Unlock()
+}
+
+func (controller *driverAdmissionController) close() {
+	controller.mutex.Lock()
+	controller.closed = true
+	for priority := driverAdmissionRelease; priority < driverAdmissionPriorityCount; priority++ {
+		for _, waiter := range controller.queues[priority] {
+			if waiter.state == driverAdmissionPending {
+				waiter.state = driverAdmissionCanceled
+			}
+		}
+		controller.queues[priority] = nil
+	}
+	controller.mutex.Unlock()
+}
+
+func (controller *driverAdmissionController) grantLocked() {
+	if controller.closed {
+		return
+	}
+	if !controller.releaseActive {
+		if waiter, ok := controller.dequeueLocked(driverAdmissionRelease); ok {
+			waiter.state = driverAdmissionGranted
+			controller.releaseActive = true
+			close(waiter.granted)
+		}
+	}
+	for controller.activeForward < controller.forwardPermits {
+		priority, ok := controller.nextForwardPriorityLocked()
+		if !ok {
+			return
+		}
+		waiter, _ := controller.dequeueLocked(priority)
+		waiter.state = driverAdmissionGranted
+		controller.activeForward++
+		if priority == driverAdmissionRetain {
+			controller.retainPriorityGrants++
+		} else if priority == driverAdmissionInit {
+			controller.retainPriorityGrants = 0
+		}
+		close(waiter.granted)
+	}
+}
+
+func (controller *driverAdmissionController) nextForwardPriorityLocked() (
+	driverAdmissionPriority, bool) {
+	retainPending := controller.hasPendingLocked(driverAdmissionRetain)
+	initPending := controller.hasPendingLocked(driverAdmissionInit)
+	if retainPending && (!initPending ||
+		controller.retainPriorityGrants < maximumRetainPriorityBurst) {
+		return driverAdmissionRetain, true
+	}
+	if initPending {
+		return driverAdmissionInit, true
+	}
+	if retainPending {
+		return driverAdmissionRetain, true
+	}
+	return 0, false
+}
+
+func (controller *driverAdmissionController) dequeueLocked(
+	priority driverAdmissionPriority) (*driverAdmissionWaiter, bool) {
+	if !controller.hasPendingLocked(priority) {
+		return nil, false
+	}
+	queue := controller.queues[priority]
+	waiter := queue[0]
+	controller.queues[priority] = queue[1:]
+	return waiter, true
+}
+
+func (controller *driverAdmissionController) hasPendingLocked(
+	priority driverAdmissionPriority) bool {
+	queue := controller.queues[priority]
+	for len(queue) > 0 && queue[0].state != driverAdmissionPending {
+		queue = queue[1:]
+	}
+	controller.queues[priority] = queue
+	return len(queue) > 0
+}
+
+func (controller *driverAdmissionController) activeCount() int {
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+	active := controller.activeForward
+	if controller.releaseActive {
+		active++
+	}
+	return active
 }
 
 type Broker struct {
@@ -50,25 +241,55 @@ type Broker struct {
 	handlerMu    sync.Mutex
 	closing      atomic.Bool
 	dropped      atomic.Uint64
-	closeOnce    sync.Once
-	closeErr     error
+	admission    *driverAdmissionController
+	// admissionHandlers tracks connections waiting for or holding a driver
+	// admission lease. The budget leaves handler slots for PID queries, whose
+	// clients cannot use the admission queue.
+	admissionHandlers      atomic.Int64
+	admissionHandlerBudget int
+	shutdown               chan struct{}
+	closeOnce              sync.Once
+	closeErr               error
+}
+
+func admissionHandlerBudget(handlerLimit int) int {
+	reserve := handlerLimit / 4
+	if reserve > pidHandlerReserve {
+		reserve = pidHandlerReserve
+	}
+	return handlerLimit - reserve
 }
 
 func ListenDefault() (*Broker, error) {
 	if os.Geteuid() != 0 {
 		return nil, errors.New("the host PID broker must run as root")
 	}
-	return listen(ServerSocketPath, 0)
+	permits, err := ParseDriverAdmissionPermits(
+		os.Getenv(DriverAdmissionPermitsEnvironment))
+	if err != nil {
+		return nil, err
+	}
+	return listenWithLimits(ServerSocketPath, 0, maxHandlers, permits)
 }
 
 func listen(socketPath string, ownerUID int) (*Broker, error) {
-	return listenWithHandlerLimit(socketPath, ownerUID, maxHandlers)
+	return listenWithLimits(socketPath, ownerUID, maxHandlers, 0)
 }
 
 func listenWithHandlerLimit(socketPath string, ownerUID int,
 	handlerLimit int) (*Broker, error) {
+	return listenWithLimits(socketPath, ownerUID, handlerLimit, 0)
+}
+
+func listenWithLimits(socketPath string, ownerUID int,
+	handlerLimit int, admissionPermits int) (*Broker, error) {
 	if handlerLimit <= 0 {
 		return nil, errors.New("host PID broker handler limit must be positive")
+	}
+	if admissionPermits < 0 || admissionPermits == 1 ||
+		admissionPermits > MaximumDriverAdmissionPermits {
+		return nil, fmt.Errorf("host PID broker admission permits must be 0 or between 2 and %d",
+			MaximumDriverAdmissionPermits)
 	}
 	directory := filepath.Dir(socketPath)
 	if err := prepareDirectory(directory, ownerUID); err != nil {
@@ -114,13 +335,17 @@ func listenWithHandlerLimit(socketPath string, ownerUID int,
 
 	cleanupListener = false
 	releaseLock = false
-	return &Broker{
-		listener:     listener,
-		socketPath:   socketPath,
-		socket:       identity,
-		lockFile:     lockFile,
-		handlerSlots: make(chan struct{}, handlerLimit),
-	}, nil
+	broker := &Broker{
+		listener:               listener,
+		socketPath:             socketPath,
+		socket:                 identity,
+		lockFile:               lockFile,
+		handlerSlots:           make(chan struct{}, handlerLimit),
+		admissionHandlerBudget: admissionHandlerBudget(handlerLimit),
+		shutdown:               make(chan struct{}),
+	}
+	broker.admission = newDriverAdmissionController(admissionPermits)
+	return broker, nil
 }
 
 func prepareDirectory(directory string, ownerUID int) error {
@@ -295,7 +520,8 @@ func (broker *Broker) handle(connection *net.UnixConn) {
 		broker.logDroppedTransaction("request read", err)
 		return
 	}
-	if !validRequest(request) {
+	command, valid := requestCommand(request)
+	if !valid {
 		response := makeResponse(statusInvalidRequest, 0)
 		writeResponse(connection, response)
 		return
@@ -309,8 +535,65 @@ func (broker *Broker) handle(connection *net.UnixConn) {
 	if pid <= 0 {
 		return
 	}
-	response := makeResponse(statusOK, uint32(pid))
-	writeResponse(connection, response)
+	if command == commandGetPID {
+		response := makeResponse(statusOK, uint32(pid))
+		writeResponse(connection, response)
+		return
+	}
+	priority, ok := admissionPriority(command)
+	if !ok {
+		writeResponse(connection, makeResponse(statusInvalidRequest, 0))
+		return
+	}
+	broker.handleDriverAdmission(connection, uint32(pid), priority)
+}
+
+func (broker *Broker) handleDriverAdmission(connection *net.UnixConn,
+	peerPID uint32, priority driverAdmissionPriority) {
+	if broker.admission == nil {
+		writeResponse(connection, makeResponse(statusUnavailable, 0))
+		return
+	}
+	if broker.admissionHandlers.Add(1) >
+		int64(broker.admissionHandlerBudget) {
+		broker.admissionHandlers.Add(-1)
+		writeResponse(connection, makeResponse(statusUnavailable, 0))
+		return
+	}
+	defer broker.admissionHandlers.Add(-1)
+
+	if err := connection.SetDeadline(time.Time{}); err != nil {
+		return
+	}
+	connectionDone := make(chan struct{})
+	go func() {
+		buffer := make([]byte, 1)
+		for {
+			read, _ := connection.Read(buffer)
+			if read > 0 {
+				continue
+			}
+			close(connectionDone)
+			return
+		}
+	}()
+
+	if !broker.admission.acquire(priority, connectionDone, broker.shutdown) {
+		return
+	}
+	defer broker.admission.release(priority)
+
+	if err := connection.SetWriteDeadline(
+		time.Now().Add(transactionTimeout)); err != nil {
+		return
+	}
+	if !writeResponse(connection, makeResponse(statusOK, peerPID)) {
+		return
+	}
+	select {
+	case <-connectionDone:
+	case <-broker.shutdown:
+	}
 }
 
 func (broker *Broker) logDroppedTransaction(operation string, err error) {
@@ -324,15 +607,16 @@ func (broker *Broker) logDroppedTransaction(operation string, err error) {
 }
 
 func writeResponse(connection *net.UnixConn,
-	response [responseSize]byte) {
+	response [responseSize]byte) bool {
 	written := 0
 	for written < len(response) {
 		count, err := connection.Write(response[written:])
 		if err != nil || count == 0 {
-			return
+			return false
 		}
 		written += count
 	}
+	return true
 }
 
 func peerPID(connection *net.UnixConn) (int32, error) {
@@ -361,6 +645,10 @@ func (broker *Broker) Close() error {
 	broker.closeOnce.Do(func() {
 		broker.handlerMu.Lock()
 		broker.closing.Store(true)
+		if broker.admission != nil {
+			broker.admission.close()
+		}
+		close(broker.shutdown)
 		broker.handlerMu.Unlock()
 
 		listenerErr := broker.listener.Close()
