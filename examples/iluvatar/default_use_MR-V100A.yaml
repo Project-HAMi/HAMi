@@ -22,8 +22,8 @@ spec:
       requests:
         iluvatar.ai/MR-V100A-vgpu: 1
         iluvatar.ai/MR-V100A.vCore: 50
-        iluvatar.ai/MR-V100A.vMem: 64
+        iluvatar.ai/MR-V100A.vMem: 4
       limits:
         iluvatar.ai/MR-V100A-vgpu: 1
         iluvatar.ai/MR-V100A.vCore: 50
-        iluvatar.ai/MR-V100A.vMem: 64
+        iluvatar.ai/MR-V100A.vMem: 4
