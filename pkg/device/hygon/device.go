@@ -277,6 +277,35 @@ func (hcu *HCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// fitQuota checks the pod's hypothetical usage, including the resolved candidate
+// and tentative allocations, without changing the caller's allocations.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, devUUID string, memreq int64, coresreq int64) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[HygonHCUDevice]...)
+	cur = append(cur, device.ContainerDevice{
+		UUID:      devUUID,
+		Type:      HygonHCUDevice,
+		Usedmem:   memreq,
+		Usedcores: coresreq,
+	})
+	hypo[HygonHCUDevice] = append(hypo[HygonHCUDevice], cur)
+
+	var mem, core int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[HygonHCUDevice] {
+		for _, val := range ctrDevs {
+			mem += val.Usedmem
+			core += val.Usedcores
+		}
+	}
+
+	return device.GetLocalCache().FitQuota(ns, mem, core, HygonHCUDevice)
+}
+
 func (hcu *HCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -336,6 +365,11 @@ func (hcu *HCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, k.Coresreq) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
