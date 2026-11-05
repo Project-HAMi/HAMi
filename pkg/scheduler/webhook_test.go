@@ -1429,26 +1429,7 @@ func TestHandleSchedulerPolicyAnnotation(t *testing.T) {
 				Spec: corev1.PodSpec{Containers: []corev1.Container{container}},
 			}
 
-			scheme := runtime.NewScheme()
-			_ = corev1.AddToScheme(scheme)
-			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
-			podBytes, err := runtime.Encode(codec, pod)
-			if err != nil {
-				t.Fatalf("Error encoding pod: %v", err)
-			}
-
-			req := admission.Request{
-				AdmissionRequest: admissionv1.AdmissionRequest{
-					UID: "test-uid", Namespace: "default", Name: "policy-pod",
-					Object: runtime.RawExtension{Raw: podBytes},
-				},
-			}
-
-			wh, err := NewWebHook()
-			if err != nil {
-				t.Fatalf("Error creating webhook: %v", err)
-			}
-			resp := wh.Handle(context.Background(), req)
+			resp := admitPod(t, pod)
 
 			if test.wantDenied {
 				if resp.Allowed {
