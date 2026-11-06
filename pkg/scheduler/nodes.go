@@ -104,6 +104,25 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	}
 }
 
+// refreshNodeObject replaces just the cached Node for an already-registered
+// node, leaving its Devices untouched. register calls this when a vendor's
+// CheckHealth reports needUpdate=false but the live Node differs from the
+// cached one in a way CheckHealth does not look at (such as the
+// hami.io/device-cordon annotation), so that change reaches Fit() without
+// waiting for a vendor-triggered cache refresh.
+func (m *nodeManager) refreshNodeObject(nodeID string, node *corev1.Node) {
+	if node == nil {
+		return
+	}
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	existing, ok := m.nodes[nodeID]
+	if !ok {
+		return
+	}
+	existing.Node = node.DeepCopy()
+}
+
 func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
