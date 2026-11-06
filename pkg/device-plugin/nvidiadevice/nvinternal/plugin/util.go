@@ -268,6 +268,9 @@ func (plugin *NvidiaDevicePlugin) registeredMemoryMB(uuid string) (int64, bool) 
 // pod.Annotations in place so that subsequent Allocate calls within the same
 // kubelet invocation see the erased state.
 func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.PodSingleDevice) error {
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
 	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
 	encoded := device.EncodePodSingleDevice(podSingleDev)
 	annoKey := device.InRequestDevices[dtype]
