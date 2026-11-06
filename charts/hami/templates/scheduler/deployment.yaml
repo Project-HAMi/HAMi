@@ -43,6 +43,10 @@ spec:
     spec:
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
+      {{- /* No Pod-level securityContext here: it would also bind the
+             colocated kube-scheduler container, which this chart does not
+             set a context for. The extender sets its own container-level
+             context below. */}}
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
@@ -85,14 +89,45 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
-          {{- if .Values.platform.openshift }}
+          {{- /* Setting the value to false renders no securityContext on
+                 any platform. Setting it to null in an overriding values
+                 file removes the key before this template runs, and a
+                 missing key renders no context either, except on
+                 OpenShift: a missing key is also what values reused from
+                 a release that predates this value look like (helm upgrade
+                 --reuse-values), and on OpenShift this context was
+                 hardcoded before it became a value, so those upgrades
+                 keep the platform default below instead of losing it.
+                 On OpenShift the extender also gets runAsNonRoot, as it
+                 did when this context was hardcoded for the platform,
+                 unless the value sets it itself: the platform assigns the
+                 Pod a user ID, while on other platforms the image sets no
+                 user and the chart no runAsUser, so requiring one there
+                 would keep the Pod from starting. */}}
+          {{- $extenderDefaults := dict
+                "allowPrivilegeEscalation" false
+                "capabilities" (dict "drop" (list "ALL"))
+                "seccompProfile" (dict "type" "RuntimeDefault") }}
+          {{- $extenderSecurityContext := dict }}
+          {{- if hasKey .Values.scheduler.extender "securityContext" }}
+          {{- $configuredSecurityContext := .Values.scheduler.extender.securityContext }}
+          {{- if kindIs "bool" $configuredSecurityContext }}
+          {{- if $configuredSecurityContext }}
+          {{- $extenderSecurityContext = $extenderDefaults }}
+          {{- end }}
+          {{- else }}
+          {{- $extenderSecurityContext = $configuredSecurityContext }}
+          {{- end }}
+          {{- else if .Values.platform.openshift }}
+          {{- $extenderSecurityContext = $extenderDefaults }}
+          {{- end }}
+          {{- if and .Values.platform.openshift $extenderSecurityContext (not (hasKey $extenderSecurityContext "runAsNonRoot")) }}
+          {{- $extenderSecurityContext = deepCopy $extenderSecurityContext }}
+          {{- $_ := set $extenderSecurityContext "runAsNonRoot" true }}
+          {{- end }}
+          {{- with $extenderSecurityContext }}
           securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            seccompProfile:
-              type: RuntimeDefault
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
             - name: POD_NAME
