@@ -1,0 +1,10 @@
+{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.server.enabled .Values.devices.remotegpu.monitor.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-remote-monitor
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+{{- end }}

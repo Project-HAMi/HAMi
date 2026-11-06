@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -100,6 +102,13 @@ type ContainerLister struct {
 	podListerSynced cache.InformerSynced
 	stopCh          chan struct{}
 	closeOnce       sync.Once
+
+	// lupineServer, when set, replaces the node API lookup. Tests use it.
+	lupineServer func(context.Context) (bool, error)
+	lupineMu     sync.Mutex
+	lupineOn     bool
+	lupineAt     time.Time
+	lupineKnown  bool
 }
 
 var resyncInterval = 5 * time.Minute
@@ -186,6 +195,75 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 // assigned to this node should reuse it rather than starting a second informer.
 func (l *ContainerLister) PodLister() corelisters.PodLister {
 	return l.podLister
+}
+
+const lupineServerLookupTTL = 5 * time.Second
+
+// OnLupineServer reports whether this node is a chart-managed lupine server.
+// That is hami.io/lupine-server present with an empty value. A non-empty value
+// is an operator-chosen port for an externally managed server; those nodes
+// keep collecting. vGPUmonitor stands by on chart-managed nodes so the remote
+// monitor can publish host GPU metrics. A failed lookup leaves the monitor
+// running, so a blip talking to the API does not silence a normal GPU node.
+// The device plugin adds and removes the label as the operating mode changes,
+// and the answer is cached for a few seconds.
+func (l *ContainerLister) OnLupineServer(ctx context.Context) bool {
+	if l == nil {
+		return false
+	}
+	l.lupineMu.Lock()
+	defer l.lupineMu.Unlock()
+	if l.lupineServer == nil && l.lupineKnown && time.Since(l.lupineAt) < lupineServerLookupTTL {
+		return l.lupineOn
+	}
+	on, err := l.lookupLupineServer(ctx)
+	if err != nil {
+		klog.V(4).InfoS("lupine server label lookup failed", "node", l.nodeName, "err", err)
+		if l.lupineKnown {
+			return l.lupineOn
+		}
+		return false
+	}
+	if !l.lupineKnown || l.lupineOn != on {
+		if on {
+			klog.InfoS("vGPUmonitor standing by; node is a chart-managed lupine server", "node", l.nodeName)
+		} else if l.lupineKnown {
+			klog.InfoS("vGPUmonitor resuming; node is no longer a chart-managed lupine server", "node", l.nodeName)
+		}
+	}
+	l.lupineOn = on
+	l.lupineAt = time.Now()
+	l.lupineKnown = true
+	return on
+}
+
+func (l *ContainerLister) lookupLupineServer(ctx context.Context) (bool, error) {
+	if l.lupineServer != nil {
+		return l.lupineServer(ctx)
+	}
+	if l.clientset == nil || l.nodeName == "" {
+		return false, fmt.Errorf("node client unavailable")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	node, err := l.clientset.CoreV1().Nodes().Get(callCtx, l.nodeName, metav1.GetOptions{})
+	if err != nil {
+		return false, err
+	}
+	val, ok := node.Labels[remotegpu.LupineServerLabel]
+	if !ok {
+		return false, nil
+	}
+	// Empty value: chart-managed. Non-empty: custom port; keep collecting.
+	return val == "", nil
+}
+
+// SetLupineServerForTest replaces the node lookup. Use only in tests.
+func (l *ContainerLister) SetLupineServerForTest(fn func(context.Context) (bool, error)) {
+	l.lupineMu.Lock()
+	defer l.lupineMu.Unlock()
+	l.lupineServer = fn
+	l.lupineKnown = false
 }
 
 // SetContainersForTest replaces the internal container map; use only in tests.

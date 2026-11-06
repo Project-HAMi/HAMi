@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -839,5 +841,30 @@ func TestCacheDirectoryRecoveryKeepsDCGMAliveUntilClose(t *testing.T) {
 	l.Close()
 	if !collector.closed || cleanups != 1 || shutdowns != 1 {
 		t.Fatalf("close failed: closed=%v cleanups=%d shutdowns=%d", collector.closed, cleanups, shutdowns)
+	}
+}
+
+func TestOnLupineServerCustomPortKeepsCollecting(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{name: "empty chart-managed", labels: map[string]string{remotegpu.LupineServerLabel: ""}, want: true},
+		{name: "custom port", labels: map[string]string{remotegpu.LupineServerLabel: "14833"}, want: false},
+		{name: "missing", labels: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := newListerForHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				body, err := json.Marshal(&corev1.Node{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+					ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: tc.labels},
+				})
+				assert.NilError(t, err)
+				_, _ = w.Write(body)
+			}))
+			assert.Equal(t, l.OnLupineServer(context.Background()), tc.want)
+		})
 	}
 }

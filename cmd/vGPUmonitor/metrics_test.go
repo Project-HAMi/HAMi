@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -108,6 +109,35 @@ func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected a collect success metric")
+	}
+}
+
+func TestCollectStandsByOnLupineServer(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "gpu-server")
+	lister := &nvidia.ContainerLister{}
+	lister.SetLupineServerForTest(func(context.Context) (bool, error) { return true, nil })
+	cc := ClusterManagerCollector{ClusterManager: &ClusterManager{containerLister: lister}}
+	ch := make(chan prometheus.Metric, 10)
+
+	cc.Collect(ch)
+	close(ch)
+
+	var got int
+	for m := range ch {
+		got++
+		if m.Desc() != collectSuccessDesc {
+			t.Fatalf("standby emitted %s", m.Desc())
+		}
+		var dm dto.Metric
+		if err := m.Write(&dm); err != nil {
+			t.Fatalf("write metric: %v", err)
+		}
+		if dm.Gauge == nil || dm.Gauge.GetValue() != 1 {
+			t.Fatalf("collect success = %v, want 1", dm.Gauge)
+		}
+	}
+	if got != 1 {
+		t.Fatalf("emitted %d metrics, want only collect success", got)
 	}
 }
 

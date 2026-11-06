@@ -95,6 +95,7 @@ var roleFiles = []struct {
 	{"scheduler", "scheduler/clusterrole.yaml"},
 	{"scheduler", "scheduler/role.yaml"},
 	{"device-plugin", "device-plugin/monitorrole.yaml"},
+	{"remote-monitor", "device-plugin/remotemonitorrole.yaml"},
 }
 
 // dirRoles maps code directories (relative to the repo root) to the roles
@@ -105,6 +106,8 @@ var dirRoles = []struct {
 	prefix string
 	roles  []string
 }{
+	{"cmd/remoteGPUmonitor/", []string{"remote-monitor"}},
+	{"pkg/monitor/remotegpu/", []string{"remote-monitor"}},
 	{"cmd/scheduler/", []string{"scheduler"}},
 	{"pkg/scheduler/", []string{"scheduler"}},
 	// pkg/device/nvidia is shared: the device plugin also runs it
