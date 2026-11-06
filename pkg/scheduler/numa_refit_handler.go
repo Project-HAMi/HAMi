@@ -336,12 +336,16 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(newDevices)}
 }
 
-// refitWrite is a NUMA refit this replica made: the container and the
-// devices it replaced.
+// refitWriteSettle is how long a resync cannot end the wait for a refit.
+const refitWriteSettle = time.Minute
+
+// refitWrite is a NUMA refit this replica made: the container, the devices
+// it replaced, and when.
 type refitWrite struct {
 	deviceType     string
 	containerIndex int
 	replaced       []string
+	at             time.Time
 }
 
 // predates reports whether an update is older than the refit: the container
@@ -360,7 +364,7 @@ func (s *Scheduler) recordRefitWrite(uid k8stypes.UID, deviceType string, contai
 	if s.refitWrites == nil {
 		s.refitWrites = make(map[k8stypes.UID]refitWrite)
 	}
-	s.refitWrites[uid] = refitWrite{deviceType: deviceType, containerIndex: containerIndex, replaced: containerDeviceIDs(replaced)}
+	s.refitWrites[uid] = refitWrite{deviceType: deviceType, containerIndex: containerIndex, replaced: containerDeviceIDs(replaced), at: time.Now()}
 }
 
 // effectivePodDeviceUsage mirrors the accounting shape stored by PodManager.

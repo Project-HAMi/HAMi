@@ -402,11 +402,15 @@ func (s *Scheduler) syncAllocationLocked(oldObj any, newPod *corev1.Pod, pi *dev
 		return nil, false
 	}
 	if pending {
-		// A resync shows the informer's latest state, so stop waiting even
-		// if it still shows the old devices.
-		resync := oldPod != nil && oldPod.ResourceVersion != "" && oldPod.ResourceVersion == newPod.ResourceVersion
-		if write.predates(rawDevices) && !resync {
-			return nil, false
+		if write.predates(rawDevices) {
+			// The refit's own update arrives within seconds. A resync that
+			// still shows the old devices well after that means another
+			// replica moved the container back, so follow it.
+			resync := oldPod != nil && oldPod.ResourceVersion != "" && oldPod.ResourceVersion == newPod.ResourceVersion
+			if !resync || time.Since(write.at) < refitWriteSettle {
+				return nil, false
+			}
+			rewritten = true
 		}
 		delete(s.refitWrites, newPod.UID)
 	}

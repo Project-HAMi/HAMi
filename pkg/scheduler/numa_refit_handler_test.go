@@ -1688,9 +1688,10 @@ func TestOnUpdatePodEndsWaitWithoutRewrite(t *testing.T) {
 	assert.Equal(t, trackedUUID(t, s), "GPU-b")
 }
 
-// TestOnUpdatePodResyncEndsWaitAfterMoveBack checks that a resync ends the
-// wait when another replica moved the container back.
-func TestOnUpdatePodResyncEndsWaitAfterMoveBack(t *testing.T) {
+// TestOnUpdatePodLateResyncFollowsMoveBack checks that a resync well after
+// the refit follows a container another replica moved back. An early resync
+// still waits, since the refit's own update may be on its way.
+func TestOnUpdatePodLateResyncFollowsMoveBack(t *testing.T) {
 	s, pod := refitFixture(t, 40000)
 	stubRefitPatch(t, nil)
 	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
@@ -1703,10 +1704,18 @@ func TestOnUpdatePodResyncEndsWaitAfterMoveBack(t *testing.T) {
 	running.Status.Phase = corev1.PodRunning
 
 	s.onUpdatePod(movedBack, running)
+	s.onUpdatePod(running, running)
 	assert.Equal(t, len(s.refitWrites), 1)
+	assert.Equal(t, trackedUUID(t, s), "GPU-b")
 
+	uid := k8stypes.UID(refitPodUID)
+	write := s.refitWrites[uid]
+	write.at = write.at.Add(-refitWriteSettle)
+	s.refitWrites[uid] = write
 	s.onUpdatePod(running, running)
 	assert.Equal(t, len(s.refitWrites), 0)
+	assert.Equal(t, trackedUUID(t, s), "GPU-a")
+	assert.DeepEqual(t, nodeUsedmem(t, s), map[string]int64{"GPU-a": 20000, "GPU-b": 0})
 }
 
 // TestOnUpdatePodPendingRefitDecodeFailureNotRepeated checks that a bad
