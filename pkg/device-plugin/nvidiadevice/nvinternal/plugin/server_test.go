@@ -1796,6 +1796,9 @@ func TestApiDevices_NilSplitCount(t *testing.T) {
 }
 
 func TestAnnotateMigRuntimeInfo_NilAnnotations(t *testing.T) {
+	// We create a plugin with nil client. The nil check for Annotations should run,
+	// then it will panic on the client call. We recover the panic to check coverage.
+	plugin := &NvidiaDevicePlugin{}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "test-pod",
@@ -1803,13 +1806,17 @@ func TestAnnotateMigRuntimeInfo_NilAnnotations(t *testing.T) {
 			Annotations: nil,
 		},
 	}
-	// Initialize fake k8s client (assuming there is a way, or just test the map logic directly)
-	// Since we only test the nil map initialization, we can just check if the map gets initialized.
-	// In real test, you'd mock the client.
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-	if pod.Annotations == nil {
-		t.Fatal("Expected pod.Annotations to be initialized")
-	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			// The function panics because client is nil, but we only care
+			// that the annotations map was initialized before the panic.
+		}
+		if pod.Annotations == nil {
+			t.Errorf("Expected pod.Annotations to be initialized, got nil")
+		}
+	}()
+
+	// This will execute the nil check, then panic on client.GetClient()
+	_ = plugin.annotateMigRuntimeInfo(pod)
 }
