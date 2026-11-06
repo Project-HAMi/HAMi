@@ -431,6 +431,26 @@ func IsValidNodeSchedulerPolicy(policy string) bool {
 	}
 }
 
+// SchedulerPolicyAnnotationError reports a scheduler-policy annotation HAMi
+// does not recognize. A missing annotation is not an error: the configured
+// default applies. GetGPUSchedulerPolicyByPod and resolveNodeSchedulerPolicy
+// already ignore a bad value at schedule time, so this is the admission-time
+// signal that turns the same typo into a kubectl apply failure.
+func SchedulerPolicyAnnotationError(pod *corev1.Pod) error {
+	if pod == nil || pod.Annotations == nil {
+		return nil
+	}
+	if value, ok := pod.Annotations[GPUSchedulerPolicyAnnotationKey]; ok && !IsValidGPUSchedulerPolicy(value) {
+		return fmt.Errorf("invalid %s annotation %q: expected binpack, spread, numa, mutex, topology-aware, or a comma-separated chain of them",
+			GPUSchedulerPolicyAnnotationKey, value)
+	}
+	if value, ok := pod.Annotations[NodeSchedulerPolicyAnnotationKey]; ok && !IsValidNodeSchedulerPolicy(value) {
+		return fmt.Errorf("invalid %s annotation %q: expected binpack or spread",
+			NodeSchedulerPolicyAnnotationKey, value)
+	}
+	return nil
+}
+
 // GetGPUSchedulerPolicyByPod returns the GPU scheduling policy to apply to
 // task, preferring its GPUSchedulerPolicyAnnotationKey annotation over
 // defaultPolicy. An annotation that does not name a known policy is ignored

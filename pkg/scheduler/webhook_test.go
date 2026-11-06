@@ -1363,6 +1363,90 @@ func TestHandleNumaAlignmentAnnotation(t *testing.T) {
 	}
 }
 
+func TestHandleSchedulerPolicyAnnotation(t *testing.T) {
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	if !ok {
+		t.Fatal("NVIDIA device is not registered")
+	}
+	resourceName := corev1.ResourceName(nvidiaDevice.GetResourceNames().ResourceCountName)
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		hasResource bool
+		wantDenied  bool
+		wantMessage string
+	}{
+		{
+			name:        "binpack is admitted",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "binpack"},
+			hasResource: true,
+		},
+		{
+			name:        "padded chain is admitted",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "binpack, numa"},
+			hasResource: true,
+		},
+		{
+			name:        "node spread is admitted",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "spread"},
+			hasResource: true,
+		},
+		{
+			name:        "gpu typo is denied",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "binpakc"},
+			hasResource: true,
+			wantDenied:  true,
+			wantMessage: util.GPUSchedulerPolicyAnnotationKey,
+		},
+		{
+			name:        "node policy chain is denied",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "binpack,spread"},
+			hasResource: true,
+			wantDenied:  true,
+			wantMessage: util.NodeSchedulerPolicyAnnotationKey,
+		},
+		{
+			name:        "gpu typo without HAMi resource is admitted",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "binpakc"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			container := corev1.Container{Name: "container1"}
+			if test.hasResource {
+				container.Resources = corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{resourceName: resource.MustParse("1")},
+				}
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "policy-pod",
+					Namespace:   "default",
+					Annotations: test.annotations,
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{container}},
+			}
+
+			resp := admitPod(t, pod)
+
+			if test.wantDenied {
+				if resp.Allowed {
+					t.Fatalf("expected denial, got allowed: %+v", resp.Result)
+				}
+				if !strings.Contains(resp.Result.Message, test.wantMessage) {
+					t.Fatalf("expected message to mention %s, got %q", test.wantMessage, resp.Result.Message)
+				}
+				return
+			}
+			if !resp.Allowed {
+				t.Fatalf("expected admission, got denied: %+v", resp.Result)
+			}
+		})
+	}
+}
+
 func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
 	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
 	if !ok {

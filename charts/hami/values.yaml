@@ -1084,18 +1084,28 @@ devices:
     # See [Iluvatar workload examples](https://project-hami.io/docs/next/userguide/iluvatar-device/enable-iluvatar-gpu-sharing#running-iluvatar-jobs).
     # Overrides replace the whole list; supply complete objects because omitted fields are not filled from defaults. An empty list removes all Iluvatar device definitions.
     # A non-empty `device-config.content` or bundled `files/device-config.yaml` takes precedence over this list.
-    # @default -- Device definitions for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
+    # @default -- Device definitions for MR-V100, MR-V100A, MR-V50, MR-V50A, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     configs:
       - chipName: MR-V100
         commonWord: MR-V100
         resourceCountName: iluvatar.ai/MR-V100-vgpu
         resourceMemoryName: iluvatar.ai/MR-V100.vMem
         resourceCoreName: iluvatar.ai/MR-V100.vCore
+      - chipName: MR-V100A
+        commonWord: MR-V100A
+        resourceCountName: iluvatar.ai/MR-V100A-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V100A.vMem
+        resourceCoreName: iluvatar.ai/MR-V100A.vCore
       - chipName: MR-V50
         commonWord: MR-V50
         resourceCountName: iluvatar.ai/MR-V50-vgpu
         resourceMemoryName: iluvatar.ai/MR-V50.vMem
         resourceCoreName: iluvatar.ai/MR-V50.vCore
+      - chipName: MR-V50A
+        commonWord: MR-V50A
+        resourceCountName: iluvatar.ai/MR-V50A-vgpu
+        resourceMemoryName: iluvatar.ai/MR-V50A.vMem
+        resourceCoreName: iluvatar.ai/MR-V50A.vCore
       - chipName: BI-V150
         commonWord: BI-V150
         resourceCountName: iluvatar.ai/BI-V150-vgpu
@@ -1112,7 +1122,7 @@ devices:
     # -- Resource-name strings delegated to the HAMi scheduler extender so kube-scheduler skips its own checks for these Iluvatar resources.
     # Used only when both `devices.iluvatar.enabled` and `scheduler.kubeScheduler.enabled` are true.
     # Include the resource names from `devices.iluvatar.configs`; they are not added automatically. Overrides replace the whole list.
-    # @default -- Count, core, and memory resource names for MR-V100, MR-V50, BI-V150, and BI-V100; see [values.yaml](values.yaml).
+    # @default -- Count, core, and memory resource names for MR-V100, MR-V100A, MR-V50, MR-V50A, BI-V150, and BI-V100; see [values.yaml](values.yaml).
     customresources:
       - iluvatar.ai/BI-V100-vgpu
       - iluvatar.ai/BI-V100.vCore
@@ -1123,9 +1133,15 @@ devices:
       - iluvatar.ai/MR-V100-vgpu
       - iluvatar.ai/MR-V100.vCore
       - iluvatar.ai/MR-V100.vMem
+      - iluvatar.ai/MR-V100A-vgpu
+      - iluvatar.ai/MR-V100A.vCore
+      - iluvatar.ai/MR-V100A.vMem
       - iluvatar.ai/MR-V50-vgpu
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
+      - iluvatar.ai/MR-V50A-vgpu
+      - iluvatar.ai/MR-V50A.vCore
+      - iluvatar.ai/MR-V50A.vMem
 
 # -- Emit legacy metric names alongside current names in the scheduler and vGPUmonitor for backward compatibility.
 legacyMetrics: false

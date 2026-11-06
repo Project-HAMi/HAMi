@@ -35,12 +35,21 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
+// getPod fetches the latest pod state directly from the API server to ensure
+// the refit uses current annotations and resourceVersion rather than potentially
+// stale informer cache state. Also a test seam.
+var getPod = func(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	ctx, cancel := context.WithTimeout(ctx, refitGetTimeout)
+	defer cancel()
+	return client.GetClient().CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
 // patchPodAnnotations patches only the given annotations, with the pod's
 // resourceVersion as a precondition so a stale refit cannot overwrite a
 // newer update to the same annotations (for example Allocate consuming a
 // to-allocate entry). Conflicts fail the refit; there is no retry with
 // cached values. Also a test seam.
-var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) error {
+var patchPodAnnotations = func(ctx context.Context, pod *corev1.Pod, annotations map[string]string) error {
 	metadata := map[string]any{"annotations": annotations}
 	if pod.ResourceVersion != "" {
 		metadata["resourceVersion"] = pod.ResourceVersion
@@ -52,7 +61,7 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 	// The refit holds the allocation lock that Filter also takes, so this
 	// call must not block scheduling on an unreachable API server. The
 	// device plugin gives up after numaRefitTimeout anyway.
-	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, refitPatchTimeout)
 	defer cancel()
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(ctx, pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
@@ -62,11 +71,14 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 // maxAllowedDeviceUUIDs bounds the allowed set a refit request may carry.
 const maxAllowedDeviceUUIDs = 512
 
-// refitPatchTimeout bounds the annotation patch. It is deliberately no longer
-// than the device plugin's own refit budget: a patch that has not landed by
-// then cannot be used, and waiting longer would hold the allocation lock
-// against every concurrent Filter call.
-const refitPatchTimeout = 2 * time.Second
+// refitGetTimeout and refitPatchTimeout bound the live pod fetch and annotation
+// patch. Together they fit within the device plugin's 2-second refit budget
+// (numaRefitTimeout) so an unreachable or slow API server cannot hold the
+// allocation lock against concurrent Filter calls indefinitely.
+const (
+	refitGetTimeout   = 1 * time.Second
+	refitPatchTimeout = 1 * time.Second
+)
 
 // RefitNumaAllocation moves one container's device reservation onto a device
 // from the caller-supplied allowed set, re-running the pod's normal
@@ -124,6 +136,15 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	if pi.NodeID != req.NodeName {
 		return s.numaRefitFailureEvent(pod, "pod %s/%s is tracked on node %s, not %s", pod.Namespace, pod.Name, pi.NodeID, req.NodeName)
 	}
+
+	livePod, err := getPod(ctx, req.PodNamespace, req.PodName)
+	if err != nil {
+		return s.numaRefitFailureEvent(pod, "cannot fetch live pod from API server: %v", err)
+	}
+	if livePod.UID != k8stypes.UID(req.PodUID) {
+		return s.numaRefitFailureEvent(pod, "live pod UID %s does not match requested UID %s", livePod.UID, req.PodUID)
+	}
+	pod = livePod
 
 	name, ok := containerNameAt(pod, req.ContainerIndex)
 	if !ok {
@@ -278,7 +299,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		device.InRequestDevices[req.DeviceType]: pendingValue,
 		device.SupportDevices[req.DeviceType]:   allocatedValue,
 	}
-	if err := patchPodAnnotations(pod, annotations); err != nil {
+	if err := patchPodAnnotations(ctx, pod, annotations); err != nil {
 		return failWithQuotaRestore("cannot patch pod annotations: %v", err)
 	}
 
@@ -452,6 +473,7 @@ func releaseContainerUsage(node *NodeUsage, reserved device.ContainerDevices) {
 	}
 }
 
+// containerDeviceIDs extracts the UUIDs from a list of container devices.
 func containerDeviceIDs(devices device.ContainerDevices) []string {
 	ids := make([]string, 0, len(devices))
 	for _, d := range devices {
