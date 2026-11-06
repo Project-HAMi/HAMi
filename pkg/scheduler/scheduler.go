@@ -87,7 +87,11 @@ type Scheduler struct {
 	// info level, so a re-registration logs at V(5) instead. It is pruned when
 	// a node is deleted, both to keep it bounded under node churn and so a node
 	// that returns under the same name is logged as newly added again.
-	printedLog    map[string]bool
+	printedLog map[string]bool
+	// backendHealth stores the last observed health for each backend on a node.
+	// register holds lock while reading or updating this map.
+	backendHealth map[string]map[string]bool
+
 	eventRecorder record.EventRecorder
 	started       uint32 // 0 = false, 1 = true
 
@@ -111,6 +115,7 @@ func NewScheduler() *Scheduler {
 		stopCh:            make(chan struct{}),
 		overviewstatus:    make(map[string]*NodeUsage),
 		printedLog:        make(map[string]bool),
+		backendHealth:     make(map[string]map[string]bool),
 		nodeNotify:        make(chan struct{}, 1),
 		leaderNotify:      make(chan struct{}, 1),
 		started:           0,
@@ -462,9 +467,8 @@ func (s *Scheduler) onDelNode(obj any) {
 	}
 }
 
-// cleanupNodeUsage removes the node from the overviewstatus and printedLog maps
-// to ensure metrics no longer report data for deleted nodes, and that a node
-// recreated under the same name is logged as newly added rather than updated.
+// cleanupNodeUsage removes per-node scheduler state so deleted nodes are no
+// longer reported and a node recreated under the same name starts fresh.
 func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -473,6 +477,7 @@ func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 		klog.V(4).InfoS("Removed node from overviewstatus", "node", nodeID)
 	}
 	delete(s.printedLog, nodeID)
+	delete(s.backendHealth, nodeID)
 }
 
 func (s *Scheduler) onAddQuota(obj any) {
@@ -648,6 +653,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 
 			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
+			s.recordDeviceBackendHealthTransition(val, devhandsk, health)
 
 			if !health {
 				existingNode, getNodeErr := s.GetNode(val.Name)

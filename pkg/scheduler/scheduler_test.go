@@ -3605,6 +3605,7 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	s.register(labels.Everything())
 	s.lock.RLock()
 	assert.Equal(t, true, s.printedLog["node-1"], "first registration should record the node")
+	assert.Equal(t, true, s.backendHealth["node-1"]["mock-vendor"], "first registration should record backend health")
 	s.lock.RUnlock()
 
 	// Deleting the node must drop its entry, and only its entry.
@@ -3613,6 +3614,8 @@ func Test_register_PrintedLogPrunedOnNodeDelete(t *testing.T) {
 	_, stillPresent := s.printedLog["node-1"]
 	assert.Equal(t, false, stillPresent, "deleting a node should prune its printedLog entry")
 	assert.Equal(t, true, s.printedLog["node-2"], "deleting a node must not disturb other nodes")
+	_, stillPresent = s.backendHealth["node-1"]
+	assert.Equal(t, false, stillPresent, "deleting a node should prune its backend health state")
 	s.lock.RUnlock()
 
 	// A node returning under the same name is treated as newly added again.

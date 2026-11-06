@@ -48,6 +48,87 @@ func TestRecordAllocationDecodeFailureEvent(t *testing.T) {
 	}
 }
 
+func TestRecordDeviceBackendHealthTransition(t *testing.T) {
+	recorder := record.NewFakeRecorder(4)
+	s := &Scheduler{eventRecorder: recorder}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name: "node-a",
+		Annotations: map[string]string{
+			"example.com/token": "sensitive-value",
+		},
+	}}
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", true)
+	assertNoEvent(t, recorder)
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", false)
+	event := receiveEvent(t, recorder)
+	assert.Contains(t, event, corev1.EventTypeWarning)
+	assert.Contains(t, event, EventReasonDeviceBackendUnhealthy)
+	assert.Contains(t, event, "backend-a")
+	assert.Contains(t, event, "node-a")
+	assert.NotContains(t, event, "sensitive-value")
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", false)
+	assertNoEvent(t, recorder)
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", true)
+	event = receiveEvent(t, recorder)
+	assert.Contains(t, event, corev1.EventTypeNormal)
+	assert.Contains(t, event, EventReasonDeviceBackendRecovered)
+	assert.Contains(t, event, "backend-a")
+	assert.Contains(t, event, "node-a")
+	assert.NotContains(t, event, "sensitive-value")
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", true)
+	assertNoEvent(t, recorder)
+}
+
+func TestRecordDeviceBackendHealthTransitionTracksBackendsIndependently(t *testing.T) {
+	recorder := record.NewFakeRecorder(4)
+	s := &Scheduler{eventRecorder: recorder}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", true)
+	s.recordDeviceBackendHealthTransition(node, "backend-b", false)
+	assertNoEvent(t, recorder)
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", false)
+	event := receiveEvent(t, recorder)
+	assert.Contains(t, event, "backend-a")
+
+	s.recordDeviceBackendHealthTransition(node, "backend-b", false)
+	assertNoEvent(t, recorder)
+
+	s.recordDeviceBackendHealthTransition(node, "backend-b", true)
+	event = receiveEvent(t, recorder)
+	assert.Contains(t, event, "backend-b")
+	assert.NotContains(t, event, "backend-a")
+
+	s.recordDeviceBackendHealthTransition(node, "backend-a", false)
+	assertNoEvent(t, recorder)
+}
+
+func receiveEvent(t *testing.T, recorder *record.FakeRecorder) string {
+	t.Helper()
+	select {
+	case event := <-recorder.Events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("expected event")
+		return ""
+	}
+}
+
+func assertNoEvent(t *testing.T, recorder *record.FakeRecorder) {
+	t.Helper()
+	select {
+	case event := <-recorder.Events:
+		t.Fatalf("unexpected event: %s", event)
+	default:
+	}
+}
+
 func TestRecordScheduleBindingResultEvent(t *testing.T) {
 	tests := []struct {
 		name          string

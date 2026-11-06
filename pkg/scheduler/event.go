@@ -49,6 +49,11 @@ const (
 	// EventReasonAllocationDecodeFailed indicates that a live Pod allocation
 	// annotation could not be decoded during scheduler accounting.
 	EventReasonAllocationDecodeFailed = "AllocationDecodeFailed"
+
+	// EventReasonDeviceBackendUnhealthy indicates that a device backend became unhealthy.
+	EventReasonDeviceBackendUnhealthy = "DeviceBackendUnhealthy"
+	// EventReasonDeviceBackendRecovered indicates that a device backend recovered.
+	EventReasonDeviceBackendRecovered = "DeviceBackendRecovered"
 )
 
 func (s *Scheduler) addAllEventHandlers() {
@@ -95,6 +100,36 @@ func (s *Scheduler) recordAllocationDecodeFailureEvent(pod *corev1.Pod, nodeName
 	}
 	s.eventRecorder.Eventf(pod, corev1.EventTypeWarning, EventReasonAllocationDecodeFailed,
 		"Failed to decode HAMi allocated-device annotations for node %q: %v", nodeName, decodeErr)
+}
+
+// recordDeviceBackendHealthTransition records the first observation as a
+// baseline, then emits a Node event only when the backend's health changes.
+// The caller must hold s.lock while updating backendHealth.
+func (s *Scheduler) recordDeviceBackendHealthTransition(node *corev1.Node, backend string, healthy bool) {
+	if node == nil || backend == "" {
+		return
+	}
+	if s.backendHealth == nil {
+		s.backendHealth = make(map[string]map[string]bool)
+	}
+	nodeHealth, ok := s.backendHealth[node.Name]
+	if !ok {
+		nodeHealth = make(map[string]bool)
+		s.backendHealth[node.Name] = nodeHealth
+	}
+	previousHealth, observed := nodeHealth[backend]
+	nodeHealth[backend] = healthy
+	if !observed || previousHealth == healthy || s.eventRecorder == nil {
+		return
+	}
+
+	if healthy {
+		s.eventRecorder.Eventf(node, corev1.EventTypeNormal, EventReasonDeviceBackendRecovered,
+			"Device backend %q on node %q recovered and is healthy", backend, node.Name)
+		return
+	}
+	s.eventRecorder.Eventf(node, corev1.EventTypeWarning, EventReasonDeviceBackendUnhealthy,
+		"Device backend %q on node %q is unhealthy", backend, node.Name)
 }
 
 func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, successMsg string, schedulerErr error) {
