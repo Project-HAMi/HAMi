@@ -990,6 +990,16 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
 }
 
+// fitQuotaForDevices verifies that the cumulative allocation of devs satisfies the namespace quota.
+func fitQuotaForDevices(pod *corev1.Pod, devs device.ContainerDevices, allocated *device.PodDevices, ns string, devType string) bool {
+	for i, c := range devs {
+		if !fitQuota(pod, map[string]device.ContainerDevices{devType: devs[:i]}, allocated, ns, c.UUID, c.Usedmem, c.Usedcores) {
+			return false
+		}
+	}
+	return true
+}
+
 // cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID
 // lookup set. Missing node, missing annotation, or an empty value all mean
 // "nothing cordoned". Malformed entries (stray whitespace/commas) are
@@ -1046,7 +1056,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if numa && prevnuma != dev.Numa {
+		if numa && !needTopology && prevnuma != dev.Numa {
 			if k.Nums != originReq {
 				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
@@ -1096,7 +1106,13 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			}
 			usedmem, usedcores = profile.MemoryMB, profile.Core
 		}
-		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, usedmem, usedcores) {
+		// topology mode collects more candidates than it allocates, so a candidate is
+		// checked alone here and the chosen combination is checked as a whole below
+		quotaDevs := tmpDevs
+		if needTopology {
+			quotaDevs = nil
+		}
+		if !fitQuota(pod, quotaDevs, allocated, pod.Namespace, dev.ID, usedmem, usedcores) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue
@@ -1164,32 +1180,115 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 	}
 	if needTopology {
-		if len(tmpDevs[k.Type]) == int(originReq) {
-			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
-			recordMigPlans(devices, tmpDevs[k.Type], preferred)
-			return true, tmpDevs, ""
-		}
-		if len(tmpDevs[k.Type]) > int(originReq) {
-			// A MIG card appears once per free slot; duplicates only inflate the
-			// combination space and win zero-score ties. Collapse when cards suffice.
+		if assertNuma(pod.GetAnnotations()) {
+			byID := make(map[string]*device.DeviceUsage, len(devices))
+			for _, d := range devices {
+				byID[d.ID] = d
+			}
+			numaGroups := make(map[int]device.ContainerDevices)
+			for _, c := range tmpDevs[k.Type] {
+				numaNode := -1
+				if d := byID[c.UUID]; d != nil {
+					numaNode = d.Numa
+				}
+				numaGroups[numaNode] = append(numaGroups[numaNode], c)
+			}
+			if originReq == 1 {
+				if len(tmpDevs[k.Type]) >= 1 {
+					lowestDevices := computeWorstSingleCard(nodeInfo, request, tmpDevs)
+					if !fitQuotaForDevices(pod, lowestDevices, allocated, pod.Namespace, k.Type) {
+						reason[common.ResourceQuotaNotFit]++
+						return false, tmpDevs, common.GenReason(reason, len(devices))
+					}
+					tmpDevs[k.Type] = lowestDevices
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+					recordMigPlans(devices, tmpDevs[k.Type], preferred)
+					return true, tmpDevs, ""
+				}
+			} else {
+				var numaNodes []int
+				for numaNode := range numaGroups {
+					numaNodes = append(numaNodes, numaNode)
+				}
+				sort.Ints(numaNodes)
+				var combinations []device.ContainerDevices
+				for _, numaNode := range numaNodes {
+					group := numaGroups[numaNode]
+					candidateGroup := group
+					if distinct := distinctCardCandidates(group); len(distinct) >= int(originReq) {
+						candidateGroup = distinct
+					}
+					if len(candidateGroup) >= int(originReq) {
+						combinations = append(combinations, generateCombinations(request, map[string]device.ContainerDevices{k.Type: candidateGroup})...)
+					}
+				}
+				if len(combinations) > 0 {
+					var quotaFit []device.ContainerDevices
+					for _, combo := range combinations {
+						if fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
+							quotaFit = append(quotaFit, combo)
+						}
+					}
+					if len(quotaFit) == 0 {
+						reason[common.ResourceQuotaNotFit]++
+						return false, tmpDevs, common.GenReason(reason, len(devices))
+					}
+					combination := computeBestCombination(nodeInfo, quotaFit)
+					tmpDevs[k.Type] = combination
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+					recordMigPlans(devices, tmpDevs[k.Type], preferred)
+					return true, tmpDevs, ""
+				}
+				if len(tmpDevs[k.Type]) >= int(originReq) {
+					reason[common.NumaNotFit] += len(tmpDevs[k.Type])
+					return false, tmpDevs, common.GenReason(reason, len(devices))
+				}
+			}
+		} else {
 			candidates := tmpDevs
 			if distinct := distinctCardCandidates(tmpDevs[k.Type]); len(distinct) >= int(originReq) {
 				candidates = map[string]device.ContainerDevices{k.Type: distinct}
 			}
-			if originReq == 1 {
-				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
-				tmpDevs[k.Type] = lowestDevices
-				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
-			} else {
-				// If requesting multiple devices, select the best combination of cards.
-				combinations := generateCombinations(request, candidates)
-				combination := computeBestCombination(nodeInfo, combinations)
-				tmpDevs[k.Type] = combination
-				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			if len(candidates[k.Type]) == int(originReq) {
+				if !fitQuotaForDevices(pod, candidates[k.Type], allocated, pod.Namespace, k.Type) {
+					reason[common.ResourceQuotaNotFit]++
+					return false, tmpDevs, common.GenReason(reason, len(devices))
+				}
+				tmpDevs[k.Type] = candidates[k.Type]
+				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+				recordMigPlans(devices, tmpDevs[k.Type], preferred)
+				return true, tmpDevs, ""
 			}
-			recordMigPlans(devices, tmpDevs[k.Type], preferred)
-			return true, tmpDevs, ""
+			if len(candidates[k.Type]) > int(originReq) {
+				if originReq == 1 {
+					// If requesting a device, select the card with the worst connection to other cards (lowest total score).
+					lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
+					if !fitQuotaForDevices(pod, lowestDevices, allocated, pod.Namespace, k.Type) {
+						reason[common.ResourceQuotaNotFit]++
+						return false, tmpDevs, common.GenReason(reason, len(devices))
+					}
+					tmpDevs[k.Type] = lowestDevices
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+				} else {
+					// If requesting multiple devices, select the best combination of cards.
+					combinations := generateCombinations(request, candidates)
+					var validCombinations []device.ContainerDevices
+					for _, combo := range combinations {
+						if fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
+							validCombinations = append(validCombinations, combo)
+						}
+					}
+					if len(validCombinations) == 0 {
+						reason[common.ResourceQuotaNotFit]++
+						return false, tmpDevs, common.GenReason(reason, len(devices))
+					}
+					combination := computeBestCombination(nodeInfo, validCombinations)
+					tmpDevs[k.Type] = combination
+					klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+				}
+				recordMigPlans(devices, tmpDevs[k.Type], preferred)
+				return true, tmpDevs, ""
+			}
 		}
 	}
 	if len(tmpDevs[k.Type]) > 0 {
