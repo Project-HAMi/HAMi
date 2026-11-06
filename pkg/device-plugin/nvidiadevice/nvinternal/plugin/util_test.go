@@ -1067,3 +1067,19 @@ func TestAllocate_PercentageCheckedAgainstAlignedDevice(t *testing.T) {
 		t.Errorf("error %q does not name the card the container got", err)
 	}
 }
+
+func TestPatchErasedAnnotation_NilAnnotations(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   "default",
+			Annotations: nil,
+		},
+	}
+	// We call the function. It will fail because there is no k8s client,
+	// but the nil map should have been initialized before the API call.
+	_ = patchErasedAnnotation(pod, "nvidia", device.PodSingleDevice{})
+	if pod.Annotations == nil {
+		t.Fatal("Expected pod.Annotations to be initialized")
+	}
+}

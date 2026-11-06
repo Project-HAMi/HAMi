@@ -272,11 +272,11 @@ func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.Po
 	encoded := device.EncodePodSingleDevice(podSingleDev)
 	annoKey := device.InRequestDevices[dtype]
 	newAnnos := map[string]string{annoKey: encoded}
-	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
-		return err
-	}
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
+	}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		return err
 	}
 	pod.Annotations[annoKey] = encoded
 	return nil

@@ -607,11 +607,11 @@ func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error 
 	if err != nil {
 		return err
 	}
-	if _, err := client.GetClient().CoreV1().Pods(pod.Namespace).Patch(plugin.operationContext(), pod.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
-		return err
-	}
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
+	}
+	if _, err := client.GetClient().CoreV1().Pods(pod.Namespace).Patch(plugin.operationContext(), pod.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return err
 	}
 	pod.Annotations[nvidia.MigAllocationsAnnotation] = string(raw)
 	return nil
