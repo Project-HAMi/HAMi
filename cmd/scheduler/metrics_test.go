@@ -17,9 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"errors"
 	"maps"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
@@ -69,6 +73,66 @@ func (f *fakeMetricsProvider) IsSynced() bool {
 
 func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
 	return f.outcome
+}
+
+func TestStartMetricsServerBindFailure(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	errCh := make(chan error, 1)
+	listener, err := startMetricsServer(occupied.Addr().String(), nil, false, errCh)
+	if listener != nil {
+		listener.Close()
+		t.Fatal("metrics unexpectedly bound an occupied port")
+	}
+	var networkError *net.OpError
+	if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "metrics address") {
+		t.Fatalf("expected synchronous metrics listener failure, got %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("no metrics server should have started, got async error %v", err)
+	default:
+	}
+}
+
+func TestStartMetricsServer(t *testing.T) {
+	provider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: device.NewQuotaManager(),
+		podManager:   device.NewPodManager(),
+	}
+	errCh := make(chan error, 1)
+	listener, err := startMetricsServer("127.0.0.1:0", provider, false, errCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://" + listener.Addr().String() + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, net.ErrClosed) || !strings.Contains(err.Error(), "metrics server error") {
+			t.Fatalf("expected supervised listener error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("metrics server did not return its listener failure")
+	}
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
