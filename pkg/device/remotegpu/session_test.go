@@ -164,6 +164,7 @@ func TestSessionStubImagePullSecrets(t *testing.T) {
 			assert.DeepEqual(t, stub.Spec.ImagePullSecrets, test.want)
 			assert.Equal(t, stub.Spec.NodeName, "gpu-a")
 			assert.Equal(t, stub.Spec.Containers[0].Image, "alpine/socat:test")
+			assert.Equal(t, stub.Annotations[sessionImageAnno], "alpine/socat:test")
 			assert.Equal(t, stubEndpoint(stub), "10.0.0.5:14833")
 		})
 	}

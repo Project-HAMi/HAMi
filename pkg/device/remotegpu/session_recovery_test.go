@@ -18,6 +18,7 @@ package remotegpu
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -31,6 +32,114 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
+
+func TestReconcileSessionStubs_PreservesAdmissionRewrittenImage(t *testing.T) {
+	const (
+		requestedImage = "alpine/socat:test"
+		rewrittenImage = "registry.example/socat@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	)
+	for _, scene := range []string{"new relay", "legacy unchanged image", "legacy rewritten image"} {
+		t.Run(scene, func(t *testing.T) {
+			var seeds []*corev1.Pod
+			if scene != "new relay" {
+				stub, err := sessionStub("kube-system", "gpu-a", "10.0.0.5:14833", requestedImage, nil)
+				assert.NilError(t, err)
+				delete(stub.Annotations, sessionImageAnno)
+				stub.UID, stub.Status.Phase = types.UID("legacy-relay"), corev1.PodRunning
+				if scene == "legacy rewritten image" {
+					stub.Spec.Containers[0].Image = rewrittenImage
+				}
+				seeds = append(seeds, stub)
+			}
+			c := sessionScene(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, seeds...)
+			cfg := testConfig()
+			cfg.SessionImage = requestedImage
+			dev := InitRemoteGPUDevice(cfg)
+			t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
+
+			creates, deletes := 0, 0
+			pods := corev1.SchemeGroupVersion.WithResource("pods")
+			c.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				create, ok := a.(k8stesting.CreateAction)
+				if !ok {
+					t.Fatalf("expected CreateAction, got %T", a)
+				}
+				created, ok := create.GetObject().(*corev1.Pod)
+				if !ok {
+					t.Fatalf("expected Pod, got %T", create.GetObject())
+				}
+				admitted := created.DeepCopy()
+				creates++
+				admitted.UID = types.UID(fmt.Sprintf("admitted-relay-%d", creates))
+				// Different requested versions deliberately map to the same image.
+				admitted.Spec.Containers[0].Image = rewrittenImage
+				assert.NilError(t, c.Tracker().Create(pods, admitted, admitted.Namespace))
+				return true, admitted, nil
+			})
+			c.PrependReactor("delete", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				deletes++
+				del, ok := a.(k8stesting.DeleteAction)
+				if !ok {
+					t.Fatalf("expected DeleteAction, got %T", a)
+				}
+				listed, err := c.Tracker().Get(pods, del.GetNamespace(), del.GetName())
+				assert.NilError(t, err)
+				listedPod, ok := listed.(*corev1.Pod)
+				if !ok {
+					t.Fatalf("expected Pod, got %T", listed)
+				}
+				pre := del.GetDeleteOptions().Preconditions
+				assert.Assert(t, pre != nil && pre.UID != nil && *pre.UID == listedPod.UID)
+				return false, nil, nil
+			})
+
+			dev.ReconcileSessionStubs(context.Background())
+			got := stubsIn(t, c)
+			assert.Equal(t, len(got), 1)
+			initialCreates, initialDeletes := 1, 0
+			if scene == "legacy unchanged image" {
+				initialCreates = 0
+			} else {
+				assert.Equal(t, got[0].Spec.Containers[0].Image, rewrittenImage)
+				assert.Equal(t, got[0].Annotations[sessionImageAnno], requestedImage)
+			}
+			if scene == "legacy rewritten image" {
+				initialDeletes = 1
+			}
+			assert.Equal(t, creates, initialCreates)
+			assert.Equal(t, deletes, initialDeletes)
+			original := got[0].DeepCopy()
+			for range 3 {
+				dev.ReconcileSessionStubs(context.Background())
+				got = stubsIn(t, c)
+				assert.Equal(t, len(got), 1)
+				assert.DeepEqual(t, got[0], *original)
+				assert.Equal(t, creates, initialCreates)
+				assert.Equal(t, deletes, initialDeletes)
+			}
+
+			cfg.SessionImage = "alpine/socat:new"
+			dev = InitRemoteGPUDevice(cfg)
+			dev.ReconcileSessionStubs(context.Background())
+			got = stubsIn(t, c)
+			assert.Equal(t, len(got), 1)
+			assert.Assert(t, got[0].UID != original.UID, "a requested image change must replace the relay")
+			assert.Equal(t, got[0].Spec.Containers[0].Image, rewrittenImage)
+			assert.Equal(t, got[0].Annotations[sessionImageAnno], cfg.SessionImage)
+			assert.Equal(t, creates, initialCreates+1)
+			assert.Equal(t, deletes, initialDeletes+1)
+			replacement := got[0].DeepCopy()
+			for range 3 {
+				dev.ReconcileSessionStubs(context.Background())
+				got = stubsIn(t, c)
+				assert.Equal(t, len(got), 1)
+				assert.DeepEqual(t, got[0], *replacement)
+				assert.Equal(t, creates, initialCreates+1)
+				assert.Equal(t, deletes, initialDeletes+1)
+			}
+		})
+	}
+}
 
 // TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods checks lifecycle and
 // configuration recovery without replacing relays for kubelet restarts or
@@ -47,10 +156,14 @@ func TestReconcileSessionStubs_RecoversTerminalAndOutdatedPods(t *testing.T) {
 		}},
 		{name: "failed without an eviction reason", replace: true, mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodFailed }},
 		{name: "completed", replace: true, mutate: func(p *corev1.Pod) { p.Status.Phase = corev1.PodSucceeded }},
-		{name: "old image", replace: true, mutate: func(p *corev1.Pod) { p.Spec.Containers[0].Image = "alpine/socat:old" }},
+		{name: "old image", replace: true, mutate: func(p *corev1.Pod) {
+			p.Spec.Containers[0].Image = "alpine/socat:old"
+			p.Annotations[sessionImageAnno] = "alpine/socat:old"
+		}},
 		{name: "pending old image", replace: true, mutate: func(p *corev1.Pod) {
 			p.Status.Phase = corev1.PodPending
 			p.Spec.Containers[0].Image = "alpine/socat:old"
+			p.Annotations[sessionImageAnno] = "alpine/socat:old"
 		}},
 		{name: "missing relay", replace: true, mutate: func(p *corev1.Pod) { p.Spec.Containers[0].Name = "other" }},
 		{name: "changed endpoint with the current image", replace: true, mutate: func(p *corev1.Pod) {

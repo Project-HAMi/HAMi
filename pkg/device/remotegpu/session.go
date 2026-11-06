@@ -37,6 +37,9 @@ const (
 	sessionStubLabel = "hami.io/lupine-session"
 
 	sessionStubPrefix = "lupine-session-"
+	// sessionImageAnno records the requested image before admission can rewrite
+	// it, so reconciliation compares scheduler intent rather than the mutation.
+	sessionImageAnno = "hami.io/lupine-session-image"
 	// sessionPullSecretsAnno records the scheduler-owned pull-secret list. It
 	// lets reconciliation detect configuration changes without comparing an
 	// empty desired list to ServiceAccount secrets injected by the apiserver.
@@ -148,6 +151,11 @@ func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []
 	}
 	for i := range stub.Spec.Containers {
 		if stub.Spec.Containers[i].Name == "relay" {
+			if requested, managed := stub.Annotations[sessionImageAnno]; managed {
+				return requested == image
+			}
+			// Older relays did not record the requested image. A rewritten
+			// legacy relay is replaced once to acquire that annotation.
 			return stub.Spec.Containers[i].Image == image
 		}
 	}
@@ -199,9 +207,9 @@ func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) 
 	for _, name := range pullSecrets {
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: name})
 	}
-	var annotations map[string]string
+	annotations := map[string]string{sessionImageAnno: image}
 	if len(pullSecrets) > 0 {
-		annotations = map[string]string{sessionPullSecretsAnno: strings.Join(pullSecrets, ",")}
+		annotations[sessionPullSecretsAnno] = strings.Join(pullSecrets, ",")
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
