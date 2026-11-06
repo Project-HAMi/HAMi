@@ -441,6 +441,55 @@ func TestBrokerReservesReleaseCapacity(t *testing.T) {
 	}
 }
 
+func TestBrokerReservesReleaseHandlerSlot(t *testing.T) {
+	const handlerLimit = 8
+	broker, socketPath := startTestBrokerWithLimits(t, handlerLimit, 2)
+	nonReleaseBudget := admissionHandlerBudget(handlerLimit) - 1
+	connections := make([]net.Conn, 0, nonReleaseBudget)
+	defer func() {
+		for _, connection := range connections {
+			_ = connection.Close()
+		}
+	}()
+	for range nonReleaseBudget {
+		connections = append(connections,
+			openAdmissionRequest(t, socketPath, commandAcquireDriverRetain))
+	}
+	deadline := time.Now().Add(time.Second)
+	for broker.admissionHandlers.Load() != int64(nonReleaseBudget) {
+		if time.Now().After(deadline) {
+			t.Fatalf("admission handlers=%d, want %d",
+				broker.admissionHandlers.Load(), nonReleaseBudget)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	overflow := openAdmissionRequest(t, socketPath,
+		commandAcquireDriverRetain)
+	defer func() { _ = overflow.Close() }()
+	if err := overflow.SetReadDeadline(
+		time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, responseSize)
+	_, readErr := io.ReadFull(overflow, response)
+	if readErr != nil {
+		t.Errorf("retain above the reserved budget was not rejected: %v",
+			readErr)
+	} else if status := binary.BigEndian.Uint16(response[6:8]); status !=
+		statusUnavailable {
+		t.Errorf("retain above the reserved budget: status=%d", status)
+	}
+
+	release, status, _, err := acquireDriverAdmissionCommand(socketPath,
+		time.Second, commandAcquireDriverRelease)
+	if err != nil || status != statusOK {
+		t.Fatalf("release admission under handler pressure: status=%d err=%v",
+			status, err)
+	}
+	_ = release.Close()
+}
+
 func TestBrokerDriverAdmissionConcurrentBound(t *testing.T) {
 	const permits = 4
 	const forwardPermits = permits - 1
@@ -522,22 +571,22 @@ func TestBrokerAdmissionIgnoresClientBytes(t *testing.T) {
 func TestBrokerRejectsAdmissionAboveHandlerBudget(t *testing.T) {
 	const handlerLimit = 8
 	broker, socketPath := startTestBrokerWithLimits(t, handlerLimit, 2)
-	budget := admissionHandlerBudget(handlerLimit)
-	connections := make([]net.Conn, 0, budget)
+	nonReleaseBudget := admissionHandlerBudget(handlerLimit) - 1
+	connections := make([]net.Conn, 0, nonReleaseBudget)
 	defer func() {
 		for _, connection := range connections {
 			_ = connection.Close()
 		}
 	}()
-	for range budget {
+	for range nonReleaseBudget {
 		connections = append(connections,
 			openAdmissionRequest(t, socketPath, commandAcquireDriverInit))
 	}
 	deadline := time.Now().Add(time.Second)
-	for broker.admissionHandlers.Load() != int64(budget) {
+	for broker.admissionHandlers.Load() != int64(nonReleaseBudget) {
 		if time.Now().After(deadline) {
 			t.Fatalf("admission handlers=%d, want %d",
-				broker.admissionHandlers.Load(), budget)
+				broker.admissionHandlers.Load(), nonReleaseBudget)
 		}
 		time.Sleep(time.Millisecond)
 	}

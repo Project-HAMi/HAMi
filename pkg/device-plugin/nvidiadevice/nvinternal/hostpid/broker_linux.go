@@ -244,7 +244,8 @@ type Broker struct {
 	admission    *driverAdmissionController
 	// admissionHandlers tracks connections waiting for or holding a driver
 	// admission lease. The budget leaves handler slots for PID queries, whose
-	// clients cannot use the admission queue.
+	// clients cannot use the admission queue, and keeps one slot for release
+	// requests.
 	admissionHandlers      atomic.Int64
 	admissionHandlerBudget int
 	shutdown               chan struct{}
@@ -554,8 +555,13 @@ func (broker *Broker) handleDriverAdmission(connection *net.UnixConn,
 		writeResponse(connection, makeResponse(statusUnavailable, 0))
 		return
 	}
-	if broker.admissionHandlers.Add(1) >
-		int64(broker.admissionHandlerBudget) {
+	handlerBudget := broker.admissionHandlerBudget
+	if priority != driverAdmissionRelease {
+		// Keep the last slot for release requests so a teardown is never
+		// rejected while initialization or retention requests wait.
+		handlerBudget--
+	}
+	if broker.admissionHandlers.Add(1) > int64(handlerBudget) {
 		broker.admissionHandlers.Add(-1)
 		writeResponse(connection, makeResponse(statusUnavailable, 0))
 		return
