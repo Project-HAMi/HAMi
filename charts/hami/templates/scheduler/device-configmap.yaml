@@ -42,9 +42,9 @@ data:
       resourceCoreName: {{ .Values.devices.cambricon.resourceCoreName }}
     hygon:
       {{- $hygonPrefix := include "hami-vgpu.hygon.prefix" . }}
-      resourceCountName: hygon.com/{{ $hygonPrefix }}num
-      resourceMemoryName: hygon.com/{{ $hygonPrefix }}mem
-      resourceCoreName: hygon.com/{{ $hygonPrefix }}cores
+      resourceCountName: {{ include "hami-vgpu.hygon.resourceCountName" . }}
+      resourceMemoryName: {{ include "hami-vgpu.hygon.resourceMemoryName" . }}
+      resourceCoreName: {{ include "hami-vgpu.hygon.resourceCoreName" . }}
       memoryFactor: {{ .Values.devices.hygon.memoryFactor }}
       resourcePrefix: {{ $hygonPrefix }}
     metax:

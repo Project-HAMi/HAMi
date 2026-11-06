@@ -382,14 +382,6 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: 'devices.hygon.resourcePrefix "*cu" must match ^[a-z0-9]+$ and contain "cu"'
-- it: rejects a Hygon resource name that disagrees with resourcePrefix
-  template: validate-values.yaml
-  set:
-    devices.hygon.resourcePrefix: dcu
-    devices.hygon.resourceCountName: hygon.com/hcunum
-  asserts:
-  - failedTemplate:
-      errorMessage: 'devices.hygon.resourceCountName "hygon.com/hcunum" does not match resourcePrefix "dcu" (hygon.com/dcunum); set resourcePrefix and omit the resource name'
 ---
 suite: Migrated field rendering
 templates:
@@ -410,6 +402,17 @@ tests:
   - matchRegex:
       path: data["device-config.yaml"]
       pattern: 'hygon:\n  resourceCountName: hygon\.com/dcunum\n  resourceMemoryName: hygon\.com/dcumem\n  resourceCoreName: hygon\.com/dcucores\n'
+  template: scheduler/device-configmap.yaml
+- it: renders an explicit Hygon resource name over the derived prefix name
+  set:
+    devices.hygon.resourcePrefix: dcu
+    devices.hygon.resourceCountName: example.com/custom-count
+    devices.hygon.resourceMemoryName: example.com/custom-mem
+    devices.hygon.resourceCoreName: example.com/custom-cores
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hygon:\n  resourceCountName: example\.com/custom-count\n  resourceMemoryName: example\.com/custom-mem\n  resourceCoreName: example\.com/custom-cores\n'
   template: scheduler/device-configmap.yaml
 - it: renders migrated image settings for scheduler/job-patch/job-createSecret.yaml
   template: scheduler/job-patch/job-createSecret.yaml

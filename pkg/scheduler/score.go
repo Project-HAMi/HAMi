@@ -29,6 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -44,7 +45,14 @@ func viewStatus(usage NodeUsage) {
 
 // deviceTypeMatches preserves HAMi's case-insensitive substring matching for
 // mapping a registered request type to the corresponding node devices.
+// Hygon keeps the request type "HCU" so existing allocation records stay on
+// that device id. The device plugin stamps the card model with the resource
+// prefix (DCU-K100_AI when resourcePrefix is dcu), so those requests match the
+// model against the configured prefix instead of the stable device id.
 func deviceTypeMatches(availableType, requestedType string) bool {
+	if hygon.IsHygonRequest(requestedType) {
+		return hygon.ModelMatchesPrefix(availableType)
+	}
 	return strings.Contains(strings.ToLower(availableType), strings.ToLower(requestedType))
 }
 
