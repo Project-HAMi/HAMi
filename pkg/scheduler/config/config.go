@@ -145,8 +145,8 @@ func InitDevicesWithConfig(config *Config) error {
 			return
 		}
 		device.DevicesMap[dev.CommonWord()] = dev
-		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
-		klog.Infof("%s device initialized successfully", commonWord)
+		device.DevicesToHandle = append(device.DevicesToHandle, dev.CommonWord())
+		klog.Infof("%s device initialized successfully", dev.CommonWord())
 	}
 
 	// Wrapper for each device's initialization function to include type assertion check
@@ -175,7 +175,14 @@ func InitDevicesWithConfig(config *Config) error {
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonHCUCommonWord)
 			}
-			return hygon.InitHCUDevice(hygonConfig), nil
+			if err := hygonConfig.Apply(); err != nil {
+				return nil, err
+			}
+			dev := hygon.InitHCUDevice(hygonConfig)
+			if dev == nil {
+				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonHCUCommonWord)
+			}
+			return dev, nil
 		}, config.HygonConfig},
 		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)

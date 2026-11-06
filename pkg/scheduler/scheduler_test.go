@@ -1174,7 +1174,7 @@ func Test_register_RemovesObsoleteHandshake(t *testing.T) {
 	})
 	device.DevicesMap = map[string]device.Devices{
 		nvidia.NvidiaGPUDevice: nvidia.InitNvidiaDevice(nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}),
-		hygon.HygonHCUDevice:   hygon.InitHCUDevice(hygon.HygonConfig{ResourceCountName: "hygon.com/dcunum"}),
+		hygon.HygonHCUDevice:   hygon.InitHCUDevice(hygon.HygonConfig{ResourcePrefix: "hcu"}),
 	}
 
 	client.KubeClient = fake.NewClientset()

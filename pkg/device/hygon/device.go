@@ -37,12 +37,6 @@ type HCUDevices struct {
 }
 
 const (
-	HandshakeAnnos     = "hami.io/node-handshake-hcu"
-	RegisterAnnos      = "hami.io/node-hcu-register"
-	HygonHCUDevice     = "HCU"
-	HygonHCUCommonWord = "HCU"
-	HCUInUse           = "hygon.com/use-hcutype"
-	HCUNoUse           = "hygon.com/nouse-hcutype"
 	// HCUUseUUID annotation specifies a comma-separated list of HCU UUIDs to use.
 	HCUUseUUID = "hygon.com/use-gpuuuid"
 	// HCUNoUseUUID annotation specifies a comma-separated list of HCU UUIDs to exclude.
@@ -52,33 +46,113 @@ const (
 	// there is a bug with nodelock package utils, the key is hard coded as "hami.io/mutex.lock"
 	// so we can only use this value now.
 	NodeLockHCU = "hami.io/mutex.lock"
+
+	defaultHygonResourcePrefix = "hcu"
 )
 
 var (
+	// HygonHCUDevice is the scheduler request type. The device plugin registers
+	// each card as "<PREFIX>-<model>" (HCU-K100_AI, DCU-K100_AI). The scheduler
+	// keeps a card only when that model contains this word, case-insensitively,
+	// so the word has to be the uppercase resource prefix.
+	HygonHCUDevice     = "HCU"
+	HygonHCUCommonWord = "HCU"
+
+	// Prefix-dependent keys. Defaults match resourcePrefix "hcu" so callers
+	// that never re-init still see the current HCU names.
+	HandshakeAnnos = "hami.io/node-handshake-hcu"
+	RegisterAnnos  = "hami.io/node-hcu-register"
+	HCUInUse       = "hygon.com/use-hcutype"
+	HCUNoUse       = "hygon.com/nouse-hcutype"
+
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
 	MemoryFactor        int64
+
+	// defaultResourcePrefix is the -hcu-prefix flag. YAML resourcePrefix wins when set.
+	defaultResourcePrefix = defaultHygonResourcePrefix
 )
 
 type HygonConfig struct {
-	ResourceCountName  string `yaml:"resourceCountName"`
-	ResourceMemoryName string `yaml:"resourceMemoryName"`
-	ResourceCoreName   string `yaml:"resourceCoreName"`
+	ResourcePrefix     string `yaml:"resourcePrefix,omitempty"`
+	ResourceCountName  string `yaml:"resourceCountName,omitempty"`
+	ResourceMemoryName string `yaml:"resourceMemoryName,omitempty"`
+	ResourceCoreName   string `yaml:"resourceCoreName,omitempty"`
 	MemoryFactor       int64  `yaml:"memoryFactor"`
 }
 
-func InitHCUDevice(config HygonConfig) *HCUDevices {
-	HygonResourceCount = config.ResourceCountName
-	HygonResourceMemory = config.ResourceMemoryName
-	HygonResourceCores = config.ResourceCoreName
-	MemoryFactor = config.MemoryFactor
-	_, ok := device.InRequestDevices[HygonHCUDevice]
-	if !ok {
-		device.InRequestDevices[HygonHCUDevice] = "hami.io/hcu-devices-to-allocate"
-		device.SupportDevices[HygonHCUDevice] = "hami.io/hcu-devices-allocated"
-		util.HandshakeAnnos[HygonHCUDevice] = HandshakeAnnos
+// Apply checks resourcePrefix and derives the single set of resource and
+// annotation names from it. An empty prefix uses -hcu-prefix, then "hcu".
+// Explicit resource names must be empty or equal to the derived names.
+// A second call with another prefix replaces the previous names.
+func (c *HygonConfig) Apply() error {
+	prefix := strings.TrimSpace(c.ResourcePrefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(defaultResourcePrefix)
 	}
+	if prefix == "" {
+		prefix = defaultHygonResourcePrefix
+	}
+	if !validResourcePrefix(prefix) {
+		return fmt.Errorf("hygon resourcePrefix %q must match ^[a-z0-9]+$ and contain \"cu\"", c.ResourcePrefix)
+	}
+	count := fmt.Sprintf("hygon.com/%snum", prefix)
+	mem := fmt.Sprintf("hygon.com/%smem", prefix)
+	cores := fmt.Sprintf("hygon.com/%scores", prefix)
+	if c.ResourceCountName != "" && c.ResourceCountName != count {
+		return fmt.Errorf("hygon resourceCountName %q does not match resourcePrefix %q (%s)", c.ResourceCountName, prefix, count)
+	}
+	if c.ResourceMemoryName != "" && c.ResourceMemoryName != mem {
+		return fmt.Errorf("hygon resourceMemoryName %q does not match resourcePrefix %q (%s)", c.ResourceMemoryName, prefix, mem)
+	}
+	if c.ResourceCoreName != "" && c.ResourceCoreName != cores {
+		return fmt.Errorf("hygon resourceCoreName %q does not match resourcePrefix %q (%s)", c.ResourceCoreName, prefix, cores)
+	}
+
+	c.ResourcePrefix = prefix
+	c.ResourceCountName = count
+	c.ResourceMemoryName = mem
+	c.ResourceCoreName = cores
+	HygonResourceCount = count
+	HygonResourceMemory = mem
+	HygonResourceCores = cores
+	word := strings.ToUpper(prefix)
+	if HygonHCUDevice != word {
+		delete(device.InRequestDevices, HygonHCUDevice)
+		delete(device.SupportDevices, HygonHCUDevice)
+		delete(util.HandshakeAnnos, HygonHCUDevice)
+	}
+	HygonHCUDevice = word
+	HygonHCUCommonWord = word
+	HandshakeAnnos = fmt.Sprintf("hami.io/node-handshake-%s", prefix)
+	RegisterAnnos = fmt.Sprintf("hami.io/node-%s-register", prefix)
+	HCUInUse = fmt.Sprintf("hygon.com/use-%stype", prefix)
+	HCUNoUse = fmt.Sprintf("hygon.com/nouse-%stype", prefix)
+	device.InRequestDevices[HygonHCUDevice] = fmt.Sprintf("hami.io/%s-devices-to-allocate", prefix)
+	device.SupportDevices[HygonHCUDevice] = fmt.Sprintf("hami.io/%s-devices-allocated", prefix)
+	util.HandshakeAnnos[HygonHCUDevice] = HandshakeAnnos
+	return nil
+}
+
+func validResourcePrefix(prefix string) bool {
+	if !strings.Contains(prefix, "cu") {
+		return false
+	}
+	for _, r := range prefix {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return prefix != ""
+}
+
+func InitHCUDevice(config HygonConfig) *HCUDevices {
+	if err := config.Apply(); err != nil {
+		klog.ErrorS(err, "invalid hygon config")
+		return nil
+	}
+	MemoryFactor = config.MemoryFactor
 	return &HCUDevices{}
 }
 
@@ -87,6 +161,7 @@ func (dev *HCUDevices) CommonWord() string {
 }
 
 func ParseConfig(fs *flag.FlagSet) {
+	fs.StringVar(&defaultResourcePrefix, "hcu-prefix", defaultHygonResourcePrefix, "Hygon resource prefix used when resourcePrefix is empty. Lowercase letters and digits, and it must contain \"cu\". The device plugin must advertise the same prefix.")
 	fs.StringVar(&HygonResourceCount, "hcu-name", "hygon.com/hcunum", "hcu resource count")
 	fs.StringVar(&HygonResourceMemory, "hcu-memory", "hygon.com/hcumem", "hcu memory resource")
 	fs.StringVar(&HygonResourceCores, "hcu-cores", "hygon.com/hcucores", "hcu core resource")

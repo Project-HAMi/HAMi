@@ -368,6 +368,28 @@ tests:
         devicePlugin.deviceSplitCount has been removed; use devices.nvidia.deviceSplitCount instead
         devices.ascend.enpu has been removed; use devices.ascend.hamiVnpuMode (template, hami-core, or enpu) instead
         scheduler.patch.image has been removed; use scheduler.patch.imageNew instead
+- it: rejects a Hygon resource prefix without cu
+  template: validate-values.yaml
+  set:
+    devices.hygon.resourcePrefix: gpu
+  asserts:
+  - failedTemplate:
+      errorMessage: 'devices.hygon.resourcePrefix "gpu" must match ^[a-z0-9]+$ and contain "cu"'
+- it: rejects a Hygon resource prefix wildcard
+  template: validate-values.yaml
+  set:
+    devices.hygon.resourcePrefix: '*cu'
+  asserts:
+  - failedTemplate:
+      errorMessage: 'devices.hygon.resourcePrefix "*cu" must match ^[a-z0-9]+$ and contain "cu"'
+- it: rejects a Hygon resource name that disagrees with resourcePrefix
+  template: validate-values.yaml
+  set:
+    devices.hygon.resourcePrefix: dcu
+    devices.hygon.resourceCountName: hygon.com/hcunum
+  asserts:
+  - failedTemplate:
+      errorMessage: 'devices.hygon.resourceCountName "hygon.com/hcunum" does not match resourcePrefix "dcu" (hygon.com/dcunum); set resourcePrefix and omit the resource name'
 ---
 suite: Migrated field rendering
 templates:
@@ -381,15 +403,13 @@ capabilities:
   majorVersion: 1
   minorVersion: 31
 tests:
-- it: renders migrated Hygon resource names
+- it: renders Hygon resource names from resourcePrefix
   set:
-    devices.hygon.resourceCountName: example.com/custom-count
-    devices.hygon.resourceMemoryName: example.com/custom-memory
-    devices.hygon.resourceCoreName: example.com/custom-cores
+    devices.hygon.resourcePrefix: dcu
   asserts:
   - matchRegex:
       path: data["device-config.yaml"]
-      pattern: 'hygon:\n  resourceCountName: example\.com/custom-count\n  resourceMemoryName: example\.com/custom-memory\n  resourceCoreName: example\.com/custom-cores\n'
+      pattern: 'hygon:\n  resourceCountName: hygon\.com/dcunum\n  resourceMemoryName: hygon\.com/dcumem\n  resourceCoreName: hygon\.com/dcucores\n'
   template: scheduler/device-configmap.yaml
 - it: renders migrated image settings for scheduler/job-patch/job-createSecret.yaml
   template: scheduler/job-patch/job-createSecret.yaml
@@ -515,6 +535,13 @@ tests:
   - matchRegex:
       path: data["device-config.yaml"]
       pattern: 'hygon:\n  resourceCountName: hygon\.com/hcunum\n  resourceMemoryName: hygon\.com/hcumem\n  resourceCoreName: hygon\.com/hcucores\n'
+- it: rejects an illegal Hygon resource prefix while rendering the device config
+  template: scheduler/device-configmap.yaml
+  set:
+    devices.hygon.resourcePrefix: dcu,hcu
+  asserts:
+  - failedTemplate:
+      errorMessage: 'devices.hygon.resourcePrefix "dcu,hcu" must match ^[a-z0-9]+$ and contain "cu"'
 - it: registers enflame resources with empty customresources
   template: scheduler/configmap.yaml
   set:
