@@ -33,6 +33,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
+// TestReconcileSessionStubs_PreservesAdmissionRewrittenImage checks convergence
+// after image admission and replacement when the requested image changes.
 func TestReconcileSessionStubs_PreservesAdmissionRewrittenImage(t *testing.T) {
 	const (
 		requestedImage = "alpine/socat:test"

@@ -156,6 +156,8 @@ func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []
 			}
 			// Older relays did not record the requested image. A rewritten
 			// legacy relay is replaced once to acquire that annotation.
+			// An upgrade can replace these relays across several nodes in
+			// one pass, disconnecting their active port-forwarded sessions.
 			return stub.Spec.Containers[i].Image == image
 		}
 	}
@@ -192,6 +194,8 @@ func sessionPullSecretsMatch(stub *corev1.Pod, names []string) bool {
 	return true
 }
 
+// sessionStub builds a relay Pod and records its managed configuration before
+// admission can mutate the Pod.
 func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) (*corev1.Pod, error) {
 	// The stub answers on the port its server does, so the port a user
 	// forwards is the one they would have used against the server itself.

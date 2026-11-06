@@ -140,6 +140,8 @@ func TestSessionPullSecretsMatchIgnoresServiceAccountInjection(t *testing.T) {
 	assert.Assert(t, sessionPullSecretsMatch(stub, nil))
 }
 
+// TestSessionStubImagePullSecrets checks the requested image and pull secrets
+// recorded for newly created relay Pods.
 func TestSessionStubImagePullSecrets(t *testing.T) {
 	tests := []struct {
 		name        string
