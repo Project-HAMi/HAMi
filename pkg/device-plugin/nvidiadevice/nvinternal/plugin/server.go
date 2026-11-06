@@ -573,6 +573,9 @@ func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error 
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
 	allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
 	if err != nil {
 		return err

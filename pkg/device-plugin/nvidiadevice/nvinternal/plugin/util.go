@@ -271,6 +271,9 @@ func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.Po
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
 	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
 	encoded := device.EncodePodSingleDevice(podSingleDev)
 	annoKey := device.InRequestDevices[dtype]
