@@ -1367,6 +1367,8 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	}
 
 	s := NewScheduler()
+	recorder := record.NewFakeRecorder(2)
+	s.eventRecorder = recorder
 	s.stopCh = make(chan struct{})
 	t.Cleanup(func() { close(s.stopCh) })
 	client.KubeClient = fake.NewClientset()
@@ -1434,6 +1436,25 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	assert.Equal(t, ok, true)
 	_, ok = nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, ok, false)
+	s.lock.RLock()
+	_, observed := s.backendHealth["node-1"]["mock-vendor"]
+	s.lock.RUnlock()
+	assert.Equal(t, observed, false, "an absent backend should not seed unhealthy state")
+
+	// When the backend first appears healthy, that observation establishes the
+	// baseline instead of being reported as a recovery from an absent backend.
+	mockDev.health = true
+	mockDev.nodeDevices = []*device.DeviceInfo{{
+		ID:           "MOCK-0",
+		DeviceVendor: "mock-vendor",
+		Health:       true,
+	}}
+	s.register(labels.Everything())
+	assertNoEvent(t, recorder)
+
+	s.lock.RLock()
+	assert.Equal(t, s.backendHealth["node-1"]["mock-vendor"], true)
+	s.lock.RUnlock()
 }
 
 func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {

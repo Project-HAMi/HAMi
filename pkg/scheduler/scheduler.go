@@ -653,7 +653,6 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 
 			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
-			s.recordDeviceBackendHealthTransition(val, devhandsk, health)
 
 			if !health {
 				existingNode, getNodeErr := s.GetNode(val.Name)
@@ -666,6 +665,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 					continue
 				}
 
+				s.recordDeviceBackendHealthTransition(val, devhandsk, false)
 				klog.ErrorS(nil, "Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
@@ -675,6 +675,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 				s.rmNodeDevices(val.Name, devhandsk)
 				continue
 			}
+			s.recordDeviceBackendHealthTransition(val, devhandsk, true)
 			if err != nil {
 				device.ForgetRegisteredDevices(devhandsk, val.Name)
 				continue
