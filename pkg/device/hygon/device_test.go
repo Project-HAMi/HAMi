@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -374,6 +376,9 @@ func Test_CheckHealth(t *testing.T) {
 }
 
 func Test_checkType(t *testing.T) {
+	prevPrefix := configuredResourcePrefix
+	configuredResourcePrefix = defaultHygonResourcePrefix
+	t.Cleanup(func() { configuredResourcePrefix = prevPrefix })
 	tests := []struct {
 		name string
 		args struct {
@@ -424,6 +429,44 @@ func Test_checkType(t *testing.T) {
 				},
 			},
 			want1: false,
+			want2: false,
+			want3: false,
+		},
+		{
+			name: "raw K100_AI still matches default hcu",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: device.DeviceUsage{
+					Type: "K100_AI",
+				},
+				n: device.ContainerDeviceRequest{
+					Type: "HCU",
+				},
+			},
+			want1: true,
+			want2: true,
+			want3: false,
+		},
+		{
+			name: "DCU-K100_AI does not match default hcu",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: device.DeviceUsage{
+					Type: "DCU-K100_AI",
+				},
+				n: device.ContainerDeviceRequest{
+					Type: "HCU",
+				},
+			},
+			want1: true,
 			want2: false,
 			want3: false,
 		},
@@ -1631,4 +1674,276 @@ func Test_GenerateResourceRequests_UnparsableMemory(t *testing.T) {
 	var invalid *device.ErrInvalidDeviceRequest
 	assert.Assert(t, errors.As(err, &invalid))
 	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}
+
+func TestResourcePrefix(t *testing.T) {
+	prevCount, prevMem, prevCores := HygonResourceCount, HygonResourceMemory, HygonResourceCores
+	prevMemoryFactor := MemoryFactor
+	prevHandshake, prevRegister := HandshakeAnnos, RegisterAnnos
+	prevInUse, prevNoUse := HCUInUse, HCUNoUse
+	prevDefaultPrefix := defaultResourcePrefix
+	prevType, prevWord := HygonHCUDevice, HygonHCUCommonWord
+	prevInRequest := device.InRequestDevices[HygonHCUDevice]
+	prevSupport := device.SupportDevices[HygonHCUDevice]
+	prevUtilHandshake := util.HandshakeAnnos[HygonHCUDevice]
+	prevConfiguredPrefix := configuredResourcePrefix
+	prevSeenReq := append([]string{}, seenHygonRequestKeys...)
+	prevSeenAlloc := append([]string{}, seenHygonAllocatedKeys...)
+	prevAliasPrimaries := append([]string{}, hygonAliasPrimaries...)
+	prevAliases := cloneAnnoAliases(device.PodDeviceAnnoAliases)
+	t.Cleanup(func() {
+		if HygonHCUDevice != prevType {
+			delete(device.InRequestDevices, HygonHCUDevice)
+			delete(device.SupportDevices, HygonHCUDevice)
+			delete(util.HandshakeAnnos, HygonHCUDevice)
+		}
+		HygonHCUDevice, HygonHCUCommonWord = prevType, prevWord
+		HygonResourceCount, HygonResourceMemory, HygonResourceCores = prevCount, prevMem, prevCores
+		MemoryFactor = prevMemoryFactor
+		HandshakeAnnos, RegisterAnnos = prevHandshake, prevRegister
+		HCUInUse, HCUNoUse = prevInUse, prevNoUse
+		defaultResourcePrefix = prevDefaultPrefix
+		configuredResourcePrefix = prevConfiguredPrefix
+		device.InRequestDevices[HygonHCUDevice] = prevInRequest
+		device.SupportDevices[HygonHCUDevice] = prevSupport
+		util.HandshakeAnnos[HygonHCUDevice] = prevUtilHandshake
+		seenHygonRequestKeys = prevSeenReq
+		seenHygonAllocatedKeys = prevSeenAlloc
+		hygonAliasPrimaries = prevAliasPrimaries
+		device.PodDeviceAnnoAliases = prevAliases
+	})
+
+	empty := HygonConfig{}
+	assert.NilError(t, empty.Apply())
+	assert.Equal(t, empty.ResourcePrefix, "hcu")
+	assert.Equal(t, HygonHCUDevice, "HCU")
+	assert.Equal(t, HygonHCUCommonWord, "HCU")
+	assert.Assert(t, ModelMatchesPrefix("HCU-K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("Z100L"))
+	assert.Assert(t, !ModelMatchesPrefix("DCU-K100_AI"))
+	assert.Assert(t, !ModelMatchesPrefix("NVIDIA-A100"))
+	assert.Assert(t, !ModelMatchesPrefix("MLU370"))
+	assert.Equal(t, empty.ResourceCountName, "hygon.com/hcunum")
+	assert.Equal(t, empty.ResourceMemoryName, "hygon.com/hcumem")
+	assert.Equal(t, empty.ResourceCoreName, "hygon.com/hcucores")
+	assert.Equal(t, HandshakeAnnos, "hami.io/node-handshake-hcu")
+	assert.Equal(t, RegisterAnnos, "hami.io/node-hcu-register")
+	assert.Equal(t, HCUInUse, "hygon.com/use-hcutype")
+	assert.Equal(t, HCUNoUse, "hygon.com/nouse-hcutype")
+	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/hcu-devices-to-allocate")
+	assert.Equal(t, device.SupportDevices[HygonHCUDevice], "hami.io/hcu-devices-allocated")
+	assert.Equal(t, util.HandshakeAnnos[HygonHCUDevice], HandshakeAnnos)
+
+	dcu := HygonConfig{ResourcePrefix: "dcu"}
+	assert.NilError(t, dcu.Apply())
+	assert.Equal(t, HygonHCUDevice, "HCU")
+	assert.Equal(t, HygonHCUCommonWord, "HCU")
+	assert.Assert(t, ModelMatchesPrefix("DCU-K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("K100_AI"))
+	assert.Assert(t, !ModelMatchesPrefix("HCU-K100_AI"))
+	assert.Equal(t, dcu.ResourceCountName, "hygon.com/dcunum")
+	assert.Equal(t, dcu.ResourceMemoryName, "hygon.com/dcumem")
+	assert.Equal(t, dcu.ResourceCoreName, "hygon.com/dcucores")
+	assert.Equal(t, HandshakeAnnos, "hami.io/node-handshake-dcu")
+	assert.Equal(t, RegisterAnnos, "hami.io/node-dcu-register")
+	assert.Equal(t, HCUInUse, "hygon.com/use-dcutype")
+	assert.Equal(t, HCUNoUse, "hygon.com/nouse-dcutype")
+	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/dcu-devices-to-allocate")
+	assert.Equal(t, device.SupportDevices[HygonHCUDevice], "hami.io/dcu-devices-allocated")
+	_, hasDCUDevice := device.InRequestDevices["DCU"]
+	assert.Assert(t, !hasDCUDevice)
+	legacy, err := device.DecodePodDevices(device.SupportDevices, map[string]string{
+		"hami.io/hcu-devices-allocated": "DCU-TPXS300010100401,HCU,1024,50:;",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, legacy[HygonHCUDevice][0][0].UUID, "DCU-TPXS300010100401")
+	assert.Equal(t, legacy[HygonHCUDevice][0][0].Usedmem, int64(1024))
+	both, err := device.DecodePodDevices(device.SupportDevices, map[string]string{
+		"hami.io/dcu-devices-allocated": "DCU-TPXS300010100401,HCU,2048,10:;",
+		"hami.io/hcu-devices-allocated": "DCU-TPXS300010100401,HCU,1024,50:;",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, both[HygonHCUDevice][0][0].Usedmem, int64(2048))
+
+	again := HygonConfig{ResourcePrefix: "hcu"}
+	assert.NilError(t, again.Apply())
+	assert.Equal(t, HygonHCUDevice, "HCU")
+	assert.Assert(t, ModelMatchesPrefix("HCU-K100_AI"))
+	assert.Assert(t, !ModelMatchesPrefix("DCU-K100_AI"))
+	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/hcu-devices-to-allocate")
+	assert.Equal(t, HandshakeAnnos, "hami.io/node-handshake-hcu")
+	carried, err := device.DecodePodDevices(device.SupportDevices, map[string]string{
+		"hami.io/dcu-devices-allocated": "DCU-TPXS300010100401,HCU,4096,20:;",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, carried[HygonHCUDevice][0][0].Usedmem, int64(4096))
+
+	spaced := HygonConfig{ResourcePrefix: "  hcu  "}
+	assert.NilError(t, spaced.Apply())
+	assert.Equal(t, spaced.ResourcePrefix, "hcu")
+
+	matched := HygonConfig{
+		ResourcePrefix:     "dcu",
+		ResourceCountName:  "hygon.com/dcunum",
+		ResourceMemoryName: "hygon.com/dcumem",
+		ResourceCoreName:   "hygon.com/dcucores",
+	}
+	assert.NilError(t, matched.Apply())
+
+	for _, prefix := range []string{"gpu", "*cu", "dcu,hcu", "DCU", "dcu/hcu", "cu cu"} {
+		bad := HygonConfig{ResourcePrefix: prefix}
+		err := bad.Apply()
+		assert.Assert(t, err != nil, prefix)
+		assert.ErrorContains(t, err, prefix)
+	}
+	assert.Equal(t, HygonResourceCount, "hygon.com/dcunum")
+
+	defaultResourcePrefix = "gpu"
+	emptyBad := HygonConfig{}
+	err = emptyBad.Apply()
+	assert.Assert(t, err != nil)
+	assert.ErrorContains(t, err, `"gpu"`)
+	defaultResourcePrefix = prevDefaultPrefix
+
+	mismatch := HygonConfig{ResourcePrefix: "dcu", ResourceCountName: "hygon.com/hcunum"}
+	assert.NilError(t, mismatch.Apply())
+	assert.Equal(t, mismatch.ResourceCountName, "hygon.com/hcunum")
+	assert.Equal(t, mismatch.ResourceMemoryName, "hygon.com/dcumem")
+	assert.Equal(t, mismatch.ResourceCoreName, "hygon.com/dcucores")
+	assert.Equal(t, HygonResourceCount, "hygon.com/hcunum")
+	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/dcu-devices-to-allocate")
+
+	defaultResourcePrefix = "dcu"
+	fromFlag := HygonConfig{}
+	assert.NilError(t, fromFlag.Apply())
+	assert.Equal(t, fromFlag.ResourcePrefix, "dcu")
+	assert.Equal(t, fromFlag.ResourceCountName, "hygon.com/dcunum")
+
+	conflictFS := flag.NewFlagSet("hygon-conflict", flag.ContinueOnError)
+	ParseConfig(conflictFS)
+	assert.NilError(t, conflictFS.Parse([]string{"-hcu-prefix=dcu", "-hcu-name=hygon.com/hcunum"}))
+	conflictCfg := HygonConfig{ResourcePrefix: "dcu"}
+	assert.NilError(t, conflictCfg.Apply())
+	assert.Equal(t, conflictCfg.ResourcePrefix, "dcu")
+	assert.Equal(t, HygonResourceCount, "hygon.com/dcunum")
+	assert.Equal(t, HygonResourceMemory, "hygon.com/dcumem")
+	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/dcu-devices-to-allocate")
+
+	nameFS := flag.NewFlagSet("hygon-yaml-name", flag.ContinueOnError)
+	ParseConfig(nameFS)
+	assert.NilError(t, nameFS.Parse([]string{"-hcu-prefix=dcu", "-hcu-name=hygon.com/hcunum"}))
+	explicitName := HygonConfig{ResourceCountName: "example.com/count"}
+	assert.NilError(t, explicitName.Apply())
+	assert.Equal(t, explicitName.ResourcePrefix, "dcu")
+	assert.Equal(t, HygonResourceCount, "example.com/count")
+	assert.Equal(t, HygonResourceMemory, "hygon.com/dcumem")
+
+	dev := InitHCUDevice(HygonConfig{
+		ResourcePrefix:     "hcu",
+		ResourceCountName:  "hygon.com/hcunum",
+		ResourceMemoryName: "hygon.com/hcumem",
+		ResourceCoreName:   "hygon.com/hcucores",
+		MemoryFactor:       1024,
+	})
+	assert.Assert(t, dev != nil)
+	assert.Equal(t, MemoryFactor, int64(1024))
+	assert.Equal(t, HygonResourceCount, "hygon.com/hcunum")
+	assert.Assert(t, InitHCUDevice(HygonConfig{ResourcePrefix: "*cu"}) == nil)
+}
+
+func cloneAnnoAliases(in map[string][]string) map[string][]string {
+	out := map[string][]string{}
+	for key, values := range in {
+		out[key] = append([]string{}, values...)
+	}
+	return out
+}
+
+// A dcu device plugin registers the card as DCU-K100_AI under the dcu node
+// annotation. The request type stays HCU so existing pod records are still
+// found, and the card is selected because its model contains the prefix.
+func TestDCURegisterAnnotationFits(t *testing.T) {
+	prevCount, prevMem, prevCores := HygonResourceCount, HygonResourceMemory, HygonResourceCores
+	prevMemoryFactor := MemoryFactor
+	prevHandshake, prevRegister := HandshakeAnnos, RegisterAnnos
+	prevInUse, prevNoUse := HCUInUse, HCUNoUse
+	prevDefaultPrefix := defaultResourcePrefix
+	prevConfiguredPrefix := configuredResourcePrefix
+	prevInRequest := device.InRequestDevices[HygonHCUDevice]
+	prevSupport := device.SupportDevices[HygonHCUDevice]
+	prevUtilHandshake := util.HandshakeAnnos[HygonHCUDevice]
+	prevSeenReq := append([]string{}, seenHygonRequestKeys...)
+	prevSeenAlloc := append([]string{}, seenHygonAllocatedKeys...)
+	prevAliasPrimaries := append([]string{}, hygonAliasPrimaries...)
+	prevAliases := cloneAnnoAliases(device.PodDeviceAnnoAliases)
+	t.Cleanup(func() {
+		HygonResourceCount, HygonResourceMemory, HygonResourceCores = prevCount, prevMem, prevCores
+		MemoryFactor = prevMemoryFactor
+		HandshakeAnnos, RegisterAnnos = prevHandshake, prevRegister
+		HCUInUse, HCUNoUse = prevInUse, prevNoUse
+		defaultResourcePrefix = prevDefaultPrefix
+		configuredResourcePrefix = prevConfiguredPrefix
+		device.InRequestDevices[HygonHCUDevice] = prevInRequest
+		device.SupportDevices[HygonHCUDevice] = prevSupport
+		util.HandshakeAnnos[HygonHCUDevice] = prevUtilHandshake
+		seenHygonRequestKeys = prevSeenReq
+		seenHygonAllocatedKeys = prevSeenAlloc
+		hygonAliasPrimaries = prevAliasPrimaries
+		device.PodDeviceAnnoAliases = prevAliases
+	})
+
+	cfg := HygonConfig{ResourcePrefix: "dcu"}
+	assert.NilError(t, cfg.Apply())
+	MemoryFactor = 1
+	dev := &HCUDevices{}
+	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name: "k8s-192-168-100-144",
+		Annotations: map[string]string{
+			RegisterAnnos: "DCU-TPXS300010100401,4,65520,100,DCU-K100_AI,0,true,0,hami:",
+		},
+	}}
+	infos, err := dev.GetNodeDevices(node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(infos), 1)
+	assert.Equal(t, infos[0].ID, "DCU-TPXS300010100401")
+	assert.Equal(t, infos[0].Type, "DCU-K100_AI")
+	assert.Equal(t, infos[0].DeviceVendor, "HCU")
+	assert.Assert(t, ModelMatchesPrefix(infos[0].Type))
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "dcu-pod",
+		Annotations: map[string]string{
+			HCUUseUUID: "DCU-TPXS300010100401",
+		},
+	}, Spec: corev1.PodSpec{Containers: []corev1.Container{{
+		Name: "app",
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			corev1.ResourceName(HygonResourceCount):  resource.MustParse("1"),
+			corev1.ResourceName(HygonResourceMemory): resource.MustParse("1024"),
+			corev1.ResourceName(HygonResourceCores):  resource.MustParse("50"),
+		}},
+	}}}}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+	assert.Equal(t, req.Type, "HCU")
+	usage := &device.DeviceUsage{
+		ID:        infos[0].ID,
+		Index:     infos[0].Index,
+		Count:     infos[0].Count,
+		Totalmem:  infos[0].Devmem,
+		Totalcore: infos[0].Devcore,
+		Type:      infos[0].Type,
+		Health:    infos[0].Health,
+		Numa:      infos[0].Numa,
+	}
+	fit, got, reason := dev.Fit([]*device.DeviceUsage{usage}, req, pod, nil, nil)
+	assert.Assert(t, fit, reason)
+	assert.Equal(t, got[HygonHCUDevice][0].UUID, "DCU-TPXS300010100401")
+
+	hcuCfg := HygonConfig{ResourcePrefix: "hcu"}
+	assert.NilError(t, hcuCfg.Apply())
+	fit, _, reason = dev.Fit([]*device.DeviceUsage{usage}, req, pod, nil, nil)
+	assert.Assert(t, !fit)
+	assert.Assert(t, strings.Contains(reason, "CardTypeMismatch"), reason)
 }
