@@ -376,6 +376,9 @@ func Test_CheckHealth(t *testing.T) {
 }
 
 func Test_checkType(t *testing.T) {
+	prevPrefix := configuredResourcePrefix
+	configuredResourcePrefix = defaultHygonResourcePrefix
+	t.Cleanup(func() { configuredResourcePrefix = prevPrefix })
 	tests := []struct {
 		name string
 		args struct {
@@ -426,6 +429,44 @@ func Test_checkType(t *testing.T) {
 				},
 			},
 			want1: false,
+			want2: false,
+			want3: false,
+		},
+		{
+			name: "raw K100_AI still matches default hcu",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: device.DeviceUsage{
+					Type: "K100_AI",
+				},
+				n: device.ContainerDeviceRequest{
+					Type: "HCU",
+				},
+			},
+			want1: true,
+			want2: true,
+			want3: false,
+		},
+		{
+			name: "DCU-K100_AI does not match default hcu",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: device.DeviceUsage{
+					Type: "DCU-K100_AI",
+				},
+				n: device.ContainerDeviceRequest{
+					Type: "HCU",
+				},
+			},
+			want1: true,
 			want2: false,
 			want3: false,
 		},
@@ -1641,7 +1682,6 @@ func TestResourcePrefix(t *testing.T) {
 	prevHandshake, prevRegister := HandshakeAnnos, RegisterAnnos
 	prevInUse, prevNoUse := HCUInUse, HCUNoUse
 	prevDefaultPrefix := defaultResourcePrefix
-	prevFlags := hygonConfigFlags
 	prevType, prevWord := HygonHCUDevice, HygonHCUCommonWord
 	prevInRequest := device.InRequestDevices[HygonHCUDevice]
 	prevSupport := device.SupportDevices[HygonHCUDevice]
@@ -1664,7 +1704,6 @@ func TestResourcePrefix(t *testing.T) {
 		HCUInUse, HCUNoUse = prevInUse, prevNoUse
 		defaultResourcePrefix = prevDefaultPrefix
 		configuredResourcePrefix = prevConfiguredPrefix
-		hygonConfigFlags = prevFlags
 		device.InRequestDevices[HygonHCUDevice] = prevInRequest
 		device.SupportDevices[HygonHCUDevice] = prevSupport
 		util.HandshakeAnnos[HygonHCUDevice] = prevUtilHandshake
@@ -1680,7 +1719,11 @@ func TestResourcePrefix(t *testing.T) {
 	assert.Equal(t, HygonHCUDevice, "HCU")
 	assert.Equal(t, HygonHCUCommonWord, "HCU")
 	assert.Assert(t, ModelMatchesPrefix("HCU-K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("Z100L"))
 	assert.Assert(t, !ModelMatchesPrefix("DCU-K100_AI"))
+	assert.Assert(t, !ModelMatchesPrefix("NVIDIA-A100"))
+	assert.Assert(t, !ModelMatchesPrefix("MLU370"))
 	assert.Equal(t, empty.ResourceCountName, "hygon.com/hcunum")
 	assert.Equal(t, empty.ResourceMemoryName, "hygon.com/hcumem")
 	assert.Equal(t, empty.ResourceCoreName, "hygon.com/hcucores")
@@ -1697,6 +1740,7 @@ func TestResourcePrefix(t *testing.T) {
 	assert.Equal(t, HygonHCUDevice, "HCU")
 	assert.Equal(t, HygonHCUCommonWord, "HCU")
 	assert.Assert(t, ModelMatchesPrefix("DCU-K100_AI"))
+	assert.Assert(t, ModelMatchesPrefix("K100_AI"))
 	assert.Assert(t, !ModelMatchesPrefix("HCU-K100_AI"))
 	assert.Equal(t, dcu.ResourceCountName, "hygon.com/dcunum")
 	assert.Equal(t, dcu.ResourceMemoryName, "hygon.com/dcumem")
@@ -1782,22 +1826,18 @@ func TestResourcePrefix(t *testing.T) {
 	conflictCfg := HygonConfig{ResourcePrefix: "dcu"}
 	assert.NilError(t, conflictCfg.Apply())
 	assert.Equal(t, conflictCfg.ResourcePrefix, "dcu")
-	assert.Equal(t, HygonResourceCount, "hygon.com/hcunum")
+	assert.Equal(t, HygonResourceCount, "hygon.com/dcunum")
 	assert.Equal(t, HygonResourceMemory, "hygon.com/dcumem")
 	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/dcu-devices-to-allocate")
 
-	matchFS := flag.NewFlagSet("hygon-match", flag.ContinueOnError)
-	ParseConfig(matchFS)
-	assert.NilError(t, matchFS.Parse([]string{
-		"-hcu-prefix=dcu",
-		"-hcu-name=hygon.com/dcunum",
-		"-hcu-memory=hygon.com/dcumem",
-		"-hcu-cores=hygon.com/dcucores",
-	}))
-	matchCfg := HygonConfig{}
-	assert.NilError(t, matchCfg.Apply())
-	assert.Equal(t, HygonResourceCount, "hygon.com/dcunum")
-	hygonConfigFlags = nil
+	nameFS := flag.NewFlagSet("hygon-yaml-name", flag.ContinueOnError)
+	ParseConfig(nameFS)
+	assert.NilError(t, nameFS.Parse([]string{"-hcu-prefix=dcu", "-hcu-name=hygon.com/hcunum"}))
+	explicitName := HygonConfig{ResourceCountName: "example.com/count"}
+	assert.NilError(t, explicitName.Apply())
+	assert.Equal(t, explicitName.ResourcePrefix, "dcu")
+	assert.Equal(t, HygonResourceCount, "example.com/count")
+	assert.Equal(t, HygonResourceMemory, "hygon.com/dcumem")
 
 	dev := InitHCUDevice(HygonConfig{
 		ResourcePrefix:     "hcu",
@@ -1830,7 +1870,6 @@ func TestDCURegisterAnnotationFits(t *testing.T) {
 	prevInUse, prevNoUse := HCUInUse, HCUNoUse
 	prevDefaultPrefix := defaultResourcePrefix
 	prevConfiguredPrefix := configuredResourcePrefix
-	prevFlags := hygonConfigFlags
 	prevInRequest := device.InRequestDevices[HygonHCUDevice]
 	prevSupport := device.SupportDevices[HygonHCUDevice]
 	prevUtilHandshake := util.HandshakeAnnos[HygonHCUDevice]
@@ -1845,7 +1884,6 @@ func TestDCURegisterAnnotationFits(t *testing.T) {
 		HCUInUse, HCUNoUse = prevInUse, prevNoUse
 		defaultResourcePrefix = prevDefaultPrefix
 		configuredResourcePrefix = prevConfiguredPrefix
-		hygonConfigFlags = prevFlags
 		device.InRequestDevices[HygonHCUDevice] = prevInRequest
 		device.SupportDevices[HygonHCUDevice] = prevSupport
 		util.HandshakeAnnos[HygonHCUDevice] = prevUtilHandshake

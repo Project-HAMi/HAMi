@@ -76,10 +76,6 @@ var (
 	// such as DCU-K100_AI are selected when they contain this prefix.
 	configuredResourcePrefix = defaultHygonResourcePrefix
 
-	// hygonConfigFlags is the FlagSet passed to ParseConfig. Visit() tells Apply
-	// whether --hcu-name / --hcu-memory / --hcu-cores were set on the command line.
-	hygonConfigFlags *flag.FlagSet
-
 	// Prefixes already applied in this process, plus the historical hcu and dcu
 	// keys, stay readable after resourcePrefix changes.
 	seenHygonRequestKeys   []string
@@ -96,10 +92,13 @@ type HygonConfig struct {
 }
 
 // Apply checks resourcePrefix and derives resource and annotation names from it.
-// An empty prefix uses -hcu-prefix, then "hcu". A non-empty resource name, or
-// an explicit --hcu-name / --hcu-memory / --hcu-cores flag, overrides the
-// derived name. The device id stays "HCU"; annotation keys follow the prefix,
-// and the previous hcu/dcu keys remain readable so existing pods stay accounted.
+// An empty prefix uses -hcu-prefix, then "hcu". A non-empty resource name in
+// this config overrides the derived name. --hcu-name, --hcu-memory, and
+// --hcu-cores stay registered so existing command lines still parse; chart
+// deployments already set the YAML names, and the scheduler parses flags
+// through cobra, so those three flags are not a second source of names.
+// The device id stays "HCU"; annotation keys follow the prefix, and the
+// previous hcu/dcu keys remain readable so existing pods stay accounted.
 func (c *HygonConfig) Apply() error {
 	prefix := strings.TrimSpace(c.ResourcePrefix)
 	if prefix == "" {
@@ -111,9 +110,9 @@ func (c *HygonConfig) Apply() error {
 	if !validResourcePrefix(prefix) {
 		return fmt.Errorf("hygon resourcePrefix %q must match ^[a-z0-9]+$ and contain \"cu\"", prefix)
 	}
-	count := resolveResourceName(c.ResourceCountName, "hcu-name", HygonResourceCount, fmt.Sprintf("hygon.com/%snum", prefix))
-	mem := resolveResourceName(c.ResourceMemoryName, "hcu-memory", HygonResourceMemory, fmt.Sprintf("hygon.com/%smem", prefix))
-	cores := resolveResourceName(c.ResourceCoreName, "hcu-cores", HygonResourceCores, fmt.Sprintf("hygon.com/%scores", prefix))
+	count := resolveResourceName(c.ResourceCountName, fmt.Sprintf("hygon.com/%snum", prefix))
+	mem := resolveResourceName(c.ResourceMemoryName, fmt.Sprintf("hygon.com/%smem", prefix))
+	cores := resolveResourceName(c.ResourceCoreName, fmt.Sprintf("hygon.com/%scores", prefix))
 
 	c.ResourcePrefix = prefix
 	c.ResourceCountName = count
@@ -136,17 +135,11 @@ func (c *HygonConfig) Apply() error {
 	return nil
 }
 
-// resolveResourceName uses an explicit config value, then an explicitly set
-// flag, and otherwise the name derived from resourcePrefix. Flag defaults are
-// not explicit: ParseConfig installs them even when the user never passed the flag.
-func resolveResourceName(configured, flagName, flagValue, derived string) string {
+// resolveResourceName uses an explicit config value, otherwise the name derived
+// from resourcePrefix.
+func resolveResourceName(configured, derived string) string {
 	if name := strings.TrimSpace(configured); name != "" {
 		return name
-	}
-	if hygonResourceFlagSet(flagName) {
-		if name := strings.TrimSpace(flagValue); name != "" {
-			return name
-		}
 	}
 	return derived
 }
@@ -157,14 +150,51 @@ func IsHygonRequest(requestedType string) bool {
 }
 
 // ModelMatchesPrefix reports whether a card model registered by the device
-// plugin belongs to the configured resource prefix. DCU-K100_AI matches dcu
-// and does not match hcu.
+// plugin belongs to the configured resource prefix.
+//
+// A prefixed model follows the current device plugin: DCU-K100_AI matches dcu
+// and does not match hcu. dcu-vgpu-device-plugin instead stores the raw DMI
+// name (K100_AI, Z100, Z100L) with no family marker. Master accepted those
+// names, and they are not the other prefix, so they match the configured one.
 func ModelMatchesPrefix(availableType string) bool {
 	prefix := configuredResourcePrefix
 	if prefix == "" {
 		prefix = defaultHygonResourcePrefix
 	}
-	return strings.Contains(strings.ToLower(availableType), strings.ToLower(prefix))
+	model := strings.ToLower(strings.TrimSpace(availableType))
+	if model == "" {
+		return false
+	}
+	if strings.Contains(model, strings.ToLower(prefix)) {
+		return true
+	}
+	if strings.Contains(model, "hcu") || strings.Contains(model, "dcu") {
+		return false
+	}
+	return legacyUnprefixedHygonModel(model)
+}
+
+// legacyUnprefixedHygonModel reports raw DMI names. The token check keeps
+// unrelated single-token types such as MLU370 off the Hygon path.
+func legacyUnprefixedHygonModel(model string) bool {
+	for _, family := range []string{"k100", "z100", "bw100", "bw150", "z100"} {
+		if strings.HasPrefix(model, family) && hygonModelToken(model) {
+			return true
+		}
+	}
+	return false
+}
+
+func hygonModelToken(model string) bool {
+	if model == "" {
+		return false
+	}
+	for _, r := range model {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func bindHygonPodDeviceAliases(activeRequest, activeAllocated string) {
@@ -219,19 +249,6 @@ func validResourcePrefix(prefix string) bool {
 	return prefix != ""
 }
 
-func hygonResourceFlagSet(name string) bool {
-	if hygonConfigFlags == nil {
-		return false
-	}
-	set := false
-	hygonConfigFlags.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			set = true
-		}
-	})
-	return set
-}
-
 func InitHCUDevice(config HygonConfig) *HCUDevices {
 	if err := config.Apply(); err != nil {
 		klog.ErrorS(err, "invalid hygon config")
@@ -246,8 +263,11 @@ func (dev *HCUDevices) CommonWord() string {
 }
 
 func ParseConfig(fs *flag.FlagSet) {
-	hygonConfigFlags = fs
 	fs.StringVar(&defaultResourcePrefix, "hcu-prefix", defaultHygonResourcePrefix, "Hygon resource prefix used when resourcePrefix is empty. Lowercase letters and digits, and it must contain \"cu\". The device plugin must advertise the same prefix.")
+	// These three flags stay so existing command lines still parse. Apply does
+	// not read them: a YAML resource name wins, and an empty name is derived
+	// from resourcePrefix. cobra parses the scheduler flags, so FlagSet.Visit
+	// on this set would not see values the user passed.
 	fs.StringVar(&HygonResourceCount, "hcu-name", "hygon.com/hcunum", "hcu resource count")
 	fs.StringVar(&HygonResourceMemory, "hcu-memory", "hygon.com/hcumem", "hcu memory resource")
 	fs.StringVar(&HygonResourceCores, "hcu-cores", "hygon.com/hcucores", "hcu core resource")

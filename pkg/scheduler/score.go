@@ -46,9 +46,7 @@ func viewStatus(usage NodeUsage) {
 // deviceTypeMatches preserves HAMi's case-insensitive substring matching for
 // mapping a registered request type to the corresponding node devices.
 // Hygon keeps the request type "HCU" so existing allocation records stay on
-// that device id. The device plugin stamps the card model with the resource
-// prefix (DCU-K100_AI when resourcePrefix is dcu), so those requests match the
-// model against the configured prefix instead of the stable device id.
+// that device id. Prefixed models match the configured prefix.
 func deviceTypeMatches(availableType, requestedType string) bool {
 	if hygon.IsHygonRequest(requestedType) {
 		return hygon.ModelMatchesPrefix(availableType)
