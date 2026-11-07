@@ -31,6 +31,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -129,26 +130,40 @@ func PatchNodeAnnotationsWithContext(ctx context.Context, node *corev1.Node, ann
 		return fmt.Errorf("kubernetes client is not initialized")
 	}
 	type patchMetadata struct {
-		Annotations map[string]string `json:"annotations,omitempty"`
+		Annotations     map[string]string `json:"annotations,omitempty"`
+		ResourceVersion string            `json:"resourceVersion,omitempty"`
 	}
 	type patchNode struct {
 		Metadata patchMetadata `json:"metadata"`
 	}
 
-	p := patchNode{}
-	p.Metadata.Annotations = annotations
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestNode, err := c.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+		rv := ""
+		if err == nil && latestNode != nil {
+			rv = latestNode.ResourceVersion
+		} else if node.ResourceVersion != "" {
+			rv = node.ResourceVersion
+		}
+		p := patchNode{
+			Metadata: patchMetadata{
+				Annotations:     annotations,
+				ResourceVersion: rv,
+			},
+		}
 
-	bytes, err := json.Marshal(p)
-	if err != nil {
+		bytes, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		_, err = c.CoreV1().Nodes().
+			Patch(ctx, node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+		if err != nil {
+			klog.Infoln("annotations=", annotations)
+			klog.Infof("patch node %v failed, %v", node.Name, err)
+		}
 		return err
-	}
-	_, err = c.CoreV1().Nodes().
-		Patch(ctx, node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		klog.Infoln("annotations=", annotations)
-		klog.Infof("patch node %v failed, %v", node.Name, err)
-	}
-	return err
+	})
 }
 
 func PatchNodeStatusCapacity(node *corev1.Node, resources corev1.ResourceList) error {
@@ -164,28 +179,44 @@ func PatchNodeStatusCapacity(node *corev1.Node, resources corev1.ResourceList) e
 		Capacity    corev1.ResourceList `json:"capacity,omitempty"`
 		Allocatable corev1.ResourceList `json:"allocatable,omitempty"`
 	}
+	type patchStatusMetadata struct {
+		ResourceVersion string `json:"resourceVersion,omitempty"`
+	}
 	type patchStatusNode struct {
-		Status patchStatusDetails `json:"status"`
+		Metadata patchStatusMetadata `json:"metadata,omitempty"`
+		Status   patchStatusDetails  `json:"status"`
 	}
 
-	p := patchStatusNode{
-		Status: patchStatusDetails{
-			Capacity:    resources,
-			Allocatable: resources,
-		},
-	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestNode, err := c.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+		rv := ""
+		if err == nil && latestNode != nil {
+			rv = latestNode.ResourceVersion
+		} else if node.ResourceVersion != "" {
+			rv = node.ResourceVersion
+		}
+		p := patchStatusNode{
+			Metadata: patchStatusMetadata{
+				ResourceVersion: rv,
+			},
+			Status: patchStatusDetails{
+				Capacity:    resources,
+				Allocatable: resources,
+			},
+		}
 
-	bytes, err := json.Marshal(p)
-	if err != nil {
+		bytes, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		_, err = c.CoreV1().Nodes().
+			Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{}, "status")
+		if err != nil {
+			klog.Infoln("resources=", resources)
+			klog.Infof("patch node status capacity %v failed, %v", node.Name, err)
+		}
 		return err
-	}
-	_, err = c.CoreV1().Nodes().
-		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{}, "status")
-	if err != nil {
-		klog.Infoln("resources=", resources)
-		klog.Infof("patch node status capacity %v failed, %v", node.Name, err)
-	}
-	return err
+	})
 }
 
 func AllNonSidecarInitContainersSucceeded(pod *corev1.Pod) bool {
@@ -213,40 +244,62 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	if pod == nil {
 		return fmt.Errorf("pod is nil")
 	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		// UID makes the patch conditional on the object's identity. A merge
 		// patch is addressed by name, so without it a patch computed for one
 		// pod can land on a different pod that later took the same name.
 		// Kubernetes rejects an update that changes the UID, so a mismatch
 		// fails the request instead of writing to the wrong object.
-		UID         k8stypes.UID      `json:"uid,omitempty"`
-		Annotations map[string]string `json:"annotations,omitempty"`
-		Labels      map[string]string `json:"labels,omitempty"`
+		UID             k8stypes.UID      `json:"uid,omitempty"`
+		Annotations     map[string]string `json:"annotations,omitempty"`
+		Labels          map[string]string `json:"labels,omitempty"`
+		ResourceVersion string            `json:"resourceVersion,omitempty"`
 	}
 	type patchPod struct {
 		Metadata patchMetadata `json:"metadata"`
 	}
 
-	p := patchPod{}
-	p.Metadata.UID = pod.UID
-	p.Metadata.Annotations = annotations
-	label := make(map[string]string)
-	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
-		label[AssignedNodeAnnotations] = v
-		p.Metadata.Labels = label
-	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestPod, err := c.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		rv := ""
+		if err == nil && latestPod != nil {
+			if pod.UID != "" && latestPod.UID != pod.UID {
+				return apierrors.NewConflict(
+					corev1.Resource("pods"), pod.Name,
+					fmt.Errorf("Precondition failed: UID in precondition: %q, UID in object meta: %q", pod.UID, latestPod.UID),
+				)
+			}
+			rv = latestPod.ResourceVersion
+		} else if pod.ResourceVersion != "" {
+			rv = pod.ResourceVersion
+		}
 
-	bytes, err := json.Marshal(p)
-	if err != nil {
+		p := patchPod{}
+		p.Metadata.UID = pod.UID
+		p.Metadata.ResourceVersion = rv
+		p.Metadata.Annotations = annotations
+		label := make(map[string]string)
+		if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
+			label[AssignedNodeAnnotations] = v
+			p.Metadata.Labels = label
+		}
+
+		bytes, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
+		_, err = c.CoreV1().Pods(pod.Namespace).
+			Patch(context.Background(), pod.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+		if err != nil {
+			klog.Infof("patch pod %v failed, %v", pod.Name, err)
+		}
 		return err
-	}
-	klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
-	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
-		Patch(context.Background(), pod.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		klog.Infof("patch pod %v failed, %v", pod.Name, err)
-	}
-	return err
+	})
 }
 
 func PatchPodLabels(namespace, name string, labels map[string]string) error {
@@ -366,25 +419,38 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
 	for _, key := range annotationKeys {
 		annos[key] = nil
 	}
-	patch := map[string]any{
-		"metadata": map[string]any{
-			"annotations": annos,
-		},
-	}
-	bytes, err := json.Marshal(patch)
-	if err != nil {
-		return err
-	}
 	c := client.GetClient()
 	if c == nil {
 		return fmt.Errorf("kubernetes client is not initialized")
 	}
-	_, err = c.CoreV1().Nodes().
-		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		klog.Infoln("remove annotation failed for node", node.Name, "annotationKeys", annotationKeys)
-	}
-	return err
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestNode, err := c.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+		rv := ""
+		if err == nil && latestNode != nil {
+			rv = latestNode.ResourceVersion
+		} else if node.ResourceVersion != "" {
+			rv = node.ResourceVersion
+		}
+		metadata := map[string]any{
+			"annotations": annos,
+		}
+		if rv != "" {
+			metadata["resourceVersion"] = rv
+		}
+		patch := map[string]any{
+			"metadata": metadata,
+		}
+		bytes, err := json.Marshal(patch)
+		if err != nil {
+			return err
+		}
+		_, err = c.CoreV1().Nodes().
+			Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+		if err != nil {
+			klog.Infoln("remove annotation failed for node", node.Name, "annotationKeys", annotationKeys)
+		}
+		return err
+	})
 }
 
 // IsValidGPUSchedulerPolicy reports whether policy names GPU scheduling
