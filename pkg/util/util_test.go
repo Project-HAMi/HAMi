@@ -1427,3 +1427,93 @@ func TestPatchPodAnnotationsRejectsStaleUID(t *testing.T) {
 	assert.Equal(t, false, forged, "the stale patch landed on the pod that replaced the original")
 	assert.Equal(t, "untouched", current.Annotations["pre-existing"])
 }
+
+func TestPatchNodeAnnotations_ConflictRetry(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-node",
+			ResourceVersion: "1",
+		},
+	}
+	fakeClient := fake.NewClientset(node)
+	attempts := 0
+	var lastResourceVersionSent string
+	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		attempts++
+		if patchAction, ok := action.(k8stesting.PatchAction); ok {
+			var patch struct {
+				Metadata struct {
+					ResourceVersion string `json:"resourceVersion"`
+				} `json:"metadata"`
+			}
+			_ = json.Unmarshal(patchAction.GetPatch(), &patch)
+			lastResourceVersionSent = patch.Metadata.ResourceVersion
+		}
+
+		if attempts == 1 {
+			// Simulate a concurrent update on the node advancing resourceVersion to "2"
+			node.ResourceVersion = "2"
+			_ = fakeClient.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), node, "")
+			return true, nil, apierrors.NewConflict(corev1.Resource("nodes"), "test-node", fmt.Errorf("conflict"))
+		}
+		return false, nil, nil
+	})
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fakeClient
+
+	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
+	assert.NilError(t, err)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, "2", lastResourceVersionSent, "retried patch must carry the latest fetched resourceVersion")
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, "bar", updated.Annotations["hami.io/test"])
+}
+
+func TestPatchPodAnnotations_ConflictRetry(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-pod",
+			Namespace:       "default",
+			UID:             "pod-uid-1",
+			ResourceVersion: "1",
+		},
+	}
+	fakeClient := fake.NewClientset(pod)
+	attempts := 0
+	var lastResourceVersionSent string
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		attempts++
+		if patchAction, ok := action.(k8stesting.PatchAction); ok {
+			var patch struct {
+				Metadata struct {
+					ResourceVersion string `json:"resourceVersion"`
+				} `json:"metadata"`
+			}
+			_ = json.Unmarshal(patchAction.GetPatch(), &patch)
+			lastResourceVersionSent = patch.Metadata.ResourceVersion
+		}
+
+		if attempts == 1 {
+			// Simulate a concurrent update on the pod advancing resourceVersion to "2"
+			pod.ResourceVersion = "2"
+			_ = fakeClient.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), pod, "default")
+			return true, nil, apierrors.NewConflict(corev1.Resource("pods"), "test-pod", fmt.Errorf("conflict"))
+		}
+		return false, nil, nil
+	})
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fakeClient
+
+	err := PatchPodAnnotations(pod, map[string]string{"hami.io/test": "bar"})
+	assert.NilError(t, err)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, "2", lastResourceVersionSent, "retried patch must carry the latest fetched resourceVersion")
+
+	updated, err := client.KubeClient.CoreV1().Pods("default").Get(context.TODO(), "test-pod", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, "bar", updated.Annotations["hami.io/test"])
+}
