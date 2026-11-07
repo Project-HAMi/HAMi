@@ -22,7 +22,7 @@ func TestValidRequest(t *testing.T) {
 		"long":         append(append([]byte{}, valid...), 0),
 		"magic":        {'B', 'A', 'D', '!', 0, 1, 0, 1},
 		"version":      {'H', 'P', 'I', 'D', 0, 2, 0, 1},
-		"command":      {'H', 'P', 'I', 'D', 0, 1, 0, 2},
+		"command":      {'H', 'P', 'I', 'D', 0, 1, 0, 5},
 		"zero command": {'H', 'P', 'I', 'D', 0, 1, 0, 0},
 	}
 	for name, request := range tests {
@@ -31,6 +31,19 @@ func TestValidRequest(t *testing.T) {
 				t.Fatal("invalid request was accepted")
 			}
 		})
+	}
+
+	for _, expected := range []uint16{
+		commandAcquireDriverInit,
+		commandAcquireDriverRetain,
+		commandAcquireDriverRelease,
+	} {
+		admission := []byte{'H', 'P', 'I', 'D', 0, 1,
+			byte(expected >> 8), byte(expected)}
+		command, ok := requestCommand(admission)
+		if !ok || command != expected {
+			t.Fatalf("admission request command=%d valid=%v", command, ok)
+		}
 	}
 }
 
@@ -58,5 +71,31 @@ func TestMakeErrorResponse(t *testing.T) {
 	}
 	if got := binary.BigEndian.Uint32(response[8:12]); got != 0 {
 		t.Fatalf("unexpected PID %d", got)
+	}
+}
+
+func TestParseDriverAdmissionPermits(t *testing.T) {
+	tests := map[string]struct {
+		value     string
+		permits   int
+		wantError bool
+	}{
+		"unset":     {value: "", permits: 0},
+		"disabled":  {value: "0", permits: 0},
+		"one":       {value: "1", wantError: true},
+		"enabled":   {value: "4", permits: 4},
+		"maximum":   {value: "64", permits: 64},
+		"negative":  {value: "-1", wantError: true},
+		"too large": {value: "65", wantError: true},
+		"text":      {value: "four", wantError: true},
+		"space":     {value: " 4", wantError: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			permits, err := ParseDriverAdmissionPermits(test.value)
+			if (err != nil) != test.wantError || permits != test.permits {
+				t.Fatalf("permits=%d err=%v", permits, err)
+			}
+		})
 	}
 }

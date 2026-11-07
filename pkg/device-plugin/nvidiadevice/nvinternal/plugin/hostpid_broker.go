@@ -137,6 +137,7 @@ func configureHostPIDBroker(
 	response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) {
 	if response.Envs != nil {
 		delete(response.Envs, hostpid.EnvironmentVariable)
+		delete(response.Envs, hostpid.DriverAdmissionEnvironment)
 	}
 	if !hostpid.Enabled(os.Getenv(hostpid.EnvironmentVariable)) {
 		removeHostPIDMounts(response, hostpid.ContainerDirectory)
@@ -146,6 +147,11 @@ func configureHostPIDBroker(
 		response.Envs = make(map[string]string)
 	}
 	response.Envs[hostpid.EnvironmentVariable] = "1"
+	permits, err := hostpid.ParseDriverAdmissionPermits(
+		os.Getenv(hostpid.DriverAdmissionPermitsEnvironment))
+	if err == nil && permits > 0 {
+		response.Envs[hostpid.DriverAdmissionEnvironment] = "1"
+	}
 	configureCanonicalHostPIDMount(response, hostpid.ContainerDirectory,
 		hostpid.ServerDirectory, true)
 	orderHostPIDMountPair(response)

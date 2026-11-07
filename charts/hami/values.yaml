@@ -498,6 +498,11 @@ devicePlugin:
     # `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`.
     # See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker).
     enabled: false
+    # -- Maximum concurrent CUDA driver lifecycle calls, including one release-only slot. Use `0` to
+    # disable or `2` through `64` to enable. Requires a HAMi-core build with driver admission support;
+    # older libraries ignore `LIBVGPU_DRIVER_ADMISSION`. Changing the value needs a drain of GPU
+    # workloads, because running pods keep the admission flag they received at allocation.
+    driverAdmissionPermits: 0
   # -- Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy:
   # ClusterFirstWithHostNet` so the scheduler Service remains resolvable.
   hostNetwork: false

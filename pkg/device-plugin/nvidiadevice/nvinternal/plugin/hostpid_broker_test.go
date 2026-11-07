@@ -231,6 +231,7 @@ func TestConfigureHostPIDBrokerDisabledRemovesStaleConfiguration(t *testing.T) {
 
 func TestConfigureHostPIDBrokerEnabled(t *testing.T) {
 	t.Setenv(hostpid.EnvironmentVariable, "1")
+	t.Setenv(hostpid.DriverAdmissionPermitsEnvironment, "4")
 	existingMount := &kubeletdevicepluginv1beta1.Mount{
 		ContainerPath: "/tmp/vgpulock",
 		HostPath:      "/tmp/vgpulock",
@@ -244,6 +245,7 @@ func TestConfigureHostPIDBrokerEnabled(t *testing.T) {
 
 	require.Equal(t, "yes", response.Envs["KEEP"])
 	require.Equal(t, "1", response.Envs[hostpid.EnvironmentVariable])
+	require.Equal(t, "1", response.Envs[hostpid.DriverAdmissionEnvironment])
 	require.Len(t, response.Mounts, 2)
 	require.Same(t, existingMount, response.Mounts[0])
 	require.Equal(t, &kubeletdevicepluginv1beta1.Mount{
@@ -251,6 +253,37 @@ func TestConfigureHostPIDBrokerEnabled(t *testing.T) {
 		HostPath:      hostpid.ServerDirectory,
 		ReadOnly:      true,
 	}, response.Mounts[1])
+}
+
+func TestConfigureHostPIDBrokerLeavesDriverAdmissionDisabled(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	for _, value := range []string{"", "0", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(hostpid.DriverAdmissionPermitsEnvironment, value)
+			response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
+
+			configureHostPIDBroker(response)
+
+			require.Equal(t, "1", response.Envs[hostpid.EnvironmentVariable])
+			require.NotContains(t, response.Envs,
+				hostpid.DriverAdmissionEnvironment)
+		})
+	}
+}
+
+func TestConfigureHostPIDBrokerClearsDriverAdmission(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	t.Setenv(hostpid.DriverAdmissionPermitsEnvironment, "4")
+	response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
+
+	configureHostPIDBroker(response)
+	require.Equal(t, "1", response.Envs[hostpid.DriverAdmissionEnvironment])
+
+	t.Setenv(hostpid.DriverAdmissionPermitsEnvironment, "0")
+	configureHostPIDBroker(response)
+
+	require.Equal(t, "1", response.Envs[hostpid.EnvironmentVariable])
+	require.NotContains(t, response.Envs, hostpid.DriverAdmissionEnvironment)
 }
 
 func TestConfigureHostPIDBrokerIsIdempotent(t *testing.T) {

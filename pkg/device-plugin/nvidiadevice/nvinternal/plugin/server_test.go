@@ -980,6 +980,7 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 // identities and host PID broker configuration.
 func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	t.Setenv(hostpid.EnvironmentVariable, "1")
+	t.Setenv(hostpid.DriverAdmissionPermitsEnvironment, "4")
 	prepareCalls := 0
 	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
 	prepareHostPIDLockParentForAllocation = func() error {
@@ -1068,6 +1069,7 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.EnvironmentVariable])
+	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.DriverAdmissionEnvironment])
 	brokerMountCount := 0
 	brokerMountIndex := -1
 	fallbackParentMountCount := 0

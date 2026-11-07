@@ -40,6 +40,11 @@ func startHostPIDBrokerWithListener(
 	if !hostpid.Enabled(os.Getenv(hostpid.EnvironmentVariable)) {
 		return nil, nil
 	}
+	permits, err := hostpid.ParseDriverAdmissionPermits(
+		os.Getenv(hostpid.DriverAdmissionPermitsEnvironment))
+	if err != nil {
+		return nil, err
+	}
 	broker, err := listen()
 	if err != nil {
 		return nil, err
@@ -52,7 +57,9 @@ func startHostPIDBrokerWithListener(
 		running.serveErr = broker.Serve()
 		close(running.done)
 	}()
-	klog.Infof("Host PID broker is listening on %s", hostpid.ServerSocketPath)
+	klog.Infof(
+		"Host PID broker is listening on %s (driver admission permits: %d)",
+		hostpid.ServerSocketPath, permits)
 	return running, nil
 }
 
