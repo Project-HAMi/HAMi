@@ -209,9 +209,9 @@ func start() error {
 		}()
 	}
 
-	// Extender, cluster, and profiling ports are claimed before serving, so a port already in use
-	// fails startup outright instead of surfacing from inside a goroutine once
-	// the scheduler looks healthy.
+	// Claim each server's port synchronously during startup, so a port already
+	// in use fails startup instead of surfacing from inside a goroutine once the
+	// scheduler looks healthy.
 	extenderListener, err := net.Listen("tcp", config.ExtenderBind)
 	if err != nil {
 		return fmt.Errorf("failed to listen on the extender address %s: %w", config.ExtenderBind, err)
@@ -222,7 +222,12 @@ func start() error {
 		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
 	}
 	defer clusterListener.Close()
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
+	if metricsListener, err := startMetricsServer(config.MetricsBindAddress, sher, legacyMetrics, errCh); err != nil {
+		return err
+	} else {
+		defer metricsListener.Close()
+	}
 	profilingListener, err := startProfilingServer(enableProfiling, profilingBindAddress, errCh)
 	if err != nil {
 		return err
@@ -231,9 +236,7 @@ func start() error {
 		defer profilingListener.Close()
 	}
 
-	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
-
-	// Supervise profiling alongside the scheduler listeners so server failures
+	// Supervise metrics and profiling alongside the scheduler listeners so server failures
 	// are returned to the caller instead of leaving a partially working process.
 	go func() {
 		errCh <- fmt.Errorf("extender server error: %w", serve(extenderListener, extenderRouter(sher), tlsCfg))

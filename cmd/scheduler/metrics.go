@@ -18,11 +18,10 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math"
+	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -558,7 +557,29 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 	return c
 }
 
-func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
+func listenMetrics(bindAddress string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", bindAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on the metrics address %s: %w", bindAddress, err)
+	}
+	return listener, nil
+}
+
+// startMetricsServer binds the metrics address before serving so startup
+// failures are synchronous. Runtime serving errors are reported to errCh.
+func startMetricsServer(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool, errCh chan<- error) (net.Listener, error) {
+	listener, err := listenMetrics(bindAddress)
+	if err != nil {
+		return nil, err
+	}
+	klog.InfoS("Metrics listener initialized", "address", listener.Addr())
+	go func() {
+		errCh <- fmt.Errorf("metrics server error: %w", initMetrics(listener, metricsProvider, legacyMetrics))
+	}()
+	return listener, nil
+}
+
+func initMetrics(listener net.Listener, metricsProvider schedulerMetricsProvider, legacyMetrics bool) error {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
@@ -567,13 +588,7 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	server := &http.Server{
-		Addr:              bindAddress,
-		Handler:           mux,
-		ReadHeaderTimeout: 15 * time.Second,
-		ReadTimeout:       60 * time.Second,
-	}
-	log.Fatal(server.ListenAndServe())
+	return serve(listener, mux, nil)
 }
 
 func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {
