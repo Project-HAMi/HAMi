@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -300,6 +301,8 @@ func Test_PodAllocationSuccess(t *testing.T) {
 	assertNodeLockAbsent(t, nodeName)
 }
 
+// Test_PodAllocationFailed tests that PodAllocationFailed updates pod annotations to DeviceBindFailed,
+// releases node locks, and handles nil pods and empty node names safely.
 func Test_PodAllocationFailed(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
@@ -318,8 +321,18 @@ func Test_PodAllocationFailed(t *testing.T) {
 
 	assertDeviceBindPhase(t, pod, util.DeviceBindFailed)
 	assertNodeLockAbsent(t, nodeName)
+
+	t.Run("safely handles nil pod or empty nodeName", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			PodAllocationFailed("", nil, "test-lock")
+			PodAllocationFailed("test-node", nil, "test-lock")
+			PodAllocationFailed("", &corev1.Pod{}, "test-lock")
+		})
+	})
 }
 
+// TestUpdatePodAnnotationsAndReleaseLock tests that updatePodAnnotationsAndReleaseLock releases
+// the node lock even when patching pod annotations fails.
 func TestUpdatePodAnnotationsAndReleaseLock(t *testing.T) {
 	t.Run("releases lock when patch fails", func(t *testing.T) {
 		for _, phase := range []string{util.DeviceBindFailed, util.DeviceBindSuccess} {
