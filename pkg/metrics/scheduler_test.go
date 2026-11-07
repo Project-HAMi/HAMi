@@ -59,6 +59,7 @@ func TestSchedulerFailureReasons(t *testing.T) {
 		FailureReasonAnnotationPatch,
 		FailureReasonBind,
 		FailureReasonInternal,
+		FailureReasonConflict,
 	} {
 		m.ObserveAllocationFailure("filter", "NVIDIA", reason)
 	}
@@ -68,6 +69,7 @@ func TestSchedulerFailureReasons(t *testing.T) {
 # TYPE hami_scheduler_allocation_failures_total counter
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="annotation_patch",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="bind",phase="filter"} 1
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="conflict",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="identity",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="internal",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lock",phase="filter"} 1
