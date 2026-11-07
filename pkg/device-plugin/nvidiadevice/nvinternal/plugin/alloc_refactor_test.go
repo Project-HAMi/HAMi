@@ -37,6 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -1017,4 +1018,131 @@ func TestMIGAllocateFailurePreservesAdoptedInstances(t *testing.T) {
 	require.Contains(t, manager.byAllocationMigUUID, "MIG-existing")
 	require.Contains(t, manager.byAllocation, allocationKey(0, "1g.5gb", placement))
 	require.False(t, plugin.migPrimed, "cached recovery must not mark destructive startup complete")
+}
+
+// TestAllocate_PrepareMigAllocationsFailureCallsPodAllocationFailed tests that Allocate invokes
+// PodAllocationFailed when dynamic MIG preparation fails and a pending pod is found.
+func TestAllocate_PrepareMigAllocationsFailureCallsPodAllocationFailed(t *testing.T) {
+	manager := initializedLazyMIGManager(t, &nvmlmock.Device{})
+	plugin := &NvidiaDevicePlugin{
+		operatingMode: nvidia.MigMode,
+		migMgr:        manager,
+		listNodePods: func() ([]*corev1.Pod, error) {
+			return nil, errors.New("node pod listing failed")
+		},
+	}
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pending-pod",
+			Namespace: "default",
+		},
+	}
+	previousLookup := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pendingPod, nil }
+	t.Cleanup(func() { getPendingPod = previousLookup })
+
+	var failedPodCalled *corev1.Pod
+	var failedNodeCalled string
+	previousFailed := podAllocationFailed
+	podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
+		failedNodeCalled = nodeName
+		failedPodCalled = pod
+	}
+	t.Cleanup(func() { podAllocationFailed = previousFailed })
+
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	_, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "recover MIG allocations before allocation")
+	require.Equal(t, "test-node", failedNodeCalled)
+	require.Equal(t, pendingPod, failedPodCalled)
+}
+
+// TestAllocate_PrepareMigAllocationsFailure_PendingPodLookupError tests that Allocate invokes
+// PodAllocationFailed to release the node lock even when looking up the pending pod errors out.
+func TestAllocate_PrepareMigAllocationsFailure_PendingPodLookupError(t *testing.T) {
+	manager := initializedLazyMIGManager(t, &nvmlmock.Device{})
+	plugin := &NvidiaDevicePlugin{
+		operatingMode: nvidia.MigMode,
+		migMgr:        manager,
+		listNodePods: func() ([]*corev1.Pod, error) {
+			return nil, errors.New("node pod listing failed")
+		},
+	}
+	previousLookup := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return nil, errors.New("kubernetes API error getting pending pod")
+	}
+	t.Cleanup(func() { getPendingPod = previousLookup })
+
+	var failedCalled bool
+	var failedPodCalled *corev1.Pod
+	var failedNodeCalled string
+	var failedLockCalled string
+	previousFailed := podAllocationFailed
+	podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
+		failedCalled = true
+		failedNodeCalled = nodeName
+		failedPodCalled = pod
+		failedLockCalled = lockName
+	}
+	t.Cleanup(func() { podAllocationFailed = previousFailed })
+
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	_, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "recover MIG allocations before allocation")
+	require.True(t, failedCalled, "podAllocationFailed must be invoked to release node lock even when pending pod lookup fails")
+	require.Equal(t, "test-node", failedNodeCalled)
+	require.Equal(t, NodeLockNvidia, failedLockCalled)
+	require.Nil(t, failedPodCalled)
+}
+
+// TestAllocate_PrepareMigAllocationsFailure_CanceledContextUsesBackground tests that Allocate
+// falls back to a fresh background context with timeout when the request context is canceled.
+func TestAllocate_PrepareMigAllocationsFailure_CanceledContextUsesBackground(t *testing.T) {
+	manager := initializedLazyMIGManager(t, &nvmlmock.Device{})
+	plugin := &NvidiaDevicePlugin{
+		operatingMode: nvidia.MigMode,
+		migMgr:        manager,
+		listNodePods: func() ([]*corev1.Pod, error) {
+			return nil, errors.New("node pod listing failed")
+		},
+	}
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pending-pod",
+			Namespace: "default",
+		},
+	}
+	previousLookup := getPendingPod
+	getPendingPod = func(ctx context.Context, _ string) (*corev1.Pod, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return pendingPod, nil
+	}
+	t.Cleanup(func() { getPendingPod = previousLookup })
+
+	var failedPodCalled *corev1.Pod
+	var failedNodeCalled string
+	previousFailed := podAllocationFailed
+	podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
+		failedNodeCalled = nodeName
+		failedPodCalled = pod
+	}
+	t.Cleanup(func() { podAllocationFailed = previousFailed })
+
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	canceledCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := plugin.Allocate(canceledCtx, &kubeletdevicepluginv1beta1.AllocateRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "recover MIG allocations before allocation")
+	require.Equal(t, "test-node", failedNodeCalled)
+	require.Equal(t, pendingPod, failedPodCalled)
 }
