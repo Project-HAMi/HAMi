@@ -18,6 +18,7 @@ package main
 
 import (
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -44,6 +45,7 @@ type fakeMetricsProvider struct {
 	podManager   *device.PodManager
 	isLeader     bool
 	isSynced     bool
+	lastSyncTime int64
 	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
@@ -65,6 +67,10 @@ func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
 
 func (f *fakeMetricsProvider) IsSynced() bool {
 	return f.isSynced
+}
+
+func (f *fakeMetricsProvider) LastSyncSuccessTime() int64 {
+	return f.lastSyncTime
 }
 
 func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
@@ -785,13 +791,14 @@ func TestSchedulerStateMetrics(t *testing.T) {
 		name       string
 		isLeader   bool
 		isSynced   bool
+		lastSync   int64
 		wantLeader float64
 		wantSynced float64
 	}{
-		{"leader and synced", true, true, 1, 1},
-		{"leader but not synced", true, false, 1, 0},
-		{"synced but not leader", false, true, 0, 1},
-		{"neither leader nor synced", false, false, 0, 0},
+		{"leader and synced", true, true, 1794012015, 1, 1},
+		{"leader but not synced", true, false, 0, 1, 0},
+		{"synced but not leader", false, true, 1794012015, 0, 1},
+		{"neither leader nor synced", false, false, 0, 0, 0},
 	}
 
 	for _, tc := range tests {
@@ -803,6 +810,7 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				podManager:   device.NewPodManager(),
 				isLeader:     tc.isLeader,
 				isSynced:     tc.isSynced,
+				lastSyncTime: tc.lastSync,
 			}
 			cc := ClusterManagerCollector{
 				ClusterManager:  c,
@@ -811,9 +819,10 @@ func TestSchedulerStateMetrics(t *testing.T) {
 
 			if err := promtestutil.CollectAndCompare(
 				cc,
-				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced)),
+				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced, tc.lastSync)),
 				"hami_scheduler_is_leader",
 				"hami_scheduler_cache_synced",
+				"hami_scheduler_last_sync_success_timestamp_seconds",
 			); err != nil {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
@@ -890,10 +899,11 @@ func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
 	}
 }
 
-// wantStr builds the expected Prometheus text for the two scheduler state
-// metrics given the expected gauge values (0.0 or 1.0).
-func wantStr(leaderVal, syncedVal float64) string {
-	return strings.Join([]string{
+// wantStr builds the expected Prometheus text for the scheduler state metrics
+// given the expected gauge values (0.0 or 1.0) and the last sync time, which is
+// left out when it is 0.
+func wantStr(leaderVal, syncedVal float64, lastSync int64) string {
+	want := strings.Join([]string{
 		`# HELP hami_scheduler_cache_synced 1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.`,
 		`# TYPE hami_scheduler_cache_synced gauge`,
 		strings.Join([]string{`hami_scheduler_cache_synced`, formatFloat(syncedVal)}, " "),
@@ -902,6 +912,15 @@ func wantStr(leaderVal, syncedVal float64) string {
 		strings.Join([]string{`hami_scheduler_is_leader`, formatFloat(leaderVal)}, " "),
 		"",
 	}, "\n")
+	if lastSync > 0 {
+		want += strings.Join([]string{
+			`# HELP hami_scheduler_last_sync_success_timestamp_seconds Timestamp of the last successful sync of the scheduler's internal node/device cache.`,
+			`# TYPE hami_scheduler_last_sync_success_timestamp_seconds gauge`,
+			strings.Join([]string{`hami_scheduler_last_sync_success_timestamp_seconds`, strconv.FormatInt(lastSync, 10)}, " "),
+			"",
+		}, "\n")
+	}
+	return want
 }
 
 func formatFloat(v float64) string {

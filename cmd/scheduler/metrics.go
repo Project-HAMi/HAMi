@@ -53,6 +53,8 @@ type schedulerMetricsProvider interface {
 	// IsSynced reports whether the scheduler's internal cache has completed at
 	// least one successful sync and is ready to serve scheduling requests.
 	IsSynced() bool
+	// LastSyncSuccessTime returns the Unix time of the last successful sync, or 0 if there is none.
+	LastSyncSuccessTime() int64
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -506,6 +508,8 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 // collectSchedulerStateMetrics emits hami_scheduler_is_leader and
 // hami_scheduler_cache_synced as gauges (0 or 1) every scrape. These allow
 // operators to alert on leader-loss or cache-desync without log-scraping.
+// hami_scheduler_last_sync_success_timestamp_seconds is emitted after the first
+// successful sync.
 func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometheus.Metric) {
 	isLeaderDesc := prometheus.NewDesc(
 		"hami_scheduler_is_leader",
@@ -515,6 +519,11 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	cacheSyncedDesc := prometheus.NewDesc(
 		"hami_scheduler_cache_synced",
 		"1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.",
+		nil, nil,
+	)
+	lastSyncSuccessDesc := prometheus.NewDesc(
+		"hami_scheduler_last_sync_success_timestamp_seconds",
+		"Timestamp of the last successful sync of the scheduler's internal node/device cache.",
 		nil, nil,
 	)
 
@@ -532,6 +541,11 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	}
 	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
+	}
+	if lastSyncSuccess := cc.metricsProvider.LastSyncSuccessTime(); lastSyncSuccess > 0 {
+		if err := sendMetric(ch, lastSyncSuccessDesc, prometheus.GaugeValue, float64(lastSyncSuccess)); err != nil {
+			klog.V(4).Infof("Failed to send hami_scheduler_last_sync_success_timestamp_seconds metric: %v", err)
+		}
 	}
 }
 
