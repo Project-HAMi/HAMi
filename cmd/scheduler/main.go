@@ -222,7 +222,7 @@ func start() error {
 		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
 	}
 	defer clusterListener.Close()
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	if metricsListener, err := startMetricsServer(config.MetricsBindAddress, sher, legacyMetrics, errCh); err != nil {
 		return err
 	} else {
