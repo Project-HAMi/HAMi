@@ -47,11 +47,17 @@ func startTestBrokerWithAdmission(t *testing.T,
 
 func startTestBrokerWithLimits(t *testing.T, handlerLimit int,
 	permits int) (*Broker, string) {
+	return startTestBrokerWithMaxHold(t, handlerLimit, permits,
+		DefaultDriverAdmissionMaxHold)
+}
+
+func startTestBrokerWithMaxHold(t *testing.T, handlerLimit int,
+	permits int, maxHold time.Duration) (*Broker, string) {
 	t.Helper()
 	directory := t.TempDir()
 	socketPath := filepath.Join(directory, "broker.sock")
 	broker, err := listenWithLimits(socketPath, os.Geteuid(), handlerLimit,
-		permits)
+		permits, maxHold)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -744,7 +750,7 @@ func TestDriverAdmissionBoundsRetainPriorityBurst(t *testing.T) {
 	}
 }
 
-func TestBrokerDriverAdmissionDoesNotExpire(t *testing.T) {
+func TestBrokerDriverAdmissionReleasesBeforeMaxHold(t *testing.T) {
 	_, socketPath := startTestBrokerWithAdmission(t, 2)
 	first, status, _, err := acquireDriverAdmission(socketPath, time.Second)
 	if err != nil || status != statusOK {
@@ -778,10 +784,116 @@ func TestBrokerDriverAdmissionDoesNotExpire(t *testing.T) {
 	}
 }
 
+func waitForActiveAdmissions(t *testing.T, broker *Broker, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for broker.admission.activeCount() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("active admissions=%d, want %d",
+				broker.admission.activeCount(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestBrokerDriverAdmissionExpiresAfterMaxHold(t *testing.T) {
+	const maxHold = 300 * time.Millisecond
+	broker, socketPath := startTestBrokerWithMaxHold(t, maxHandlers, 2,
+		maxHold)
+	stale, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("stale admission: status=%d err=%v", status, err)
+	}
+	defer stale.Close()
+	granted := time.Now()
+
+	type result struct {
+		connection net.Conn
+		status     uint16
+		err        error
+	}
+	waiting := make(chan result, 1)
+	go func() {
+		connection, status, _, err := acquireDriverAdmission(socketPath,
+			2*time.Second)
+		waiting <- result{connection: connection, status: status, err: err}
+	}()
+	var next net.Conn
+	select {
+	case result := <-waiting:
+		if result.err != nil || result.status != statusOK {
+			t.Fatalf("waiting admission: status=%d err=%v",
+				result.status, result.err)
+		}
+		next = result.connection
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting admission was not granted after the lease expired")
+	}
+	defer next.Close()
+	if elapsed := time.Since(granted); elapsed < maxHold {
+		t.Fatalf("lease expired after %s, want at least %s", elapsed, maxHold)
+	}
+	if got := broker.admission.activeCount(); got != 1 {
+		t.Fatalf("active admissions=%d, want 1", got)
+	}
+
+	// A late close from the expired client must not free the new lease.
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+	queued := openAdmissionRequest(t, socketPath, commandAcquireDriverRetain)
+	defer queued.Close()
+	if err := queued.SetReadDeadline(
+		time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, responseSize)
+	if _, err := io.ReadFull(queued, response); err == nil {
+		t.Fatal("queued admission was granted after a late release")
+	}
+	if got := broker.admission.activeCount(); got != 1 {
+		t.Fatalf("active admissions after late release=%d, want 1", got)
+	}
+}
+
+func TestBrokerDriverAdmissionLateReleaseIsNoop(t *testing.T) {
+	broker, socketPath := startTestBrokerWithMaxHold(t, maxHandlers, 3,
+		300*time.Millisecond)
+	stale, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("stale admission: status=%d err=%v", status, err)
+	}
+	defer stale.Close()
+	waitForActiveAdmissions(t, broker, 0)
+
+	first, status, _, err := acquireDriverAdmission(socketPath, time.Second)
+	if err != nil || status != statusOK {
+		t.Fatalf("first admission: status=%d err=%v", status, err)
+	}
+	defer first.Close()
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := broker.admission.activeCount(); got != 1 {
+		t.Fatalf("active admissions after late release=%d, want 1", got)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForActiveAdmissions(t, broker, 0)
+	broker.admission.mutex.Lock()
+	activeForward := broker.admission.activeForward
+	broker.admission.mutex.Unlock()
+	if activeForward != 0 {
+		t.Fatalf("active forward admissions=%d, want 0", activeForward)
+	}
+}
+
 func TestBrokerCloseBoundsDriverAdmission(t *testing.T) {
 	directory := t.TempDir()
 	socketPath := filepath.Join(directory, "broker.sock")
-	broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers, 2)
+	broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers, 2,
+		DefaultDriverAdmissionMaxHold)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,10 +923,19 @@ func TestBrokerRejectsInvalidAdmissionLimit(t *testing.T) {
 	socketPath := filepath.Join(directory, "broker.sock")
 	for _, permits := range []int{-1, 1, MaximumDriverAdmissionPermits + 1} {
 		broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers,
-			permits)
+			permits, DefaultDriverAdmissionMaxHold)
 		if err == nil {
 			_ = broker.Close()
 			t.Fatalf("accepted admission permits %d", permits)
+		}
+	}
+	for _, maxHold := range []time.Duration{-time.Second, 0,
+		MaximumDriverAdmissionMaxHold + time.Nanosecond} {
+		broker, err := listenWithLimits(socketPath, os.Geteuid(), maxHandlers,
+			2, maxHold)
+		if err == nil {
+			_ = broker.Close()
+			t.Fatalf("accepted admission max hold %s", maxHold)
 		}
 	}
 }

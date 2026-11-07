@@ -43,6 +43,26 @@ tests:
             name: HAMI_HOSTPID_DRIVER_ADMISSION_PERMITS
             value: "4"
         template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: HAMI_HOSTPID_DRIVER_ADMISSION_MAX_HOLD_SECONDS
+            value: "60"
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: passes the admission max hold when the broker is enabled
+    set:
+      devicePlugin.hostPIDBroker.enabled: true
+      devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds: 120
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: HAMI_HOSTPID_DRIVER_ADMISSION_MAX_HOLD_SECONDS
+            value: "120"
+        template: device-plugin/daemonsetnvidia.yaml
 
   - it: accepts a quoted permit count
     set:
@@ -87,4 +107,36 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: devicePlugin.hostPIDBroker.driverAdmissionPermits must be 0 or an integer from 2 through 64
+    template: validate-values.yaml
+
+  - it: rejects a zero admission max hold
+    set:
+      devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds: 0
+    asserts:
+      - failedTemplate:
+          errorMessage: devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600
+    template: validate-values.yaml
+
+  - it: rejects an admission max hold above the maximum
+    set:
+      devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds: 3601
+    asserts:
+      - failedTemplate:
+          errorMessage: devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600
+    template: validate-values.yaml
+
+  - it: rejects a fractional admission max hold
+    set:
+      devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds: 1.5
+    asserts:
+      - failedTemplate:
+          errorMessage: devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600
+    template: validate-values.yaml
+
+  - it: rejects a non-numeric admission max hold
+    set:
+      devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds: sixty
+    asserts:
+      - failedTemplate:
+          errorMessage: devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600
     template: validate-values.yaml

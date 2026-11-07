@@ -248,6 +248,7 @@ type Broker struct {
 	// requests.
 	admissionHandlers      atomic.Int64
 	admissionHandlerBudget int
+	admissionMaxHold       time.Duration
 	shutdown               chan struct{}
 	closeOnce              sync.Once
 	closeErr               error
@@ -270,20 +271,28 @@ func ListenDefault() (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return listenWithLimits(ServerSocketPath, 0, maxHandlers, permits)
+	maxHold, err := ParseDriverAdmissionMaxHold(
+		os.Getenv(DriverAdmissionMaxHoldEnvironment))
+	if err != nil {
+		return nil, err
+	}
+	return listenWithLimits(ServerSocketPath, 0, maxHandlers, permits, maxHold)
 }
 
 func listen(socketPath string, ownerUID int) (*Broker, error) {
-	return listenWithLimits(socketPath, ownerUID, maxHandlers, 0)
+	return listenWithLimits(socketPath, ownerUID, maxHandlers, 0,
+		DefaultDriverAdmissionMaxHold)
 }
 
 func listenWithHandlerLimit(socketPath string, ownerUID int,
 	handlerLimit int) (*Broker, error) {
-	return listenWithLimits(socketPath, ownerUID, handlerLimit, 0)
+	return listenWithLimits(socketPath, ownerUID, handlerLimit, 0,
+		DefaultDriverAdmissionMaxHold)
 }
 
 func listenWithLimits(socketPath string, ownerUID int,
-	handlerLimit int, admissionPermits int) (*Broker, error) {
+	handlerLimit int, admissionPermits int,
+	admissionMaxHold time.Duration) (*Broker, error) {
 	if handlerLimit <= 0 {
 		return nil, errors.New("host PID broker handler limit must be positive")
 	}
@@ -291,6 +300,10 @@ func listenWithLimits(socketPath string, ownerUID int,
 		admissionPermits > MaximumDriverAdmissionPermits {
 		return nil, fmt.Errorf("host PID broker admission permits must be 0 or between 2 and %d",
 			MaximumDriverAdmissionPermits)
+	}
+	if admissionMaxHold <= 0 || admissionMaxHold > MaximumDriverAdmissionMaxHold {
+		return nil, fmt.Errorf("host PID broker admission max hold must be positive and at most %s",
+			MaximumDriverAdmissionMaxHold)
 	}
 	directory := filepath.Dir(socketPath)
 	if err := prepareDirectory(directory, ownerUID); err != nil {
@@ -343,6 +356,7 @@ func listenWithLimits(socketPath string, ownerUID int,
 		lockFile:               lockFile,
 		handlerSlots:           make(chan struct{}, handlerLimit),
 		admissionHandlerBudget: admissionHandlerBudget(handlerLimit),
+		admissionMaxHold:       admissionMaxHold,
 		shutdown:               make(chan struct{}),
 	}
 	broker.admission = newDriverAdmissionController(admissionPermits)
@@ -593,12 +607,22 @@ func (broker *Broker) handleDriverAdmission(connection *net.UnixConn,
 		time.Now().Add(transactionTimeout)); err != nil {
 		return
 	}
+	granted := time.Now()
 	if !writeResponse(connection, makeResponse(statusOK, peerPID)) {
 		return
 	}
+	expired := time.NewTimer(broker.admissionMaxHold)
+	defer expired.Stop()
 	select {
 	case <-connectionDone:
 	case <-broker.shutdown:
+	case <-expired.C:
+		// Fail open: free the permit for other workloads but leave the
+		// client and its driver call alone. Returning closes this lease, so
+		// a later close from the client cannot release another permit.
+		klog.Warningf(
+			"Driver admission lease of PID %d expired after %s; releasing its permit",
+			peerPID, time.Since(granted).Round(time.Millisecond))
 	}
 }
 

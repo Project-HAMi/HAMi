@@ -45,6 +45,11 @@ func startHostPIDBrokerWithListener(
 	if err != nil {
 		return nil, err
 	}
+	maxHold, err := hostpid.ParseDriverAdmissionMaxHold(
+		os.Getenv(hostpid.DriverAdmissionMaxHoldEnvironment))
+	if err != nil {
+		return nil, err
+	}
 	broker, err := listen()
 	if err != nil {
 		return nil, err
@@ -58,8 +63,8 @@ func startHostPIDBrokerWithListener(
 		close(running.done)
 	}()
 	klog.Infof(
-		"Host PID broker is listening on %s (driver admission permits: %d)",
-		hostpid.ServerSocketPath, permits)
+		"Host PID broker is listening on %s (driver admission permits: %d, max hold: %s)",
+		hostpid.ServerSocketPath, permits, maxHold)
 	return running, nil
 }
 
