@@ -37,6 +37,9 @@ const (
 	sessionStubLabel = "hami.io/lupine-session"
 
 	sessionStubPrefix = "lupine-session-"
+	// sessionImageAnno records the requested image before admission can rewrite
+	// it, so reconciliation compares scheduler intent rather than the mutation.
+	sessionImageAnno = "hami.io/lupine-session-image"
 	// sessionPullSecretsAnno records the scheduler-owned pull-secret list. It
 	// lets reconciliation detect configuration changes without comparing an
 	// empty desired list to ServiceAccount secrets injected by the apiserver.
@@ -94,11 +97,14 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	for i := range existing.Items {
 		stub := &existing.Items[i]
 		node := stub.Labels[sessionStubLabel]
+		if stub.DeletionTimestamp != nil {
+			// The fixed name cannot be reused until graceful deletion finishes.
+			delete(wanted, node)
+			continue
+		}
 		endpoint, keep := wanted[node]
-		// A stub whose endpoint or pull credentials changed is replaced rather
-		// than edited, since the fields that carry them cannot be changed on a
-		// running pod.
-		if keep && stubEndpoint(stub) == endpoint && sessionPullSecretsMatch(stub, RemoteGPUSessionImagePullSecrets) {
+		// Replace terminal relays and relays whose managed configuration changed.
+		if keep && sessionStubMatches(stub, endpoint, RemoteGPUSessionImage, RemoteGPUSessionImagePullSecrets) {
 			delete(wanted, node)
 			continue
 		}
@@ -136,6 +142,28 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	}
 }
 
+// sessionStubMatches reports whether a nonterminal relay has the desired
+// scheduler-managed configuration. Container restarts are left to the kubelet.
+func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []string) bool {
+	if stub.Status.Phase == corev1.PodFailed || stub.Status.Phase == corev1.PodSucceeded ||
+		stubEndpoint(stub) != endpoint || !sessionPullSecretsMatch(stub, pullSecrets) {
+		return false
+	}
+	for i := range stub.Spec.Containers {
+		if stub.Spec.Containers[i].Name == "relay" {
+			if requested, managed := stub.Annotations[sessionImageAnno]; managed {
+				return requested == image
+			}
+			// Older relays did not record the requested image. A rewritten
+			// legacy relay is replaced once to acquire that annotation.
+			// An upgrade can replace these relays across several nodes in
+			// one pass, disconnecting their active port-forwarded sessions.
+			return stub.Spec.Containers[i].Image == image
+		}
+	}
+	return false
+}
+
 // stubEndpoint reports which server a stub was built to relay to.
 func stubEndpoint(stub *corev1.Pod) string {
 	for i := range stub.Spec.Containers {
@@ -166,6 +194,8 @@ func sessionPullSecretsMatch(stub *corev1.Pod, names []string) bool {
 	return true
 }
 
+// sessionStub builds a relay Pod and records its managed configuration before
+// admission can mutate the Pod.
 func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) (*corev1.Pod, error) {
 	// The stub answers on the port its server does, so the port a user
 	// forwards is the one they would have used against the server itself.
@@ -181,9 +211,9 @@ func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) 
 	for _, name := range pullSecrets {
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: name})
 	}
-	var annotations map[string]string
+	annotations := map[string]string{sessionImageAnno: image}
 	if len(pullSecrets) > 0 {
-		annotations = map[string]string{sessionPullSecretsAnno: strings.Join(pullSecrets, ",")}
+		annotations[sessionPullSecretsAnno] = strings.Join(pullSecrets, ",")
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

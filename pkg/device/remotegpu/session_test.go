@@ -140,6 +140,8 @@ func TestSessionPullSecretsMatchIgnoresServiceAccountInjection(t *testing.T) {
 	assert.Assert(t, sessionPullSecretsMatch(stub, nil))
 }
 
+// TestSessionStubImagePullSecrets checks the requested image and pull secrets
+// recorded for newly created relay Pods.
 func TestSessionStubImagePullSecrets(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -164,6 +166,7 @@ func TestSessionStubImagePullSecrets(t *testing.T) {
 			assert.DeepEqual(t, stub.Spec.ImagePullSecrets, test.want)
 			assert.Equal(t, stub.Spec.NodeName, "gpu-a")
 			assert.Equal(t, stub.Spec.Containers[0].Image, "alpine/socat:test")
+			assert.Equal(t, stub.Annotations[sessionImageAnno], "alpine/socat:test")
 			assert.Equal(t, stubEndpoint(stub), "10.0.0.5:14833")
 		})
 	}
