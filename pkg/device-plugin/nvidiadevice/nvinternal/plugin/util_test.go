@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -318,6 +319,14 @@ func Test_PodAllocationFailed(t *testing.T) {
 
 	assertDeviceBindPhase(t, pod, util.DeviceBindFailed)
 	assertNodeLockAbsent(t, nodeName)
+
+	t.Run("safely handles nil pod or empty nodeName", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			PodAllocationFailed("", nil, "test-lock")
+			PodAllocationFailed("test-node", nil, "test-lock")
+			PodAllocationFailed("", &corev1.Pod{}, "test-lock")
+		})
+	})
 }
 
 func TestUpdatePodAnnotationsAndReleaseLock(t *testing.T) {
