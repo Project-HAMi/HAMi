@@ -30,6 +30,10 @@ import (
 
 var errTemporaryClosed = errors.New("temporary closed")
 
+// feedbackInterval is how often watchAndFeedback checks the lupine label and
+// refreshes NVML. Tests shorten it.
+var feedbackInterval = 5 * time.Second
+
 //type hostGPUPid struct {
 //	hostGPUPid int
 //	mtime      uint64
@@ -160,7 +164,7 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 		return errTemporaryClosed
 	}
 
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(feedbackInterval)
 	defer ticker.Stop()
 
 	for {
@@ -179,10 +183,9 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 			}
 
 		case <-ticker.C:
-			// Chart-managed lupine servers (empty hami.io/lupine-server) may
-			// publish host metrics from remoteGPUmonitor. Drop NVML while that
-			// label is empty, and pick it up again if the device plugin removes
-			// the label or sets a custom port.
+			// A chart-managed lupine server's local NVML view has no remote
+			// client attribution. Publishing that partial picture is worse
+			// than publishing nothing, so drop NVML until the label goes away.
 			if lister.OnLupineServer(ctx) {
 				shutdownNVML()
 				continue

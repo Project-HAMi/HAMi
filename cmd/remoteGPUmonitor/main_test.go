@@ -17,14 +17,19 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -34,6 +39,97 @@ func TestRunRequiresNodeName(t *testing.T) {
 	err := run("", "http://127.0.0.1:9/metrics", ":0")
 	if err == nil || err.Error() != "node name is required" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRunOutsideCluster(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	err := run("node-a", "http://127.0.0.1:9/metrics", "127.0.0.1:0")
+	if err == nil {
+		t.Fatal("expected in-cluster config to fail")
+	}
+}
+
+func TestServeScrapesAndShutsDown(t *testing.T) {
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = io.WriteString(w, "# EOF\n")
+	}))
+	defer source.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve(ctx, fake.NewSimpleClientset(), "node-a", source.URL, addr)
+	}()
+
+	client := &http.Client{Timeout: time.Second}
+	deadline := time.Now().Add(5 * time.Second)
+	var healthy bool
+	for time.Now().Before(deadline) {
+		resp, err := client.Get("http://" + addr + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				healthy = true
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !healthy {
+		t.Fatal("healthz did not become ready")
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	var ready bool
+	for time.Now().Before(deadline) {
+		resp, err := client.Get("http://" + addr + "/readyz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				ready = true
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("readyz did not report a synchronized cache")
+	}
+
+	resp, err := client.Get("http://" + addr + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status %d: %s", resp.StatusCode, body)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after cancellation")
 	}
 }
 

@@ -67,6 +67,10 @@ func run(node, source, bind string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	return serve(ctx, client, node, source, bind)
+}
+
+func serve(ctx context.Context, client kubernetes.Interface, node, source, bind string) error {
 	factory := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.LabelSelector = remote.RemoteGPUPodLabel + "=true"
 	}))
@@ -97,7 +101,7 @@ func run(node, source, bind string) error {
 		_ = server.Shutdown(shutdown)
 	}()
 	// Start HTTP before synchronization so readiness can report startup progress.
-	err = server.ListenAndServe()
+	err := server.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil
 	}

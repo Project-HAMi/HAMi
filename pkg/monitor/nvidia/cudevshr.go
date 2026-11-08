@@ -201,10 +201,9 @@ const lupineServerLookupTTL = 5 * time.Second
 
 // OnLupineServer reports whether this node is a chart-managed lupine server.
 // That is hami.io/lupine-server present with an empty value. A non-empty value
-// is an operator-chosen port for an externally managed server; those nodes
-// keep collecting. vGPUmonitor stands by on chart-managed nodes so the remote
-// monitor can publish host GPU metrics. A failed lookup leaves the monitor
-// running, so a blip talking to the API does not silence a normal GPU node.
+// is an operator-chosen port for an externally managed server.
+// A failed lookup keeps the previous answer, or reports false when there is
+// none, so a blip talking to the API does not change a normal GPU node.
 // The device plugin adds and removes the label as the operating mode changes,
 // and the answer is cached for a few seconds.
 func (l *ContainerLister) OnLupineServer(ctx context.Context) bool {

@@ -229,12 +229,10 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 	if cc.standingBy() {
-		// Host metrics for this node come from remoteGPUmonitor. Stay serving
-		// /metrics so the pod stays ready, and publish nothing about the GPU.
+		// Local NVML on a chart-managed lupine server cannot name the remote
+		// clients. Emit no series, including collect success: a success gauge
+		// with no GPU samples looks like an idle node.
 		klog.V(4).Info("vGPUmonitor idle on lupine server node")
-		if err := sendMetric(ch, collectSuccessDesc, prometheus.GaugeValue, 1, os.Getenv(util.NodeNameEnvName)); err != nil {
-			klog.Errorf("Failed to send collect success metric: %v", err)
-		}
 		return
 	}
 	success := 1.0

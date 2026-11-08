@@ -868,3 +868,58 @@ func TestOnLupineServerCustomPortKeepsCollecting(t *testing.T) {
 		})
 	}
 }
+
+func TestOnLupineServerLookupFailureKeepsPreviousAnswer(t *testing.T) {
+	t.Run("no client reports false", func(t *testing.T) {
+		if (&ContainerLister{}).OnLupineServer(context.Background()) {
+			t.Fatal("missing client looked like a lupine server")
+		}
+	})
+
+	var (
+		status = http.StatusOK
+		labels map[string]string
+		hits   int
+	)
+	l := newListerForHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(&corev1.Node{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+			ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: labels},
+		})
+		assert.NilError(t, err)
+		_, _ = w.Write(body)
+	}))
+
+	labels = map[string]string{remotegpu.LupineServerLabel: ""}
+	if !l.OnLupineServer(context.Background()) {
+		t.Fatal("empty label")
+	}
+	if !l.OnLupineServer(context.Background()) || hits != 1 {
+		t.Fatalf("cache hit = %d requests, on=%v", hits, l.lupineOn)
+	}
+
+	status = http.StatusInternalServerError
+	l.lupineAt = time.Now().Add(-lupineServerLookupTTL - time.Second)
+	if !l.OnLupineServer(context.Background()) {
+		t.Fatal("lookup failure dropped a known lupine server")
+	}
+
+	labels = nil
+	status = http.StatusOK
+	l.lupineAt = time.Now().Add(-lupineServerLookupTTL - time.Second)
+	if l.OnLupineServer(context.Background()) {
+		t.Fatal("removing the label did not resume collection")
+	}
+
+	l.nodeName = ""
+	l.lupineKnown = false
+	if l.OnLupineServer(context.Background()) {
+		t.Fatal("empty node name looked like a lupine server")
+	}
+}
