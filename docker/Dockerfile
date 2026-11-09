@@ -58,7 +58,7 @@ RUN set -eux; \
       dpkg-deb -x "/tmp/$pkg" /out; \
     done
 
-FROM nvidia/cuda:13.4.3-base-ubuntu22.04@sha256:7416c5229cb6c5b2e7cd7a5930ec97db03f3e064d56b8abacf525f6b4da0b271
+FROM nvidia/cuda:13.5.0-base-ubuntu22.04@sha256:4df174aaa911425cc8ab5beb6f897dfeafa92f03884c25176db134743f6e3736
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
