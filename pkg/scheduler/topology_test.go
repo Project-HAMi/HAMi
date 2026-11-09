@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -749,7 +750,7 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 	candidates := candidateNodes("gang-a", "gang-b", "gang-c")
 
 	t.Run("two separate ToRs cannot hold a gang of two", func(t *testing.T) {
-		capacity := map[string]int{"gang-a": 1, "gang-b": 1, "gang-c": 1}
+		capacity := map[string]int{"gang-a": 1, "gang-b": 0, "gang-c": 1}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, capacity, nil, 1, 2)
 		assert.Empty(t, feasible, "each tier 1 domain only has room for one member")
 	})
@@ -811,4 +812,141 @@ func TestTopologyGangNeedsDistinctNodes(t *testing.T) {
 	assert.True(t, topologyGangNeedsDistinctNodes(affinity(map[string]string{"job": "train"})))
 	assert.False(t, topologyGangNeedsDistinctNodes(affinity(map[string]string{"job": "other"})))
 	assert.False(t, topologyGangNeedsDistinctNodes(topologyPod(nil, nil)))
+}
+
+const gangTestDeviceType = "gang-test"
+
+var gangTestResourceName corev1.ResourceName = gangTestDeviceType + "/cores"
+
+type gangTestDevice struct{}
+
+func (m *gangTestDevice) CommonWord() string { return gangTestDeviceType }
+func (m *gangTestDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (m *gangTestDevice) CheckHealth(_ string, _ *corev1.Node) (bool, bool) { return true, true }
+func (m *gangTestDevice) NodeCleanUp(_ string) error                        { return nil }
+func (m *gangTestDevice) GetResourceNames() device.ResourceNames            { return device.ResourceNames{} }
+func (m *gangTestDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+	return nil, nil
+}
+func (m *gangTestDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
+func (m *gangTestDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *gangTestDevice) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
+	cores := ctr.Resources.Limits[gangTestResourceName]
+	if cores.IsZero() {
+		return device.ContainerDeviceRequest{}, nil
+	}
+	return device.ContainerDeviceRequest{Nums: 1, Type: gangTestDeviceType, Coresreq: cores.Value()}, nil
+}
+func (m *gangTestDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
+	return nil
+}
+func (m *gangTestDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
+	return 0
+}
+func (m *gangTestDevice) AddResourceUsage(_ *corev1.Pod, usage *device.DeviceUsage, allocated *device.ContainerDevice) error {
+	usage.Used++
+	usage.Usedcores += allocated.Usedcores
+	return nil
+}
+func (m *gangTestDevice) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	for _, usage := range devices {
+		if usage.Health && usage.Totalcore-usage.Usedcores >= request.Coresreq {
+			return true, map[string]device.ContainerDevices{
+				gangTestDeviceType: {{UUID: usage.ID, Type: usage.Type, Usedcores: request.Coresreq}},
+			}, ""
+		}
+	}
+	return false, nil, "not enough gang-test cores"
+}
+
+func gangTestPod(name string, cores int64) *corev1.Pod {
+	pod := topologyPod(nil, map[string]string{"job-name": "train"})
+	pod.Name = name
+	pod.UID = types.UID(name)
+	pod.Spec.Containers = []corev1.Container{{
+		Name: "worker",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{gangTestResourceName: *resource.NewQuantity(cores, resource.DecimalSI)},
+		},
+	}}
+	return pod
+}
+
+func TestTopologyGangMembersUseEachPodsRequest(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	task := gangTestPod("train-0", 40)
+	sibling := gangTestPod("train-1", 80)
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	members, ok := new(Scheduler).topologyGangMembers(task, resourceReqs, []*corev1.Pod{sibling}, 2)
+	require.True(t, ok)
+	require.Len(t, members, 2)
+	assert.Equal(t, int64(40), members[0].resourceReqs[0][gangTestDeviceType].Coresreq)
+	assert.Equal(t, int64(80), members[1].resourceReqs[0][gangTestDeviceType].Coresreq)
+}
+
+// TestTopologyGangFilterUsesSiblingRequest is the regression test for the gang
+// filter scoring every remaining member with the request of the Pod being
+// scheduled. One node has room for two 40-core members but not for a 40-core
+// plus an 80-core member; the filter must see the sibling's request rather than
+// assuming the gang is homogeneous.
+func TestTopologyGangFilterUsesSiblingRequest(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	nodeName := "node0"
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "0",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	gangNode := func() map[string]*NodeUsage {
+		return map[string]*NodeUsage{nodeName: buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: "gang-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)}
+	}
+	plan := func(sibling *corev1.Pod) *topologyPlan {
+		return &topologyPlan{
+			view:     scheduler.topologySnapshot(),
+			group:    "default/job-name/train",
+			mode:     util.TopologyModeHard,
+			highest:  0,
+			gangSize: 2,
+			pending:  []*corev1.Pod{sibling},
+		}
+	}
+
+	t.Run("sibling that fits keeps the node", func(t *testing.T) {
+		nodes := gangNode()
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyGangFilter(plan(gangTestPod("train-1", 40)), task, resourceReqs, &nodes, failedNodes)
+		assert.Contains(t, nodes, nodeName)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("sibling that does not fit rejects the node", func(t *testing.T) {
+		nodes := gangNode()
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyGangFilter(plan(gangTestPod("train-1", 80)), task, resourceReqs, &nodes, failedNodes)
+		assert.Empty(t, nodes)
+		assert.Contains(t, failedNodes, nodeName)
+	})
 }
