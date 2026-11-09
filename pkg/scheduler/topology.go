@@ -401,11 +401,12 @@ func topologyGangDomainContainsPlaced(tree *topology.Tree, domain *topology.Hype
 
 // topologyGangMember is one member of a gang that still needs a node, with
 // everything the capacity simulation needs to score it exactly as Filter will:
-// its own device request, node policy and scoring weights.
+// its own device request, node policy, preferred node affinity and scoring weights.
 type topologyGangMember struct {
 	pod          *corev1.Pod
 	resourceReqs device.PodDeviceRequests
 	nodePolicy   string
+	nodeAffinity *policy.PreferredNodeAffinity
 	weights      util.DeviceScoringWeights
 	distinct     bool
 }
@@ -428,6 +429,7 @@ func (s *Scheduler) topologyGangMembers(task *corev1.Pod, resourceReqs device.Po
 			pod:          pod,
 			resourceReqs: reqs,
 			nodePolicy:   resolveNodeSchedulerPolicy(pod),
+			nodeAffinity: resolvePreferredNodeAffinity(pod),
 			weights:      weights,
 			distinct:     topologyGangNeedsDistinctNodes(pod),
 		})
@@ -503,7 +505,7 @@ func (s *Scheduler) topologyGangNodeCapacity(nodeID string, usage *NodeUsage, me
 			capacity++
 			continue
 		}
-		result := s.scoreNode(nodeID, simulated, member.resourceReqs, member.pod, member.nodePolicy, member.weights)
+		result := s.scoreNode(nodeID, simulated, member.resourceReqs, member.pod, member.nodePolicy, member.nodeAffinity, member.weights)
 		if result.err != nil || result.score == nil {
 			continue
 		}

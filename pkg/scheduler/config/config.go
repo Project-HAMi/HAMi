@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"reflect"
 	"slices"
@@ -66,6 +67,10 @@ var (
 
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
+
+	// NodeAffinityScoreWeight is the bonus added to a node's score when it matches the pod's preferred nodeAffinity,
+	// scaled by the matched weight ratio. 0 (the default) disables the bonus.
+	NodeAffinityScoreWeight float32
 
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
@@ -370,6 +375,8 @@ func validateConfig(config *Config) error {
 func validateRegisteredDevices(devices map[string]device.Devices) error {
 	var errs []error
 	owners := make(map[string]string, len(devices))
+	memoryOwners := make(map[string]string, len(devices))
+	memoryFactors := make(map[string]int64, len(devices))
 
 	for _, commonWord := range slices.Sorted(maps.Keys(devices)) {
 		dev := devices[commonWord]
@@ -397,6 +404,16 @@ func validateRegisteredDevices(devices map[string]device.Devices) error {
 
 		if names.MemoryFactor < 0 {
 			errs = append(errs, fmt.Errorf("%s: memoryFactor must not be negative, got %d", commonWord, names.MemoryFactor))
+		}
+
+		if names.ResourceMemoryName != "" {
+			factor := max(names.MemoryFactor, 1)
+			if previous, taken := memoryOwners[names.ResourceMemoryName]; !taken {
+				memoryOwners[names.ResourceMemoryName] = commonWord
+				memoryFactors[names.ResourceMemoryName] = factor
+			} else if memoryFactors[names.ResourceMemoryName] != factor {
+				errs = append(errs, fmt.Errorf("%s and %s both claim memory resource %q with different memoryFactor values; its quota limit cannot be scaled for both", previous, commonWord, names.ResourceMemoryName))
+			}
 		}
 
 		if names.ResourceCountName == "" {
@@ -461,11 +478,21 @@ iluvatars:
     resourceCountName: iluvatar.ai/MR-V100-vgpu
     resourceMemoryName: iluvatar.ai/MR-V100.vMem
     resourceCoreName: iluvatar.ai/MR-V100.vCore
+  - chipName: MR-V100A
+    commonWord: MR-V100A
+    resourceCountName: iluvatar.ai/MR-V100A-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V100A.vMem
+    resourceCoreName: iluvatar.ai/MR-V100A.vCore
   - chipName: MR-V50
     commonWord: MR-V50
     resourceCountName: iluvatar.ai/MR-V50-vgpu
     resourceMemoryName: iluvatar.ai/MR-V50.vMem
     resourceCoreName: iluvatar.ai/MR-V50.vCore
+  - chipName: MR-V50A
+    commonWord: MR-V50A
+    resourceCountName: iluvatar.ai/MR-V50A-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V50A.vMem
+    resourceCoreName: iluvatar.ai/MR-V50A.vCore
   - chipName: BI-V150
     commonWord: BI-V150
     resourceCountName: iluvatar.ai/BI-V150-vgpu
@@ -583,7 +610,15 @@ vnpus:
       - name: "vir04"
         memory: 12288
         aiCore: 4
-        aiCPU: 4`
+        aiCPU: 4
+  # Ascend950DT 9582 whole-card configuration. One count request uses the full device memory.
+  - chipName: "Ascend950DT"
+    commonWord: "Ascend950DT"
+    resourceName: "huawei.com/Ascend950DT"
+    memoryAllocatable: 98304
+    memoryCapacity: 98304
+    aiCore: 32
+`
 
 	var yamlData Config
 	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)
@@ -628,4 +663,15 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	klog.Info("Successfully read and parsed config file")
 	return &yamlData, nil
+}
+
+// ValidateNodeAffinityScoreWeight rejects a --node-affinity-score-weight that
+// would corrupt node ordering: a negative weight turns the preferred-node bonus
+// into a penalty, and NaN or Inf make every score comparison meaningless.
+func ValidateNodeAffinityScoreWeight(weight float32) error {
+	w := float64(weight)
+	if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 {
+		return fmt.Errorf("--node-affinity-score-weight must be a finite number >= 0, got %v", weight)
+	}
+	return nil
 }
