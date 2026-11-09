@@ -76,6 +76,11 @@ type topologyPlan struct {
 	// by this scheduler. A count rather than a node count matters when a node
 	// hosts more than one member of the group.
 	placedMembers int
+	// pending holds the group members that still wait for a node, in name
+	// order. The gang filter scores each of them with its own device request,
+	// so that a heterogeneous gang is not measured with the request of the Pod
+	// being scheduled first.
+	pending []*corev1.Pod
 }
 
 // rebuildTopology replaces the cached hierarchy with one built from nodes. It is
@@ -147,7 +152,8 @@ func topologyRequirement(pod *corev1.Pod) (highest int, mode string, ok bool) {
 		return 0, "", false
 	}
 
-	mode = strings.ToLower(strings.TrimSpace(pod.Annotations[util.TopologyModeAnnotationKey]))
+	rawMode := strings.ToLower(strings.TrimSpace(pod.Annotations[util.TopologyModeAnnotationKey]))
+	mode = rawMode
 	if mode != "" && mode != util.TopologyModeHard && mode != util.TopologyModeSoft {
 		klog.ErrorS(nil, "Ignoring invalid NPU topology mode", "pod", klog.KObj(pod), "mode", mode)
 		mode = ""
@@ -156,7 +162,12 @@ func topologyRequirement(pod *corev1.Pod) (highest int, mode string, ok bool) {
 	raw := strings.TrimSpace(pod.Annotations[util.TopologyHighestTierAnnotationKey])
 	if raw == "" {
 		// A mode without a tier asks for ranking only: nothing is rejected.
-		return unlimitedTier, mode, mode != ""
+		// An unrecognized mode still opted in, it only falls back to the
+		// configured default, so it must not turn the feature off.
+		if rawMode != "" {
+			return unlimitedTier, mode, true
+		}
+		return 0, "", false
 	}
 
 	tier, err := strconv.Atoi(raw)
@@ -196,16 +207,17 @@ func topologyGroupKey(pod *corev1.Pod) string {
 // its siblings before the API server has observed it as bound. UIDs deduplicate
 // the informer and the reservation cache, which both know about a Pod after it
 // has been observed.
-func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) ([]string, int) {
+func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) ([]string, int, []*corev1.Pod) {
 	placed := make(map[string]struct{})
 	active := make(map[types.UID]string)
+	pending := make(map[types.UID]*corev1.Pod)
 	if s.podLister != nil {
 		pods, err := s.podLister.Pods(task.Namespace).List(labels.Everything())
 		if err != nil {
 			klog.ErrorS(err, "Failed to list pods for NPU topology grouping", "namespace", task.Namespace)
 		}
 		for _, pod := range pods {
-			if pod.UID == task.UID || pod.Spec.NodeName == "" || pod.DeletionTimestamp != nil {
+			if pod.UID == task.UID || pod.DeletionTimestamp != nil {
 				continue
 			}
 			if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
@@ -214,30 +226,48 @@ func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) ([]st
 			if topologyGroupKey(pod) != group {
 				continue
 			}
+			if pod.Spec.NodeName == "" {
+				pending[pod.UID] = pod
+				continue
+			}
 			active[pod.UID] = pod.Spec.NodeName
 			placed[pod.Spec.NodeName] = struct{}{}
 		}
 	}
 	for _, info := range s.podManager.ListPodsInfo() {
-		if info.Pod == nil || info.Pod.UID == task.UID || info.NodeID == "" || info.Namespace != task.Namespace {
+		if info.Pod == nil || info.Pod.UID == task.UID || info.Namespace != task.Namespace {
 			continue
 		}
 		if topologyGroupKey(info.Pod) != group {
 			continue
 		}
+		if info.NodeID == "" {
+			if _, ok := active[info.Pod.UID]; !ok {
+				pending[info.Pod.UID] = info.Pod
+			}
+			continue
+		}
+		delete(pending, info.Pod.UID)
 		active[info.Pod.UID] = info.NodeID
 		placed[info.NodeID] = struct{}{}
 	}
-	if len(placed) == 0 {
-		return nil, 0
+	pendingPods := make([]*corev1.Pod, 0, len(pending))
+	for _, pod := range pending {
+		pendingPods = append(pendingPods, pod)
 	}
-	return slices.Sorted(maps.Keys(placed)), len(active)
+	slices.SortFunc(pendingPods, func(a, b *corev1.Pod) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	if len(placed) == 0 {
+		return nil, 0, pendingPods
+	}
+	return slices.Sorted(maps.Keys(placed)), len(active), pendingPods
 }
 
 // topologyPlacedNodes is the node-only view retained for callers that do not
 // need the gang member count.
 func (s *Scheduler) topologyPlacedNodes(task *corev1.Pod, group string) []string {
-	nodes, _ := s.topologyGroupPlacement(task, group)
+	nodes, _, _ := s.topologyGroupPlacement(task, group)
 	return nodes
 }
 
@@ -264,7 +294,7 @@ func (s *Scheduler) topologyPlanFor(task *corev1.Pod) *topologyPlan {
 	if group == "" {
 		return nil
 	}
-	placed, placedMembers := s.topologyGroupPlacement(task, group)
+	placed, placedMembers, pending := s.topologyGroupPlacement(task, group)
 	return &topologyPlan{
 		view:          view,
 		group:         group,
@@ -273,6 +303,7 @@ func (s *Scheduler) topologyPlanFor(task *corev1.Pod) *topologyPlan {
 		highest:       highest,
 		gangSize:      topologyGangSize(task),
 		placedMembers: placedMembers,
+		pending:       pending,
 	}
 }
 
@@ -368,72 +399,117 @@ func topologyGangDomainContainsPlaced(tree *topology.Tree, domain *topology.Hype
 	return true
 }
 
-// topologyConsumeAllocation replays the device allocation scoreNode computed
-// for one simulated pod on the copied NodeUsage. AddResourceUsage is the same
-// hook the real allocation path uses, so vendor-specific accounting (for
-// example Ascend's per-card Used counter) stays consistent with Filter.
-func topologyConsumeAllocation(usage *NodeUsage, task *corev1.Pod, allocations device.PodDevices) bool {
-	changed := false
-	for devType, containers := range allocations {
-		plugin, ok := device.GetDevices()[devType]
-		if !ok {
-			continue
-		}
-		for _, containerDevices := range containers {
-			for i := range containerDevices {
-				allocated := containerDevices[i]
-				if allocated.UUID == "" {
-					continue
-				}
-				var target *device.DeviceUsage
-				for _, deviceList := range usage.Devices.DeviceLists {
-					if deviceList.Device != nil && deviceList.Device.ID == allocated.UUID {
-						target = deviceList.Device
-						break
-					}
-				}
-				if target == nil {
-					continue
-				}
-				beforeUsed, beforeCores, beforeMem := target.Used, target.Usedcores, target.Usedmem
-				if err := plugin.AddResourceUsage(task, target, &allocated); err != nil {
-					return changed
-				}
-				if target.Used != beforeUsed || target.Usedcores != beforeCores || target.Usedmem != beforeMem {
-					changed = true
-				}
-			}
-		}
-	}
-	return changed
+// topologyGangMember is one member of a gang that still needs a node, with
+// everything the capacity simulation needs to score it exactly as Filter will:
+// its own device request, node policy and scoring weights.
+type topologyGangMember struct {
+	pod          *corev1.Pod
+	resourceReqs device.PodDeviceRequests
+	nodePolicy   string
+	weights      util.DeviceScoringWeights
+	distinct     bool
 }
 
-// topologyGangNodeCapacity returns how many additional members of the gang one
+// topologyGangMembers resolves one member per slot the gang still has to place.
+// A gang is not required to be homogeneous, so every member is described by its
+// own Pod and device.Resourcereqs result instead of the request of the Pod that
+// happens to be scheduled first. Members the job controller has not created yet
+// are represented by the current Pod, which keeps the check conservative while
+// a gang is still being rolled out.
+func (s *Scheduler) topologyGangMembers(task *corev1.Pod, resourceReqs device.PodDeviceRequests, pending []*corev1.Pod, remaining int) ([]topologyGangMember, bool) {
+	members := make([]topologyGangMember, 0, remaining)
+	add := func(pod *corev1.Pod, reqs device.PodDeviceRequests) bool {
+		weights, err := util.GetDeviceScoringWeightsByPod(pod)
+		if err != nil {
+			klog.ErrorS(err, "NPU topology gang check skipped: invalid device scoring weights", "pod", klog.KObj(pod))
+			return false
+		}
+		members = append(members, topologyGangMember{
+			pod:          pod,
+			resourceReqs: reqs,
+			nodePolicy:   resolveNodeSchedulerPolicy(pod),
+			weights:      weights,
+			distinct:     topologyGangNeedsDistinctNodes(pod),
+		})
+		return true
+	}
+	if remaining <= 0 || !add(task, resourceReqs) {
+		return nil, false
+	}
+	for _, pod := range pending {
+		if len(members) >= remaining {
+			break
+		}
+		if pod == nil || pod.UID == task.UID {
+			continue
+		}
+		reqs, err := device.Resourcereqs(pod)
+		if err != nil {
+			klog.ErrorS(err, "NPU topology gang check skipped: cannot read a gang member's device request", "pod", klog.KObj(pod))
+			return nil, false
+		}
+		if !add(pod, reqs) {
+			return nil, false
+		}
+	}
+	for len(members) < remaining {
+		if !add(task, resourceReqs) {
+			return nil, false
+		}
+	}
+	return members, true
+}
+
+// topologyGangNodeCapacity returns how many of the remaining gang members one
 // node can hold. It simulates the same scoring path Filter uses on a private
 // deep copy, so device geometry, NUMA rules and vendor accounting are resolved
 // exactly as they will be at bind time, and the scheduler's live node cache is
 // never modified.
-func (s *Scheduler) topologyGangNodeCapacity(nodeID string, usage *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, weights util.DeviceScoringWeights, limit int, distinct bool, placed []string) int {
-	if limit <= 0 || usage == nil {
+//
+// Each member is scored with its own request and Pod context. A member that
+// does not fit is skipped so that a later, smaller member can still use the
+// remaining room; the count reflects the members that were actually placed in
+// the simulation, not the request of the Pod that happens to be scheduled
+// first.
+func (s *Scheduler) topologyGangNodeCapacity(nodeID string, usage *NodeUsage, members []topologyGangMember, placed []string) int {
+	if len(members) == 0 || usage == nil {
 		return 0
+	}
+	limit := len(members)
+	distinct := false
+	for i := range members {
+		if members[i].distinct {
+			distinct = true
+			break
+		}
 	}
 	if distinct {
 		if slices.Contains(placed, nodeID) {
 			return 0
 		}
+		// A hostname anti-affinity keeps every sibling off this node too.
 		limit = 1
 	}
 	simulated := usage.DeepCopy()
 	capacity := 0
-	for capacity < limit {
-		result := s.scoreNode(nodeID, simulated, resourceReqs, task, userNodePolicy, weights)
-		if result.err != nil || result.score == nil {
+	for i := range members {
+		if capacity >= limit {
 			break
+		}
+		member := &members[i]
+		if len(member.resourceReqs) == 0 {
+			// A member that asks for no HAMi device still takes a slot but
+			// cannot make the node smaller.
+			capacity++
+			continue
+		}
+		result := s.scoreNode(nodeID, simulated, member.resourceReqs, member.pod, member.nodePolicy, member.weights)
+		if result.err != nil || result.score == nil {
+			continue
 		}
 		capacity++
-		if !topologyConsumeAllocation(simulated, task, result.score.Devices) {
-			break
-		}
+		// scoreNode applies the allocation to simulated through applyPeakUsage,
+		// so the next member already sees the reduced capacity.
 	}
 	return capacity
 }
@@ -476,17 +552,14 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 		}
 	}
 
-	userNodePolicy := resolveNodeSchedulerPolicy(task)
-	weights, err := util.GetDeviceScoringWeightsByPod(task)
-	if err != nil {
-		klog.ErrorS(err, "NPU topology gang check skipped: invalid device scoring weights", "pod", klog.KObj(task))
+	members, ok := s.topologyGangMembers(task, resourceReqs, plan.pending, remaining)
+	if !ok {
 		return
 	}
-	distinctNodes := topologyGangNeedsDistinctNodes(task)
 
 	capacity := make(map[string]int, len(*nodes))
 	for nodeID, usage := range *nodes {
-		capacity[nodeID] = s.topologyGangNodeCapacity(nodeID, usage, resourceReqs, task, userNodePolicy, weights, remaining, distinctNodes, plan.placed)
+		capacity[nodeID] = s.topologyGangNodeCapacity(nodeID, usage, members, plan.placed)
 	}
 
 	feasible, fittingDomains := topologyGangFeasibleNodes(tree, *nodes, capacity, plan.placed, plan.highest, remaining)
@@ -559,6 +632,9 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 			}
 			fittingDomains = append(fittingDomains, domain.String())
 			for _, nodeID := range members {
+				if capacity[nodeID] <= 0 {
+					continue
+				}
 				feasible[nodeID] = struct{}{}
 			}
 		}

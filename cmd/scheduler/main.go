@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -157,6 +158,17 @@ func start() error {
 	)
 
 	config.InitDevices()
+
+	// A mode the scheduler does not recognize is not harmless: topologyPlanFor
+	// copies it into the plan as-is, both hard filters compare against
+	// util.TopologyModeHard, and Pods that rely on the configured default would
+	// silently lose the hard filter and the gang guarantee. Fail at startup
+	// instead, like the device-plugin identity flags below.
+	config.TopologyMode = strings.ToLower(strings.TrimSpace(config.TopologyMode))
+	if config.TopologyMode != util.TopologyModeHard && config.TopologyMode != util.TopologyModeSoft {
+		return fmt.Errorf("--npu-topology-mode must be %q or %q, got %q",
+			util.TopologyModeHard, util.TopologyModeSoft, config.TopologyMode)
+	}
 
 	var err error
 	config.HostName, err = os.Hostname()
