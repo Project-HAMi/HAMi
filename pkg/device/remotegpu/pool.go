@@ -591,16 +591,16 @@ func (p *pool) revision() uint64 {
 	return p.fleetRev
 }
 
-// deviceIDs is the set of cards the pool currently carries, so a caller
-// holding a pre-refresh view can tell which of its cards survived.
-func (p *pool) deviceIDs() map[string]struct{} {
+// deviceHealth snapshots the current cards and their health, so callers with
+// older usage can check both server identity and allocation eligibility.
+func (p *pool) deviceHealth() map[string]bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ids := make(map[string]struct{}, len(p.devices))
+	health := make(map[string]bool, len(p.devices))
 	for _, d := range p.devices {
-		ids[d.ID] = struct{}{}
+		health[d.ID] = d.Health
 	}
-	return ids
+	return health
 }
 
 // refreshNow re-reads the fleet without waiting for poolTTL to lapse, so a
