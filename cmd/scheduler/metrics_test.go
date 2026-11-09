@@ -788,17 +788,18 @@ hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpumem"
 // leader and sync state.
 func TestSchedulerStateMetrics(t *testing.T) {
 	tests := []struct {
-		name       string
-		isLeader   bool
-		isSynced   bool
-		lastSync   int64
-		wantLeader float64
-		wantSynced float64
+		name         string
+		isLeader     bool
+		isSynced     bool
+		lastSync     int64
+		wantLeader   float64
+		wantSynced   float64
+		wantLastSync int64
 	}{
-		{"leader and synced", true, true, 1794012015, 1, 1},
-		{"leader but not synced", true, false, 0, 1, 0},
-		{"synced but not leader", false, true, 1794012015, 0, 1},
-		{"neither leader nor synced", false, false, 0, 0, 0},
+		{"leader and synced", true, true, 1794012015, 1, 1, 1794012015},
+		{"leader but not synced", true, false, 0, 1, 0, 0},
+		{"synced but not leader", false, true, 1794012015, 0, 1, 0},
+		{"neither leader nor synced", false, false, 0, 0, 0, 0},
 	}
 
 	for _, tc := range tests {
@@ -819,7 +820,7 @@ func TestSchedulerStateMetrics(t *testing.T) {
 
 			if err := promtestutil.CollectAndCompare(
 				cc,
-				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced, tc.lastSync)),
+				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced, tc.wantLastSync)),
 				"hami_scheduler_is_leader",
 				"hami_scheduler_cache_synced",
 				"hami_scheduler_last_sync_success_timestamp_seconds",
