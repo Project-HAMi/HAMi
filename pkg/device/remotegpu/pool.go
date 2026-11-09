@@ -369,6 +369,15 @@ func (p *pool) refresh(ctx context.Context) {
 	} else {
 		inUse, listed = reservations(ctx, previousInUse)
 	}
+	if !listed {
+		// Previous reservations cannot establish ownership of newly discovered
+		// cards, especially after a restart when inUse is empty. Report the
+		// current fleet as unavailable until a complete refresh restores its
+		// health, while still propagating server removals and readiness changes.
+		for _, d := range devices {
+			d.Health = false
+		}
+	}
 	// Ask every server concurrently: one unreachable server pays its own
 	// metricsTimeout instead of adding it to everyone else's.
 	busy := askServers(ctx, endpoints, previousBusy, listedServers)
