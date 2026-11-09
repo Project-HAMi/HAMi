@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -108,6 +109,21 @@ func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected a collect success metric")
+	}
+}
+
+func TestCollectStandsByOnLupineServer(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "gpu-server")
+	lister := &nvidia.ContainerLister{}
+	lister.SetLupineServerForTest(func(context.Context) (bool, error) { return true, nil })
+	cc := ClusterManagerCollector{ClusterManager: &ClusterManager{containerLister: lister}}
+	ch := make(chan prometheus.Metric, 10)
+
+	cc.Collect(ch)
+	close(ch)
+
+	for m := range ch {
+		t.Fatalf("standby emitted %s", m.Desc())
 	}
 }
 

@@ -17,13 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -365,5 +368,32 @@ func TestObserveProtectsUsageUntilReadsAndWritesFinish(t *testing.T) {
 			defer lister.UnLock()
 			assert.Equal(t, len(lister.ListContainers()), 0)
 		})
+	}
+}
+
+func TestWatchAndFeedbackStandsByOnLupineServer(t *testing.T) {
+	if nvret := nvml.Init(); nvret == nvml.SUCCESS {
+		_ = nvml.Shutdown()
+		t.Skip("NVML is available, so the standby branch is not distinguished by an init failure")
+	}
+	previousInterval := feedbackInterval
+	feedbackInterval = 15 * time.Millisecond
+	t.Cleanup(func() { feedbackInterval = previousInterval })
+
+	lister := &nvidia.ContainerLister{}
+	onLupine := true
+	lister.SetLupineServerForTest(func(context.Context) (bool, error) { return onLupine, nil })
+	lockAbsent := func() bool { return false }
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	if err := watchAndFeedback(ctx, lister, nil, lockAbsent); err != nil {
+		t.Fatalf("lupine server: %v", err)
+	}
+
+	onLupine = false
+	err := watchAndFeedback(context.Background(), lister, nil, lockAbsent)
+	if err == nil || !strings.Contains(err.Error(), "failed to initialize NVML") {
+		t.Fatalf("left the lupine server: got %v, want collection to resume", err)
 	}
 }

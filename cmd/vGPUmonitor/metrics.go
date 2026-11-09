@@ -17,12 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 	"unicode/utf8"
 
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -66,18 +68,8 @@ var (
 		[]string{"node"}, nil,
 	)
 
-	hostGPUdesc = prometheus.NewDesc(
-		"hami_host_gpu_memory_used_bytes",
-		"GPU device memory usage in bytes",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
-	)
-
-	hostGPUUtilizationdesc = prometheus.NewDesc(
-		"hami_host_gpu_utilization_ratio",
-		"GPU core utilization ratio (0-100)",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
-	)
-
+	hostGPUdesc                  = metrics.HostMemory
+	hostGPUUtilizationdesc       = metrics.HostUtilization
 	hostGPUMemoryUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_controller_utilization_ratio",
 		"GPU memory controller utilization ratio (0-100)",
@@ -101,28 +93,11 @@ var (
 		"Lifetime aggregate ECC errors",
 		[]string{"node", "device_index", "device_uuid", "device_type", "error_type"}, nil,
 	)
-	ctrvGPUdesc = prometheus.NewDesc(
-		"hami_vgpu_memory_used_bytes",
-		"vGPU device memory usage in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-
-	ctrvGPUlimitdesc = prometheus.NewDesc(
-		"hami_vgpu_memory_limit_bytes",
-		"vGPU device memory limit in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceMemorydesc = prometheus.NewDesc(
-		"hami_container_device_memory_bytes",
-		"Container device memory usage in bytes (DEPRECATED: use hami_vgpu_memory_used_bytes, deprecated in v2.11.0, removed in v2.12.0)",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceUtilizationdesc = prometheus.NewDesc(
-		"hami_container_device_utilization_ratio",
-		"Container device SM utilization ratio",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceLastKernelDesc = prometheus.NewDesc(
+	ctrvGPUdesc              = metrics.ContainerMemory
+	ctrvGPUlimitdesc         = metrics.ContainerMemoryLimit
+	ctrDeviceMemorydesc      = metrics.ContainerDeviceMemory
+	ctrDeviceUtilizationdesc = metrics.ContainerUtilization
+	ctrDeviceLastKernelDesc  = prometheus.NewDesc(
 		"hami_container_last_kernel_elapsed_seconds",
 		"Seconds since last kernel execution in container",
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
@@ -253,6 +228,13 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
+	if cc.standingBy() {
+		// Local NVML on a chart-managed lupine server cannot name the remote
+		// clients. Emit no series, including collect success: a success gauge
+		// with no GPU samples looks like an idle node.
+		klog.V(4).Info("vGPUmonitor idle on lupine server node")
+		return
+	}
 	success := 1.0
 	if os.Getenv("HAMI_MONITOR_UNKNOWN_PROCESSES") == "true" {
 		counts, err := cc.ClusterManager.containerLister.UnknownProcessCounts()
@@ -289,6 +271,13 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	klog.Info("Finished collecting metrics for vGPUMonitor")
+}
+
+func (cc ClusterManagerCollector) standingBy() bool {
+	if cc.ClusterManager == nil || cc.ClusterManager.containerLister == nil {
+		return false
+	}
+	return cc.ClusterManager.containerLister.OnLupineServer(context.Background())
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {

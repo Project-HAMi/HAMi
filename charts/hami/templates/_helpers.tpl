@@ -175,7 +175,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hami.remotegpu.server.imagePullSecrets" -}}
-{{ include "common.images.pullSecrets" (dict "images" (list .Values.devices.remotegpu.server.image) "global" .Values.global) }}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.devices.remotegpu.server.image .Values.devicePlugin.monitor.image) "global" .Values.global) }}
 {{- end -}}
 
 {{/*
