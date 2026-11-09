@@ -3,6 +3,9 @@ on:
   # Run this workflow every time a new commit pushed to upstream/fork repository.
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
   pull_request:
+  schedule:
+    # Keep a longer-running benchmark history without making PR feedback slow.
+    - cron: '17 3 * * 1'
   push:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
@@ -12,7 +15,8 @@ permissions:
   contents: read  # for actions/checkout to fetch code
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A weekly benchmark must not cancel (or be cancelled by) a master push.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -25,6 +29,17 @@ env:
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  support-bundle:
+    name: Support bundle tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Test support bundle collector
+        run: make test-support-bundle
+
   lint:
     name: lint
     runs-on: ubuntu-22.04
@@ -44,7 +59,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.13.1
+          version: v2.15.0
           install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
@@ -60,6 +75,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Parse the version
         id: parse_version
         run: |
@@ -67,11 +83,7 @@ jobs:
           suffix="$(git rev-parse --short HEAD)"
           tag="${value}-${suffix}"
           echo "version=${tag}" >> $GITHUB_OUTPUT
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-
-      # Check the code diff, ignore the docs and examples change
+      # Check the code diff, ignore examples and Markdown changes
       - name: Parse the code diff
         id: parse_code
         run: |
@@ -81,7 +93,7 @@ jobs:
           echo "Git log: $(git log ${pr_commit})"
           echo "Base commit: ${base_commit}"
           echo "Git log: $(git log ${base_commit})"
-          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)docs/*' ':(exclude)examples/*' ':(exclude)*.md')
+          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)examples/*' ':(exclude)*.md')
           echo "Changed files: ${changed_files}"
           if [ -n "$changed_files" ]; then
             echo "Will run e2e-test"
@@ -95,7 +107,9 @@ jobs:
     name: Unit test
     needs: [ lint, get_info ] # rely on lint & get_info successful completion
     runs-on: ubuntu-22.04
-    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
+    # The schedule added by this workflow is benchmark-only. Skipping this job
+    # also skips its build, chart, and E2E dependants.
+    if: github.event_name != 'schedule' && (needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master')
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -134,10 +148,21 @@ jobs:
     needs: [ lint, get_info ]
     runs-on: ubuntu-22.04
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
+    # Keep concurrent benchmark allocation samples comparable across runner
+    # generations with different CPU counts. Wall-clock results remain
+    # informational, so two processors preserve concurrency without making
+    # timing a CI gate.
+    env:
+      GOMAXPROCS: '2'
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
+          # On pull_request events, github.sha is GitHub's tested merge commit.
+          # Compare that merge result with the base revision, not the stale PR
+          # head when master has moved since the branch was last rebased.
+          ref: ${{ github.sha }}
           persist-credentials: false
       # The libvgpu submodule holds no Go sources, so unlike the unit test job
       # this one does not need it to build the benchmarks.
@@ -145,20 +170,52 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      - name: Test benchmark comparison script
+        run: make test-bench-compare
+      - name: Install benchstat
+        if: github.event_name == 'pull_request'
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da
+      - name: Run PR base benchmarks
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          mkdir -p _output/bench
+          git worktree add --detach ../hami-bench-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd ../hami-bench-base
+            # The base may predate BENCH_COUNT, so invoke go test directly
+            # instead of relying on the new script interface from this PR.
+            package_list="$(go list ./pkg/... ./cmd/...)"
+            readarray -t benchmark_packages <<<"${package_list}"
+            go test -run '^$' -bench . -benchmem -benchtime 100ms -count 10 \
+              "${benchmark_packages[@]}"
+          ) 2>&1 | tee _output/bench/base.txt
       - name: Run benchmarks
-        # A low benchtime keeps this a smoke test: the job proves every
-        # benchmark still runs, and deliberately does not compare timings,
-        # which are not reproducible on shared runners.
-        run: BENCHTIME=10x make bench
+        # PR comparisons need independent samples for benchstat, rather than
+        # multiple iterations collapsed into a single Go benchmark result.
+        # The scheduled run is longer and retains samples for trend inspection.
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BENCHTIME=100ms BENCH_COUNT=10 make bench
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            BENCHTIME=1s BENCH_COUNT=10 make bench
+          else
+            BENCHTIME=10x make bench
+          fi
+      - name: Compare PR benchmark results
+        if: github.event_name == 'pull_request'
+        run: >-
+          bash hack/bench-compare.sh _output/bench/base.txt _output/bench/results.txt
+          _output/bench/benchstat.txt hack/bench-policy.tsv
       - name: Upload benchmark results
         # Uploaded even on failure so the partial output shows which benchmark
         # broke.
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: benchmark-results
-          path: _output/bench/results.txt
-          retention-days: 5
+          path: _output/bench
+          retention-days: 30
           if-no-files-found: warn
 
   build:
@@ -189,13 +246,16 @@ jobs:
           basePath: # optional, default is .
           submodulePath: libvgpu
 
+      - name: Read image pins from version.mk
+        run: grep -E '^(GOLANG|NVIDIA)_IMAGE=' version.mk >> "$GITHUB_ENV"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
         with:
-          driver-opts: image=moby/buildkit:v0.31.2@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -211,8 +271,8 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-            NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+            GOLANG_IMAGE=${{ env.GOLANG_IMAGE }}
+            NVIDIA_IMAGE=${{ env.NVIDIA_IMAGE }}
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
@@ -228,7 +288,7 @@ jobs:
           docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
       - name: Upload image.tar as artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: hami-image
           path: image.tar
@@ -241,7 +301,7 @@ jobs:
     needs: [ test, get_info ]
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     env:
-      HELM_VERSION: v3.8.1
+      HELM_VERSION: v3.22.1
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -289,7 +349,7 @@ jobs:
           mv charts/*.tgz tmp
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: chart_package_artifact
           path: tmp/*

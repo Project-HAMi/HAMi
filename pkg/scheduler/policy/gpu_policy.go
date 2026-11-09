@@ -221,7 +221,9 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		// hygon, iluvatar, metax, mthreads). Scoring from the percentage while
 		// Fit books Memreq makes the device look emptier than the allocation
 		// it is about to receive.
-		if container.Memreq == 0 && container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
+		// Only a positive value is a percentage: Enflame sends a negative mode
+		// code (-1) there, which must not be scaled into negative memory.
+		if container.Memreq == 0 && container.MemPercentagereq > 0 && container.MemPercentagereq != 101 {
 			mem += (ds.Device.Totalmem * container.MemPercentagereq) / 100
 			continue
 		}

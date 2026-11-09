@@ -19,7 +19,7 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
-      - uses: tomsun28/issues-translate-action@b41f55ddc81d7d54bd542a4f289fe28ec081898e # v2.7
+      - uses: tomsun28/issues-translate-action@af53517fed9ee52907193239fb88ddf72f51a07d # v2.8
         with:
           IS_MODIFY_TITLE: true
           BOT_GITHUB_TOKEN: ${{ secrets.TRANSLATE_ROBOT_TOKEN }}

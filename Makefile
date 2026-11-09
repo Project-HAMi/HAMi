@@ -45,7 +45,7 @@ tidy:
 	$(GO) mod tidy
 
 proto:
-	$(GO) get github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
+	$(GO) install github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
 	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
 
 build: $(CMDS) $(DEVICES)
@@ -71,6 +71,14 @@ test:
 .PHONY: bench
 bench:
 	bash hack/bench.sh
+
+.PHONY: test-bench-compare
+test-bench-compare:
+	bash hack/test-bench-compare.sh
+
+.PHONY: test-support-bundle
+test-support-bundle:
+	bash hack/test-hami-support-bundle.sh
 
 lint:
 	bash hack/verify-staticcheck.sh

@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -810,5 +812,114 @@ func TestMappedUsageRemainsValidUntilUnlock(t *testing.T) {
 				require.Empty(t, l.ListContainers())
 			}
 		})
+	}
+}
+
+func TestCacheDirectoryRecoveryKeepsDCGMAliveUntilClose(t *testing.T) {
+	previous := wholeGPUDisableHAMiCore
+	wholeGPUDisableHAMiCore = false
+	t.Cleanup(func() { wholeGPUDisableHAMiCore = previous })
+	collector := newMigTestCollector(&fakeLatestValuesQuerier{})
+	cleanups, shutdowns := 0, 0
+	collector.watched = map[uint]func(){1: func() { cleanups++ }}
+	collector.shutdown = func() { shutdowns++ }
+	path := filepath.Join(t.TempDir(), "cache")
+	l := &ContainerLister{containerPath: path, containers: map[string]*ContainerUsage{}, podLister: newTestPodLister(), wholeGPU: &wholeGPUState{dcgm: collector}, stopCh: make(chan struct{})}
+	defer l.Close()
+	if err := l.Update(); !os.IsNotExist(err) {
+		t.Fatalf("expected missing directory: %v", err)
+	}
+	if collector.closed || cleanups != 0 || shutdowns != 0 {
+		t.Fatal("missing directory closed DCGM")
+	}
+	assert.NilError(t, os.Mkdir(path, 0755))
+	assert.NilError(t, l.Update())
+	if collector.closed {
+		t.Fatal("directory recovery lost collector")
+	}
+	l.Close()
+	l.Close()
+	if !collector.closed || cleanups != 1 || shutdowns != 1 {
+		t.Fatalf("close failed: closed=%v cleanups=%d shutdowns=%d", collector.closed, cleanups, shutdowns)
+	}
+}
+
+func TestOnLupineServerCustomPortKeepsCollecting(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{name: "empty chart-managed", labels: map[string]string{remotegpu.LupineServerLabel: ""}, want: true},
+		{name: "custom port", labels: map[string]string{remotegpu.LupineServerLabel: "14833"}, want: false},
+		{name: "missing", labels: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := newListerForHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				body, err := json.Marshal(&corev1.Node{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+					ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: tc.labels},
+				})
+				assert.NilError(t, err)
+				_, _ = w.Write(body)
+			}))
+			assert.Equal(t, l.OnLupineServer(context.Background()), tc.want)
+		})
+	}
+}
+
+func TestOnLupineServerLookupFailureKeepsPreviousAnswer(t *testing.T) {
+	t.Run("no client reports false", func(t *testing.T) {
+		if (&ContainerLister{}).OnLupineServer(context.Background()) {
+			t.Fatal("missing client looked like a lupine server")
+		}
+	})
+
+	var (
+		status = http.StatusOK
+		labels map[string]string
+		hits   int
+	)
+	l := newListerForHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(&corev1.Node{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+			ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: labels},
+		})
+		assert.NilError(t, err)
+		_, _ = w.Write(body)
+	}))
+
+	labels = map[string]string{remotegpu.LupineServerLabel: ""}
+	if !l.OnLupineServer(context.Background()) {
+		t.Fatal("empty label")
+	}
+	if !l.OnLupineServer(context.Background()) || hits != 1 {
+		t.Fatalf("cache hit = %d requests, on=%v", hits, l.lupineOn)
+	}
+
+	status = http.StatusInternalServerError
+	l.lupineAt = time.Now().Add(-lupineServerLookupTTL - time.Second)
+	if !l.OnLupineServer(context.Background()) {
+		t.Fatal("lookup failure dropped a known lupine server")
+	}
+
+	labels = nil
+	status = http.StatusOK
+	l.lupineAt = time.Now().Add(-lupineServerLookupTTL - time.Second)
+	if l.OnLupineServer(context.Background()) {
+		t.Fatal("removing the label did not resume collection")
+	}
+
+	l.nodeName = ""
+	l.lupineKnown = false
+	if l.OnLupineServer(context.Background()) {
+		t.Fatal("empty node name looked like a lupine server")
 	}
 }

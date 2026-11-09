@@ -151,6 +151,59 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 }
 
+func Test_CheckHealth(t *testing.T) {
+	InitMLUDevice(CambriconConfig{
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	dev := &CambriconDevices{}
+
+	node := func(name string, allocatableCores, capacityCores, memory int64, model string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{}},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{},
+				Capacity:    corev1.ResourceList{},
+			},
+		}
+		if model != "" {
+			n.Labels[MLUModelLabel] = model
+		}
+		if allocatableCores > 0 {
+			n.Status.Allocatable[corev1.ResourceName(MLUResourceCores)] = *resource.NewQuantity(allocatableCores, resource.DecimalSI)
+		}
+		if capacityCores > 0 {
+			n.Status.Capacity[corev1.ResourceName(MLUResourceCores)] = *resource.NewQuantity(capacityCores, resource.DecimalSI)
+		}
+		if memory > 0 {
+			n.Status.Capacity[corev1.ResourceName(MLUResourceMemory)] = *resource.NewQuantity(memory, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(CambriconMLUCommonWord, node("mlu-health-absent", 0, 200, 1024, ""))
+	assert.False(t, healthy)
+	assert.False(t, needUpdate)
+
+	present := node("mlu-health-present", 100, 100, 1024, "MLU370-X4")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, present)
+	assert.True(t, healthy)
+	assert.False(t, needUpdate)
+
+	relabelled := node("mlu-health-present", 100, 100, 1024, "MLU370-X8")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, relabelled)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
+
+	grown := node("mlu-health-present", 200, 200, 1024, "MLU370-X8")
+	healthy, needUpdate = dev.CheckHealth(CambriconMLUCommonWord, grown)
+	assert.True(t, healthy)
+	assert.True(t, needUpdate)
+}
+
 func Test_MutateAdmission(t *testing.T) {
 	config := CambriconConfig{
 		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
@@ -462,6 +515,44 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Memreq:           int64(256000),
 				MemPercentagereq: int64(0),
 				Coresreq:         int64(2),
+			},
+		},
+		{
+			name: "a count above 1 takes whole MLUs and keeps the declared memory in the request",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("2"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int64(2),
+				Type:             CambriconMLUDevice,
+				Memreq:           int64(256000),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(100),
+			},
+		},
+		{
+			name: "a count above 1 ignores memory and core values even out of range",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("2"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("36028797018963968"),
+						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("101"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int64(2),
+				Type:             CambriconMLUDevice,
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(100),
 			},
 		},
 		{
@@ -1766,6 +1857,84 @@ func TestDevices_Fit_ResourceQuotaWholeCardRequest(t *testing.T) {
 	}
 	if reason != "1/1 ResourceQuotaNotFit" {
 		t.Errorf("expected reason %q, got %q", "1/1 ResourceQuotaNotFit", reason)
+	}
+}
+
+// A count above 1 allocates whole MLUs, so a declared memory below the card
+// size must not shrink what the allocation records as used.
+func TestDevices_Fit_MultiMLUAllocatesWholeCards(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
+
+	devices := []*device.DeviceUsage{}
+	for i := range 2 {
+		devices = append(devices, &device.DeviceUsage{
+			ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 100,
+			Totalmem: 40960, Totalcore: 100, Type: CambriconMLUDevice, Health: true,
+		})
+	}
+	request := device.ContainerDeviceRequest{
+		Nums: 2, Type: CambriconMLUDevice, Memreq: 256000 / 100, MemPercentagereq: 100, Coresreq: 100,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+
+	fit, result, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if !fit {
+		t.Fatalf("expected the request to fit, got reason %q", reason)
+	}
+	for _, d := range result[CambriconMLUDevice] {
+		if d.Usedmem != 40960 {
+			t.Errorf("device %s Usedmem = %d, want the whole card 40960", d.UUID, d.Usedmem)
+		}
+	}
+}
+
+// A count above 1 takes whole MLUs, so a declared memory that fits the quota
+// must not admit a request whose whole cards exceed it.
+func TestDevices_Fit_MultiMLUQuotaCountsWholeCards(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
+
+	ns := "cambricon-multi-quota-ns"
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlu-quota", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.cambricon.com/mlu.smlu.vmemory"): resource.MustParse("50"),
+			},
+		},
+	}
+	qm := device.NewQuotaManager()
+	qm.AddQuota(quota)
+	t.Cleanup(func() { qm.DelQuota(quota) })
+
+	devices := []*device.DeviceUsage{}
+	for i := range 2 {
+		devices = append(devices, &device.DeviceUsage{
+			ID: fmt.Sprintf("dev-%d", i), Index: uint(i), Count: 100,
+			Totalmem: 40960, Totalcore: 100, Type: CambriconMLUDevice, Health: true,
+		})
+	}
+	request := device.ContainerDeviceRequest{
+		Nums: 2, Memreq: 10, MemPercentagereq: 101, Coresreq: 100, Type: CambriconMLUDevice,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+	fit, result, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Errorf("expected whole MLUs exceeding the namespace's ResourceQuota to be denied, but Fit admitted it (reason=%q)", reason)
+	}
+	// Every card is over quota on its own; none may be taken on the declared memory.
+	if got := len(result[CambriconMLUDevice]); got != 0 {
+		t.Errorf("expected no MLU to pass the quota check, got %d (reason=%q)", got, reason)
 	}
 }
 

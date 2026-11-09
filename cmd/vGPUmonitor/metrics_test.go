@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -111,6 +112,21 @@ func TestCollectReportsFailureWhenGPUInfoFails(t *testing.T) {
 	}
 }
 
+func TestCollectStandsByOnLupineServer(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "gpu-server")
+	lister := &nvidia.ContainerLister{}
+	lister.SetLupineServerForTest(func(context.Context) (bool, error) { return true, nil })
+	cc := ClusterManagerCollector{ClusterManager: &ClusterManager{containerLister: lister}}
+	ch := make(chan prometheus.Metric, 10)
+
+	cc.Collect(ch)
+	close(ch)
+
+	for m := range ch {
+		t.Fatalf("standby emitted %s", m.Desc())
+	}
+}
+
 // A pod whose MIG allocations cannot be decoded or point at a container that
 // does not exist is skipped, but the scrape must report it as degraded.
 func TestCollectPodAndContainerMigInfoReportsSkippedAllocations(t *testing.T) {
@@ -151,6 +167,50 @@ func TestCollectPodAndContainerMigInfoReportsSkippedAllocations(t *testing.T) {
 			}
 			if sent := len(ch) > 0; sent != tc.wantSent {
 				t.Fatalf("sent %d metrics, want any: %v", len(ch), tc.wantSent)
+			}
+		})
+	}
+}
+
+// MIG info must stop once the pod reaches a terminal phase (Succeeded or Failed).
+func TestCollectPodAndContainerMigInfoSkipsTerminatedPods(t *testing.T) {
+	const allocation = `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-1","profile":"1g.10gb","placement":{"start":0,"size":1},"migUUID":"MIG-1","gpuInstanceID":1,"computeInstanceID":0}]`
+	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			t.Setenv(util.NodeNameEnvName, "test-node")
+			informerFactory := informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
+			indexer := informerFactory.Core().V1().Pods().Informer().GetIndexer()
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "p", Namespace: "ns",
+					Labels:      map[string]string{util.AssignedNodeAnnotations: "test-node"},
+					Annotations: map[string]string{nv.MigAllocationsAnnotation: allocation},
+				},
+				Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "c"}}},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}
+			if err := indexer.Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			cc := ClusterManagerCollector{ClusterManager: &ClusterManager{PodLister: informerFactory.Core().V1().Pods().Lister()}}
+			sent := func() int {
+				ch := make(chan prometheus.Metric, 10)
+				if err := cc.collectPodAndContainerMigInfo(ch); err != nil {
+					t.Fatalf("err = %v, want nil", err)
+				}
+				return len(ch)
+			}
+			if sent() == 0 {
+				t.Fatal("running pod sent no MIG info")
+			}
+
+			terminated := pod.DeepCopy()
+			terminated.Status.Phase = phase
+			if err := indexer.Update(terminated); err != nil {
+				t.Fatal(err)
+			}
+			if n := sent(); n != 0 {
+				t.Fatalf("terminated pod sent %d metrics, want 0", n)
 			}
 		})
 	}

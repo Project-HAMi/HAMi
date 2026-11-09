@@ -25,7 +25,7 @@ spec:
             - "--vllm-url"
             - "http://127.0.0.1:8000/v1/chat/completions"
             - "--model"
-            - "Qwen3-8B"
+            - "Qwen/Qwen3-8B"
             - "--warmup"
             - "30"
             - "--runs"

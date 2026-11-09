@@ -18,6 +18,7 @@ package remotegpu
 
 import (
 	"context"
+	"maps"
 	"net"
 	"strconv"
 	"strings"
@@ -25,7 +26,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
@@ -36,8 +39,9 @@ import (
 
 const (
 	// LupineServerLabel marks a GPU node as serving its GPUs through lupine.
-	// The label value is the lupine listen port; an empty value means
-	// RemoteGPUConfig.DefaultPort.
+	// The NVIDIA device plugin applies it when the per-node ConfigMap sets
+	// operatingmode to remote (peer to hami-core / mig). The label value is the
+	// lupine listen port; an empty value means RemoteGPUConfig.DefaultPort.
 	LupineServerLabel = "hami.io/lupine-server"
 
 	// nvidiaRegisterAnnos is where the stock HAMi NVIDIA device plugin already
@@ -70,13 +74,53 @@ const (
 	// under the register lock. An apiserver that stops answering would
 	// otherwise hold either for as long as it stays quiet.
 	poolFetchTimeout = 10 * time.Second
+
+	// RetryAnno is stamped on a pod that Fit turned away once the fleet
+	// changes. kube-scheduler learns nothing about the fleet from an extender:
+	// a lupine server that appears or returns is no event it requeues on, so
+	// the pod would sit in the unschedulable queue until the next flush,
+	// minutes away. Any update to the pod requeues it at once.
+	RetryAnno = "hami.io/remote-gpu-retry"
+
+	// waitingTTL drops a refused pod that never got a fleet change to retry
+	// on, such as one deleted while it waited.
+	waitingTTL = 10 * time.Minute
 )
 
 // Swappable for tests, mirroring how plugin/server.go injects getPendingPod.
 var (
 	listLupineNodes = apiListLupineNodes
 	listPods        = apiListPods
+	nudgePods       = apiNudgePods
 )
+
+// waiter is a pod Fit refused, remembered so it can be nudged on a fleet change.
+type waiter struct {
+	uid             types.UID
+	namespace, name string
+	at              time.Time
+}
+
+// apiNudgePods returns the pods it could not patch, so they are kept for the
+// next fleet change instead of being dropped.
+func apiNudgePods(pods []waiter, rev uint64) []waiter {
+	c := client.GetClient()
+	if c == nil {
+		return pods
+	}
+	var failed []waiter
+	payload := []byte(`{"metadata":{"annotations":{"` + RetryAnno + `":"` + strconv.FormatUint(rev, 10) + `"}}}`)
+	for _, w := range pods {
+		ctx, cancel := context.WithTimeout(context.Background(), poolFetchTimeout)
+		_, err := c.CoreV1().Pods(w.namespace).Patch(ctx, w.name, types.MergePatchType, payload, metav1.PatchOptions{})
+		cancel()
+		if err != nil && !apierrors.IsNotFound(err) {
+			klog.V(4).InfoS("remotegpu: failed to requeue waiting pod", "pod", w.namespace+"/"+w.name, "error", err)
+			failed = append(failed, w)
+		}
+	}
+	return failed
+}
 
 func apiListLupineNodes(ctx context.Context) ([]corev1.Node, error) {
 	c := client.GetClient()
@@ -124,25 +168,79 @@ type pool struct {
 	mu          sync.Mutex
 	defaultPort int
 
-	fetchedAt  time.Time
-	forcedAt   time.Time
-	refreshing bool              // a refresh is already fetching; do not start a second one
-	refreshed  chan struct{}     // closed when the in-flight refresh installs its result
-	fleetRev   uint64            // bumped whenever a refresh installs a different fleet
-	endpoints  map[string]string // lupine node name -> "host:port"
-	devices    []*device.DeviceInfo
-	inUse      map[string]struct{} // device ID held by a live pod
-	held       map[string]booking  // device ID booked since the last refresh
-	busy       map[string]struct{} // device ID a server reports a client on
+	fetchedAt    time.Time
+	forcedAt     time.Time
+	refreshing   bool                  // a refresh is already fetching; do not start a second one
+	refreshed    chan struct{}         // closed when the in-flight refresh installs its result
+	fleetRev     uint64                // bumped whenever a refresh installs a different fleet
+	endpoints    map[string]string     // lupine node name -> "host:port"
+	serverLabels map[string]labels.Set // lupine node name -> labels from the same pool snapshot
+	devices      []*device.DeviceInfo
+	inUse        map[string]struct{}  // device ID held by a live pod
+	held         map[string]booking   // device ID booked since the last refresh
+	busy         map[string]struct{}  // device ID a server reports a client on
+	waiting      map[types.UID]waiter // pods Fit refused since the fleet last changed
 }
 
 func newPool(defaultPort int) *pool {
 	return &pool{
-		defaultPort: defaultPort,
-		endpoints:   map[string]string{},
-		inUse:       map[string]struct{}{},
-		held:        map[string]booking{},
-		busy:        map[string]struct{}{},
+		defaultPort:  defaultPort,
+		endpoints:    map[string]string{},
+		serverLabels: map[string]labels.Set{},
+		inUse:        map[string]struct{}{},
+		held:         map[string]booking{},
+		busy:         map[string]struct{}{},
+		waiting:      map[types.UID]waiter{},
+	}
+}
+
+// wait remembers a pod Fit refused, so a fleet change can requeue it.
+// A pod refused on an older fleet than rev missed that change's nudge, so it is
+// nudged now.
+func (p *pool) wait(pod *corev1.Pod, rev uint64) {
+	if pod == nil || pod.UID == "" {
+		return
+	}
+	w := waiter{uid: pod.UID, namespace: pod.Namespace, name: pod.Name, at: time.Now()}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if rev != p.fleetRev {
+		go func(rev uint64) {
+			if failed := nudgePods([]waiter{w}, rev); len(failed) > 0 {
+				p.requeue(failed)
+			}
+		}(p.fleetRev)
+		return
+	}
+	p.waiting[pod.UID] = w
+}
+
+// pruneWaiting forgets pods refused longer ago than waitingTTL. Callers hold p.mu.
+func (p *pool) pruneWaiting() {
+	for uid, w := range p.waiting {
+		if time.Since(w.at) >= waitingTTL {
+			delete(p.waiting, uid)
+		}
+	}
+}
+
+// takeWaiting hands over the pods worth nudging and forgets them. Callers hold p.mu.
+func (p *pool) takeWaiting() []waiter {
+	p.pruneWaiting()
+	out := make([]waiter, 0, len(p.waiting))
+	for _, w := range p.waiting {
+		out = append(out, w)
+	}
+	clear(p.waiting)
+	return out
+}
+
+// requeue puts back pods a nudge could not reach, for the next fleet change.
+func (p *pool) requeue(pods []waiter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, w := range pods {
+		p.waiting[w.uid] = w
 	}
 }
 
@@ -178,6 +276,7 @@ func serverOf(id string) string {
 // in-flight checks) and the swap of the new state in run under the lock.
 func (p *pool) refresh(ctx context.Context) {
 	p.mu.Lock()
+	p.pruneWaiting()
 	if !p.fetchedAt.IsZero() && time.Since(p.fetchedAt) < poolTTL {
 		p.mu.Unlock()
 		return
@@ -232,6 +331,7 @@ func (p *pool) refresh(ctx context.Context) {
 	}
 
 	endpoints := make(map[string]string, len(nodes))
+	serverLabels := make(map[string]labels.Set, len(nodes))
 	listedServers := make(map[string]struct{}, len(nodes))
 	var devices []*device.DeviceInfo
 	for i := range nodes {
@@ -252,6 +352,7 @@ func (p *pool) refresh(ctx context.Context) {
 			continue
 		}
 		endpoints[n.Name] = endpoint
+		serverLabels[n.Name] = copyLabels(n.Labels)
 		devices = append(devices, gpus...)
 	}
 
@@ -276,8 +377,16 @@ func (p *pool) refresh(ctx context.Context) {
 	defer p.mu.Unlock()
 	if !sameFleet(p.devices, devices) {
 		p.fleetRev++
+		if waiting := p.takeWaiting(); len(waiting) > 0 {
+			go func(rev uint64) {
+				if failed := nudgePods(waiting, rev); len(failed) > 0 {
+					p.requeue(failed)
+				}
+			}(p.fleetRev)
+		}
 	}
 	p.endpoints = endpoints
+	p.serverLabels = serverLabels
 	p.devices = devices
 	p.inUse = inUse
 	p.busy = busy
@@ -299,6 +408,12 @@ func (p *pool) refresh(ctx context.Context) {
 	klog.V(4).InfoS("remotegpu: pool refreshed",
 		"servers", len(endpoints), "devices", len(devices),
 		"reserved", len(p.inUse), "busyOnServer", len(p.busy))
+}
+
+func copyLabels(in map[string]string) labels.Set {
+	out := make(labels.Set, len(in))
+	maps.Copy(out, in)
+	return out
 }
 
 func (p *pool) endpointOf(n *corev1.Node) (string, bool) {
@@ -601,6 +716,24 @@ func (p *pool) endpoint(nodeName string) (string, bool) {
 	defer p.mu.Unlock()
 	ep, ok := p.endpoints[nodeName]
 	return ep, ok
+}
+
+// matchingServers returns only servers whose labels satisfy selector. Labels
+// are captured with the same Node snapshot as the endpoints and devices, so a
+// server that disappeared from the usable pool cannot match by stale metadata.
+func (p *pool) matchingServers(selector labels.Selector, servers []string) []string {
+	if selector == nil {
+		return servers
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	matched := make([]string, 0, len(servers))
+	for _, server := range servers {
+		if selector.Matches(p.serverLabels[server]) {
+			matched = append(matched, server)
+		}
+	}
+	return matched
 }
 
 // isLupineNode reports whether the node serves the pool rather than consuming

@@ -35,6 +35,65 @@ import (
 	"k8s.io/klog/v2"
 )
 
+func TestCheckHealth(t *testing.T) {
+	dev := &IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+		},
+		nodeRegisterAnno: "hami.io/node-MR-V100-register",
+	}
+	oneCard := "GPU-0,10,8192,100,MR-V100,0,true:"
+	twoCards := "GPU-0,10,8192,100,MR-V100,0,true:GPU-1,10,8192,100,MR-V100,0,true:"
+
+	node := func(name string, mem, core int64, register string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
+		}
+		if register != "" {
+			n.Annotations[dev.nodeRegisterAnno] = register
+		}
+		if mem > 0 {
+			n.Status.Allocatable["iluvatar.ai/MR-V100.vMem"] = *resource.NewQuantity(mem, resource.DecimalSI)
+		}
+		if core > 0 {
+			n.Status.Allocatable["iluvatar.ai/MR-V100.vCore"] = *resource.NewQuantity(core, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth("MR-V100", nil)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	// A count resource without memory or core must not keep the node schedulable.
+	countOnly := node("iluvatar-health-count", 0, 0, oneCard)
+	countOnly.Status.Allocatable["iluvatar.ai/MR-V100-vgpu"] = *resource.NewQuantity(2, resource.DecimalSI)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", countOnly)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("iluvatar-health-mem", 8192, 0, oneCard)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	present.Annotations[dev.nodeRegisterAnno] = twoCards
+	healthy, needUpdate = dev.CheckHealth("MR-V100", present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = dev.CheckHealth("MR-V100", node("iluvatar-health-core", 0, 100, oneCard))
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
+
 func TestGetNodeDevices(t *testing.T) {
 	dev := IluvatarDevices{
 		config: IluvatarConfig{

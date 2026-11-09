@@ -1,5 +1,5 @@
 ---
-name: k8s-debug-pending-pod
+name: k8s-debug-gpu-pod
 description: >
   Use when pods are stuck in Pending, CrashLoopBackOff, or ImagePullBackOff state.
   Performs event-driven triage to quickly identify root cause, then deep-dives into

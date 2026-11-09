@@ -1,11 +1,11 @@
 GO=go
 GO111MODULE=on
-CMDS=scheduler vGPUmonitor
+CMDS=scheduler vGPUmonitor remoteGPUmonitor
 DEVICES=nvidia
 OUTPUT_DIR=bin
 TARGET_PLATFORMS=linux/amd64
-GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+GOLANG_IMAGE=golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+NVIDIA_IMAGE=nvidia/cuda:13.4.3-cudnn-devel-ubi8@sha256:53d7fab8667b6524238d2ff5b03b4be788e7afd7c00e5cd15cc2af8f911d8010
 DEST_DIR=/usr/local/vgpu/
 
 VERSION = v0.0.1

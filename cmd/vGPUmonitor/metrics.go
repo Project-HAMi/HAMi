@@ -17,12 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 	"unicode/utf8"
 
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -54,25 +56,20 @@ type ClusterManagerCollector struct {
 // Metric and label names follow Prometheus naming best practices:
 // https://prometheus.io/docs/practices/naming/
 var (
+	unknownProcessCountDesc = prometheus.NewDesc(
+		"hami_host_gpu_unknown_process_count",
+		"Distinct live NVML compute/graphics processes not matched to a container allocated this GPU by HAMi; omitted when the inventory fails",
+		[]string{"node", "device_uuid"}, nil,
+	)
 	// Catches a degraded Collect that still returns HTTP 200.
 	collectSuccessDesc = prometheus.NewDesc(
 		"hami_vgpumonitor_collect_success",
-		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0); metrics a GPU does not support are not counted as failures",
+		"Whether the last metrics collection fully succeeded (1) or any part of it failed (0); unsupported optional GPU metrics are skipped; an enabled unknown-process inventory must succeed",
 		[]string{"node"}, nil,
 	)
 
-	hostGPUdesc = prometheus.NewDesc(
-		"hami_host_gpu_memory_used_bytes",
-		"GPU device memory usage in bytes",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
-	)
-
-	hostGPUUtilizationdesc = prometheus.NewDesc(
-		"hami_host_gpu_utilization_ratio",
-		"GPU core utilization ratio (0-100)",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
-	)
-
+	hostGPUdesc                  = metrics.HostMemory
+	hostGPUUtilizationdesc       = metrics.HostUtilization
 	hostGPUMemoryUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_controller_utilization_ratio",
 		"GPU memory controller utilization ratio (0-100)",
@@ -96,28 +93,11 @@ var (
 		"Lifetime aggregate ECC errors",
 		[]string{"node", "device_index", "device_uuid", "device_type", "error_type"}, nil,
 	)
-	ctrvGPUdesc = prometheus.NewDesc(
-		"hami_vgpu_memory_used_bytes",
-		"vGPU device memory usage in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-
-	ctrvGPUlimitdesc = prometheus.NewDesc(
-		"hami_vgpu_memory_limit_bytes",
-		"vGPU device memory limit in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceMemorydesc = prometheus.NewDesc(
-		"hami_container_device_memory_bytes",
-		`Container device memory usage in bytes`,
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceUtilizationdesc = prometheus.NewDesc(
-		"hami_container_device_utilization_ratio",
-		"Container device SM utilization ratio",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-	ctrDeviceLastKernelDesc = prometheus.NewDesc(
+	ctrvGPUdesc              = metrics.ContainerMemory
+	ctrvGPUlimitdesc         = metrics.ContainerMemoryLimit
+	ctrDeviceMemorydesc      = metrics.ContainerDeviceMemory
+	ctrDeviceUtilizationdesc = metrics.ContainerUtilization
+	ctrDeviceLastKernelDesc  = prometheus.NewDesc(
 		"hami_container_last_kernel_elapsed_seconds",
 		"Seconds since last kernel execution in container",
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
@@ -213,6 +193,7 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 // Describe sends all the metrics descriptors that the collector might use.
 // These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- unknownProcessCountDesc
 	ch <- collectSuccessDesc
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
@@ -247,7 +228,25 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
+	if cc.standingBy() {
+		// Local NVML on a chart-managed lupine server cannot name the remote
+		// clients. Emit no series, including collect success: a success gauge
+		// with no GPU samples looks like an idle node.
+		klog.V(4).Info("vGPUmonitor idle on lupine server node")
+		return
+	}
 	success := 1.0
+	if os.Getenv("HAMI_MONITOR_UNKNOWN_PROCESSES") == "true" {
+		counts, err := cc.ClusterManager.containerLister.UnknownProcessCounts()
+		if err != nil {
+			klog.Errorf("Unknown GPU process inventory: %v", err)
+			success = 0
+		}
+		if err := emitUnknownProcessCounts(ch, counts); err != nil {
+			klog.Errorf("Failed to emit unknown GPU process counts: %v", err)
+			success = 0
+		}
+	}
 
 	// Collect GPU information
 	if err := cc.collectGPUInfo(ch); err != nil {
@@ -272,6 +271,13 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	klog.Info("Finished collecting metrics for vGPUMonitor")
+}
+
+func (cc ClusterManagerCollector) standingBy() bool {
+	if cc.ClusterManager == nil || cc.ClusterManager.containerLister == nil {
+		return false
+	}
+	return cc.ClusterManager.containerLister.OnLupineServer(context.Background())
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {
@@ -524,6 +530,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 	// Iterate through each Pod
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		podContainers, found := containerMap[string(pod.UID)]
 		if !found {
 			klog.V(5).Infof("No containers found for pod %s/%s", pod.Namespace, pod.Name)
@@ -654,6 +665,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 	}
 	failed := 0
 	for _, pod := range pods {
+		// Skip terminated pods (Succeeded or Failed): they no longer hold their devices.
+		if util.IsPodInTerminatedState(pod) {
+			klog.V(5).Infof("Skipping terminated pod %s/%s", pod.Namespace, pod.Name)
+			continue
+		}
 		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
 			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -753,4 +769,15 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
+}
+
+// emitUnknownProcessCounts emits only successful device inventories, including
+// explicit zeroes. Failed inventories are absent from counts.
+func emitUnknownProcessCounts(ch chan<- prometheus.Metric, counts []nvidia.UnknownProcessCount) error {
+	for _, count := range counts {
+		if err := sendMetric(ch, unknownProcessCountDesc, prometheus.GaugeValue, float64(count.Count), os.Getenv(util.NodeNameEnvName), count.UUID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,0 +1,18 @@
+suite: Ascend950DT configuration
+templates:
+  - scheduler/device-configmap.yaml
+  - scheduler/configmap.yaml
+set:
+  devices.ascend.enabled: true
+  scheduler.kubeScheduler.enabled: true
+tests:
+  - it: renders Ascend950DT as a count-only whole-card resource
+    asserts:
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(?s)- aiCore: 32\n\s+chipName: Ascend950DT\n\s+commonWord: Ascend950DT\n\s+memoryAllocatable: 98304\n\s+memoryCapacity: 98304\n\s+resourceName: huawei\.com/Ascend950DT\s*\z'
+        template: scheduler/device-configmap.yaml
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*- ignoredByScheduler: true\n\s+name: huawei\.com/Ascend950DT\s*$'
+        template: scheduler/configmap.yaml

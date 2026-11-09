@@ -143,13 +143,13 @@ func (m *MigInstanceManager) Init() error {
 	m.sessionMu.Lock()
 	defer m.sessionMu.Unlock()
 	if m.closing != nil {
-		return fmt.Errorf("MIG manager is shutting down")
+		return fmt.Errorf("NVML session is shutting down")
 	}
 	if m.initialized {
 		return nil
 	}
 	if m.nvmllib == nil {
-		return fmt.Errorf("MIG manager NVML library is not configured")
+		return fmt.Errorf("NVML library is not configured")
 	}
 	if ret := m.nvmllib.Init(); ret != nvml.SUCCESS {
 		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(ret))
@@ -159,7 +159,7 @@ func (m *MigInstanceManager) Init() error {
 	clear(m.byAllocationMigUUID)
 	m.mu.Unlock()
 	m.initialized = true
-	klog.V(4).InfoS("MIG manager NVML session initialized")
+	klog.V(4).InfoS("Device-plugin NVML session initialized")
 	return nil
 }
 
@@ -168,8 +168,11 @@ func (m *MigInstanceManager) Init() error {
 func (m *MigInstanceManager) beginOperation() (func(), error) {
 	m.sessionMu.Lock()
 	defer m.sessionMu.Unlock()
-	if !m.initialized || m.closing != nil {
-		return nil, fmt.Errorf("MIG manager NVML session is not running")
+	if !m.initialized {
+		return nil, fmt.Errorf("NVML session is not initialized")
+	}
+	if m.closing != nil {
+		return nil, fmt.Errorf("NVML session is shutting down")
 	}
 	m.operations.Add(1)
 	return m.operations.Done, nil
@@ -195,7 +198,7 @@ func (m *MigInstanceManager) Shutdown() {
 	if ret := m.nvmllib.Shutdown(); ret != nvml.SUCCESS {
 		klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(ret)), "nvml Shutdown failed")
 	} else {
-		klog.V(4).InfoS("MIG manager NVML session shut down")
+		klog.V(4).InfoS("Device-plugin NVML session shut down")
 	}
 	m.sessionMu.Lock()
 	m.initialized = false

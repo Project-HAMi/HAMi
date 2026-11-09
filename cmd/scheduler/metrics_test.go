@@ -17,19 +17,23 @@ limitations under the License.
 package main
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
@@ -629,7 +633,7 @@ func TestClusterManagerCollectorQuotaMetrics(t *testing.T) {
 # TYPE hami_resource_quota_limit gauge
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
 hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
@@ -650,7 +654,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			metricsProvider: provider,
 		}
 		want := `
-# HELP QuotaUsed resourcequota usage for a certain device
+# HELP QuotaUsed resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE QuotaUsed gauge
 QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
 QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096
@@ -658,7 +662,7 @@ QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 40
 # TYPE hami_resource_quota_limit gauge
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
 hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
 hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
@@ -697,7 +701,7 @@ func TestClusterManagerCollectorQuotaUnconfiguredLimit(t *testing.T) {
 		metricsProvider: unconfProvider,
 	}
 	want := `
-# HELP hami_resource_quota_used resourcequota usage for a certain device
+# HELP hami_resource_quota_used resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpumem"} 1024
 `
@@ -708,6 +712,68 @@ hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpu
 		"hami_resource_quota_limit",
 	); err != nil {
 		t.Fatalf("unexpected unconfigured limit collecting result:\n%s", err)
+	}
+}
+
+func TestClusterManagerCollectorQuotaLimitScaledByMemoryFactor(t *testing.T) {
+	const (
+		ns       = "team-scaled"
+		memName  = "nvidia.com/gpumem"
+		coreName = "nvidia.com/gpucores"
+	)
+
+	prevDevices, prevTypes := device.DevicesMap, device.DevicesToHandle
+	prevRequests, prevSupport := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices)
+	t.Cleanup(func() {
+		device.DevicesMap, device.DevicesToHandle = prevDevices, prevTypes
+		device.InRequestDevices, device.SupportDevices = prevRequests, prevSupport
+	})
+	if err := config.InitDevicesWithConfig(&config.Config{NvidiaConfig: nvidia.NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           memName,
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             coreName,
+		DefaultGPUNum:                1,
+		MemoryFactor:                 1024,
+	}}); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	qm := device.NewQuotaManager()
+	rq := &corev1.ResourceQuota{}
+	rq.Name = "gpu"
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(10, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(50, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+	t.Cleanup(func() {
+		qm.DelQuota(rq)
+		delete(qm.Quotas, ns)
+	})
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: qm,
+		podManager:   device.NewPodManager(),
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  &ClusterManager{LegacyMetrics: false},
+		metricsProvider: provider,
+	}
+	want := `
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpucores"} 50
+hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpumem"} 10240
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_resource_quota_limit",
+	); err != nil {
+		t.Fatalf("unexpected scaled limit collecting result:\n%s", err)
 	}
 }
 

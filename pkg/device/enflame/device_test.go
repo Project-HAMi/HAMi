@@ -30,6 +30,61 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestEnflameDevices_CheckHealth(t *testing.T) {
+	InitEnflameDevice(EnflameConfig{
+		ResourceNameDRSGCU: "enflame.com/drs-gcu",
+		ResourceNameMemory: "enflame.com/gcu-memory",
+		ResourceNameCore:   "enflame.com/gcu-core",
+	})
+	dev := &EnflameDevices{}
+	oneCard := `{"devices":[{"index":"0","minor":"0","capacity":6}],"profiles":{"1g.6gb":"0"}}`
+	twoCards := `{"devices":[{"index":"0","minor":"0","capacity":6},{"index":"1","minor":"1","capacity":6}],"profiles":{"1g.6gb":"0"}}`
+
+	node := func(name string, mem, core int64, capacity string) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status:     corev1.NodeStatus{Allocatable: corev1.ResourceList{}},
+		}
+		if capacity != "" {
+			n.Annotations[GCUDrsCapacity] = capacity
+		}
+		if mem > 0 {
+			n.Status.Allocatable[corev1.ResourceName(EnflameResourceNameGCUMemory)] = *resource.NewQuantity(mem, resource.DecimalSI)
+		}
+		if core > 0 {
+			n.Status.Allocatable[corev1.ResourceName(EnflameResourceNameGCUCore)] = *resource.NewQuantity(core, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(EnflameVGCUCommonWord, node("enflame-health-none", 0, 0, oneCard))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	countOnly := node("enflame-health-count-only", 0, 0, oneCard)
+	countOnly.Status.Allocatable[corev1.ResourceName(EnflameResourceNameDRSGCU)] = *resource.NewQuantity(2, resource.DecimalSI)
+	healthy, needUpdate = dev.CheckHealth(EnflameVGCUCommonWord, countOnly)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("enflame-health-mem", 40960, 0, oneCard)
+	healthy, needUpdate = dev.CheckHealth(EnflameVGCUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth(EnflameVGCUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	present.Annotations[GCUDrsCapacity] = twoCards
+	healthy, needUpdate = dev.CheckHealth(EnflameVGCUCommonWord, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+
+	healthy, needUpdate = dev.CheckHealth(EnflameVGCUCommonWord, node("enflame-health-core", 0, 100, oneCard))
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
+
 func TestGetNodeDevices_DRSAnnotation(t *testing.T) {
 	InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
 	dev := &EnflameDevices{}

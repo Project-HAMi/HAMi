@@ -212,10 +212,9 @@ type ResourceNames struct {
 	ResourceMemoryName string
 	ResourceCoreName   string
 	// MemoryFactor is the scale GenerateResourceRequests applies to the memory
-	// value read off the container spec. Recorded usage is in scaled units
-	// while a ResourceQuota limit is written in unscaled ones, so a quota check
-	// has to bring the limit up by the same factor. Backends that do not scale
-	// leave this zero.
+	// value read off the container spec. Recorded usage is in scaled units, so
+	// the quota manager scales a ResourceQuota memory limit by the same factor
+	// when it loads the quota. Backends that do not scale leave this zero.
 	MemoryFactor int64
 }
 
@@ -680,6 +679,17 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node, re
 		return false, false
 	}
 	return true, registerAnnoChanged(devType, node.Name, registerAnno)
+}
+
+// AllocatableHealth reports whether a node should stay in the scheduler cache,
+// and whether its device list should be read again.
+func AllocatableHealth(devType, nodeName string, allocatable, cardCount int64, anno string) (bool, bool) {
+	if allocatable <= 0 {
+		ForgetRegisteredDevices(devType, nodeName)
+		return false, false
+	}
+	observed := strconv.FormatInt(cardCount, 10) + "\n" + anno
+	return true, registerAnnoChanged(devType, nodeName, observed)
 }
 
 // Deprecated: new MIG allocations never encode template/slot indexes in UUIDs.

@@ -136,6 +136,7 @@ spec:
             - --profiling-bind-address={{ .Values.scheduler.profilingBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
+            - --node-affinity-score-weight={{ .Values.scheduler.defaultSchedulerPolicy.nodeAffinityScoreWeight | default 0 }}
             - --force-overwrite-default-scheduler={{ .Values.scheduler.forceOverwriteDefaultScheduler}}
             - --device-config-file=/device-config.yaml
             - --leader-elect={{ .Values.scheduler.leaderElect }}

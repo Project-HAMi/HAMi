@@ -25,22 +25,33 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
+
+// getPod fetches the latest pod state directly from the API server to ensure
+// the refit uses current annotations and resourceVersion rather than potentially
+// stale informer cache state. Also a test seam.
+var getPod = func(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	ctx, cancel := context.WithTimeout(ctx, refitGetTimeout)
+	defer cancel()
+	return client.GetClient().CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+}
 
 // patchPodAnnotations patches only the given annotations, with the pod's
 // resourceVersion as a precondition so a stale refit cannot overwrite a
 // newer update to the same annotations (for example Allocate consuming a
 // to-allocate entry). Conflicts fail the refit; there is no retry with
 // cached values. Also a test seam.
-var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) error {
+var patchPodAnnotations = func(ctx context.Context, pod *corev1.Pod, annotations map[string]string) error {
 	metadata := map[string]any{"annotations": annotations}
 	if pod.ResourceVersion != "" {
 		metadata["resourceVersion"] = pod.ResourceVersion
@@ -52,7 +63,7 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 	// The refit holds the allocation lock that Filter also takes, so this
 	// call must not block scheduling on an unreachable API server. The
 	// device plugin gives up after numaRefitTimeout anyway.
-	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, refitPatchTimeout)
 	defer cancel()
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(ctx, pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
@@ -62,11 +73,14 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 // maxAllowedDeviceUUIDs bounds the allowed set a refit request may carry.
 const maxAllowedDeviceUUIDs = 512
 
-// refitPatchTimeout bounds the annotation patch. It is deliberately no longer
-// than the device plugin's own refit budget: a patch that has not landed by
-// then cannot be used, and waiting longer would hold the allocation lock
-// against every concurrent Filter call.
-const refitPatchTimeout = 2 * time.Second
+// refitGetTimeout and refitPatchTimeout bound the live pod fetch and annotation
+// patch. Together they fit within the device plugin's 2-second refit budget
+// (numaRefitTimeout) so an unreachable or slow API server cannot hold the
+// allocation lock against concurrent Filter calls indefinitely.
+const (
+	refitGetTimeout   = 1 * time.Second
+	refitPatchTimeout = 1 * time.Second
+)
 
 // RefitNumaAllocation moves one container's device reservation onto a device
 // from the caller-supplied allowed set, re-running the pod's normal
@@ -98,7 +112,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	if len(req.AllowedDeviceUUIDs) > maxAllowedDeviceUUIDs {
 		return numaRefitFailure(nil, "refit request carries %d allowed devices, limit is %d", len(req.AllowedDeviceUUIDs), maxAllowedDeviceUUIDs)
 	}
-	refitDevice, ok := device.GetDevices()[req.DeviceType]
+	_, ok := device.GetDevices()[req.DeviceType]
 	if !ok {
 		return numaRefitFailure(nil, "unknown device type %q", req.DeviceType)
 	}
@@ -109,28 +123,48 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		return numaRefitFailure(nil, "device type %q is not supported by the NUMA refit yet", req.DeviceType)
 	}
 
+	// Outcomes from here on are counted in the allocation metrics under the
+	// refit phase. Refusals above are not: an unauthenticated caller could
+	// drive them, and the device type is not validated before this point.
+	refuse := func(pod *corev1.Pod, reason metrics.SchedulerFailureReason, format string, args ...any) device.NumaRefitResponse {
+		s.GetAllocationMetrics().ObserveAllocationFailure("refit", req.DeviceType, reason)
+		if pod == nil {
+			return numaRefitFailure(nil, format, args...)
+		}
+		return s.numaRefitFailureEvent(pod, format, args...)
+	}
+
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
 	key := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: k8stypes.UID(req.PodUID)}}
 	pi, ok := s.podManager.GetPod(key)
 	if !ok {
-		return numaRefitFailure(nil, "pod %s is not tracked by the scheduler", req.PodUID)
+		return refuse(nil, metrics.FailureReasonLookup, "pod %s is not tracked by the scheduler", req.PodUID)
 	}
 	pod := pi.Pod
 	if pod.Namespace != req.PodNamespace || pod.Name != req.PodName {
-		return numaRefitFailure(nil, "pod %s does not match %s/%s", req.PodUID, req.PodNamespace, req.PodName)
+		return refuse(nil, metrics.FailureReasonIdentity, "pod %s does not match %s/%s", req.PodUID, req.PodNamespace, req.PodName)
 	}
 	if pi.NodeID != req.NodeName {
-		return s.numaRefitFailureEvent(pod, "pod %s/%s is tracked on node %s, not %s", pod.Namespace, pod.Name, pi.NodeID, req.NodeName)
+		return refuse(pod, metrics.FailureReasonIdentity, "pod %s/%s is tracked on node %s, not %s", pod.Namespace, pod.Name, pi.NodeID, req.NodeName)
 	}
+
+	livePod, err := getPod(ctx, req.PodNamespace, req.PodName)
+	if err != nil {
+		return refuse(pod, metrics.FailureReasonLookup, "cannot fetch live pod from API server: %v", err)
+	}
+	if livePod.UID != k8stypes.UID(req.PodUID) {
+		return refuse(pod, metrics.FailureReasonIdentity, "live pod UID %s does not match requested UID %s", livePod.UID, req.PodUID)
+	}
+	pod = livePod
 
 	name, ok := containerNameAt(pod, req.ContainerIndex)
 	if !ok {
-		return s.numaRefitFailureEvent(pod, "container index %d is outside the pod's containers", req.ContainerIndex)
+		return refuse(pod, metrics.FailureReasonIdentity, "container index %d is outside the pod's containers", req.ContainerIndex)
 	}
 	if req.ContainerName != "" && name != req.ContainerName {
-		return s.numaRefitFailureEvent(pod, "container index %d is %q, not %q", req.ContainerIndex, name, req.ContainerName)
+		return refuse(pod, metrics.FailureReasonIdentity, "container index %d is %q, not %q", req.ContainerIndex, name, req.ContainerName)
 	}
 
 	// Per-container state comes from the annotations: podManager stores
@@ -139,19 +173,19 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	// still pending: a blank to-allocate entry means Allocate consumed it.
 	toAllocate, err := device.DecodePodDevices(device.InRequestDevices, pod.Annotations)
 	if err != nil {
-		return s.numaRefitFailureEvent(pod, "cannot decode pending allocation annotation: %v", err)
+		return refuse(pod, metrics.FailureReasonInternal, "cannot decode pending allocation annotation: %v", err)
 	}
 	allocated, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		return s.numaRefitFailureEvent(pod, "cannot decode allocated annotation: %v", err)
+		return refuse(pod, metrics.FailureReasonInternal, "cannot decode allocated annotation: %v", err)
 	}
 	pendingSingle := toAllocate[req.DeviceType]
 	allocatedSingle := allocated[req.DeviceType]
 	if req.ContainerIndex < 0 || req.ContainerIndex >= len(pendingSingle) || len(pendingSingle[req.ContainerIndex]) == 0 {
-		return s.numaRefitFailureEvent(pod, "container %d has no pending %s allocation to refit", req.ContainerIndex, req.DeviceType)
+		return refuse(pod, metrics.FailureReasonLookup, "container %d has no pending %s allocation to refit", req.ContainerIndex, req.DeviceType)
 	}
 	if req.ContainerIndex >= len(allocatedSingle) || len(allocatedSingle[req.ContainerIndex]) == 0 {
-		return s.numaRefitFailureEvent(pod, "container %d has no recorded %s allocation", req.ContainerIndex, req.DeviceType)
+		return refuse(pod, metrics.FailureReasonLookup, "container %d has no recorded %s allocation", req.ContainerIndex, req.DeviceType)
 	}
 	current := allocatedSingle[req.ContainerIndex]
 
@@ -167,6 +201,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		}
 	}
 	if alreadyAllowed {
+		// Nothing moves, so this is not counted as a refit allocation.
 		return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(current)}
 	}
 	// A fit request carries one memory/core amount for all requested
@@ -175,21 +210,21 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	// replaying current[0] would rewrite the other devices' accounting.
 	for _, d := range current[1:] {
 		if d.Usedmem != current[0].Usedmem || d.Usedcores != current[0].Usedcores {
-			return s.numaRefitFailureEvent(pod, "container %d reserves differing amounts per device; the refit does not support heterogeneous reservations", req.ContainerIndex)
+			return refuse(pod, metrics.FailureReasonNoFit, "container %d reserves differing amounts per device; the refit does not support heterogeneous reservations", req.ContainerIndex)
 		}
 	}
 
 	nodeUsageMap, _, failedNodes, err := s.getNodesUsage(&[]string{req.NodeName}, pod)
 	if err != nil {
-		return s.numaRefitFailureEvent(pod, "cannot compute node usage: %v", err)
+		return refuse(pod, metrics.FailureReasonInternal, "cannot compute node usage: %v", err)
 	}
 	nodeUsage, ok := (*nodeUsageMap)[req.NodeName]
 	if !ok {
-		return s.numaRefitFailureEvent(pod, "node %s unavailable: %s", req.NodeName, failedNodes[req.NodeName])
+		return refuse(pod, metrics.FailureReasonLookup, "node %s unavailable: %s", req.NodeName, failedNodes[req.NodeName])
 	}
 	for _, deviceList := range nodeUsage.Devices.DeviceLists {
 		if _, ok := allowed[deviceList.Device.ID]; ok && deviceList.Device.Mode == nvidia.MigMode {
-			return s.numaRefitFailureEvent(pod, "allowed device %s is in MIG mode; the NUMA refit does not support MIG", deviceList.Device.ID)
+			return refuse(pod, metrics.FailureReasonNoFit, "allowed device %s is in MIG mode; the NUMA refit does not support MIG", deviceList.Device.ID)
 		}
 	}
 	// The snapshot contains this pod's phase-collapsed reservation. Prepare
@@ -200,7 +235,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 
 	weights, err := util.GetDeviceScoringWeightsByPod(pod)
 	if err != nil {
-		return s.numaRefitFailureEvent(pod, "invalid device scoring weights: %v", err)
+		return refuse(pod, metrics.FailureReasonInternal, "invalid device scoring weights: %v", err)
 	}
 
 	// Seed the fit with the pod's other container allocations so exclusivity
@@ -220,9 +255,9 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	}
 	seeded := len(devinput[req.DeviceType])
 	s.quotaManager.RmUsage(pod, pi.Devices)
-	failWithQuotaRestore := func(format string, args ...any) device.NumaRefitResponse {
+	failWithQuotaRestore := func(reason metrics.SchedulerFailureReason, format string, args ...any) device.NumaRefitResponse {
 		s.quotaManager.AddUsage(pod, pi.Devices)
-		return s.numaRefitFailureEvent(pod, format, args...)
+		return refuse(pod, reason, format, args...)
 	}
 
 	// Preserve the reservation's accounted amounts; only the device moves.
@@ -234,11 +269,11 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	}}
 	fit, reason := fitInRestrictedDevices(nodeUsage, requests, req.DeviceType, req.AllowedDeviceUUIDs, pod, nodeUsage.NodeInfo, &devinput, weights)
 	if !fit {
-		return failWithQuotaRestore("no allowed device fits: %s", reason)
+		return failWithQuotaRestore(metrics.FailureReasonNoFit, "no allowed device fits: %s", reason)
 	}
 	selected := devinput[req.DeviceType]
 	if len(selected) != seeded+1 || len(selected[seeded]) != len(current) {
-		return failWithQuotaRestore("restricted fit selected %d container sets, want %d with %d devices", len(selected), seeded+1, len(current))
+		return failWithQuotaRestore(metrics.FailureReasonInternal, "restricted fit selected %d container sets, want %d with %d devices", len(selected), seeded+1, len(current))
 	}
 	newDevices := selected[seeded]
 
@@ -258,9 +293,8 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 			quotaCores += d.Usedcores
 		}
 	}
-	resourceNames := refitDevice.GetResourceNames()
-	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, resourceNames.MemoryFactor, quotaCores, req.DeviceType) {
-		return failWithQuotaRestore("refit would exceed the %s resource quota in namespace %s", req.DeviceType, pod.Namespace)
+	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, quotaCores, req.DeviceType) {
+		return failWithQuotaRestore(metrics.FailureReasonNoFit, "refit would exceed the %s resource quota in namespace %s", req.DeviceType, pod.Namespace)
 	}
 
 	// Patch both annotations by replacing only this container's entry inside
@@ -269,18 +303,22 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	// rebuilds accounting onto the refitted device.
 	pendingValue, err := replaceContainerDeviceEntry(pod.Annotations[device.InRequestDevices[req.DeviceType]], req.ContainerIndex, newDevices)
 	if err != nil {
-		return failWithQuotaRestore("cannot rewrite pending allocation annotation: %v", err)
+		return failWithQuotaRestore(metrics.FailureReasonInternal, "cannot rewrite pending allocation annotation: %v", err)
 	}
 	allocatedValue, err := replaceContainerDeviceEntry(pod.Annotations[device.SupportDevices[req.DeviceType]], req.ContainerIndex, newDevices)
 	if err != nil {
-		return failWithQuotaRestore("cannot rewrite allocated annotation: %v", err)
+		return failWithQuotaRestore(metrics.FailureReasonInternal, "cannot rewrite allocated annotation: %v", err)
 	}
 	annotations := map[string]string{
 		device.InRequestDevices[req.DeviceType]: pendingValue,
 		device.SupportDevices[req.DeviceType]:   allocatedValue,
 	}
-	if err := patchPodAnnotations(pod, annotations); err != nil {
-		return failWithQuotaRestore("cannot patch pod annotations: %v", err)
+	if err := patchPodAnnotations(ctx, pod, annotations); err != nil {
+		patchReason := metrics.FailureReasonAnnotationPatch
+		if apierrors.IsConflict(err) {
+			patchReason = metrics.FailureReasonConflict
+		}
+		return failWithQuotaRestore(patchReason, "cannot patch pod annotations: %v", err)
 	}
 
 	// Rebuild the in-memory reservation from the patched annotations exactly
@@ -298,8 +336,9 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		if _, ok := s.podManager.ReplacePodDevices(key, effective); ok {
 			s.quotaManager.AddUsage(pod, effective)
 		} else {
-			// The pod left the cache between lookup and update; the informer
-			// rebuilds accounting from the patched annotations on re-add.
+			// Pod removals take allocLock, so the pod cannot leave the cache
+			// while the refit holds it. This only guards against a future
+			// caller that removes pods without the lock.
 			klog.InfoS("pod left the scheduler cache during NUMA refit; annotations remain authoritative", "pod", klog.KObj(pod))
 		}
 	} else {
@@ -310,6 +349,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	message := fmt.Sprintf("NUMA refit moved container %d from %s to %s", req.ContainerIndex, containerDeviceIDs(current), containerDeviceIDs(newDevices))
 	klog.InfoS(message, "pod", klog.KObj(pod), "node", req.NodeName)
 	s.recordNumaRefitResultEvent(pod, message, nil)
+	s.GetAllocationMetrics().ObserveAllocation("refit", req.DeviceType)
 	return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(newDevices)}
 }
 
@@ -452,6 +492,7 @@ func releaseContainerUsage(node *NodeUsage, reserved device.ContainerDevices) {
 	}
 }
 
+// containerDeviceIDs extracts the UUIDs from a list of container devices.
 func containerDeviceIDs(devices device.ContainerDevices) []string {
 	ids := make([]string, 0, len(devices))
 	for _, d := range devices {

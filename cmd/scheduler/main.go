@@ -72,6 +72,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
+	rootCmd.Flags().Float32Var(&config.NodeAffinityScoreWeight, "node-affinity-score-weight", 0.0, "Bonus added to the node score for nodes matching the pod's preferred nodeAffinity, scaled by the matched weight ratio (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 
@@ -80,7 +81,7 @@ func init() {
 	rootCmd.Flags().IntVar(&config.Timeout, "kube-timeout", client.DefaultTimeout, "Timeout to use while talking with kube-apiserver.")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable pprof profiling via HTTP server")
 	rootCmd.Flags().StringVar(&profilingBindAddress, "profiling-bind-address", "127.0.0.1:6060", "Bind address for the dedicated pprof HTTP server when profiling is enabled")
-	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
+	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", nodelock.NodeLockTimeout, "timeout for node locks; defaults to HAMI_NODELOCK_EXPIRE, or 5m")
 	rootCmd.Flags().DurationVar(&config.NodeLockRetryTimeout, "node-lock-retry-timeout", 28*time.Second, "timeout for retrying LockNode when contended by another PodGroup member (0 disables retry). Align the Extender's httpTimeout in KubeSchedulerConfiguration with this value.")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
 	rootCmd.Flags().StringVar(&config.DevicePluginNamespace, "device-plugin-namespace", "", "namespace of the device-plugin ServiceAccount allowed to call the /refit endpoint")
@@ -139,6 +140,10 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 }
 
 func start() error {
+	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
+		return err
+	}
+
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)

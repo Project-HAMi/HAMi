@@ -181,7 +181,31 @@ func (dev *IluvatarDevices) checkType(annos map[string]string, d device.DeviceUs
 }
 
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n, n.Annotations[dev.nodeRegisterAnno])
+	if n == nil {
+		return false, false
+	}
+	device.RemoveObsoleteHandshake(devType, n)
+	memQty := n.Status.Allocatable[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	coreQty := n.Status.Allocatable[corev1.ResourceName(dev.config.ResourceCoreName)]
+	mem := memQty.Value()
+	core := coreQty.Value()
+	signal := int64(0)
+	if mem > 0 || core > 0 {
+		signal = 1
+	}
+	anno := ""
+	if n.Annotations != nil {
+		anno = n.Annotations[dev.nodeRegisterAnno]
+	}
+	return device.AllocatableHealth(devType, n.Name, signal, iluvatarAnnotationDevices(anno), anno)
+}
+
+func iluvatarAnnotationDevices(raw string) int64 {
+	devices, err := device.DecodeNodeDevices(raw)
+	if err != nil {
+		return 0
+	}
+	return int64(len(devices))
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

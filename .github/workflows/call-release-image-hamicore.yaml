@@ -44,15 +44,23 @@ jobs:
           df -h
       - name: Getting Image Ref
         id: ref
+        # inputs reach the script through the environment, not expression
+        # interpolation, so their contents cannot become part of the command
+        env:
+          IN_REF: ${{ inputs.ref }}
+          IN_SUFFIX: ${{ inputs.suffix }}
+          IN_TAGOVERRIDE: ${{ inputs.tagoverride }}
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
+          DISPATCH_SUFFIX: ${{ github.event.inputs.suffix }}
         run: |
           if ${{ inputs.ref != '' }} ; then
               echo "call by workflow_call"
-              image_ref=${{ inputs.ref }}
-              image_suffix=${{ inputs.suffix }}
+              image_ref="$IN_REF"
+              image_suffix="$IN_SUFFIX"
           elif ${{ github.event_name == 'workflow_dispatch' }} ; then
               echo "call by workflow_dispatch"
-              image_ref=${{ github.event.inputs.ref }}
-              image_suffix=${{ github.event.inputs.suffix }}
+              image_ref="$DISPATCH_REF"
+              image_suffix="$DISPATCH_SUFFIX"
           else
               echo "unexpected event: ${{ github.event_name }}"
               exit 1
@@ -60,7 +68,7 @@ jobs:
           echo "ref=${image_ref}" >> $GITHUB_ENV
           [ -n "${image_suffix}" ] && echo "suffix=-${image_suffix}" >> $GITHUB_ENV
           if ${{ inputs.tagoverride != '' }} ; then
-              echo "imagetag=${{ inputs.tagoverride }}" >> $GITHUB_ENV
+              echo "imagetag=${IN_TAGOVERRIDE}" >> $GITHUB_ENV
           else
               # it is invalid if the ref is branch name "xx/xx/xx"
               echo "imagetag=${image_ref##*/}" >> $GITHUB_ENV
@@ -85,10 +93,13 @@ jobs:
           make lint_dockerfile
 
       - name: Docker Login
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
+
+      - name: Read image pins from version.mk
+        run: grep -E '^(GOLANG|NVIDIA)_IMAGE=' version.mk >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
@@ -96,7 +107,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
         with:
-          driver-opts: image=moby/buildkit:v0.31.2@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -114,8 +125,8 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-              NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
+              GOLANG_IMAGE=${{ env.GOLANG_IMAGE }}
+              NVIDIA_IMAGE=${{ env.NVIDIA_IMAGE }}
               DEST_DIR=/usr/local
             tags: ${{ steps.meta.outputs.tags }}
             push: true

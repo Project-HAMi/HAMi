@@ -11,10 +11,31 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      golang-org-x:
+        patterns:
+          - "golang.org/x/*"
+      k8s-io-x:
+        patterns:
+          - "k8s.io/api"
+          - "k8s.io/apimachinery"
+          - "k8s.io/client-go"
+          - "k8s.io/kube-scheduler"
+          - "k8s.io/kubelet"
+          - "k8s.io/apiextensions-apiserver"
+          - "sigs.k8s.io/controller-runtime"
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "daily"
+  - package-ecosystem: "docker"
+    directory: "/benchmarks/ai-benchmark"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

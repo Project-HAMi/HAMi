@@ -922,6 +922,54 @@ func TestMIGAllocateDoesNotListLivePods(t *testing.T) {
 	}
 }
 
+// TestMIGAllocateChecksRegisteredProfile verifies Allocate refuses a MIG slice
+// whose profile the node did not register for that card (issue #3077).
+func TestMIGAllocateChecksRegisteredProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		registered string
+		wantErr    string
+	}{
+		{name: "profile registered", registered: "1g.5gb"},
+		{name: "profile not offered", registered: "2g.10gb", wantErr: "does not offer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupInRequestDevices(t)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "allocate", Namespace: "default", Annotations: map[string]string{
+					"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{{cd("GPU-test", "NVIDIA", 1024, 20)}}),
+					nvidia.MigAllocationsAnnotation:    `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-test","profile":"1g.5gb","placement":{"start":0,"size":1}}]`,
+				}},
+				Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "gpu"}}},
+				Status: corev1.PodStatus{Phase: corev1.PodPending},
+			}
+			mockAllocateGlobals(t, pod)
+			previousClient := client.KubeClient
+			client.KubeClient = fake.NewSimpleClientset(pod.DeepCopy())
+			t.Cleanup(func() { client.KubeClient = previousClient })
+			manager, _ := mockMigRecoveryDevice(t)
+			placement := nvml.GpuInstancePlacement{Start: 0, Size: 1}
+			key := allocationKey(0, "1g.5gb", placement)
+			manager.byAllocation[key] = &migInstance{MigUUID: "MIG-test", GIID: 1, CIID: 2, Profile: "1g.5gb", Placement: placement}
+			manager.byAllocationMigUUID["MIG-test"] = key
+			plugin := newTestPlugin(t)
+			plugin.operatingMode, plugin.migMgr, plugin.migPrimed = nvidia.MigMode, manager, true
+			plugin.config.Flags.Plugin.DeviceIDStrategy = ptr(v1.DeviceIDStrategyUUID)
+			plugin.listNodePods = func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod.DeepCopy()}, nil }
+			plugin.rememberMigCard("GPU-test", 40960, []device.MigProfile{{Name: tc.registered, MemoryMB: 4864}})
+			response, err := plugin.Allocate(t.Context(), &kubeletdevicepluginv1beta1.AllocateRequest{
+				ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{DevicesIds: []string{"GPU-test-0"}}},
+			})
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "MIG-test", response.ContainerResponses[0].Envs["NVIDIA_VISIBLE_DEVICES"])
+		})
+	}
+}
+
 // TestMIGAllocateFailurePreservesAdoptedInstances verifies cached recovery cannot
 // add an existing workload to the rollback set of a later failed allocation.
 func TestMIGAllocateFailurePreservesAdoptedInstances(t *testing.T) {

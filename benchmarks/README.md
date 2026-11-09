@@ -18,15 +18,7 @@ cd ai-benchmark
 REGISTRY=docker.io/your-org TAG=v0.1.0 sh build.sh
 ```
 
-Override the default model at build time:
-
-```bash
-docker buildx build \
-  --build-arg MODEL_NAME=Qwen/Qwen3-8B \
-  --build-arg DTYPE=bfloat16 \
-  -t your-registry/vllm-bench-server:latest \
-  -f Dockerfile .
-```
+The server image serves `Qwen/Qwen3-8B` in `bfloat16`. To use another model, change the `CMD` flags in `ai-benchmark/Dockerfile`.
 
 ## Run Locally (Docker)
 
@@ -40,7 +32,7 @@ This starts a vLLM container, waits for it to be ready, runs `benchmark.py`, the
 Pass extra arguments to `benchmark.py` via `run_bench.sh`:
 
 ```bash
-sh run_bench.sh --model Qwen3-8B --warmup 10 --runs 100
+sh run_bench.sh --model Qwen/Qwen3-8B --warmup 10 --runs 100
 ```
 
 ## Run on Kubernetes
@@ -85,7 +77,7 @@ python gen_report.py \
 
 ```
 --vllm-url   vLLM endpoint (default: http://127.0.0.1:8000/v1/chat/completions)
---model      Model name (default: Qwen3-8B)
+--model      Model name (default: Qwen/Qwen3-8B)
 --prompt     Prompt text
 --warmup     Warmup requests (default: 30)
 --runs       Benchmark requests (default: 200)

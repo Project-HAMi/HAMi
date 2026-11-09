@@ -276,6 +276,71 @@ func PatchPodLabels(namespace, name string, labels map[string]string) error {
 	return err
 }
 
+// PatchNodeLabels merges the given labels onto the node. An empty string value
+// is a deliberate label (for example hami.io/lupine-server with the chart
+// default port), not an omit.
+func PatchNodeLabels(node *corev1.Node, labels map[string]string) error {
+	return PatchNodeLabelsWithContext(context.Background(), node, labels)
+}
+
+// PatchNodeLabelsWithContext allows callers to cancel a label patch on shutdown.
+func PatchNodeLabelsWithContext(ctx context.Context, node *corev1.Node, labels map[string]string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+	type patchMetadata struct {
+		Labels map[string]string `json:"labels,omitempty"`
+	}
+	type patchNode struct {
+		Metadata patchMetadata `json:"metadata"`
+	}
+
+	bytes, err := json.Marshal(patchNode{Metadata: patchMetadata{Labels: labels}})
+	if err != nil {
+		return err
+	}
+	_, err = c.CoreV1().Nodes().
+		Patch(ctx, node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.InfoS("patch node labels failed", "node", node.Name, "labels", labels, "err", err)
+	}
+	return err
+}
+
+// RemoveNodeLabels deletes the named labels from the node via a merge patch.
+func RemoveNodeLabels(node *corev1.Node, labelKeys ...string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	labels := make(map[string]any, len(labelKeys))
+	for _, key := range labelKeys {
+		labels[key] = nil
+	}
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"labels": labels,
+		},
+	}
+	bytes, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+	_, err = c.CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.InfoS("remove node labels failed", "node", node.Name, "labelKeys", labelKeys, "err", err)
+	}
+	return err
+}
+
 func InitKlogFlags() *flag.FlagSet {
 	// Init log flags
 	flagset := flag.NewFlagSet("klog", flag.ExitOnError)
@@ -364,6 +429,26 @@ func IsValidNodeSchedulerPolicy(policy string) bool {
 	default:
 		return false
 	}
+}
+
+// SchedulerPolicyAnnotationError reports a scheduler-policy annotation HAMi
+// does not recognize. A missing annotation is not an error: the configured
+// default applies. GetGPUSchedulerPolicyByPod and resolveNodeSchedulerPolicy
+// already ignore a bad value at schedule time, so this is the admission-time
+// signal that turns the same typo into a kubectl apply failure.
+func SchedulerPolicyAnnotationError(pod *corev1.Pod) error {
+	if pod == nil || pod.Annotations == nil {
+		return nil
+	}
+	if value, ok := pod.Annotations[GPUSchedulerPolicyAnnotationKey]; ok && !IsValidGPUSchedulerPolicy(value) {
+		return fmt.Errorf("invalid %s annotation %q: expected binpack, spread, numa, mutex, topology-aware, or a comma-separated chain of them",
+			GPUSchedulerPolicyAnnotationKey, value)
+	}
+	if value, ok := pod.Annotations[NodeSchedulerPolicyAnnotationKey]; ok && !IsValidNodeSchedulerPolicy(value) {
+		return fmt.Errorf("invalid %s annotation %q: expected binpack or spread",
+			NodeSchedulerPolicyAnnotationKey, value)
+	}
+	return nil
 }
 
 // GetGPUSchedulerPolicyByPod returns the GPU scheduling policy to apply to

@@ -83,11 +83,21 @@ iluvatars:
   resourceCountName: iluvatar.ai/MR-V100-vgpu
   resourceMemoryName: iluvatar.ai/MR-V100.vMem
   resourceCoreName: iluvatar.ai/MR-V100.vCore
+- chipName: MR-V100A
+  commonWord: MR-V100A
+  resourceCountName: iluvatar.ai/MR-V100A-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V100A.vMem
+  resourceCoreName: iluvatar.ai/MR-V100A.vCore
 - chipName: MR-V50
   commonWord: MR-V50
   resourceCountName: iluvatar.ai/MR-V50-vgpu
   resourceMemoryName: iluvatar.ai/MR-V50.vMem
   resourceCoreName: iluvatar.ai/MR-V50.vCore
+- chipName: MR-V50A
+  commonWord: MR-V50A
+  resourceCountName: iluvatar.ai/MR-V50A-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V50A.vMem
+  resourceCoreName: iluvatar.ai/MR-V50A.vCore
 - chipName: BI-V150
   commonWord: BI-V150
   resourceCountName: iluvatar.ai/BI-V150-vgpu
@@ -232,6 +242,19 @@ func Test_LoadConfig(t *testing.T) {
 	assert.DeepEqual(t, configData.VNPUs, expectedVNPUs)
 	expectedIluvatars := createIluvatarConfigs()
 	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
+}
+
+func TestLoadConfigRemoteGPUSessionImagePullSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "device-config.yaml")
+	config := "remotegpu:\n  sessionImagePullSecrets:\n    - global-registry\n    - session-registry\n"
+	assert.NilError(t, os.WriteFile(path, []byte(config), 0o600))
+
+	configData, err := LoadConfig(path)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, configData.RemoteGPUConfig.SessionImagePullSecrets, []string{
+		"global-registry",
+		"session-registry",
+	})
 }
 
 func TestLoadConfigRejectsInvalidFields(t *testing.T) {
@@ -448,11 +471,25 @@ func createIluvatarConfigs() []iluvatar.IluvatarConfig {
 			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
 		},
 		{
+			ChipName:           "MR-V100A",
+			CommonWord:         "MR-V100A",
+			ResourceCountName:  "iluvatar.ai/MR-V100A-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100A.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100A.vCore",
+		},
+		{
 			ChipName:           "MR-V50",
 			CommonWord:         "MR-V50",
 			ResourceCountName:  "iluvatar.ai/MR-V50-vgpu",
 			ResourceMemoryName: "iluvatar.ai/MR-V50.vMem",
 			ResourceCoreName:   "iluvatar.ai/MR-V50.vCore",
+		},
+		{
+			ChipName:           "MR-V50A",
+			CommonWord:         "MR-V50A",
+			ResourceCountName:  "iluvatar.ai/MR-V50A-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V50A.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V50A.vCore",
 		},
 		{
 			ChipName:           "BI-V150",
@@ -712,6 +749,22 @@ func Test_validateRegisteredDevices(t *testing.T) {
 			devices: map[string]device.Devices{
 				"A": stubDevices{names: device.ResourceNames{}},
 				"B": stubDevices{names: device.ResourceNames{}},
+			},
+		},
+		{
+			name: "two backends sharing a memory resource with different factors",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1024}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 2}},
+			},
+			wantErr: `A and B both claim memory resource "shared.com/mem"`,
+		},
+		{
+			// Factors of 0 and 1 both mean the request is not scaled.
+			name: "sharing a memory resource with the same factor is allowed",
+			devices: map[string]device.Devices{
+				"A": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem"}},
+				"B": stubDevices{names: device.ResourceNames{ResourceMemoryName: "shared.com/mem", MemoryFactor: 1}},
 			},
 		},
 		{

@@ -30,10 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -113,6 +115,59 @@ func TestBindRejectsNodeDifferentFromScheduledNode(t *testing.T) {
 	pi, ok := s.podManager.GetPod(pod)
 	assert.Equal(t, true, ok, "the reservation was dropped by a rejected bind")
 	assert.Equal(t, "node-1", pi.NodeID)
+}
+
+func TestBindRejectsRemoteGPUReservationOutsideSelector(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+	pod := remoteGPUWebhookPod(resourceName, map[string]string{
+		remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+	})
+	pod.UID = "remote-gpu-uid"
+	s := schedulerWithPods(t, pod)
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "client-node"}}
+	_, err := s.kubeClient.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	nodeFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour)
+	nodeIndexer := nodeFactory.Core().V1().Nodes().Informer().GetIndexer()
+	require.NoError(t, nodeIndexer.Add(node))
+	s.nodeLister = nodeFactory.Core().V1().Nodes().Lister()
+	s.eventRecorder = record.NewFakeRecorder(10)
+	reserved := device.PodDevices{remotegpu.RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: remotegpu.RemoteGPUCommonWord}},
+	}}
+	s.podManager.AddPod(pod, "client-node", reserved)
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       pod.UID,
+		Node:         "client-node",
+	})
+
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(res.Error, "reserved Lupine server"), "bind result: %q", res.Error)
+	pi, ok := s.podManager.GetPod(pod)
+	assert.Equal(t, true, ok, "rejected bind must preserve the reservation")
+	assert.Equal(t, "client-node", pi.NodeID)
+}
+
+func TestBindRejectsRemoteGPUSelectorWithoutReservation(t *testing.T) {
+	resourceName := initRemoteGPUWebhookDevice(t)
+	pod := remoteGPUWebhookPod(resourceName, map[string]string{
+		remotegpu.LupineServerSelectorAnno: "gpu-pool=inference",
+	})
+	pod.UID = "remote-gpu-uid"
+	s := schedulerWithPods(t, pod)
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       pod.UID,
+		Node:         "client-node",
+	})
+
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(res.Error, "has no scheduler reservation"), "bind result: %q", res.Error)
 }
 
 // The reported attack: a bind request pairs a running pod's UID with a pod

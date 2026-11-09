@@ -92,7 +92,7 @@ chmod 600 "${KUBE_CONF}"
 
 # Add Helm repository.
 echo "Adding Helm repository..."
-if ! helm repo add "${HELM_NAME}" "${HELM_REPO}" --force-update --kubeconfig "${KUBE_CONF}" --insecure-skip-tls-verify; then
+if ! helm repo add "${HELM_NAME}" "${HELM_REPO}" --force-update --kubeconfig "${KUBE_CONF}"; then
   echo "Error: Failed to add Helm repository. Please check the repository URL and network connectivity."
   exit 1
 fi

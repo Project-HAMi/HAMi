@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository. `AGENTS.md` links to this file.
 
 ## Project Overview
 
@@ -14,7 +14,12 @@ make docker             # Build Docker image
 make tidy               # Run go mod tidy
 make test               # Run unit tests with coverage (output in _output/coverage/)
 make lint               # Run golangci-lint (version pinned in hack/verify-staticcheck.sh)
-make verify             # Run all verification checks (license, lint, import aliases)
+make verify             # Run all verification checks (lint, license, import aliases, RBAC permissions)
+make bench              # Run the benchmarks (CI only checks that they still execute)
+make verify_chart       # Lint and render the chart, run Trivy, check chart and app versions
+make update-helm-chart-docs   # Regenerate the values table in charts/hami/README.md (needs helm-docs)
+make verify-helm-chart-docs   # Check that generated table is current
+make local-deploy       # Build the image and deploy it to a local minikube/kind cluster
 ```
 
 ### Running a single test
@@ -42,11 +47,11 @@ go test ./pkg/device/nvidia/... -run TestName -short --race -count=1
 
 ### Core Package Layout
 
-- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`) is a concrete implementation.
+- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`, `biren/`, `remotegpu/`) is a concrete implementation.
 
 - **`pkg/scheduler/`** — Scheduler extender logic: node filtering, scoring, webhook handling. `config/config.go` contains `InitDevicesWithConfig()` which registers all device backends into `device.DevicesMap`.
 
-- **`pkg/scheduler/policy/`** — GPU scheduling policies (`binpack`, `spread`) and node-level scoring.
+- **`pkg/scheduler/policy/`** — GPU scheduling policies (`binpack`, `spread`, `topology-aware`, `mutex`, and `numa` as a chained sort key; comma-separated combinations are accepted) and node-level scoring.
 
 - **`pkg/util/`** — Shared utilities including K8s client setup, node locking (annotation-based distributed lock), and leader election.
 
@@ -64,9 +69,13 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 
 - License headers on all `.go` files (`hack/verify-license.sh`, uses `addlicense`)
 - Import aliases must match `hack/.import-aliases` (e.g., `corev1` for `k8s.io/api/core/v1`)
+- RBAC permissions: the ClusterRole in the chart must cover the API calls in `pkg/` and `cmd/` (`hack/verify-rbac.sh`)
 - golangci-lint with config in `.golangci.yaml` (version pinned in `hack/verify-staticcheck.sh`)
 - `goimports` with local prefix `github.com/Project-HAMi/HAMi`
 - Unit tests with race detector
+- DCO: every commit needs a `Signed-off-by` trailer (`git commit -s`)
+- Chart docs: the generated values table in `charts/hami/README.md` must match `charts/hami/values.yaml` (`make verify-helm-chart-docs`)
+- Nightly Trivy scan of the built images, plus CodeQL and OpenSSF Scorecard
 
 ## Conventions
 
@@ -74,9 +83,27 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 - Import grouping: stdlib, then external, then `github.com/Project-HAMi/HAMi/...` (enforced by goimports local-prefixes)
 - K8s API import aliases are enforced (see `hack/.import-aliases`): `corev1`, `metav1`, `apierrors`, etc.
 - All Go files require Apache 2.0 license header
-- Helm chart lives in `charts/hami/`
+- Helm chart lives in `charts/hami/`; vendor settings live under `devices.<vendor>` in `values.yaml`, and values are documented with `# -- Description` comments for helm-docs
+- Image and tool versions are pinned in `version.mk`, `hack/verify-staticcheck.sh` and the workflows; HAMi-core is the `libvgpu` submodule
 - E2E tests use Ginkgo/Gomega (`test/e2e/`)
 - Annotations use the `hami.io/` prefix
+
+## Documentation changes
+
+Detailed user documentation belongs in the [HAMi website repository](https://github.com/Project-HAMi/website). For installation, upgrades, configuration, device behavior, operational procedures, troubleshooting, and examples that explain these topics, update the relevant website guide and submit a PR there. Link the website PR from the related HAMi PR when applicable, subject to the user's authorization to publish.
+
+Development and design documents intended for the wider community must be submitted to `docs/developers/` in the website repository, not committed to this repository. English-only documentation is acceptable.
+
+Keep `README.md`, `README_cn.md`, and `README_ja.md` focused on the project overview and navigation. Keep the hand-written portion of `charts/hami/README.md` focused on Chart documentation links. Do not add detailed guides or duplicate website content in these files as part of a feature or bug fix. README edits should be limited to necessary overview corrections, link maintenance, or an explicitly requested README change.
+
+## Chart values reference
+
+The complete, generated values table stays in `charts/hami/README.md`. Keep it up to date when changing Chart values; the documentation guidance above does not prohibit generated updates.
+
+- Edit defaults and parameter descriptions in `charts/hami/values.yaml`.
+- Do not hand-edit the block between `<!-- BEGIN GENERATED VALUES -->` and `<!-- END GENERATED VALUES -->`.
+- From the repository root, run `make update-helm-chart-docs`, then `make verify-helm-chart-docs`. Use these targets rather than invoking `helm-docs` directly, because the template reads the existing README to preserve its hand-written content.
+- Keep scenario guidance and configuration examples on the website. Do not copy the full generated values table into the website or maintain translated copies of it.
 
 ## AI Assistance Disclosure
 

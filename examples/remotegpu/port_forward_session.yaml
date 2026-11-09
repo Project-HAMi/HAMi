@@ -14,7 +14,8 @@
 #   LD_LIBRARY_PATH=/opt/lupine/lib nvidia-smi
 #
 # The forwarded port is the one that server listens on, which is the value of
-# its hami.io/lupine-server label when it carries one.
+# its hami.io/lupine-server label (applied by the device plugin for
+# operatingmode: remote) when it carries one.
 #
 # A session is not accounted for. The stub holds no card, because a lupine node
 # reports no devices to the scheduler: it serves its GPUs rather than hosting

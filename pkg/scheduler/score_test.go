@@ -115,7 +115,7 @@ func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
 				}}},
 			}
 			result := (&Scheduler{quotaManager: quota}).scoreNode(node.Name, usage, requests, pod,
-				util.NodeSchedulerPolicyBinpack.String(), util.DeviceScoringWeights{})
+				util.NodeSchedulerPolicyBinpack.String(), nil, util.DeviceScoringWeights{})
 			if (result.score != nil) != tc.fit {
 				t.Fatalf("placement fit = %t, want %t (reason: %s)", result.score != nil, tc.fit, result.reason)
 			}

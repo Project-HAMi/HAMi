@@ -558,6 +558,41 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
+			name: "omitted cores reserve no compute",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+						"hygon.com/hcumem": resource.MustParse("1024"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int64(1),
+				Type:             HygonHCUDevice,
+				Memreq:           int64(1024),
+				MemPercentagereq: int64(0),
+				Coresreq:         int64(0),
+			},
+		},
+		{
+			name: "count only keeps full memory and reserves no compute",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/hcunum": resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int64(1),
+				Type:             HygonHCUDevice,
+				Memreq:           int64(0),
+				MemPercentagereq: int64(100),
+				Coresreq:         int64(0),
+			},
+		},
+		{
 			name: "hcuResourceMem don't set limit and request,hcuResourceCores don't set limit and hcuResourceCount set to limits and request",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{

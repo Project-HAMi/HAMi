@@ -122,6 +122,9 @@ func setupNodeLockTimeout() {
 		d, err := time.ParseDuration(nodelock)
 		if err != nil {
 			klog.ErrorS(err, "Failed to parse HAMI_NODELOCK_EXPIRE, using default", "duration", NodeLockTimeout)
+		} else if d <= 0 {
+			// A lock older than a non-positive timeout is always expired, so every lock could be taken over at once.
+			klog.ErrorS(nil, "HAMI_NODELOCK_EXPIRE must be positive, using default", "value", nodelock, "duration", NodeLockTimeout)
 		} else {
 			NodeLockTimeout = d
 			klog.InfoS("Node lock expiration time set from environment variable", "duration", d)

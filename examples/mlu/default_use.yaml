@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: c-1
-          image: ubuntu:18.04
+          image: ubuntu:22.04
           command: ["sleep"]
           args: ["100000"]
           resources:
