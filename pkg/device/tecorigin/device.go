@@ -647,6 +647,11 @@ func (t *TecoDevices) Fit(devices []*device.DeviceUsage, request device.Containe
 		return false, tmpDevs, common.GenReason(map[string]int{common.CardInsufficientCore: 1}, len(devices))
 	}
 
+	var annotations map[string]string
+	if pod != nil {
+		annotations = pod.GetAnnotations()
+	}
+
 	cands := make([]tecoCandidate, 0, len(devices))
 	for _, dev := range devices {
 		if !dev.Health {
@@ -657,7 +662,7 @@ func (t *TecoDevices) Fit(devices []*device.DeviceUsage, request device.Containe
 			reasons[common.CardTimeSlicingExhausted]++
 			continue
 		}
-		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, TecoUseUUID, TecoNoUseUUID, TecoCommonWord) {
+		if !device.CheckUUID(annotations, dev.ID, TecoUseUUID, TecoNoUseUUID, TecoCommonWord) {
 			reasons[common.CardUUIDMismatch]++
 			continue
 		}
