@@ -1236,7 +1236,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	var res *extenderv1.ExtenderBindingResult
 
 	binding := &corev1.Binding{
-		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
+		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, Namespace: args.PodNamespace, UID: args.PodUID},
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 
