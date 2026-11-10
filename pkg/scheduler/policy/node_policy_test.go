@@ -117,6 +117,27 @@ func TestNodeSwap(t *testing.T) {
 	}
 }
 
+func TestNodePolicyUsesSpread(t *testing.T) {
+	tests := []struct {
+		policy string
+		want   bool
+	}{
+		{policy: "spread", want: true},
+		{policy: "superpod,spread", want: true},
+		{policy: "binpack,spread", want: false},
+		{policy: "superpod,binpack", want: false},
+		{policy: "superpod", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.policy, func(t *testing.T) {
+			if got := nodePolicyUsesSpread(tt.policy); got != tt.want {
+				t.Errorf("nodePolicyUsesSpread(%q) = %t, want %t", tt.policy, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLess(t *testing.T) {
 	tests := []struct {
 		name          string

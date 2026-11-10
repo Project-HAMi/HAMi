@@ -92,6 +92,11 @@ func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
 	return chain
 }
 
+func nodePolicyUsesSpread(policy string) bool {
+	chain := nodeSortKeyChain(policy)
+	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread
+}
+
 // lessByChain compares nodes i and j by the ordered sort-key chain parsed
 // from l.Policy, falling back to binpack (today's default node policy)
 // when the comma list names no recognized sort key (e.g. "superpod").
@@ -140,13 +145,13 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 		score := dev.ScoreNode(ns.Node, val, previous, policy)
 
 		// Backends implementing policyNeutralScorer return policy-independent
-		// "higher is better" scores. For the Spread policy (which selects the
-		// lowest score), we invert the score to preserve the ranking.
+		// "higher is better" scores. For Spread (which selects the lowest
+		// score), we invert the score to preserve the ranking.
 		// We also apply a weight of 10000 to ensure device scores dominate
 		// the base node score.
 		if _, ok := dev.(policyNeutralScorer); ok {
 			weight := float32(10000)
-			if policy == util.NodeSchedulerPolicySpread.String() {
+			if nodePolicyUsesSpread(policy) {
 				weight = -10000
 			}
 			score = weight * score
@@ -264,7 +269,7 @@ func (ns *NodeScore) AddNodeAffinityScore(pref *PreferredNodeAffinity, policy st
 	matched := pref.terms.Score(ns.Node)
 	r := float32(matched) / float32(pref.totalWeight)
 	bonus := weight * r
-	if policy == util.NodeSchedulerPolicySpread.String() {
+	if nodePolicyUsesSpread(policy) {
 		bonus = -bonus
 	}
 	ns.Score += bonus
