@@ -296,16 +296,18 @@ func TestCheckCandidate(t *testing.T) {
 			want:      &Violation{Tier: 3, Peer: "node4"},
 		},
 		{
-			name:      "a candidate outside the described fabric is not constrained",
+			name:      "a candidate outside the described fabric is unknown and rejected",
 			candidate: "unlabeled",
 			placed:    []string{"node0"},
 			highest:   0,
+			want:      &Violation{Tier: 4, Peer: "node0", Unknown: true},
 		},
 		{
-			name:      "a placed member outside the described fabric does not constrain",
+			name:      "a placed member outside the described fabric rejects a labeled candidate",
 			candidate: "node1",
 			placed:    []string{"unlabeled"},
 			highest:   0,
+			want:      &Violation{Tier: 4, Peer: "unlabeled", Unknown: true},
 		},
 	}
 
@@ -346,10 +348,10 @@ func TestLocality(t *testing.T) {
 		{name: "whole fabric in common", candidate: "node1", placed: []string{"node4"}, want: 0.25},
 		{name: "outside the described fabric", candidate: "unlabeled", placed: []string{"node0"}, want: 0},
 		{
-			name:      "members outside the fabric are not counted",
+			name:      "unknown members contribute zero to the mean",
 			candidate: "node1",
 			placed:    []string{"node0", "unlabeled"},
-			want:      0.75,
+			want:      0.375,
 		},
 		{
 			name:      "the mean rewards the domain holding most of the group",

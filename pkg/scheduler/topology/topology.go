@@ -68,6 +68,7 @@ const (
 	FromAnnotation
 )
 
+// String returns the human-readable source name used in validation messages.
 func (s Source) String() string {
 	if s == FromAnnotation {
 		return "annotation"
@@ -273,6 +274,7 @@ func (t Tier) Value(node *corev1.Node) string {
 	return node.Labels[t.Key]
 }
 
+// dedupeSorted sorts values in place and removes duplicate entries.
 func dedupeSorted(values []string) []string {
 	sort.Strings(values)
 	unique := values[:0]
@@ -394,6 +396,7 @@ type Violation struct {
 	Unknown bool
 }
 
+// String renders a rejection for scheduler logs and failed-node messages.
 func (v *Violation) String() string {
 	if v == nil {
 		return ""
@@ -408,17 +411,16 @@ func (v *Violation) String() string {
 // whose other members sit on placed nodes, or nil when it can. A pair is
 // rejected when its lowest common ancestor is deeper in the hierarchy than
 // highestTierAllowed, which includes pairs that share no configured domain at
-// all. Nodes that carry no tier value are outside the described fabric: they
-// neither constrain nor are constrained by the model, so a group that has a
-// member on an unlabeled node keeps scheduling as it did before.
+// all. A node that carries no tier value has no common domain with the described
+// fabric, so it is treated as UnknownTier and rejected by a finite hard limit.
 func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllowed int) *Violation {
-	if t == nil || !t.InModel(candidate) {
+	if t == nil {
 		return nil
 	}
 
 	worst := (*Violation)(nil)
 	for _, peer := range placed {
-		if peer == candidate || !t.InModel(peer) {
+		if peer == candidate {
 			continue
 		}
 		tier := t.TierOf(candidate, peer)
@@ -437,19 +439,17 @@ func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllo
 // described fabric or shares no domain with any of them. The mean, rather than
 // the worst case, is what makes a candidate next to most of a group outrank one
 // next to a single member, which is the hyper-node binpacking the CCE
-// documentation describes. Members outside the described fabric are not
-// counted, so they neither raise nor lower the score.
+// documentation describes. A candidate or member outside the described fabric
+// is treated as UnknownTier, contributes 0 to the mean, and remains in the
+// denominator so an unknown peer cannot inflate the locality score.
 func (t *Tree) Locality(candidate string, placed []string) float64 {
-	if t == nil || len(placed) == 0 || !t.InModel(candidate) {
+	if t == nil || len(placed) == 0 {
 		return 0
 	}
 
 	unknown := float64(t.UnknownTier())
 	total, peers := 0.0, 0
 	for _, peer := range placed {
-		if !t.InModel(peer) {
-			continue
-		}
 		peers++
 		total += (unknown - float64(t.TierOf(candidate, peer))) / unknown
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -36,6 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/topology"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -143,8 +145,30 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 	return listener, nil
 }
 
+// validateTopologyConfig normalizes the topology mode and rejects malformed
+// topology flags before the scheduler starts. A typo must not silently disable
+// hard placement guarantees or invert the locality bonus.
+func validateTopologyConfig() error {
+	config.TopologyMode = strings.ToLower(strings.TrimSpace(config.TopologyMode))
+	if config.TopologyMode != util.TopologyModeHard && config.TopologyMode != util.TopologyModeSoft {
+		return fmt.Errorf("--npu-topology-mode must be %q or %q, got %q",
+			util.TopologyModeHard, util.TopologyModeSoft, config.TopologyMode)
+	}
+	if _, err := topology.ParseTiers(config.TopologyTierLabels); err != nil {
+		return fmt.Errorf("invalid --npu-topology-tier-labels: %w", err)
+	}
+	weight := float64(config.TopologyScoreWeight)
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || config.TopologyScoreWeight < 0 {
+		return fmt.Errorf("--npu-topology-score-weight must be finite and non-negative, got %v", config.TopologyScoreWeight)
+	}
+	return nil
+}
+
 func start() error {
 	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
+		return err
+	}
+	if err := validateTopologyConfig(); err != nil {
 		return err
 	}
 
@@ -158,17 +182,6 @@ func start() error {
 	)
 
 	config.InitDevices()
-
-	// A mode the scheduler does not recognize is not harmless: topologyPlanFor
-	// copies it into the plan as-is, both hard filters compare against
-	// util.TopologyModeHard, and Pods that rely on the configured default would
-	// silently lose the hard filter and the gang guarantee. Fail at startup
-	// instead, like the device-plugin identity flags below.
-	config.TopologyMode = strings.ToLower(strings.TrimSpace(config.TopologyMode))
-	if config.TopologyMode != util.TopologyModeHard && config.TopologyMode != util.TopologyModeSoft {
-		return fmt.Errorf("--npu-topology-mode must be %q or %q, got %q",
-			util.TopologyModeHard, util.TopologyModeSoft, config.TopologyMode)
-	}
 
 	var err error
 	config.HostName, err = os.Hostname()

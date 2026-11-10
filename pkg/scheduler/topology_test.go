@@ -231,9 +231,8 @@ func candidateNodes(names ...string) map[string]*NodeUsage {
 }
 
 // TestApplyTopologyFilter covers the hard half: a candidate that would stretch
-// the group past the allowed tier is dropped and reported, a candidate the
-// hierarchy says nothing about is left alone, and a soft request rejects
-// nothing at all.
+// the group past the allowed tier is dropped and reported, a node the hierarchy
+// does not describe is rejected as unknown, and a soft request rejects nothing.
 func TestApplyTopologyFilter(t *testing.T) {
 	allNodes := cceTopologyNodes()
 	scheduler := topologyTestScheduler(t, allNodes)
@@ -284,27 +283,31 @@ func TestApplyTopologyFilter(t *testing.T) {
 		assert.Empty(t, failedNodes)
 	})
 
-	t.Run("nodes outside the described fabric are not constrained", func(t *testing.T) {
+	t.Run("nodes outside the described fabric are rejected as unknown", func(t *testing.T) {
 		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
 		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
 		candidates := candidateNodes("node0", "node2", "node-unlabeled")
 		failedNodes := map[string]string{}
 		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
 
-		assert.Len(t, candidates, 2)
-		assert.Contains(t, candidates, "node-unlabeled")
+		assert.Len(t, candidates, 1)
 		assert.Contains(t, candidates, "node0")
+		assert.Len(t, failedNodes, 2)
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node-unlabeled"])[common.HyperNodeTierNotFit])
 	})
 
-	t.Run("a pod group already placed outside the fabric keeps scheduling", func(t *testing.T) {
+	t.Run("a pod group already placed outside the fabric only matches its own unknown node", func(t *testing.T) {
 		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
 		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
 		candidates := candidateNodes("node0", "node2", "node-unlabeled")
 		failedNodes := map[string]string{}
 		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node-unlabeled"), pod, &candidates, failedNodes)
 
-		assert.Len(t, candidates, 3)
-		assert.Empty(t, failedNodes)
+		assert.Len(t, candidates, 1)
+		assert.Contains(t, candidates, "node-unlabeled")
+		assert.Len(t, failedNodes, 2)
+		assert.Contains(t, failedNodes, "node0")
+		assert.Contains(t, failedNodes, "node2")
 	})
 
 	t.Run("a rejection that leaves nothing reports an event", func(t *testing.T) {
@@ -370,7 +373,7 @@ func TestApplyTopologyScore(t *testing.T) {
 		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.75, scores.NodeList[0].Score, 0.001)
 		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.5, scores.NodeList[1].Score, 0.001)
 		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.25, scores.NodeList[2].Score, 0.001)
-		assert.InDelta(t, 100, scores.NodeList[3].Score, 0.001, "a node outside the fabric is left alone")
+		assert.InDelta(t, 100, scores.NodeList[3].Score, 0.001, "a node outside the fabric earns no soft bonus")
 	})
 
 	t.Run("spread rewards the closer node too", func(t *testing.T) {
@@ -583,14 +586,15 @@ func TestTopologyFromSuperPodAnnotations(t *testing.T) {
 		failedNodes := map[string]string{}
 		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node1"), pod, &candidates, failedNodes)
 
-		assert.Len(t, candidates, 3, "the two nodes of the super pod and the node outside the hierarchy survive")
+		assert.Len(t, candidates, 2, "only the two nodes of the super pod survive")
 		assert.Contains(t, candidates, "node1")
 		assert.Contains(t, candidates, "node0")
-		assert.Contains(t, candidates, "node4", "a node outside the described fabric is not constrained")
-		assert.Len(t, failedNodes, 2)
+		assert.NotContains(t, candidates, "node4", "a node outside the described fabric is unknown")
+		assert.Len(t, failedNodes, 3)
 		assert.Equal(t, 1, common.ParseReason(failedNodes["node2"])[common.HyperNodeTierNotFit],
 			"a node of another super pod must report the topology reason")
 		assert.Equal(t, 1, common.ParseReason(failedNodes["node3"])[common.HyperNodeTierNotFit])
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node4"])[common.HyperNodeTierNotFit])
 	})
 
 	t.Run("ranking prefers the nodes of the super pod of the group", func(t *testing.T) {
@@ -604,8 +608,8 @@ func TestTopologyFromSuperPodAnnotations(t *testing.T) {
 
 		// The only tier above the node is the super-pod, so a node sharing it
 		// is halfway to being the same place, and a node of another super-pod
-		// shares nothing at all. A node outside the described fabric is left
-		// exactly where it was.
+		// shares nothing at all. A node outside the described fabric is treated
+		// as UnknownTier and earns no locality bonus.
 		closer := 100 + float32(config.DefaultTopologyScoreWeight)*0.5
 		assert.InDelta(t, closer, scores.NodeList[0].Score, 0.001)
 		assert.InDelta(t, 100, scores.NodeList[1].Score, 0.001)
@@ -740,6 +744,57 @@ func gangFabric() []*corev1.Node {
 		}})
 	}
 	return nodes
+}
+
+// TestTopologyGangSize checks the annotation parser and its fixed safety bound.
+func TestTopologyGangSize(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "unset keeps incremental behavior", raw: "", want: 1},
+		{name: "trimmed valid size", raw: " 8 ", want: 8},
+		{name: "maximum is accepted", raw: "1024", want: 1024},
+		{name: "above maximum is rejected", raw: "1025", want: 1},
+		{name: "zero is rejected", raw: "0", want: 1},
+		{name: "negative is rejected", raw: "-1", want: 1},
+		{name: "non-numeric is rejected", raw: "abc", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := topologyPod(map[string]string{util.TopologyGangSizeAnnotationKey: tt.raw}, nil)
+			assert.Equal(t, tt.want, topologyGangSize(pod))
+		})
+	}
+	assert.Equal(t, 1, topologyGangSize(nil))
+}
+
+// TestTopologyGangFilterFailsClosedOnUnknownPlacedNode verifies that a gang
+// already anchored outside the described fabric cannot claim a domain fit.
+func TestTopologyGangFilterFailsClosedOnUnknownPlacedNode(t *testing.T) {
+	unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+	scheduler := topologyTestScheduler(t, append(cceTopologyNodes(), unlabeled))
+	task := topologyPod(nil, nil)
+	plan := &topologyPlan{
+		view:          scheduler.topologySnapshot(),
+		group:         "default/job-name/train",
+		mode:          util.TopologyModeHard,
+		highest:       1,
+		gangSize:      3,
+		placedMembers: 1,
+		placed:        []string{"node-unlabeled"},
+	}
+	nodes := candidateNodes("node0", "node1", "node-unlabeled")
+	failedNodes := map[string]string{}
+
+	scheduler.applyTopologyGangFilter(plan, task, nil, &nodes, failedNodes)
+
+	assert.Empty(t, nodes)
+	assert.Len(t, failedNodes, 3)
+	for node := range candidateNodes("node0", "node1", "node-unlabeled") {
+		assert.Equal(t, 1, common.ParseReason(failedNodes[node])[common.GangTopologyNotFit])
+	}
 }
 
 // TestTopologyGangFeasibleNodes covers the domain arithmetic of the

@@ -36,10 +36,17 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// unlimitedTier is the highest tier a pod can ask for when it wants topology
-// aware ranking without a cap. It is resolved to the depth of the configured
-// hierarchy once the hierarchy is known.
-const unlimitedTier = -1
+const (
+	// unlimitedTier is the highest tier a pod can ask for when it wants
+	// topology aware ranking without a cap. It is resolved to the depth of the
+	// configured hierarchy once the hierarchy is known.
+	unlimitedTier = -1
+
+	// maxTopologyGangSize bounds the capacity simulation performed for one
+	// gang. Larger values are treated as malformed annotations so a typo cannot
+	// turn one Filter call into an unbounded amount of device scoring.
+	maxTopologyGangSize = 1024
+)
 
 // topologyGroupLabels identify the distributed job a pod belongs to. They cover
 // the usual training operators: Kubeflow and most job controllers set job-name,
@@ -307,9 +314,10 @@ func (s *Scheduler) topologyPlanFor(task *corev1.Pod) *topologyPlan {
 	}
 }
 
-// topologyGangSize reads the optional gang size. A missing or malformed value
-// keeps the previous incremental behavior instead of turning a typo into a
-// cluster-wide scheduling outage.
+// topologyGangSize reads the optional gang size. A missing or malformed value,
+// including one above maxTopologyGangSize, keeps the previous incremental
+// behavior instead of turning a typo into a cluster-wide scheduling outage or
+// an unbounded capacity simulation.
 func topologyGangSize(task *corev1.Pod) int {
 	if task == nil {
 		return 1
@@ -319,7 +327,7 @@ func topologyGangSize(task *corev1.Pod) int {
 		return 1
 	}
 	size, err := strconv.Atoi(raw)
-	if err != nil || size < 1 {
+	if err != nil || size < 1 || size > maxTopologyGangSize {
 		klog.ErrorS(nil, "Ignoring invalid NPU topology gang size", "pod", klog.KObj(task), "gangSize", raw)
 		return 1
 	}
@@ -543,17 +551,6 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 	if tree == nil {
 		return
 	}
-	for _, placedNode := range plan.placed {
-		if !tree.InModel(placedNode) {
-			// The model deliberately leaves unlabeled nodes unconstrained. A
-			// gang that already has a member there cannot be proven feasible,
-			// so keep the legacy behavior instead of guessing a domain.
-			klog.V(4).InfoS("NPU topology gang check skipped: placed member is outside the topology model",
-				"pod", klog.KObj(task), "group", plan.group, "node", placedNode)
-			return
-		}
-	}
-
 	members, ok := s.topologyGangMembers(task, resourceReqs, plan.pending, remaining)
 	if !ok {
 		return
