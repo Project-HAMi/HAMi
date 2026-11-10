@@ -478,22 +478,28 @@ func (s *Scheduler) topologyGangMembers(task *corev1.Pod, resourceReqs device.Po
 	return members, true
 }
 
-// topologyGangNodeAssignment returns the indexes of the remaining gang members
-// that one node can host. It simulates the same scoring path Filter uses on a
-// private deep copy, so device geometry, NUMA rules and vendor accounting are
-// resolved exactly as they will be at bind time, and the scheduler's live node
-// cache is never modified.
-//
-// Each member is scored with its own request and Pod context. A member that
-// does not fit is skipped so that a later, smaller member can still use the
-// remaining room; the result reflects the members that were actually placed in
-// the simulation, not the request of the Pod that happens to be scheduled
-// first. Returning the member indexes rather than only their count lets the
-// caller verify a complete domain-wide assignment, so the same member cannot
-// satisfy the gang on several nodes at once.
-func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, members []topologyGangMember, placed []string) []int {
+// topologyGangNodeFit describes two different properties of one node:
+// admits lists the members that fit on the node on their own, while capacity
+// is how many members fit together when their allocations share the node.
+// Keeping them separate matters for a heterogeneous gang: a 40-core member and
+// an 80-core sibling can each fit on either of two 100-core nodes, but not both
+// on one node. Matching must be able to put them on separate nodes even though
+// the greedy simulation records only one shared-node slot.
+type topologyGangNodeFit struct {
+	admits   []int
+	capacity int
+}
+
+// topologyGangNodeAssignment computes the fit information for one node. Each
+// member is scored with its own request and Pod context, exactly as Filter will
+// score it, on private deep copies so the scheduler's live node cache is never
+// modified. The admission pass scores each member against fresh usage; the
+// capacity pass then greedily shares one simulated copy. Failed fits are
+// remembered per Pod: slots the job controller has not created yet reuse the
+// current Pod, and repeating the same failed placeholder cannot make it fit.
+func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, members []topologyGangMember, placed []string) topologyGangNodeFit {
 	if len(members) == 0 || usage == nil {
-		return nil
+		return topologyGangNodeFit{}
 	}
 	limit := len(members)
 	distinct := false
@@ -505,29 +511,55 @@ func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, 
 	}
 	if distinct {
 		if slices.Contains(placed, nodeID) {
-			return nil
+			return topologyGangNodeFit{}
 		}
 		// A hostname anti-affinity keeps every sibling off this node too.
 		limit = 1
 	}
+
+	fit := topologyGangNodeFit{admits: make([]int, 0, len(members))}
+	admitted := make([]bool, len(members))
+	fitsAlone := make(map[*corev1.Pod]bool, len(members))
+	for i := range members {
+		member := &members[i]
+		if len(member.resourceReqs) == 0 {
+			fit.admits = append(fit.admits, i)
+			admitted[i] = true
+			continue
+		}
+		canFit, seen := fitsAlone[member.pod]
+		if !seen {
+			result := s.scoreNode(nodeID, usage.DeepCopy(), member.resourceReqs, member.pod, member.nodePolicy, member.nodeAffinity, member.weights)
+			canFit = result.err == nil && result.score != nil
+			fitsAlone[member.pod] = canFit
+		}
+		if canFit {
+			fit.admits = append(fit.admits, i)
+			admitted[i] = true
+		}
+	}
+	if distinct {
+		if len(fit.admits) > 0 {
+			fit.capacity = 1
+		}
+		return fit
+	}
+
 	simulated := usage.DeepCopy()
-	assignment := make([]int, 0, limit)
-	// A failed fit changes neither simulated usage nor that member's inputs.
-	// Slots the job controller has not created yet are filled with the current
-	// Pod, so the same placeholder would be scored again for every remaining
-	// slot. Remember a failed Pod instead of repeating the identical work.
-	// Distinct pending Pods keep their own entry and are still evaluated,
-	// because they can have different requests and Pod context.
 	failed := make(map[*corev1.Pod]struct{}, len(members))
 	for i := range members {
-		if len(assignment) >= limit {
+		if fit.capacity >= limit {
 			break
 		}
 		member := &members[i]
 		if len(member.resourceReqs) == 0 {
 			// A member that asks for no HAMi device still takes a slot but
 			// cannot make the node smaller.
-			assignment = append(assignment, i)
+			fit.capacity++
+			continue
+		}
+		if !admitted[i] {
+			failed[member.pod] = struct{}{}
 			continue
 		}
 		if _, ok := failed[member.pod]; ok {
@@ -538,11 +570,11 @@ func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, 
 			failed[member.pod] = struct{}{}
 			continue
 		}
-		assignment = append(assignment, i)
+		fit.capacity++
 		// scoreNode applies the allocation to simulated through applyPeakUsage,
 		// so the next member already sees the reduced capacity.
 	}
-	return assignment
+	return fit
 }
 
 // applyTopologyGangFilter enforces all-or-nothing placement for a gang whose
@@ -577,7 +609,7 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 		return
 	}
 
-	assignments := make(map[string][]int, len(*nodes))
+	assignments := make(map[string]topologyGangNodeFit, len(*nodes))
 	for nodeID, usage := range *nodes {
 		assignments[nodeID] = s.topologyGangNodeAssignment(nodeID, usage, members, plan.placed)
 	}
@@ -629,7 +661,7 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 // not automatically preferred: the result is a union, and a node survives when
 // any allowed domain can hold the gang. The hard tier filter that runs next
 // still rejects a node that is too far from the members already placed.
-func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeUsage, assignments map[string][]int, placed []string, highest, remaining int) (map[string]struct{}, []string) {
+func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeUsage, assignments map[string]topologyGangNodeFit, placed []string, highest, remaining int) (map[string]struct{}, []string) {
 	feasible := make(map[string]struct{})
 	var fittingDomains []string
 	if tree == nil || remaining <= 0 {
@@ -645,20 +677,19 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 			}
 			domains[chain[level]] = append(domains[chain[level]], nodeID)
 		}
-		for domain, members := range domains {
+		for domain, domainNodes := range domains {
 			if !topologyGangDomainContainsPlaced(tree, domain, level, placed) {
 				continue
 			}
-			if !topologyGangDomainCanAssign(assignments, members, remaining) {
-				continue
-			}
 			fits := false
-			for _, nodeID := range members {
-				if !slices.Contains(assignments[nodeID], 0) {
+			for _, nodeID := range domainNodes {
+				if !slices.Contains(assignments[nodeID].admits, 0) {
 					continue
 				}
-				feasible[nodeID] = struct{}{}
-				fits = true
+				if topologyGangDomainCanAssign(assignments, domainNodes, nodeID, remaining) {
+					feasible[nodeID] = struct{}{}
+					fits = true
+				}
 			}
 			if fits {
 				fittingDomains = append(fittingDomains, domain.String())
@@ -669,24 +700,30 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 }
 
 // topologyGangDomainCanAssign reports whether every remaining member other than
-// the current Pod can be placed in the domain. Member 0 is pinned to its
-// candidate by the caller and is therefore excluded from the matching. Each
-// node may host at most the members its assignment simulation admitted, and an
-// augmenting-path match lets a member displace another member from a node that
-// is already full.
-func topologyGangDomainCanAssign(assignments map[string][]int, nodes []string, remaining int) bool {
-	if remaining <= 1 {
+// the current Pod can be placed in the domain after member 0 is pinned to
+// pinnedNode. Reserving that slot first is required when one node admits several
+// members individually but can only host one of them, otherwise member 0 would
+// be counted there and again in the sibling matching. Each node may host at
+// most the members its shared-usage simulation admitted, and an augmenting-path
+// match lets a member displace another member from a node that is already full.
+func topologyGangDomainCanAssign(assignments map[string]topologyGangNodeFit, nodes []string, pinnedNode string, remaining int) bool {
+	pinned := assignments[pinnedNode]
+	if remaining <= 0 || pinned.capacity == 0 || !slices.Contains(pinned.admits, 0) {
+		return false
+	}
+	if remaining == 1 {
 		return true
 	}
 	capacity := make(map[string]int, len(nodes))
 	for _, nodeID := range nodes {
-		capacity[nodeID] = len(assignments[nodeID])
+		capacity[nodeID] = assignments[nodeID].capacity
 	}
+	capacity[pinnedNode]--
 	assigned := make(map[string][]int, len(nodes))
 	var assign func(member int, visited map[string]bool) bool
 	assign = func(member int, visited map[string]bool) bool {
 		for _, nodeID := range nodes {
-			if visited[nodeID] || !slices.Contains(assignments[nodeID], member) {
+			if visited[nodeID] || !slices.Contains(assignments[nodeID].admits, member) {
 				continue
 			}
 			visited[nodeID] = true

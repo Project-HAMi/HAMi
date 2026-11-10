@@ -808,13 +808,21 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 	candidates := candidateNodes("gang-a", "gang-b", "gang-c")
 
 	t.Run("two separate ToRs cannot hold a gang of two", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {0}, "gang-b": {}, "gang-c": {1}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{1}, 1),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
 		assert.Empty(t, feasible, "each tier 1 domain only has room for one member")
 	})
 
 	t.Run("only the ToR with a complete assignment can hold the gang", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {0}, "gang-b": {0, 1}, "gang-c": {0}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{0, 1}, 2),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
 		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
 		assert.Contains(t, feasible, "gang-a")
 		assert.Contains(t, feasible, "gang-b")
@@ -823,48 +831,92 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 	})
 
 	t.Run("a member counted on two nodes cannot satisfy the gang", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {0}, "gang-b": {0}, "gang-c": {}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
 		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
 		assert.Empty(t, feasible, "member 0 cannot stand in for member 1 on both nodes")
 		assert.Empty(t, domains)
 	})
 
 	t.Run("a node that can only host a sibling is not a candidate", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {0}, "gang-b": {1}, "gang-c": {}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{1}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
 		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
 		assert.Equal(t, map[string]struct{}{"gang-a": {}}, feasible)
 		assert.Len(t, domains, 1)
 	})
 
 	t.Run("a middle tier domain can satisfy the gang on its own", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {}, "gang-b": {}, "gang-c": {0, 1}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0, 1}, 2),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 2, 2)
 		assert.Equal(t, map[string]struct{}{"gang-c": {}}, feasible)
 	})
 
 	t.Run("the cluster tier admits every node", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {0, 1}, "gang-b": {0, 1}, "gang-c": {0, 1}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 2),
+			"gang-b": gangNodeFit([]int{0, 1}, 2),
+			"gang-c": gangNodeFit([]int{0, 1}, 2),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 3, 2)
 		assert.Len(t, feasible, 3)
 	})
 
 	t.Run("a placed member pins the gang to its domain", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {}, "gang-b": {0}, "gang-c": {0}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 1, 1)
 		assert.Equal(t, map[string]struct{}{"gang-b": {}}, feasible)
 	})
 
 	t.Run("no domain under the cap can hold the last member", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {}, "gang-b": {}, "gang-c": {0}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 2, 1)
 		assert.Empty(t, feasible, "gang-c is in another rack and the cap is rack level")
 	})
 
 	t.Run("a wider cap lets the last member leave the rack", func(t *testing.T) {
-		assignments := map[string][]int{"gang-a": {}, "gang-b": {}, "gang-c": {0}}
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
 		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 3, 1)
 		assert.Equal(t, map[string]struct{}{"gang-c": {}}, feasible)
 	})
+
+	t.Run("pinning a member consumes a shared slot", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 1),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidateNodes("gang-a"), assignments, nil, 1, 2)
+		assert.Empty(t, feasible, "the node admits both members alone but has only one shared slot")
+	})
+}
+
+// gangNodeFit is shorthand for the two properties returned by the per-node
+// simulation: the members that fit alone and the number that fit together.
+func gangNodeFit(admits []int, capacity int) topologyGangNodeFit {
+	return topologyGangNodeFit{admits: admits, capacity: capacity}
 }
 
 // TestTopologyGangNeedsDistinctNodes checks that the capacity simulation knows
@@ -1052,9 +1104,110 @@ func TestTopologyGangFilterUsesSiblingRequest(t *testing.T) {
 	})
 }
 
+// TestTopologyGangFilterSeparatesHeterogeneousMembers verifies that a node does
+// not need to host every member itself. A 40-core Pod and an 80-core sibling do
+// not fit together on one 100-core node, but each fits alone, so two nodes in
+// the same topology domain are a valid assignment.
+func TestTopologyGangFilterSeparatesHeterogeneousMembers(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{gangTestPod("train-1", 80)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterUsesDistinctNodes verifies that hostname anti-affinity
+// is enforced during domain matching: each node can admit both homogeneous
+// members alone, but one node can only host one of them at a time.
+func TestTopologyGangFilterUsesDistinctNodes(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	task.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			TopologyKey: corev1.LabelHostname,
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+				"job-name": "train",
+			}},
+		}},
+	}}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{gangTestPod("train-1", 40)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
 // TestTopologyGangFilterRejectsDuplicateAssignments is the regression test for
 // summing per-node capacities. Both tier 1 nodes can host the 40-core current
-// Pod but neither can host the 80-core sibling. The filter must not count the
+// Pod but neither can host the 120-core sibling. The filter must not count the
 // current Pod on both nodes and admit a gang that can never become Ready.
 func TestTopologyGangFilterRejectsDuplicateAssignments(t *testing.T) {
 	oldDevicesMap := device.DevicesMap
@@ -1090,7 +1243,7 @@ func TestTopologyGangFilterRejectsDuplicateAssignments(t *testing.T) {
 		mode:     util.TopologyModeHard,
 		highest:  1,
 		gangSize: 2,
-		pending:  []*corev1.Pod{gangTestPod("train-1", 80)},
+		pending:  []*corev1.Pod{gangTestPod("train-1", 120)},
 	}
 
 	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
