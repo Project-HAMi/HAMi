@@ -923,6 +923,44 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 		feasible, _ := topologyGangFeasibleNodes(tree, candidateNodes("gang-a"), assignments, nil, 1, 2)
 		assert.Empty(t, feasible, "the node admits both members alone but has only one shared slot")
 	})
+
+	t.Run("pinning a member does not consume an extra shared slot", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 2),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidateNodes("gang-a"), assignments, nil, 1, 2)
+		assert.Equal(t, map[string]struct{}{"gang-a": {}}, feasible,
+			"the pinned member occupies one of the node's two shared slots, not two")
+	})
+}
+
+// TestTopologyGangDomainCanAssignSearchesAfterRejectedFit verifies that the
+// matcher tries another partition when device verification rejects the fast
+// capacity match.
+func TestTopologyGangDomainCanAssignSearchesAfterRejectedFit(t *testing.T) {
+	nodes := []string{"node-a", "node-b"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true, true}, capacity: 2},
+		"node-b": {admits: []bool{true, true, true}, capacity: 2},
+	}
+	verify := func(nodeID string, members []int) bool {
+		if nodeID != "node-a" {
+			return true
+		}
+		for _, member := range members {
+			if member == 2 {
+				return false
+			}
+		}
+		return true
+	}
+
+	assigned, ok := topologyGangDomainCanAssign(nodes, fits, "node-a", 3, verify)
+	require.True(t, ok)
+	assert.Equal(t, []int{0, 1}, assigned["node-a"])
+	assert.Equal(t, []int{2}, assigned["node-b"])
 }
 
 // gangNodeFit is shorthand for the two properties returned by the per-node
@@ -1155,6 +1193,58 @@ func TestTopologyGangFilterSeparatesHeterogeneousMembers(t *testing.T) {
 		highest:  1,
 		gangSize: 2,
 		pending:  []*corev1.Pod{gangTestPod("train-1", 80)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterFindsAlternativePartition is the regression test for a
+// fast capacity match whose concrete set does not fit. Each 100-core node has
+// two shared slots for this gang, so the capacity matcher may pick 90+90 while
+// the only valid partitions are 90+10 on each node. Both nodes in the tier 1
+// domain must remain feasible anchors.
+func TestTopologyGangFilterFindsAlternativePartition(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 90)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 4,
+		pending: []*corev1.Pod{
+			gangTestPod("train-1", 90),
+			gangTestPod("train-2", 10),
+			gangTestPod("train-3", 10),
+		},
 	}
 
 	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)

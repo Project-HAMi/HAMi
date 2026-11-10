@@ -46,6 +46,12 @@ const (
 	// gang. Larger values are treated as malformed annotations so a typo cannot
 	// turn one Filter call into an unbounded amount of device scoring.
 	maxTopologyGangSize = 1024
+
+	// maxTopologyGangSearchStates bounds the fallback search used when the
+	// fast capacity match produces a concrete set that the device simulation
+	// rejects. The fast path handles the ordinary case; the fallback only
+	// explores alternative placements after a heterogeneous conflict.
+	maxTopologyGangSearchStates = 65536
 )
 
 // topologyGroupLabels identify the distributed job a pod belongs to. They cover
@@ -726,7 +732,7 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 			domainFits := topologyGangBuildDomainFits(assignments, domainNodes, remaining)
 			// An unpinned match is a necessary condition: when even the
 			// whole domain cannot place every member, no anchor in it can.
-			if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, "", remaining); !ok {
+			if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, "", remaining, verify); !ok {
 				continue
 			}
 			hasAnchor := false
@@ -734,11 +740,7 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 				if !domainFits[nodeID].admits[0] {
 					continue
 				}
-				assigned, ok := topologyGangDomainCanAssign(domainNodes, domainFits, nodeID, remaining)
-				if !ok {
-					continue
-				}
-				if verify != nil && !topologyGangAssignmentFits(assigned, verify) {
+				if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, nodeID, remaining, verify); !ok {
 					continue
 				}
 				feasible[nodeID] = struct{}{}
@@ -790,10 +792,30 @@ func topologyGangAssignmentFits(assigned map[string][]int, verify func(string, [
 // topologyGangDomainCanAssign returns the member assignment for a domain. An
 // empty pinnedNode performs the unpinned feasibility check. A non-empty one
 // reserves member 0 on that node first, then matches the remaining members.
-// Each node may host at most the number of members its shared-usage simulation
-// admitted, and an augmenting path lets a member displace another member from a
-// node that is already full.
-func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int) (map[string][]int, bool) {
+// The fast matcher is a capacity-only bipartite match. If its concrete
+// assignment does not pass the optional device verification, search alternative
+// placements for the same anchor rather than rejecting a domain that can still
+// hold the gang in a different partition.
+func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, verifiers ...func(string, []int) bool) (map[string][]int, bool) {
+	var verify func(string, []int) bool
+	if len(verifiers) > 0 {
+		verify = verifiers[0]
+	}
+	assigned, ok := topologyGangDomainMatch(nodes, fits, pinnedNode, remaining)
+	if !ok {
+		return nil, false
+	}
+	if verify == nil || topologyGangAssignmentFits(assigned, verify) {
+		return assigned, true
+	}
+	return topologyGangDomainSearch(nodes, fits, pinnedNode, remaining, verify)
+}
+
+// topologyGangDomainMatch is the fast capacity matcher. Each node may host at
+// most the number of members its shared-usage simulation admitted, and an
+// augmenting path lets a member displace another member from a node that is
+// already full. Member 0 is pinned to its anchor and cannot be displaced.
+func topologyGangDomainMatch(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int) (map[string][]int, bool) {
 	if remaining <= 0 {
 		return nil, false
 	}
@@ -809,7 +831,6 @@ func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDom
 			return nil, false
 		}
 		assigned[pinnedNode] = []int{0}
-		capacity[pinnedNode]--
 		start = 1
 	}
 	if remaining == 1 && pinnedNode != "" {
@@ -848,6 +869,91 @@ func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDom
 		if !assign(member, make([]bool, len(nodes))) {
 			return nil, false
 		}
+	}
+	return assigned, true
+}
+
+// topologyGangDomainSearch explores alternative member-to-node assignments
+// after concrete device verification rejects the fast match. Members are tried
+// fewest-candidates-first to prune early, while each node set is verified in
+// member-index order because that is the order the scheduler will place them.
+func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, verify func(string, []int) bool) (map[string][]int, bool) {
+	if remaining <= 0 {
+		return nil, false
+	}
+	assigned := make(map[string][]int, len(nodes))
+	start := 0
+	if pinnedNode != "" {
+		pinned, ok := fits[pinnedNode]
+		if !ok || pinned.capacity == 0 || !pinned.admits[0] {
+			return nil, false
+		}
+		assigned[pinnedNode] = []int{0}
+		if !verify(pinnedNode, assigned[pinnedNode]) {
+			return nil, false
+		}
+		start = 1
+	}
+	if start >= remaining {
+		return assigned, true
+	}
+
+	type memberChoice struct {
+		member int
+		nodes  []string
+	}
+	choices := make([]memberChoice, 0, remaining-start)
+	for member := start; member < remaining; member++ {
+		candidateNodes := make([]string, 0, len(nodes))
+		for _, nodeID := range nodes {
+			nodeFit := fits[nodeID]
+			if nodeFit.capacity > 0 && member < len(nodeFit.admits) && nodeFit.admits[member] {
+				candidateNodes = append(candidateNodes, nodeID)
+			}
+		}
+		if len(candidateNodes) == 0 {
+			return nil, false
+		}
+		choices = append(choices, memberChoice{member: member, nodes: candidateNodes})
+	}
+	slices.SortStableFunc(choices, func(a, b memberChoice) int {
+		if len(a.nodes) != len(b.nodes) {
+			return len(a.nodes) - len(b.nodes)
+		}
+		return a.member - b.member
+	})
+
+	attempts := 0
+	var search func(index int) bool
+	search = func(index int) bool {
+		if index == len(choices) {
+			return true
+		}
+		choice := choices[index]
+		for _, nodeID := range choice.nodes {
+			if len(assigned[nodeID]) >= fits[nodeID].capacity {
+				continue
+			}
+			attempts++
+			if attempts > maxTopologyGangSearchStates {
+				return false
+			}
+			previous := assigned[nodeID]
+			next := append(previous[:len(previous):len(previous)], choice.member)
+			slices.Sort(next)
+			if !verify(nodeID, next) {
+				continue
+			}
+			assigned[nodeID] = next
+			if search(index + 1) {
+				return true
+			}
+			assigned[nodeID] = previous
+		}
+		return false
+	}
+	if !search(0) {
+		return nil, false
 	}
 	return assigned, true
 }
