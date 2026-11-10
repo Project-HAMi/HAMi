@@ -170,6 +170,8 @@ scheduler:
   # -- Age after which a node lock is treated as expired, as a positive duration such as `5m`. An unparsable or non-positive value is ignored
   # and `5m` is used. A `--node-lock-timeout` flag in `scheduler.extender.extraArgs` overrides it.
   nodeLockExpire: "5m"
+  # Superpod rack boost score bonus for the superpod node-scheduler policy.
+  # superpodRackBoost: "10"
   # -- Annotations for the scheduler Pods.
   podAnnotations: {}
   # -- Tolerations for the scheduler Pods.

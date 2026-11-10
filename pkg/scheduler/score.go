@@ -501,6 +501,12 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		NodeList: make([]*policy.NodeScore, 0),
 	}
 
+	// Superpod filter stage: converge same-task pods into one superpod.
+	superpodCtx := s.prepareSuperpodContext(task, userNodePolicy)
+	if err := s.applySuperpodFilter(superpodCtx, task, nodes, failedNodes); err != nil {
+		return nil, err
+	}
+
 	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
@@ -530,6 +536,9 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 				failedNodesMutex.Unlock()
 
 			default:
+				if superpodCtx != nil {
+					result.score.Score = applySuperpodRackBoost(superpodCtx, node.Node, nodeID, result.score.Score, userNodePolicy)
+				}
 				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, result.score)
 				fitNodesMutex.Unlock()
