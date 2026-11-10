@@ -395,10 +395,18 @@ func topologyGangNeedsDistinctNodes(task *corev1.Pod) bool {
 }
 
 // topologyGangDomainContainsPlaced reports whether domain is the domain that
-// holds every member already placed. A placed member whose chain stops below
-// level cannot belong to that domain, so the domain is not a candidate.
+// holds every member already placed. A placed member outside the model, or one
+// whose chain stops below level, cannot belong to that domain, so the domain is
+// not a candidate.
 func topologyGangDomainContainsPlaced(tree *topology.Tree, domain *topology.HyperNode, level int, placed []string) bool {
 	for _, placedNode := range placed {
+		// A gang anchored on a node outside the model has no domain that can
+		// be proven to hold it. Fail closed instead of treating the node's own
+		// tier 0 domain as a fit, which would let an unlabeled member anchor a
+		// gang anywhere in the cluster.
+		if !tree.InModel(placedNode) {
+			return false
+		}
 		chain := tree.Chain(placedNode)
 		if level >= len(chain) || chain[level] != domain {
 			return false
@@ -502,6 +510,13 @@ func (s *Scheduler) topologyGangNodeCapacity(nodeID string, usage *NodeUsage, me
 	}
 	simulated := usage.DeepCopy()
 	capacity := 0
+	// A failed fit changes neither simulated usage nor that member's inputs.
+	// Slots the job controller has not created yet are filled with the current
+	// Pod, so the same placeholder would be scored again for every remaining
+	// slot. Remember a failed Pod instead of repeating the identical work.
+	// Distinct pending Pods keep their own entry and are still evaluated,
+	// because they can have different requests and Pod context.
+	failed := make(map[*corev1.Pod]struct{}, len(members))
 	for i := range members {
 		if capacity >= limit {
 			break
@@ -513,8 +528,12 @@ func (s *Scheduler) topologyGangNodeCapacity(nodeID string, usage *NodeUsage, me
 			capacity++
 			continue
 		}
+		if _, ok := failed[member.pod]; ok {
+			continue
+		}
 		result := s.scoreNode(nodeID, simulated, member.resourceReqs, member.pod, member.nodePolicy, member.nodeAffinity, member.weights)
 		if result.err != nil || result.score == nil {
+			failed[member.pod] = struct{}{}
 			continue
 		}
 		capacity++

@@ -94,6 +94,7 @@ func topologyTestScheduler(t *testing.T, nodes []*corev1.Node) *Scheduler {
 	return scheduler
 }
 
+// topologyPod returns a Pod carrying the given topology annotations and labels.
 func topologyPod(annotations map[string]string, labels map[string]string) *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name:        "topology-pod",
@@ -222,6 +223,8 @@ func topologyPlanForTest(scheduler *Scheduler, mode string, highest int, placed 
 	}
 }
 
+// candidateNodes returns an empty device inventory for each named node, which
+// is all the pure domain and gang arithmetic tests need.
 func candidateNodes(names ...string) map[string]*NodeUsage {
 	candidates := make(map[string]*NodeUsage, len(names))
 	for _, name := range names {
@@ -875,18 +878,35 @@ var gangTestResourceName corev1.ResourceName = gangTestDeviceType + "/cores"
 
 type gangTestDevice struct{}
 
+// CommonWord returns the resource prefix of the test device.
 func (m *gangTestDevice) CommonWord() string { return gangTestDeviceType }
+
+// MutateAdmission implements device.Devices; the test device changes nothing.
 func (m *gangTestDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
 	return false, nil
 }
+
+// CheckHealth reports the test device as healthy.
 func (m *gangTestDevice) CheckHealth(_ string, _ *corev1.Node) (bool, bool) { return true, true }
-func (m *gangTestDevice) NodeCleanUp(_ string) error                        { return nil }
-func (m *gangTestDevice) GetResourceNames() device.ResourceNames            { return device.ResourceNames{} }
+
+// NodeCleanUp implements device.Devices; the test device has nothing to clean.
+func (m *gangTestDevice) NodeCleanUp(_ string) error { return nil }
+
+// GetResourceNames implements device.Devices; tests request cores directly.
+func (m *gangTestDevice) GetResourceNames() device.ResourceNames { return device.ResourceNames{} }
+
+// GetNodeDevices implements device.Devices; tests supply device usage directly.
 func (m *gangTestDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
 	return nil, nil
 }
-func (m *gangTestDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
+
+// LockNode implements device.Devices without taking a lock.
+func (m *gangTestDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+
+// ReleaseNodeLock implements device.Devices without releasing a lock.
 func (m *gangTestDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+
+// GenerateResourceRequests maps the test core limit to one device request.
 func (m *gangTestDevice) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
 	cores := ctr.Resources.Limits[gangTestResourceName]
 	if cores.IsZero() {
@@ -894,17 +914,25 @@ func (m *gangTestDevice) GenerateResourceRequests(ctr *corev1.Container) (device
 	}
 	return device.ContainerDeviceRequest{Nums: 1, Type: gangTestDeviceType, Coresreq: cores.Value()}, nil
 }
+
+// PatchAnnotations implements device.Devices; tests inspect no annotations.
 func (m *gangTestDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
 	return nil
 }
+
+// ScoreNode implements device.Devices and contributes no vendor score.
 func (m *gangTestDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
 	return 0
 }
+
+// AddResourceUsage charges the allocated cores to the simulated device.
 func (m *gangTestDevice) AddResourceUsage(_ *corev1.Pod, usage *device.DeviceUsage, allocated *device.ContainerDevice) error {
 	usage.Used++
 	usage.Usedcores += allocated.Usedcores
 	return nil
 }
+
+// Fit admits the request when one device has enough free cores.
 func (m *gangTestDevice) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	for _, usage := range devices {
 		if usage.Health && usage.Totalcore-usage.Usedcores >= request.Coresreq {
@@ -916,6 +944,8 @@ func (m *gangTestDevice) Fit(devices []*device.DeviceUsage, request device.Conta
 	return false, nil, "not enough gang-test cores"
 }
 
+// gangTestPod returns a job member whose container requests cores of the test
+// device.
 func gangTestPod(name string, cores int64) *corev1.Pod {
 	pod := topologyPod(nil, map[string]string{"job-name": "train"})
 	pod.Name = name
@@ -929,6 +959,8 @@ func gangTestPod(name string, cores int64) *corev1.Pod {
 	return pod
 }
 
+// TestTopologyGangMembersUseEachPodsRequest verifies that every gang member
+// keeps its own device request instead of inheriting the first Pod's.
 func TestTopologyGangMembersUseEachPodsRequest(t *testing.T) {
 	oldDevicesMap := device.DevicesMap
 	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })

@@ -25,10 +25,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// labeledNode returns a node carrying the given labels.
 func labeledNode(name string, labels map[string]string) *corev1.Node {
 	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
 }
 
+// annotatedNode returns a node carrying the given annotations.
 func annotatedNode(name string, annotations map[string]string) *corev1.Node {
 	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations}}
 }
@@ -49,6 +51,7 @@ func cceFabric() []*corev1.Node {
 	}
 }
 
+// cceTree builds the CCE fabric with the three standard test tiers.
 func cceTree(t *testing.T) *Tree {
 	t.Helper()
 	tiers, err := ParseTiers("test-tier-1,test-tier-2,test-tier-3")
@@ -66,6 +69,8 @@ func disjointFabric() []*corev1.Node {
 	}
 }
 
+// TestParseTiers covers tier parsing: implicit and explicit levels, annotation
+// keys, and the empty specification that disables the feature.
 func TestParseTiers(t *testing.T) {
 	tests := []struct {
 		name string
@@ -117,6 +122,8 @@ func TestParseTiers(t *testing.T) {
 	}
 }
 
+// TestParseTiersRejectsAmbiguousSpecs verifies that duplicate and malformed
+// tier specifications are errors instead of being silently collapsed.
 func TestParseTiersRejectsAmbiguousSpecs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -137,6 +144,7 @@ func TestParseTiersRejectsAmbiguousSpecs(t *testing.T) {
 	}
 }
 
+// TestBuildTreeShape checks the domain counts and tier depth of the CCE fabric.
 func TestBuildTreeShape(t *testing.T) {
 	tree := cceTree(t)
 
@@ -156,6 +164,7 @@ func TestBuildTreeShape(t *testing.T) {
 	assert.Len(t, tree.HyperNodes()[0].Nodes, 2)
 }
 
+// TestTierOf checks the lowest common ancestor tier reported for node pairs.
 func TestTierOf(t *testing.T) {
 	tree := cceTree(t)
 
@@ -181,6 +190,8 @@ func TestTierOf(t *testing.T) {
 	}
 }
 
+// TestBuildTruncatesMissingLevels verifies that a node missing a tier is not
+// guessed into the domains above the first missing value.
 func TestBuildTruncatesMissingLevels(t *testing.T) {
 	nodes := append(cceFabric(),
 		labeledNode("leaf-only", map[string]string{"test-tier-1": "HyperNode2"}),
@@ -198,6 +209,8 @@ func TestBuildTruncatesMissingLevels(t *testing.T) {
 	assert.Equal(t, 0, tree.TierOf("unlabeled", "unlabeled"))
 }
 
+// TestBuildReadsTierValuesFromAnnotations verifies that @-prefixed tiers read
+// their values from node annotations.
 func TestBuildReadsTierValuesFromAnnotations(t *testing.T) {
 	nodes := []*corev1.Node{
 		annotatedNode("node0", map[string]string{"hami.io/npu-super-pod-id": "pod-a"}),
@@ -215,6 +228,8 @@ func TestBuildReadsTierValuesFromAnnotations(t *testing.T) {
 	assert.Equal(t, 2, tree.TierOf("node0", "node2"))
 }
 
+// TestLCAUsesTheDeepestSharedDomain checks that LCA returns the deepest domain
+// two nodes really share, even when the wiring is inconsistent.
 func TestLCAUsesTheDeepestSharedDomain(t *testing.T) {
 	// A tier 1 domain whose members are labeled with two different tier 2
 	// domains is an ill-formed wiring, but the tree must still answer with the
@@ -233,6 +248,8 @@ func TestLCAUsesTheDeepestSharedDomain(t *testing.T) {
 	assert.Equal(t, []string{"node0", "node1"}, tree.HyperNodes()[0].Nodes)
 }
 
+// TestCheckCandidate covers the hard tier limit against the members already
+// placed, including unknown candidates and unknown placed members.
 func TestCheckCandidate(t *testing.T) {
 	tree := cceTree(t)
 
@@ -318,6 +335,8 @@ func TestCheckCandidate(t *testing.T) {
 	}
 }
 
+// TestCheckCandidateWithoutCommonDomain verifies that nodes sharing no domain
+// are rejected by a finite tier limit and score no locality.
 func TestCheckCandidateWithoutCommonDomain(t *testing.T) {
 	tiers, err := ParseTiers("test-tier-1,test-tier-2,test-tier-3")
 	require.NoError(t, err)
@@ -332,6 +351,7 @@ func TestCheckCandidateWithoutCommonDomain(t *testing.T) {
 	assert.Zero(t, tree.Locality("node0", []string{"node8"}))
 }
 
+// TestLocality checks the locality fraction used by the topology scorer.
 func TestLocality(t *testing.T) {
 	tree := cceTree(t)
 
@@ -368,6 +388,7 @@ func TestLocality(t *testing.T) {
 	}
 }
 
+// TestNilTreeIsInert verifies that a nil tree never constrains or scores.
 func TestNilTreeIsInert(t *testing.T) {
 	var tree *Tree
 

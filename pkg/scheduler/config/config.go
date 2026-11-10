@@ -89,9 +89,10 @@ var (
 	TopologyMode = util.TopologyModeSoft
 
 	// TopologyScoreWeight scales the locality bonus the NPU topology scorer adds
-	// to the score of a node. The base score of a node is util.Weight per device
-	// dimension, so the default keeps topology a preference that a much better
-	// device fit can still outweigh.
+	// to the score of a node. The base device score is util.Weight per device
+	// dimension, so the default, DefaultTopologyScoreWeight, outweighs the
+	// device-fit difference of one dimension while a large difference across
+	// all three dimensions can still win.
 	TopologyScoreWeight float32
 
 	// NodeLockTimeout is the timeout for node locks.
@@ -118,9 +119,11 @@ var (
 	DevicePluginServiceAccount string
 )
 
-// DefaultTopologyScoreWeight is the default TopologyScoreWeight. It is larger
-// than util.Weight so that keeping a job inside one domain outranks the device
-// fit of any single node, which is the point of topology aware scheduling.
+// DefaultTopologyScoreWeight is the default TopologyScoreWeight. At twice
+// util.Weight it makes the locality bonus outweigh the device-fit difference
+// of one dimension, which is where topology aware scheduling should matter;
+// the base score spans three dimensions, so an overall much better fit can
+// still win.
 const DefaultTopologyScoreWeight float32 = 20
 
 type Config struct {
