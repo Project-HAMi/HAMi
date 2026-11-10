@@ -830,6 +830,18 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 		assert.Len(t, domains, 2, "gang-b and switch-1 both fit the gang")
 	})
 
+	t.Run("a pinned member cannot be displaced from its anchor", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 1),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Equal(t, map[string]struct{}{"gang-b": {}}, feasible,
+			"only the anchor that leaves member 1 a node can be feasible")
+		assert.Len(t, domains, 1)
+	})
+
 	t.Run("a member counted on two nodes cannot satisfy the gang", func(t *testing.T) {
 		assignments := map[string]topologyGangNodeFit{
 			"gang-a": gangNodeFit([]int{0}, 1),

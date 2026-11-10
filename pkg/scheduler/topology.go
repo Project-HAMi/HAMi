@@ -828,6 +828,10 @@ func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDom
 				return true
 			}
 			for _, displaced := range slices.Clone(assigned[nodeID]) {
+				if pinnedNode != "" && displaced == 0 {
+					// Member 0 is the current Pod. It must stay on the anchor.
+					continue
+				}
 				if !assign(displaced, visited) {
 					continue
 				}
