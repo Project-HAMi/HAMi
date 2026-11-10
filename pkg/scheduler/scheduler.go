@@ -1323,6 +1323,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(err)
 	}
 
+	s.GetAllocationMetrics().ObserveAllocation("bind", s.podAllocationType(current))
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
