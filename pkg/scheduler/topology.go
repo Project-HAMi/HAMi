@@ -577,6 +577,41 @@ func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, 
 	return fit
 }
 
+// topologyGangNodeSetFits re-simulates one concrete assignment on a node. The
+// greedy capacity count is useful for pruning, but a heterogeneous match can
+// assign a different subset whose combined request does not fit. Verifying the
+// actual set keeps hard mode all-or-nothing.
+func (s *Scheduler) topologyGangNodeSetFits(nodeID string, usage *NodeUsage, members []topologyGangMember, assigned []int) bool {
+	if usage == nil {
+		return false
+	}
+	seen := make(map[int]struct{}, len(assigned))
+	for _, index := range assigned {
+		if index < 0 || index >= len(members) {
+			return false
+		}
+		if _, duplicate := seen[index]; duplicate {
+			return false
+		}
+		seen[index] = struct{}{}
+		if len(assigned) > 1 && members[index].distinct {
+			return false
+		}
+	}
+	simulated := usage.DeepCopy()
+	for _, index := range assigned {
+		member := &members[index]
+		if len(member.resourceReqs) == 0 {
+			continue
+		}
+		result := s.scoreNode(nodeID, simulated, member.resourceReqs, member.pod, member.nodePolicy, member.nodeAffinity, member.weights)
+		if result.err != nil || result.score == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // applyTopologyGangFilter enforces all-or-nothing placement for a gang whose
 // members must share one allowed topology domain. The incremental hard filter
 // only looks at members that are already placed, so without this check the
@@ -614,7 +649,10 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 		assignments[nodeID] = s.topologyGangNodeAssignment(nodeID, usage, members, plan.placed)
 	}
 
-	feasible, fittingDomains := topologyGangFeasibleNodes(tree, *nodes, assignments, plan.placed, plan.highest, remaining)
+	feasible, fittingDomains := topologyGangFeasibleNodes(tree, *nodes, assignments, plan.placed, plan.highest, remaining,
+		func(nodeID string, assigned []int) bool {
+			return s.topologyGangNodeSetFits(nodeID, (*nodes)[nodeID], members, assigned)
+		})
 	for _, domain := range fittingDomains {
 		klog.V(4).InfoS("NPU topology gang domain fits", "pod", klog.KObj(task), "group", plan.group,
 			"domain", domain, "remaining", remaining)
@@ -661,11 +699,15 @@ func (s *Scheduler) applyTopologyGangFilter(plan *topologyPlan, task *corev1.Pod
 // not automatically preferred: the result is a union, and a node survives when
 // any allowed domain can hold the gang. The hard tier filter that runs next
 // still rejects a node that is too far from the members already placed.
-func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeUsage, assignments map[string]topologyGangNodeFit, placed []string, highest, remaining int) (map[string]struct{}, []string) {
+func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeUsage, assignments map[string]topologyGangNodeFit, placed []string, highest, remaining int, verifiers ...func(string, []int) bool) (map[string]struct{}, []string) {
 	feasible := make(map[string]struct{})
 	var fittingDomains []string
 	if tree == nil || remaining <= 0 {
 		return feasible, nil
+	}
+	var verify func(string, []int) bool
+	if len(verifiers) > 0 {
+		verify = verifiers[0]
 	}
 	highest = min(highest, tree.MaxTier())
 	for level := 0; level <= highest; level++ {
@@ -681,17 +723,28 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 			if !topologyGangDomainContainsPlaced(tree, domain, level, placed) {
 				continue
 			}
-			fits := false
+			domainFits := topologyGangBuildDomainFits(assignments, domainNodes, remaining)
+			// An unpinned match is a necessary condition: when even the
+			// whole domain cannot place every member, no anchor in it can.
+			if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, "", remaining); !ok {
+				continue
+			}
+			hasAnchor := false
 			for _, nodeID := range domainNodes {
-				if !slices.Contains(assignments[nodeID].admits, 0) {
+				if !domainFits[nodeID].admits[0] {
 					continue
 				}
-				if topologyGangDomainCanAssign(assignments, domainNodes, nodeID, remaining) {
-					feasible[nodeID] = struct{}{}
-					fits = true
+				assigned, ok := topologyGangDomainCanAssign(domainNodes, domainFits, nodeID, remaining)
+				if !ok {
+					continue
 				}
+				if verify != nil && !topologyGangAssignmentFits(assigned, verify) {
+					continue
+				}
+				feasible[nodeID] = struct{}{}
+				hasAnchor = true
 			}
-			if fits {
+			if hasAnchor {
 				fittingDomains = append(fittingDomains, domain.String())
 			}
 		}
@@ -699,34 +752,77 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 	return feasible, fittingDomains
 }
 
-// topologyGangDomainCanAssign reports whether every remaining member other than
-// the current Pod can be placed in the domain after member 0 is pinned to
-// pinnedNode. Reserving that slot first is required when one node admits several
-// members individually but can only host one of them, otherwise member 0 would
-// be counted there and again in the sibling matching. Each node may host at
-// most the members its shared-usage simulation admitted, and an augmenting-path
-// match lets a member displace another member from a node that is already full.
-func topologyGangDomainCanAssign(assignments map[string]topologyGangNodeFit, nodes []string, pinnedNode string, remaining int) bool {
-	pinned := assignments[pinnedNode]
-	if remaining <= 0 || pinned.capacity == 0 || !slices.Contains(pinned.admits, 0) {
-		return false
+// topologyGangDomainFit is the per-domain form of topologyGangNodeFit. The
+// admission flags are built once per domain so matching does not repeatedly
+// scan the original member index slices.
+type topologyGangDomainFit struct {
+	admits   []bool
+	capacity int
+}
+
+func topologyGangBuildDomainFits(assignments map[string]topologyGangNodeFit, nodes []string, members int) map[string]topologyGangDomainFit {
+	fits := make(map[string]topologyGangDomainFit, len(nodes))
+	for _, nodeID := range nodes {
+		nodeFit := assignments[nodeID]
+		admits := make([]bool, members)
+		for _, member := range nodeFit.admits {
+			if member >= 0 && member < members {
+				admits[member] = true
+			}
+		}
+		fits[nodeID] = topologyGangDomainFit{admits: admits, capacity: nodeFit.capacity}
 	}
-	if remaining == 1 {
-		return true
+	return fits
+}
+
+// topologyGangAssignmentFits re-simulates every node assignment produced by the
+// capacity matching. capacity is only a greedy count, so a heterogeneous match
+// must not be accepted until its concrete member set has been checked.
+func topologyGangAssignmentFits(assigned map[string][]int, verify func(string, []int) bool) bool {
+	for nodeID, members := range assigned {
+		if !verify(nodeID, members) {
+			return false
+		}
 	}
+	return true
+}
+
+// topologyGangDomainCanAssign returns the member assignment for a domain. An
+// empty pinnedNode performs the unpinned feasibility check. A non-empty one
+// reserves member 0 on that node first, then matches the remaining members.
+// Each node may host at most the number of members its shared-usage simulation
+// admitted, and an augmenting path lets a member displace another member from a
+// node that is already full.
+func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int) (map[string][]int, bool) {
+	if remaining <= 0 {
+		return nil, false
+	}
+	assigned := make(map[string][]int, len(nodes))
 	capacity := make(map[string]int, len(nodes))
 	for _, nodeID := range nodes {
-		capacity[nodeID] = assignments[nodeID].capacity
+		capacity[nodeID] = fits[nodeID].capacity
 	}
-	capacity[pinnedNode]--
-	assigned := make(map[string][]int, len(nodes))
-	var assign func(member int, visited map[string]bool) bool
-	assign = func(member int, visited map[string]bool) bool {
-		for _, nodeID := range nodes {
-			if visited[nodeID] || !slices.Contains(assignments[nodeID].admits, member) {
+	start := 0
+	if pinnedNode != "" {
+		pinned, ok := fits[pinnedNode]
+		if !ok || pinned.capacity == 0 || !pinned.admits[0] {
+			return nil, false
+		}
+		assigned[pinnedNode] = []int{0}
+		capacity[pinnedNode]--
+		start = 1
+	}
+	if remaining == 1 && pinnedNode != "" {
+		return assigned, true
+	}
+	var assign func(member int, visited []bool) bool
+	assign = func(member int, visited []bool) bool {
+		for index, nodeID := range nodes {
+			nodeFit := fits[nodeID]
+			if visited[index] || member >= len(nodeFit.admits) || !nodeFit.admits[member] {
 				continue
 			}
-			visited[nodeID] = true
+			visited[index] = true
 			if len(assigned[nodeID]) < capacity[nodeID] {
 				assigned[nodeID] = append(assigned[nodeID], member)
 				return true
@@ -744,12 +840,12 @@ func topologyGangDomainCanAssign(assignments map[string]topologyGangNodeFit, nod
 		}
 		return false
 	}
-	for member := 1; member < remaining; member++ {
-		if !assign(member, make(map[string]bool, len(nodes))) {
-			return false
+	for member := start; member < remaining; member++ {
+		if !assign(member, make([]bool, len(nodes))) {
+			return nil, false
 		}
 	}
-	return true
+	return assigned, true
 }
 
 // applyTopologyScore ranks the fitting nodes by how close they are to the nodes

@@ -827,7 +827,7 @@ func TestTopologyGangFeasibleNodes(t *testing.T) {
 		assert.Contains(t, feasible, "gang-a")
 		assert.Contains(t, feasible, "gang-b")
 		assert.NotContains(t, feasible, "gang-c")
-		assert.Len(t, domains, 1, "only switch-1 has two slots")
+		assert.Len(t, domains, 2, "gang-b and switch-1 both fit the gang")
 	})
 
 	t.Run("a member counted on two nodes cannot satisfy the gang", func(t *testing.T) {
@@ -1149,6 +1149,61 @@ func TestTopologyGangFilterSeparatesHeterogeneousMembers(t *testing.T) {
 
 	assert.Len(t, nodes, 2)
 	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterRejectsHeterogeneousOvercommit verifies that matching
+// by per-node capacity alone cannot admit a gang whose concrete member sets
+// exceed the device resources. Each 100-core node individually admits every
+// member and greedily fits two 10-core members, but 10/10/95/95 cannot be
+// partitioned across two nodes.
+func TestTopologyGangFilterRejectsHeterogeneousOvercommit(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 10)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 4,
+		pending: []*corev1.Pod{
+			gangTestPod("train-1", 10),
+			gangTestPod("train-2", 95),
+			gangTestPod("train-3", 95),
+		},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Empty(t, nodes)
+	assert.Len(t, failedNodes, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		assert.Equal(t, 1, common.ParseReason(failedNodes[nodeName])[common.GangTopologyNotFit])
+	}
 }
 
 // TestTopologyGangFilterUsesDistinctNodes verifies that hostname anti-affinity
