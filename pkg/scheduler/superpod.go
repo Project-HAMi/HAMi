@@ -178,7 +178,7 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 	// Rack counting runs after rejectNodesBySuperpod so only surviving nodes
 	// are counted, avoiding bias from nodes that fail the capacity check.
 	if !taskAnchored {
-		s.collectRackNodeCounts(ctx, task, nodes, ctx.podRequest)
+		s.collectRackSlotCounts(ctx, task, nodes, ctx.podRequest)
 	}
 
 	klog.V(2).InfoS("Superpod filter applied",
@@ -246,12 +246,15 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 	return rejected
 }
 
-// collectRackNodeCounts accumulates, per superpod, the total remaining device
+// collectRackSlotCounts accumulates, per superpod, the total remaining device
 // slots each rack holds, for first-pod rack preference. Only nodes that can
 // hold the current pod's single-pod request contribute their nodeUsableSlots.
 // podRequest is passed in to avoid recomputing.
-func (s *Scheduler) collectRackNodeCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) {
+func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) {
 	for nodeID, node := range *nodes {
+		if node == nil || node.Node == nil {
+			continue
+		}
 		spid, ok := node.Node.Labels[util.SuperPodIDLabel]
 		if !ok || spid == "" {
 			continue
@@ -284,6 +287,9 @@ func (s *Scheduler) collectRackNodeCounts(ctx *superpodContext, task *corev1.Pod
 // nodeUsableSlots returns the total available device slots on a node by
 // summing Count - Used across all healthy devices.
 func nodeUsableSlots(node *NodeUsage) int64 {
+	if node == nil {
+		return 0
+	}
 	var total int64
 	for _, ds := range node.Devices.DeviceLists {
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
@@ -302,6 +308,9 @@ func nodeUsableSlots(node *NodeUsage) int64 {
 // all HAMi backends. App container requests are summed, init container
 // requests take the running-max, and the larger of the two wins.
 func singleSuperpodPodRequest(pod *corev1.Pod) (int64, error) {
+	if pod == nil {
+		return 0, nil
+	}
 	counts, err := device.Resourcereqs(pod)
 	if err != nil {
 		return 0, err
