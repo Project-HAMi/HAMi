@@ -417,18 +417,21 @@ func normalizeSchedulerPolicy(policy string) string {
 	return strings.Join(parts, ",")
 }
 
-// IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
-// policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
-// single name is meaningful here. The value is trimmed before it is compared,
-// so surrounding whitespace is read the same way IsValidGPUSchedulerPolicy
-// reads it.
+// IsValidNodeSchedulerPolicy reports whether policy names node scheduling
+// policies HAMi recognizes. The value is read as a comma-separated ordered
+// list, matching the node sort-key chain and superpod filter.
 func IsValidNodeSchedulerPolicy(policy string) bool {
-	switch SchedulerPolicyName(strings.TrimSpace(policy)) {
-	case NodeSchedulerPolicyBinpack, NodeSchedulerPolicySpread:
-		return true
-	default:
+	if strings.TrimSpace(policy) == "" {
 		return false
 	}
+	for p := range strings.SplitSeq(policy, ",") {
+		switch SchedulerPolicyName(strings.TrimSpace(p)) {
+		case NodeSchedulerPolicyBinpack, NodeSchedulerPolicySpread, NodeSchedulerPolicySuperpod:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // SchedulerPolicyAnnotationError reports a scheduler-policy annotation HAMi
@@ -445,7 +448,7 @@ func SchedulerPolicyAnnotationError(pod *corev1.Pod) error {
 			GPUSchedulerPolicyAnnotationKey, value)
 	}
 	if value, ok := pod.Annotations[NodeSchedulerPolicyAnnotationKey]; ok && !IsValidNodeSchedulerPolicy(value) {
-		return fmt.Errorf("invalid %s annotation %q: expected binpack or spread",
+		return fmt.Errorf("invalid %s annotation %q: expected binpack, spread, superpod, or a comma-separated chain of them",
 			NodeSchedulerPolicyAnnotationKey, value)
 	}
 	return nil

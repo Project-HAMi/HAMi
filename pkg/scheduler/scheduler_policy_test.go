@@ -158,7 +158,7 @@ func TestPlacementUnderUnrecognizedPolicy(t *testing.T) {
 
 // TestResolveNodeSchedulerPolicy covers the node-policy half of the change,
 // which the placement test above does not reach: an annotation replaces the
-// configured policy only when it names a policy NodeScoreList.Less handles.
+// configured policy only when it names valid node-policy tokens.
 func TestResolveNodeSchedulerPolicy(t *testing.T) {
 	original := config.NodeSchedulerPolicy
 	t.Cleanup(func() { config.NodeSchedulerPolicy = original })
@@ -192,9 +192,10 @@ func TestResolveNodeSchedulerPolicy(t *testing.T) {
 		}{
 			{"valid value overrides the configured policy", withPolicy(override), override},
 			{"surrounding whitespace is trimmed off an accepted value", withPolicy(" " + override + " "), override},
+			{"sort-key chain is accepted", withPolicy("binpack,spread"), "binpack,spread"},
+			{"superpod filter and sort key are accepted", withPolicy("superpod,binpack"), "superpod,binpack"},
 			{"unrecognized value keeps the configured policy", withPolicy("spraed"), clusterDefault},
 			{"empty value keeps the configured policy", withPolicy(""), clusterDefault},
-			{"chain form is not a node policy", withPolicy("binpack,spread"), clusterDefault},
 			{"gpu-only policy is not a node policy", withPolicy("numa"), clusterDefault},
 			{"unrelated annotation is ignored", map[string]string{"hami.io/unrelated": "spread"}, clusterDefault},
 			{"no annotations at all", nil, clusterDefault},

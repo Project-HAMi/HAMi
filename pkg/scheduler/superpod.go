@@ -381,7 +381,7 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 		"ownerKind", owner.Kind, "ownerName", owner.Name)
 	switch owner.Kind {
 	case "ReplicaSet":
-		if rs, err := s.kubeClient.AppsV1().ReplicaSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && rs != nil && rs.Spec.Replicas != nil {
+		if rs, err := s.kubeClient.AppsV1().ReplicaSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && rs != nil && rs.Spec.Replicas != nil && *rs.Spec.Replicas > 0 {
 			request, err := singleSuperpodPodRequest(task)
 			if err != nil {
 				return 0, false, err
@@ -389,7 +389,7 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return request * int64(*rs.Spec.Replicas), true, nil
 		}
 	case "StatefulSet":
-		if sts, err := s.kubeClient.AppsV1().StatefulSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && sts != nil && sts.Spec.Replicas != nil {
+		if sts, err := s.kubeClient.AppsV1().StatefulSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && sts != nil && sts.Spec.Replicas != nil && *sts.Spec.Replicas > 0 {
 			request, err := singleSuperpodPodRequest(task)
 			if err != nil {
 				return 0, false, err
@@ -397,7 +397,7 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return request * int64(*sts.Spec.Replicas), true, nil
 		}
 	case "Job":
-		if job, err := s.kubeClient.BatchV1().Jobs(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && job != nil && job.Spec.Parallelism != nil {
+		if job, err := s.kubeClient.BatchV1().Jobs(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{}); err == nil && job != nil && job.Spec.Parallelism != nil && *job.Spec.Parallelism > 0 {
 			request, err := singleSuperpodPodRequest(task)
 			if err != nil {
 				return 0, false, err

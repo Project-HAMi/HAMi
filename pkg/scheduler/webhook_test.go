@@ -1400,8 +1400,18 @@ func TestHandleSchedulerPolicyAnnotation(t *testing.T) {
 			wantMessage: util.GPUSchedulerPolicyAnnotationKey,
 		},
 		{
-			name:        "node policy chain is denied",
+			name:        "node policy chain is admitted",
 			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "binpack,spread"},
+			hasResource: true,
+		},
+		{
+			name:        "superpod and binpack chain is admitted",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "superpod,binpack"},
+			hasResource: true,
+		},
+		{
+			name:        "unknown node policy is denied",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "binpack,unknown"},
 			hasResource: true,
 			wantDenied:  true,
 			wantMessage: util.NodeSchedulerPolicyAnnotationKey,
@@ -1445,6 +1455,86 @@ func TestHandleSchedulerPolicyAnnotation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInjectSuperpodAffinity(t *testing.T) {
+	newPod := func(policy string, labels map[string]string, affinity *corev1.Affinity) *corev1.Pod {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec:       corev1.PodSpec{Affinity: affinity},
+		}
+		if policy != "" {
+			pod.Annotations = map[string]string{util.NodeSchedulerPolicyAnnotationKey: policy}
+		}
+		return pod
+	}
+
+	t.Run("inactive policy leaves affinity unchanged", func(t *testing.T) {
+		pod := newPod("binpack", map[string]string{util.TaskIDLabel: "task-1"}, nil)
+		injectSuperpodAffinity(pod)
+		if pod.Spec.Affinity != nil {
+			t.Fatalf("unexpected affinity: %#v", pod.Spec.Affinity)
+		}
+	})
+
+	t.Run("missing task id leaves affinity unchanged", func(t *testing.T) {
+		pod := newPod("superpod", nil, nil)
+		injectSuperpodAffinity(pod)
+		if pod.Spec.Affinity != nil {
+			t.Fatalf("unexpected affinity: %#v", pod.Spec.Affinity)
+		}
+	})
+
+	t.Run("creates required affinity for task", func(t *testing.T) {
+		pod := newPod("binpack,superpod", map[string]string{util.TaskIDLabel: "task-1"}, nil)
+		injectSuperpodAffinity(pod)
+		if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAffinity == nil {
+			t.Fatal("expected pod affinity to be initialized")
+		}
+		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 1 {
+			t.Fatalf("got %d required terms, want 1", len(terms))
+		}
+		if terms[0].TopologyKey != util.SuperPodIDLabel {
+			t.Fatalf("topology key = %q, want %q", terms[0].TopologyKey, util.SuperPodIDLabel)
+		}
+		if got := terms[0].LabelSelector.MatchLabels[util.TaskIDLabel]; got != "task-1" {
+			t.Fatalf("task selector = %q, want task-1", got)
+		}
+	})
+
+	t.Run("preserves unrelated terms and does not duplicate superpod term", func(t *testing.T) {
+		userTerm := corev1.PodAffinityTerm{TopologyKey: "zone"}
+		pod := newPod("superpod", map[string]string{util.TaskIDLabel: "task-1"}, &corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{userTerm},
+			},
+		})
+		injectSuperpodAffinity(pod)
+		injectSuperpodAffinity(pod)
+
+		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 2 {
+			t.Fatalf("got %d required terms, want existing term plus one superpod term", len(terms))
+		}
+		if terms[0].TopologyKey != userTerm.TopologyKey || terms[1].TopologyKey != util.SuperPodIDLabel {
+			t.Fatalf("unexpected required terms: %#v", terms)
+		}
+	})
+
+	t.Run("existing superpod term is not overwritten", func(t *testing.T) {
+		existing := corev1.PodAffinityTerm{TopologyKey: util.SuperPodIDLabel}
+		pod := newPod("superpod", map[string]string{util.TaskIDLabel: "task-1"}, &corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{existing},
+			},
+		})
+		injectSuperpodAffinity(pod)
+		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 1 || terms[0].LabelSelector != nil {
+			t.Fatalf("existing user-managed term was changed: %#v", terms)
+		}
+	})
 }
 
 func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
