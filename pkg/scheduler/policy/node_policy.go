@@ -63,6 +63,7 @@ func (l NodeScoreList) Less(i, j int) bool {
 	// default policy is Binpack
 	return l.NodeList[i].Score < l.NodeList[j].Score
 }
+
 // nodeSortKeyOrder lists the recognized node sort-key policies, in the
 // priority used when a caller-supplied chain doesn't disambiguate them
 // further.
@@ -70,6 +71,7 @@ var nodeSortKeyOrder = []util.SchedulerPolicyName{
 	util.NodeSchedulerPolicyBinpack,
 	util.NodeSchedulerPolicySpread,
 }
+
 // nodeSortKeyChain parses policy as a comma-separated ordered list and
 // returns the sort-key policies (binpack/spread) it names, in the order
 // written, deduplicated. superpod is a filter consumed via
@@ -89,6 +91,7 @@ func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
 	}
 	return chain
 }
+
 // lessByChain compares nodes i and j by the ordered sort-key chain parsed
 // from l.Policy, falling back to binpack (today's default node policy)
 // when the comma list names no recognized sort key (e.g. "superpod").

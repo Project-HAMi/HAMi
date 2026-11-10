@@ -97,7 +97,7 @@ const (
 	// reconciles the scheduler-selected GPU with the NUMA-aligned replica
 	// preferred by kubelet's Topology Manager. See NumaAlignmentMode.
 	NumaAlignmentAnnotationKey = "hami.io/numa-alignment"
-	
+
 	// TaskIDLabel groups pods of the same logical task for superpod convergence.
 	TaskIDLabel = "hami.io/taskid"
 	// SuperPodIDLabel is the node label identifying the superpod, usable as podAffinity topologyKey.

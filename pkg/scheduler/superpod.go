@@ -295,10 +295,7 @@ func nodeUsableSlots(node *NodeUsage) int64 {
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
 			continue
 		}
-		avail := int64(ds.Device.Count - ds.Device.Used)
-		if avail < 0 {
-			avail = 0
-		}
+		avail := max(ds.Device.Count-ds.Device.Used, 0)
 		total += avail
 	}
 	return total
@@ -321,7 +318,7 @@ func singleSuperpodPodRequest(pod *corev1.Pod) (int64, error) {
 		var containerReq int64
 		for _, r := range reqMap {
 			if r.Nums > 0 {
-				containerReq += int64(r.Nums)
+				containerReq += r.Nums
 			}
 		}
 		if i < initCnt {
@@ -443,8 +440,7 @@ func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) 
 				"taskid", taskid, "totalRequest", total)
 			return total, nil
 		} else if resolveErr != nil {
-			var invalidRequest *device.ErrInvalidDeviceRequest
-			if errors.As(resolveErr, &invalidRequest) {
+			if _, ok := errors.AsType[*device.ErrInvalidDeviceRequest](resolveErr); ok {
 				return 0, resolveErr
 			}
 			klog.V(4).ErrorS(resolveErr, "Superpod total request: failed to resolve task's ReplicaSets",
