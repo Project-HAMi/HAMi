@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -139,4 +140,102 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// it parks register() inside node listing so the test can change leadership
+// while register() holds the scheduler lock.
+type blockingNodeLister struct {
+	listerscorev1.NodeLister
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (l *blockingNodeLister) List(selector labels.Selector) ([]*corev1.Node, error) {
+	close(l.entered)
+	<-l.release
+	return l.NodeLister.List(selector)
+}
+
+func newLeaderTestScheduler(t *testing.T) (*Scheduler, listerscorev1.NodeLister) {
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = nil })
+	previousDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = previousDevices })
+
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	nodeLister := informerFactory.Core().V1().Nodes().Lister()
+	s.nodeLister = nodeLister
+
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}))
+	device.DevicesMap = map[string]device.Devices{
+		nvidia.NvidiaGPUDevice: device.GetDevices()[nvidia.NvidiaGPUDevice],
+	}
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node-0",
+			Annotations: map[string]string{
+				nvidia.RegisterAnnos: `[{"id":"GPU-0","count":10,"devmem":40960,"devcore":100,"type":"NVIDIA","health":true,"mode":"hami-core","numa":0,"index":0,"devicevendor":"NVIDIA"}]`,
+			},
+		},
+	}
+	node.Status.Allocatable = corev1.ResourceList{"hami.io/gpu": resource.MustParse("1")}
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+	return s, nodeLister
+}
+
+// register() checks IsLeader() on entry and stores synced=true when it finishes,
+// so OnStoppedLeading has to wait for it.
+func Test_register_LeadershipLostDuringRegister(t *testing.T) {
+	s, nodeLister := newLeaderTestScheduler(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.nodeLister = &blockingNodeLister{
+		NodeLister: nodeLister,
+		entered:    entered,
+		release:    release,
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		s.register(labels.Everything())
+	})
+	<-entered
+
+	stopped := make(chan struct{})
+	wg.Go(func() {
+		s.onStoppedLeading()
+		close(stopped)
+	})
+	select {
+	case <-stopped:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	wg.Wait()
+	require.False(t, s.IsSynced())
+}
+
+// a replica that loses the lease must stop serving the node usage snapshot it
+// built as leader, because followers never run register() and the snapshot
+// would be exported unchanged on /metrics.
+func Test_onStoppedLeading_ClearsNodeUsage(t *testing.T) {
+	s, _ := newLeaderTestScheduler(t)
+	s.register(labels.Everything())
+	require.True(t, s.IsSynced())
+	require.Contains(t, *s.InspectAllNodesUsage(), "gpu-node-0")
+	s.onStoppedLeading()
+	require.False(t, s.IsSynced())
+	require.Empty(t, *s.InspectAllNodesUsage())
 }

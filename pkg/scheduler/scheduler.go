@@ -128,14 +128,19 @@ func NewScheduler() *Scheduler {
 				default:
 				}
 			},
-			OnStoppedLeading: func() {
-				s.synced.Store(false)
-			},
+			OnStoppedLeading: s.onStoppedLeading,
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) onStoppedLeading() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.overviewstatus = make(map[string]*NodeUsage)
+	s.synced.Store(false)
 }
 
 func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
