@@ -128,14 +128,19 @@ func NewScheduler() *Scheduler {
 				default:
 				}
 			},
-			OnStoppedLeading: func() {
-				s.synced.Store(false)
-			},
+			OnStoppedLeading: s.onStoppedLeading,
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) onStoppedLeading() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.overviewstatus = make(map[string]*NodeUsage)
+	s.synced.Store(false)
 }
 
 func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
@@ -785,12 +790,15 @@ func (s *Scheduler) updateSchedulerLabel() {
 // It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
 // without contending on the scheduler's write lock during cache refreshes.
 func (s *Scheduler) IsSynced() bool {
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		return false
+	}
 	return s.synced.Load()
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		return s.synced.Load(), nil
+		return s.IsSynced(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
@@ -804,6 +812,11 @@ func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		empty := make(map[string]*NodeUsage)
+		return &empty
+	}
 
 	snapshot := make(map[string]*NodeUsage, len(s.overviewstatus))
 	for nodeID, usage := range s.overviewstatus {

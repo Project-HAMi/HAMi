@@ -42,12 +42,16 @@ type fakeMetricsProvider struct {
 	nodeUsage    map[string]*schedulerpkg.NodeUsage
 	quotaManager *device.QuotaManager
 	podManager   *device.PodManager
-	isLeader     bool
+	isLeader     *bool
 	isSynced     bool
 	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
+	if f.isLeader != nil && !*f.isLeader {
+		empty := make(map[string]*schedulerpkg.NodeUsage)
+		return &empty
+	}
 	return &f.nodeUsage
 }
 
@@ -60,7 +64,11 @@ func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 }
 
 func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
-	return leaderelection.NewDummyLeaderManager(f.isLeader)
+	leader := true
+	if f.isLeader != nil {
+		leader = *f.isLeader
+	}
+	return leaderelection.NewDummyLeaderManager(leader)
 }
 
 func (f *fakeMetricsProvider) IsSynced() bool {
@@ -801,7 +809,7 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
 				quotaManager: device.NewQuotaManager(),
 				podManager:   device.NewPodManager(),
-				isLeader:     tc.isLeader,
+				isLeader:     &tc.isLeader,
 				isSynced:     tc.isSynced,
 			}
 			cc := ClusterManagerCollector{
@@ -818,6 +826,82 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
 		})
+	}
+}
+
+// When the scheduler is not the leader, cluster usage metrics (node, quota,
+// container, remote GPU) are not exported, only scheduler state and outcome
+// metrics are emitted.
+func TestClusterManagerCollector_NonLeaderSkipsClusterMetrics(t *testing.T) {
+	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
+	isLeader := false
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-1",
+							Totalmem:  8192,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+						},
+					},
+				},
+			},
+		},
+	}
+	qm := device.NewQuotaManager()
+	qm.Quotas["ns"] = &device.DeviceQuota{
+		"hami.io/gpu": &device.Quota{Used: 1, Limit: 1, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "ns") })
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "ns",
+			UID:       k8stypes.UID("uid-1"),
+		},
+	}
+	pm.AddPod(pod, "node-1", device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			device.ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 4096, Usedcores: 50}},
+		},
+	})
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    nodeUsage,
+		quotaManager: qm,
+		podManager:   pm,
+		isLeader:     &isLeader,
+		isSynced:     true,
+	}
+	cc := ClusterManagerCollector{
+		ClusterManager:  c,
+		metricsProvider: provider,
+	}
+
+	// Verify scheduler state metric reports non-leader.
+	if err := promtestutil.CollectAndCompare(
+		cc,
+		strings.NewReader(wantStr(0, 1)),
+		"hami_scheduler_is_leader",
+		"hami_scheduler_cache_synced",
+	); err != nil {
+		t.Fatalf("unexpected state metrics: %v", err)
+	}
+
+	// Verify cluster usage metrics are not exported.
+	ch := make(chan prometheus.Metric, 50)
+	cc.Collect(ch)
+	close(ch)
+	for m := range ch {
+		desc := m.Desc().String()
+		if strings.Contains(desc, "hami_node_") || strings.Contains(desc, "hami_resource_quota_") ||
+			strings.Contains(desc, "hami_vgpu_") || strings.Contains(desc, "hami_remote_gpu_") {
+			t.Errorf("unexpected metric collected on follower: %s", desc)
+		}
 	}
 }
 
