@@ -738,19 +738,7 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 	}
 	var verify func(string, []int) bool
 	if len(verifiers) > 0 {
-		inner := verifiers[0]
-		cache := make(map[string]bool)
-		verify = func(nodeID string, members []int) bool {
-			canonical := slices.Clone(members)
-			slices.Sort(canonical)
-			key := topologyGangMemberSetKey(nodeID, canonical)
-			if result, seen := cache[key]; seen {
-				return result
-			}
-			result := inner(nodeID, canonical)
-			cache[key] = result
-			return result
-		}
+		verify = topologyGangMemoizedVerifier(verifiers[0])
 	}
 	// One budget covers the unpinned check and every anchor in this filter
 	// call, so a wide domain cannot multiply the fallback search by its nodes.
@@ -792,6 +780,25 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 		}
 	}
 	return feasible, fittingDomains
+}
+
+// topologyGangMemoizedVerifier canonicalizes member sets before both caching
+// and verification. Device allocation is simulated in member-index order, which
+// is the order the scheduler places a gang, so arriving at the same set through
+// a different search order must not change the result.
+func topologyGangMemoizedVerifier(verify func(string, []int) bool) func(string, []int) bool {
+	cache := make(map[string]bool)
+	return func(nodeID string, members []int) bool {
+		canonical := slices.Clone(members)
+		slices.Sort(canonical)
+		key := topologyGangMemberSetKey(nodeID, canonical)
+		if result, seen := cache[key]; seen {
+			return result
+		}
+		result := verify(nodeID, canonical)
+		cache[key] = result
+		return result
+	}
 }
 
 // topologyGangDomainFit is the per-domain form of topologyGangNodeFit. The

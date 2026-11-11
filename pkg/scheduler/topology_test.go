@@ -998,6 +998,49 @@ func TestTopologyGangDomainCanAssignSearchesWhenCapacityIsTooLow(t *testing.T) {
 	assert.Equal(t, 5, total)
 }
 
+// TestTopologyGangMemoizedVerifierCanonicalizesMemberOrder covers an
+// order-sensitive device allocator: reaching the same member set in another
+// search order must verify the set in member-index order and reuse that result.
+func TestTopologyGangMemoizedVerifierCanonicalizesMemberOrder(t *testing.T) {
+	calls := 0
+	verify := topologyGangMemoizedVerifier(func(nodeID string, members []int) bool {
+		calls++
+		assert.Equal(t, "node-a", nodeID)
+		assert.Equal(t, []int{0, 1, 2}, members)
+		return true
+	})
+
+	require.True(t, verify("node-a", []int{2, 0, 1}))
+	require.True(t, verify("node-a", []int{1, 2, 0}))
+	assert.Equal(t, 1, calls, "the cached result should be reused independent of arrival order")
+}
+
+// TestTopologyGangSearchBudgetSharedAndFailsClosed verifies that consecutive
+// searches charged to one budget do not reset it, and that an exhausted budget
+// rejects the search before another device verification runs.
+func TestTopologyGangSearchBudgetSharedAndFailsClosed(t *testing.T) {
+	nodes := []string{"node-a"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true}, capacity: 1},
+	}
+	verifyCalls := 0
+	verify := func(_ string, _ []int) bool {
+		verifyCalls++
+		return false
+	}
+	budget := &topologyGangSearchBudget{attempts: maxTopologyGangSearchStates - 1}
+
+	_, ok := topologyGangDomainCanAssignWithin(nodes, fits, "", 2, budget, verify)
+	require.False(t, ok)
+	assert.Equal(t, 1, verifyCalls)
+	assert.Equal(t, maxTopologyGangSearchStates, budget.attempts)
+
+	_, ok = topologyGangDomainCanAssignWithin(nodes, fits, "", 2, budget, verify)
+	require.False(t, ok)
+	assert.Equal(t, 1, verifyCalls, "an exhausted shared budget must fail closed before verification")
+	assert.Equal(t, maxTopologyGangSearchStates+1, budget.attempts)
+}
+
 // gangNodeFit is shorthand for the two properties returned by the per-node
 // simulation: the members that fit alone and the number that fit together.
 func gangNodeFit(admits []int, capacity int) topologyGangNodeFit {
