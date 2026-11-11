@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -496,6 +497,24 @@ type topologyGangNodeFit struct {
 	capacity int
 }
 
+// topologyGangMemberMatchesNode applies a sibling Pod runner's required
+// node affinity and node selector to a candidate node. scoreNode does not
+// evaluate these fields because the apiserver normally prefilters the Pod
+// being scheduled; a pending sibling has not gone through that path yet.
+func topologyGangMemberMatchesNode(pod *corev1.Pod, node *corev1.Node) bool {
+	if pod == nil {
+		return false
+	}
+	if node == nil {
+		required := pod.Spec.Affinity
+		return len(pod.Spec.NodeSelector) == 0 &&
+			(required == nil || required.NodeAffinity == nil ||
+				required.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil)
+	}
+	match, err := nodeaffinity.GetRequiredNodeAffinity(pod).Match(node)
+	return err == nil && match
+}
+
 // topologyGangNodeAssignment computes the fit information for one node. Each
 // member is scored with its own request and Pod context, exactly as Filter will
 // score it, on private deep copies so the scheduler's live node cache is never
@@ -528,6 +547,9 @@ func (s *Scheduler) topologyGangNodeAssignment(nodeID string, usage *NodeUsage, 
 	fitsAlone := make(map[*corev1.Pod]bool, len(members))
 	for i := range members {
 		member := &members[i]
+		if !topologyGangMemberMatchesNode(member.pod, usage.Node) {
+			continue
+		}
 		if len(member.resourceReqs) == 0 {
 			fit.admits = append(fit.admits, i)
 			admitted[i] = true
@@ -594,6 +616,9 @@ func (s *Scheduler) topologyGangNodeSetFits(nodeID string, usage *NodeUsage, mem
 	seen := make(map[int]struct{}, len(assigned))
 	for _, index := range assigned {
 		if index < 0 || index >= len(members) {
+			return false
+		}
+		if !topologyGangMemberMatchesNode(members[index].pod, usage.Node) {
 			return false
 		}
 		if _, duplicate := seen[index]; duplicate {
@@ -713,8 +738,21 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 	}
 	var verify func(string, []int) bool
 	if len(verifiers) > 0 {
-		verify = verifiers[0]
+		inner := verifiers[0]
+		cache := make(map[string]bool)
+		verify = func(nodeID string, members []int) bool {
+			key := topologyGangMemberSetKey(nodeID, members)
+			if result, seen := cache[key]; seen {
+				return result
+			}
+			result := inner(nodeID, members)
+			cache[key] = result
+			return result
+		}
 	}
+	// One budget covers the unpinned check and every anchor in this filter
+	// call, so a wide domain cannot multiply the fallback search by its nodes.
+	budget := &topologyGangSearchBudget{}
 	highest = min(highest, tree.MaxTier())
 	for level := 0; level <= highest; level++ {
 		domains := make(map[*topology.HyperNode][]string)
@@ -732,7 +770,7 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 			domainFits := topologyGangBuildDomainFits(assignments, domainNodes, remaining)
 			// An unpinned match is a necessary condition: when even the
 			// whole domain cannot place every member, no anchor in it can.
-			if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, "", remaining, verify); !ok {
+			if _, ok := topologyGangDomainCanAssignWithin(domainNodes, domainFits, "", remaining, budget, verify); !ok {
 				continue
 			}
 			hasAnchor := false
@@ -740,7 +778,7 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 				if !domainFits[nodeID].admits[0] {
 					continue
 				}
-				if _, ok := topologyGangDomainCanAssign(domainNodes, domainFits, nodeID, remaining, verify); !ok {
+				if _, ok := topologyGangDomainCanAssignWithin(domainNodes, domainFits, nodeID, remaining, budget, verify); !ok {
 					continue
 				}
 				feasible[nodeID] = struct{}{}
@@ -797,18 +835,31 @@ func topologyGangAssignmentFits(assigned map[string][]int, verify func(string, [
 // placements for the same anchor rather than rejecting a domain that can still
 // hold the gang in a different partition.
 func topologyGangDomainCanAssign(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, verifiers ...func(string, []int) bool) (map[string][]int, bool) {
+	return topologyGangDomainCanAssignWithin(nodes, fits, pinnedNode, remaining, nil, verifiers...)
+}
+
+// topologyGangDomainCanAssignWithin is topologyGangDomainCanAssign with a
+// caller-owned search budget. topologyGangFeasibleNodes shares one budget
+// across all domains and anchors of a filter call.
+func topologyGangDomainCanAssignWithin(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, budget *topologyGangSearchBudget, verifiers ...func(string, []int) bool) (map[string][]int, bool) {
 	var verify func(string, []int) bool
 	if len(verifiers) > 0 {
 		verify = verifiers[0]
 	}
-	assigned, ok := topologyGangDomainMatch(nodes, fits, pinnedNode, remaining)
-	if !ok {
-		return nil, false
+	if budget == nil {
+		budget = &topologyGangSearchBudget{}
 	}
-	if verify == nil || topologyGangAssignmentFits(assigned, verify) {
+	assigned, matched := topologyGangDomainMatch(nodes, fits, pinnedNode, remaining)
+	if matched && (verify == nil || topologyGangAssignmentFits(assigned, verify)) {
 		return assigned, true
 	}
-	return topologyGangDomainSearch(nodes, fits, pinnedNode, remaining, verify)
+	if verify == nil {
+		return nil, false
+	}
+	// The fast matcher uses a greedy per-node capacity count, which is only
+	// a lower bound for heterogeneous members. A capacity miss can therefore
+	// still have a valid partition; let the verified search decide.
+	return topologyGangDomainSearch(nodes, fits, pinnedNode, remaining, verify, budget)
 }
 
 // topologyGangDomainMatch is the fast capacity matcher. Each node may host at
@@ -877,9 +928,12 @@ func topologyGangDomainMatch(nodes []string, fits map[string]topologyGangDomainF
 // after concrete device verification rejects the fast match. Members are tried
 // fewest-candidates-first to prune early, while each node set is verified in
 // member-index order because that is the order the scheduler will place them.
-func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, verify func(string, []int) bool) (map[string][]int, bool) {
+func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomainFit, pinnedNode string, remaining int, verify func(string, []int) bool, budget *topologyGangSearchBudget) (map[string][]int, bool) {
 	if remaining <= 0 {
 		return nil, false
+	}
+	if budget == nil {
+		budget = &topologyGangSearchBudget{}
 	}
 	assigned := make(map[string][]int, len(nodes))
 	start := 0
@@ -923,7 +977,11 @@ func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomain
 		return a.member - b.member
 	})
 
-	attempts := 0
+	maxMembers := make(map[string]int, len(nodes))
+	for _, nodeID := range nodes {
+		maxMembers[nodeID] = topologyGangAdmittedCount(fits[nodeID])
+	}
+
 	var search func(index int) bool
 	search = func(index int) bool {
 		if index == len(choices) {
@@ -931,11 +989,13 @@ func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomain
 		}
 		choice := choices[index]
 		for _, nodeID := range choice.nodes {
-			if len(assigned[nodeID]) >= fits[nodeID].capacity {
+			// capacity is a greedy lower bound, not an upper bound. The
+			// verified search must be able to place a larger heterogeneous
+			// subset, so bound by the number of members that node admits.
+			if len(assigned[nodeID]) >= maxMembers[nodeID] {
 				continue
 			}
-			attempts++
-			if attempts > maxTopologyGangSearchStates {
+			if !budget.spend() {
 				return false
 			}
 			previous := assigned[nodeID]
@@ -956,6 +1016,42 @@ func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomain
 		return nil, false
 	}
 	return assigned, true
+}
+
+// topologyGangSearchBudget bounds the fallback searches of one gang filter
+// call. Sharing it keeps a wide domain from multiplying the exponential search
+// by its number of anchors. Once exhausted the search fails closed.
+type topologyGangSearchBudget struct {
+	attempts int
+}
+
+func (b *topologyGangSearchBudget) spend() bool {
+	b.attempts++
+	return b.attempts <= maxTopologyGangSearchStates
+}
+
+// topologyGangMemberSetKey canonicalizes a node and member set for the verifier
+// cache, so repeated partitions reached from another anchor reuse the result.
+func topologyGangMemberSetKey(nodeID string, members []int) string {
+	sorted := slices.Clone(members)
+	slices.Sort(sorted)
+	var key strings.Builder
+	key.WriteString(nodeID)
+	for _, member := range sorted {
+		key.WriteByte('|')
+		key.WriteString(strconv.Itoa(member))
+	}
+	return key.String()
+}
+
+func topologyGangAdmittedCount(fit topologyGangDomainFit) int {
+	count := 0
+	for _, admitted := range fit.admits {
+		if admitted {
+			count++
+		}
+	}
+	return count
 }
 
 // applyTopologyScore ranks the fitting nodes by how close they are to the nodes

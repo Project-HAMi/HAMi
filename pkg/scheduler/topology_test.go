@@ -963,6 +963,41 @@ func TestTopologyGangDomainCanAssignSearchesAfterRejectedFit(t *testing.T) {
 	assert.Equal(t, []int{2}, assigned["node-b"])
 }
 
+// TestTopologyGangDomainCanAssignSearchesWhenCapacityIsTooLow covers the
+// review case of 80,20,20,20,20 on two 100-core nodes. The greedy shared-node
+// simulation admits only two members per node (80+20), so the fast capacity
+// matcher rejects the domain even though 80+20 on one node and 20+20+20 on the
+// other is a valid partition. The verified search must find it.
+func TestTopologyGangDomainCanAssignSearchesWhenCapacityIsTooLow(t *testing.T) {
+	nodes := []string{"node-a", "node-b"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true, true, true, true}, capacity: 2},
+		"node-b": {admits: []bool{true, true, true, true, true}, capacity: 2},
+	}
+	verify := func(_ string, members []int) bool {
+		used := 0
+		for _, member := range members {
+			if member == 0 {
+				used += 80
+				continue
+			}
+			used += 20
+		}
+		return used <= 100
+	}
+
+	assigned, ok := topologyGangDomainCanAssign(nodes, fits, "", 5, verify)
+	require.True(t, ok)
+	require.Len(t, assigned, 2)
+
+	total := 0
+	for nodeID, members := range assigned {
+		total += len(members)
+		assert.True(t, verify(nodeID, members), "node %s exceeds its 100 cores: %v", nodeID, members)
+	}
+	assert.Equal(t, 5, total)
+}
+
 // gangNodeFit is shorthand for the two properties returned by the per-node
 // simulation: the members that fit alone and the number that fit together.
 func gangNodeFit(admits []int, capacity int) topologyGangNodeFit {
@@ -1152,6 +1187,65 @@ func TestTopologyGangFilterUsesSiblingRequest(t *testing.T) {
 		assert.Empty(t, nodes)
 		assert.Contains(t, failedNodes, nodeName)
 	})
+}
+
+// TestTopologyGangFilterChecksSiblingNodeSelectors is the regression test for a
+// sibling whose nodeSelector restricts it to one node. The scheduler itself
+// prefilters only the Pod being scheduled, so without an explicit check the
+// first Pod could take the sibling's only eligible node and leave the gang
+// permanently Pending.
+func TestTopologyGangFilterChecksSiblingNodeSelectors(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	fabric := gangFabric()
+	fabric[0].Labels["gang-node"] = "gang-a"
+	fabric[1].Labels["gang-node"] = "gang-b"
+	scheduler := topologyTestScheduler(t, fabric)
+
+	task := gangTestPod("train-0", 10)
+	task.Spec.NodeSelector = map[string]string{"gang-node": "gang-a"}
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	sibling := gangTestPod("train-1", 10)
+	sibling.Spec.NodeSelector = map[string]string{"gang-node": "gang-b"}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"gang-a", "gang-b"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID: nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name:   nodeName,
+				Labels: map[string]string{"gang-node": nodeName},
+			}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{sibling},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Contains(t, nodes, "gang-a", "the current Pod may only use its own node")
+	assert.NotContains(t, nodes, "gang-b", "the sibling's only eligible node must be preserved")
+	assert.Equal(t, 1, common.ParseReason(failedNodes["gang-b"])[common.GangTopologyNotFit])
 }
 
 // TestTopologyGangFilterSeparatesHeterogeneousMembers verifies that a node does
