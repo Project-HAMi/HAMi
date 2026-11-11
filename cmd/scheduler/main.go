@@ -94,6 +94,7 @@ func init() {
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
+	rootCmd.AddCommand(newValidateCommand())
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
