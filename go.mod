@@ -9,7 +9,7 @@ require (
 	github.com/NVIDIA/go-nvlib v0.13.0
 	github.com/NVIDIA/go-nvml v0.13.4-1
 	github.com/NVIDIA/k8s-device-plugin v0.20.1
-	github.com/NVIDIA/nvidia-container-toolkit v1.20.1
+	github.com/NVIDIA/nvidia-container-toolkit v1.20.2
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/fsnotify/fsnotify v1.10.1
@@ -100,7 +100,7 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261012220534-4341edf3f941 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/apiextensions-apiserver v0.37.1 // indirect
