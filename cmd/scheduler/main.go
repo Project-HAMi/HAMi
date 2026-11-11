@@ -51,6 +51,9 @@ var (
 	enableProfiling      bool
 	profilingBindAddress string
 	legacyMetrics        bool
+	initGlobalClient     = client.InitGlobalClient
+	initDevices          = config.InitDevices
+	listenTCP            = net.Listen
 	rootCmd              = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
@@ -139,6 +142,9 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 	return listener, nil
 }
 
+// start initializes the scheduler, claims its HTTP listeners synchronously,
+// and blocks until a supervised server reports an error. All acquired
+// listeners and scheduler resources are released before it returns.
 func start() error {
 	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
 		return err
@@ -147,13 +153,13 @@ func start() error {
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
-	client.InitGlobalClient(
+	initGlobalClient(
 		client.WithBurst(config.Burst),
 		client.WithQPS(config.QPS),
 		client.WithTimeout(config.Timeout),
 	)
 
-	config.InitDevices()
+	initDevices()
 
 	var err error
 	config.HostName, err = os.Hostname()
@@ -212,12 +218,12 @@ func start() error {
 	// Claim each server's port synchronously during startup, so a port already
 	// in use fails startup instead of surfacing from inside a goroutine once the
 	// scheduler looks healthy.
-	extenderListener, err := net.Listen("tcp", config.ExtenderBind)
+	extenderListener, err := listenTCP("tcp", config.ExtenderBind)
 	if err != nil {
 		return fmt.Errorf("failed to listen on the extender address %s: %w", config.ExtenderBind, err)
 	}
 	defer extenderListener.Close()
-	clusterListener, err := net.Listen("tcp", config.HTTPBind)
+	clusterListener, err := listenTCP("tcp", config.HTTPBind)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", config.HTTPBind, err)
 	}

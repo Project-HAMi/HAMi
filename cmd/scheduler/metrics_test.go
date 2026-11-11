@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -39,6 +40,7 @@ import (
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	clientpkg "github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
 
@@ -75,6 +77,8 @@ func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOu
 	return f.outcome
 }
 
+// TestStartMetricsServerBindFailure verifies that the metrics helper reports a
+// bind error synchronously and never starts a serving goroutine.
 func TestStartMetricsServerBindFailure(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -99,6 +103,8 @@ func TestStartMetricsServerBindFailure(t *testing.T) {
 	}
 }
 
+// TestStartMetricsServer verifies that the metrics endpoint remains available
+// and that a serving failure reaches the scheduler's supervision channel.
 func TestStartMetricsServer(t *testing.T) {
 	provider := &fakeMetricsProvider{
 		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
@@ -133,6 +139,141 @@ func TestStartMetricsServer(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("metrics server did not return its listener failure")
 	}
+}
+
+// TestStartMetricsLifecycle exercises the real scheduler startup path with a
+// fake Kubernetes client. It covers both metrics bind rollback and listener
+// cleanup after a supervised server failure.
+func TestStartMetricsLifecycle(t *testing.T) {
+	previousInitGlobalClient := initGlobalClient
+	previousInitDevices := initDevices
+	previousListenTCP := listenTCP
+	previousKubeClient := clientpkg.KubeClient
+	previousScheduler := sher
+	previousExtenderBind := config.ExtenderBind
+	previousHTTPBind := config.HTTPBind
+	previousMetricsBindAddress := config.MetricsBindAddress
+	previousDevicePluginNamespace := config.DevicePluginNamespace
+	previousDevicePluginServiceAccount := config.DevicePluginServiceAccount
+	previousLeaderElect := config.LeaderElect
+	previousHostName := config.HostName
+	previousNodeAffinityScoreWeight := config.NodeAffinityScoreWeight
+	previousEnableProfiling := enableProfiling
+	previousTLSCertFile := tlsCertFile
+	previousTLSKeyFile := tlsKeyFile
+	t.Cleanup(func() {
+		initGlobalClient = previousInitGlobalClient
+		initDevices = previousInitDevices
+		listenTCP = previousListenTCP
+		clientpkg.KubeClient = previousKubeClient
+		sher = previousScheduler
+		config.ExtenderBind = previousExtenderBind
+		config.HTTPBind = previousHTTPBind
+		config.MetricsBindAddress = previousMetricsBindAddress
+		config.DevicePluginNamespace = previousDevicePluginNamespace
+		config.DevicePluginServiceAccount = previousDevicePluginServiceAccount
+		config.LeaderElect = previousLeaderElect
+		config.HostName = previousHostName
+		config.NodeAffinityScoreWeight = previousNodeAffinityScoreWeight
+		enableProfiling = previousEnableProfiling
+		tlsCertFile = previousTLSCertFile
+		tlsKeyFile = previousTLSKeyFile
+	})
+
+	initGlobalClient = func(...clientpkg.Option) {}
+	initDevices = func() {}
+	config.ExtenderBind = "127.0.0.1:0"
+	config.HTTPBind = "127.0.0.1:0"
+	config.DevicePluginNamespace = "test"
+	config.DevicePluginServiceAccount = "test"
+	config.LeaderElect = false
+	config.NodeAffinityScoreWeight = 0
+	enableProfiling = false
+	tlsCertFile = ""
+	tlsKeyFile = ""
+
+	t.Run("metrics bind failure releases earlier listeners", func(t *testing.T) {
+		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+		occupied, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer occupied.Close()
+		config.MetricsBindAddress = occupied.Addr().String()
+
+		var acquired []net.Listener
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				acquired = append(acquired, listener)
+			}
+			return listener, err
+		}
+
+		err = start()
+		var networkError *net.OpError
+		if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "metrics address") {
+			t.Fatalf("expected startup to return the metrics bind error, got %v", err)
+		}
+		if len(acquired) != 2 {
+			t.Fatalf("startup acquired %d listeners before metrics failed, want 2", len(acquired))
+		}
+		for _, listener := range acquired {
+			rebound, bindErr := net.Listen("tcp", listener.Addr().String())
+			if bindErr != nil {
+				t.Errorf("listener %s was not released: %v", listener.Addr(), bindErr)
+				continue
+			}
+			rebound.Close()
+		}
+	})
+
+	t.Run("supervised server failure releases all listeners", func(t *testing.T) {
+		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+		config.MetricsBindAddress = "127.0.0.1:0"
+		acquired := make(chan net.Listener, 3)
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				acquired <- listener
+			}
+			return listener, err
+		}
+
+		result := make(chan error, 1)
+		go func() {
+			result <- start()
+		}()
+
+		listeners := make([]net.Listener, 0, 3)
+		for len(listeners) < cap(acquired) {
+			select {
+			case listener := <-acquired:
+				listeners = append(listeners, listener)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("startup acquired %d listeners, want 3", len(listeners))
+			}
+		}
+		if err := listeners[0].Close(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-result:
+			if !errors.Is(err, net.ErrClosed) || !strings.Contains(err.Error(), "extender server error") {
+				t.Fatalf("expected supervised extender error, got %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("startup did not return the supervised server error")
+		}
+		for _, listener := range listeners {
+			rebound, err := net.Listen("tcp", listener.Addr().String())
+			if err != nil {
+				t.Errorf("listener %s was not released: %v", listener.Addr(), err)
+				continue
+			}
+			rebound.Close()
+		}
+	})
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {

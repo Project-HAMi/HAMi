@@ -557,8 +557,10 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 	return c
 }
 
+// listenMetrics claims bindAddress for the metrics server and returns a
+// wrapped bind error without starting any serving goroutine.
 func listenMetrics(bindAddress string) (net.Listener, error) {
-	listener, err := net.Listen("tcp", bindAddress)
+	listener, err := listenTCP("tcp", bindAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on the metrics address %s: %w", bindAddress, err)
 	}
@@ -579,6 +581,8 @@ func startMetricsServer(bindAddress string, metricsProvider schedulerMetricsProv
 	return listener, nil
 }
 
+// initMetrics registers the scheduler collectors and serves them on listener
+// until the HTTP server returns an error. The caller owns the listener.
 func initMetrics(listener net.Listener, metricsProvider schedulerMetricsProvider, legacyMetrics bool) error {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
