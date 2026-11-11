@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
 	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 	"k8s.io/klog/v2"
 
@@ -209,4 +210,62 @@ func (ns *NodeScore) AddNodeAffinityScore(pref *PreferredNodeAffinity, policy st
 	}
 	ns.Score += bonus
 	klog.V(2).Infof("node %s affinity matched %d/%d, bonus %f, score %f", ns.NodeID, matched, pref.totalWeight, bonus, ns.Score)
+}
+
+// PreferNoScheduleTolerations returns the pod tolerations that can tolerate a
+// PreferNoSchedule taint, that is those with an empty effect (any effect) or
+// PreferNoSchedule. It mirrors the filtering the kube-scheduler TaintToleration
+// score plugin applies before counting taints, and is computed once per pod.
+func PreferNoScheduleTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
+	var out []corev1.Toleration
+	for _, t := range tolerations {
+		if t.Effect == "" || t.Effect == corev1.TaintEffectPreferNoSchedule {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// CountIntolerablePreferNoScheduleTaints counts the node's PreferNoSchedule
+// taints that none of the given tolerations tolerates. NoSchedule and NoExecute
+// taints are not counted: kube-scheduler drops such nodes in its own Filter
+// before calling the extender.
+//
+// Tolerations using the Gt/Lt operators are evaluated: the API server only
+// admits them when the TaintTolerationComparisonOperators feature is enabled,
+// so a pod carrying one was accepted with the feature on.
+func CountIntolerablePreferNoScheduleTaints(node *corev1.Node, tolerations []corev1.Toleration) int {
+	if node == nil {
+		return 0
+	}
+	count := 0
+	for i := range node.Spec.Taints {
+		taint := &node.Spec.Taints[i]
+		if taint.Effect != corev1.TaintEffectPreferNoSchedule {
+			continue
+		}
+		if !corev1helpers.TolerationsTolerateTaint(klog.Background(), tolerations, taint, true) {
+			count++
+		}
+	}
+	return count
+}
+
+// AddTaintTolerationScore applies a penalty of weight * (count / maxCount),
+// where count is this node's untolerated PreferNoSchedule taints and maxCount
+// the highest such count among the candidate nodes, as kube-scheduler's
+// TaintToleration plugin normalizes. The node with the most untolerated taints
+// loses exactly weight and a node without any is unchanged. Binpack picks the
+// highest score and spread the lowest, so the penalty is negated under spread
+// to keep steering the pod away from the tainted node.
+func (ns *NodeScore) AddTaintTolerationScore(count, maxCount int, policy string, weight float32) {
+	if count <= 0 || maxCount <= 0 {
+		return
+	}
+	penalty := weight * float32(count) / float32(maxCount)
+	if policy == util.NodeSchedulerPolicySpread.String() {
+		penalty = -penalty
+	}
+	ns.Score -= penalty
+	klog.V(2).Infof("node %s untolerated PreferNoSchedule taints %d/%d, penalty %f, score %f", ns.NodeID, count, maxCount, penalty, ns.Score)
 }

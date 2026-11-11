@@ -76,6 +76,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().Float32Var(&config.NodeAffinityScoreWeight, "node-affinity-score-weight", 0.0, "Bonus added to the node score for nodes matching the pod's preferred nodeAffinity, scaled by the matched weight ratio (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
+	rootCmd.Flags().Float32Var(&config.TaintTolerationScoreWeight, "taint-toleration-score-weight", 0.0, "Penalty applied to the node score for PreferNoSchedule taints the pod does not tolerate, scaled by the node's untolerated taint count over the highest count among candidate nodes (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 
@@ -146,6 +147,9 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 // listeners and scheduler resources are released before it returns.
 func start() error {
 	if err := validateSchedulerOptions(); err != nil {
+		return err
+	}
+	if err := config.ValidateTaintTolerationScoreWeight(config.TaintTolerationScoreWeight); err != nil {
 		return err
 	}
 
