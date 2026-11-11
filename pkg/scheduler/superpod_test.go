@@ -1189,6 +1189,54 @@ func TestSuperpodOwnerReplicas(t *testing.T) {
 		_, _, err := s.superpodOwnerReplicas(task)
 		assert.Assert(t, err != nil)
 	})
+
+	t.Run("non-NotFound owner lookup errors propagate", func(t *testing.T) {
+		tests := []struct {
+			kind     string
+			resource string
+		}{
+			{kind: "ReplicaSet", resource: "replicasets"},
+			{kind: "StatefulSet", resource: "statefulsets"},
+			{kind: "Job", resource: "jobs"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.kind, func(t *testing.T) {
+				getErr := errors.New("API unavailable")
+				client := fake.NewClientset()
+				client.PrependReactor("get", tt.resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, getErr
+				})
+				task := makeGPUPod("pod", "default", "", 1)
+				task.Labels[util.TaskIDLabel] = "task-1"
+				task.OwnerReferences = []metav1.OwnerReference{{Kind: tt.kind, Name: "owner"}}
+				s := &Scheduler{kubeClient: client}
+
+				total, found, err := s.superpodOwnerReplicas(task)
+				assert.Assert(t, errors.Is(err, getErr))
+				assert.Equal(t, int64(0), total)
+				assert.Assert(t, !found)
+
+				total, err = s.resolveSuperpodTotalRequest(task, 1)
+				assert.Assert(t, errors.Is(err, getErr))
+				assert.Equal(t, int64(0), total, "must not fall back to the single-pod request")
+			})
+		}
+	})
+
+	t.Run("NotFound owner lookup remains eligible for fallback", func(t *testing.T) {
+		task := makeGPUPod("pod", "default", "", 1)
+		task.OwnerReferences = []metav1.OwnerReference{{Kind: "Job", Name: "missing"}}
+		s := &Scheduler{kubeClient: fake.NewClientset()}
+
+		total, found, err := s.superpodOwnerReplicas(task)
+		assert.NilError(t, err)
+		assert.Equal(t, int64(0), total)
+		assert.Assert(t, !found)
+
+		total, err = s.resolveSuperpodTotalRequest(task, 1)
+		assert.NilError(t, err)
+		assert.Equal(t, int64(1), total)
+	})
 }
 
 // ---------------------------------------------------------------------------
