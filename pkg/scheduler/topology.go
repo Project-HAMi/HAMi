@@ -741,11 +741,13 @@ func topologyGangFeasibleNodes(tree *topology.Tree, candidates map[string]*NodeU
 		inner := verifiers[0]
 		cache := make(map[string]bool)
 		verify = func(nodeID string, members []int) bool {
-			key := topologyGangMemberSetKey(nodeID, members)
+			canonical := slices.Clone(members)
+			slices.Sort(canonical)
+			key := topologyGangMemberSetKey(nodeID, canonical)
 			if result, seen := cache[key]; seen {
 				return result
 			}
-			result := inner(nodeID, members)
+			result := inner(nodeID, canonical)
 			cache[key] = result
 			return result
 		}
@@ -1030,14 +1032,13 @@ func (b *topologyGangSearchBudget) spend() bool {
 	return b.attempts <= maxTopologyGangSearchStates
 }
 
-// topologyGangMemberSetKey canonicalizes a node and member set for the verifier
-// cache, so repeated partitions reached from another anchor reuse the result.
+// topologyGangMemberSetKey builds a verifier cache key from a node and an
+// already sorted member set. The caller sorts the set before verification so
+// the cached result is independent of the order a search reached it.
 func topologyGangMemberSetKey(nodeID string, members []int) string {
-	sorted := slices.Clone(members)
-	slices.Sort(sorted)
 	var key strings.Builder
 	key.WriteString(nodeID)
-	for _, member := range sorted {
+	for _, member := range members {
 		key.WriteByte('|')
 		key.WriteString(strconv.Itoa(member))
 	}
