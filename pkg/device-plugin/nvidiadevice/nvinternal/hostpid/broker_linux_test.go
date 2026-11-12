@@ -800,12 +800,13 @@ func TestBrokerDriverAdmissionExpiresAfterMaxHold(t *testing.T) {
 	const maxHold = 300 * time.Millisecond
 	broker, socketPath := startTestBrokerWithMaxHold(t, maxHandlers, 2,
 		maxHold)
+	// The broker starts the lease timer after this, so it is a lower bound.
+	requested := time.Now()
 	stale, status, _, err := acquireDriverAdmission(socketPath, time.Second)
 	if err != nil || status != statusOK {
 		t.Fatalf("stale admission: status=%d err=%v", status, err)
 	}
 	defer stale.Close()
-	granted := time.Now()
 
 	type result struct {
 		connection net.Conn
@@ -830,7 +831,7 @@ func TestBrokerDriverAdmissionExpiresAfterMaxHold(t *testing.T) {
 		t.Fatal("waiting admission was not granted after the lease expired")
 	}
 	defer next.Close()
-	if elapsed := time.Since(granted); elapsed < maxHold {
+	if elapsed := time.Since(requested); elapsed < maxHold {
 		t.Fatalf("lease expired after %s, want at least %s", elapsed, maxHold)
 	}
 	if got := broker.admission.activeCount(); got != 1 {
