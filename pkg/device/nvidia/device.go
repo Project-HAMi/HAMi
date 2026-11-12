@@ -150,10 +150,11 @@ type NvidiaConfig struct {
 
 // These configs can be specified for each node by using Nodeconfig.
 type NodeDefaultConfig struct {
-	DeviceSplitCount          *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
-	DeviceMemoryScaling       *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
-	DeviceCoreScaling         *float64 `yaml:"deviceCoreScaling" json:"devicecorescaling"`
-	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
+	MPSV3                     *MPSV3NodeConfig `yaml:"mpsv3,omitempty" json:"mpsv3,omitempty"`
+	DeviceSplitCount          *uint            `yaml:"deviceSplitCount" json:"devicesplitcount"`
+	DeviceMemoryScaling       *float64         `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
+	DeviceCoreScaling         *float64         `yaml:"deviceCoreScaling" json:"devicecorescaling"`
+	PreConfiguredDeviceMemory *int64           `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
 	// LimitDelivery is how containers get their limits: file (default) or env.
@@ -187,7 +188,7 @@ type NodeConfig struct {
 	Name string `json:"name"`
 	// NodeLabelSelector selects nodes by label when no entry names the node.
 	NodeLabelSelector *metav1.LabelSelector `json:"nodelabelselector,omitempty"`
-	// OperatingMode selects hami-core, mig, or remote. The device plugin
+	// OperatingMode selects hami-core, mig, remote, or mps-v3. The device plugin
 	// mirrors remote mode onto the Lupine discovery label.
 	OperatingMode                string        `json:"operatingmode"`
 	Migstrategy                  string        `json:"migstrategy"`
@@ -1032,6 +1033,13 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	reason := make(map[string]int)
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
+	var byID map[string]*device.DeviceUsage
+	if needTopology {
+		byID = make(map[string]*device.DeviceUsage, len(devices))
+		for _, dev := range devices {
+			byID[dev.ID] = dev
+		}
+	}
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
 	cordoned := cordonedDevices(nodeInfo)
 	preferred := migProfilePreference(pod.GetAnnotations())
@@ -1040,14 +1048,6 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
-		coresreq := k.Coresreq
-		var mpsFits bool
-		coresreq, mpsFits = mpsV3Fits(pod, dev, originReq, tmpDevs[k.Type], coresreq)
-		if !mpsFits {
-			reason[common.CardTypeMismatch]++
-			continue
-		}
-		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
@@ -1078,6 +1078,16 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
 		}
+		selected := tmpDevs[k.Type]
+		if needTopology {
+			selected = nil
+		}
+		coresreq, mpsFits := mpsV3Fits(pod, dev, originReq, selected, k.Coresreq, allocated)
+		if !mpsFits {
+			reason[common.CardTypeMismatch]++
+			continue
+		}
+		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", coresreq, "Nums", k.Nums, "device index", i)
 
 		memreq := int64(0)
 		if dev.Count <= dev.Used {
@@ -1105,8 +1115,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		// A MIG slice is booked and charged its profile's capacity, not the raw request, so resolve
 		// the profile before the quota check and keep it on the tentative slice.
 		usedmem, usedcores := memreq, coresreq
-		if dev.Mode == MpsV3Mode && len(tmpDevs[k.Type]) > 0 {
-			first := tmpDevs[k.Type][0]
+		if dev.Mode == MpsV3Mode && len(selected) > 0 {
+			first := selected[0]
 			if first.Usedmem != usedmem || first.Usedcores != usedcores {
 				reason[common.CardTypeMismatch]++
 				continue
@@ -1199,11 +1209,23 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 	}
 	if needTopology {
-		if assertNuma(pod.GetAnnotations()) {
-			byID := make(map[string]*device.DeviceUsage, len(devices))
-			for _, d := range devices {
-				byID[d.ID] = d
+		mpsCombinationFits := func(combo device.ContainerDevices) bool {
+			for i, chosen := range combo {
+				dev := byID[chosen.UUID]
+				if dev.Mode != MpsV3Mode {
+					continue
+				}
+				first := combo[0]
+				if first.Usedmem != chosen.Usedmem || first.Usedcores != chosen.Usedcores {
+					return false
+				}
+				if _, ok := mpsV3Fits(pod, dev, originReq, combo[:i], k.Coresreq, allocated); !ok {
+					return false
+				}
 			}
+			return true
+		}
+		if assertNuma(pod.GetAnnotations()) {
 			numaGroups := make(map[int]device.ContainerDevices)
 			for _, c := range tmpDevs[k.Type] {
 				numaNode := -1
@@ -1244,7 +1266,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				if len(combinations) > 0 {
 					var quotaFit []device.ContainerDevices
 					for _, combo := range combinations {
-						if fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
+						if mpsCombinationFits(combo) && fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
 							quotaFit = append(quotaFit, combo)
 						}
 					}
@@ -1269,7 +1291,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 				candidates = map[string]device.ContainerDevices{k.Type: distinct}
 			}
 			if len(candidates[k.Type]) == int(originReq) {
-				if !fitQuotaForDevices(pod, candidates[k.Type], allocated, pod.Namespace, k.Type) {
+				if !mpsCombinationFits(candidates[k.Type]) || !fitQuotaForDevices(pod, candidates[k.Type], allocated, pod.Namespace, k.Type) {
 					reason[common.ResourceQuotaNotFit]++
 					return false, tmpDevs, common.GenReason(reason, len(devices))
 				}
@@ -1293,7 +1315,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 					combinations := generateCombinations(request, candidates)
 					var validCombinations []device.ContainerDevices
 					for _, combo := range combinations {
-						if fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
+						if mpsCombinationFits(combo) && fitQuotaForDevices(pod, combo, allocated, pod.Namespace, k.Type) {
 							validCombinations = append(validCombinations, combo)
 						}
 					}

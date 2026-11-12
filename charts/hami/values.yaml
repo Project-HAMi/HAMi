@@ -387,7 +387,7 @@ devicePlugin:
   # JSON field in `nodeConfiguration.config` overrides this setting for matching nodes.
   reportNodeCapacity: false
   nodeConfiguration:
-    # operatingmode is per-node: "hami-core", "mig", or "remote".
+    # operatingmode is per-node: "hami-core", "mig", "mps", "mps-v3", or "remote".
     # "remote" makes this node a Lupine GPU server; the plugin applies
     # hami.io/lupine-server (empty value = devices.remotegpu.defaultPort).
     # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
@@ -400,7 +400,10 @@ devicePlugin:
     # Selected entries apply in list order; later overrides take precedence. For per-node resource
     # settings, null, zero, or false does not replace an existing non-zero or true value. Empty
     # `operatingmode` and `filterdevices` values are ignored. Entries with both or neither of `name` and
-    # `nodelabelselector`, or with an empty or invalid label selector, are skipped.
+    # `nodelabelselector`, or with an empty or invalid label selector, are skipped. For
+    # `operatingmode: mps-v3`, `mpsv3.computeMode` defaults to `namespace-cap`.
+    # `server-timeslice` also accepts `mpsv3.timeslice` (default, short, medium, long)
+    # and optional `mpsv3.timesliceYieldLevel` (1 or 2). Each `mpsv3` object replaces the previous one.
     # @default -- Example node configuration; see [values.yaml](values.yaml).
     config: |
       {
@@ -442,7 +445,7 @@ devicePlugin:
   # kubelet/CRI support for CDI devices.
   deviceListStrategy: "envvar"
   # -- Node-local MPS v3 service. Select operatingmode: mps-v3 in nodeConfiguration.
-  # Requires exclusively CDI strategies, Toolkit >=1.20.1, r615/CUDA 13.4 and cgroup v2.
+  # Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver r620 or later, and cgroup v2.
   mpsV3:
     enabled: false
     # -- Persistent host path, mounted at the same path inside the plugin.

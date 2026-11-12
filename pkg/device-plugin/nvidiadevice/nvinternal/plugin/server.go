@@ -177,7 +177,14 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels ma
 		if val.Name != "" {
 			klog.Infof("Reading config from file %s", val.Name)
 		}
-		if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
+		defaults := val.NodeDefaultConfig
+		// Select the MPS policy as a unit so omitted options in an override
+		// do not inherit options from a different compute mode.
+		if defaults.MPSV3 != nil {
+			sConfig.MPSV3 = defaults.MPSV3
+			defaults.MPSV3 = nil
+		}
+		if err := mergo.Merge(&sConfig.NodeDefaultConfig, defaults, mergo.WithOverride); err != nil {
 			return "", err
 		}
 		if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {

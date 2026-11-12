@@ -23,15 +23,22 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type fakeMPSV3 struct {
-	servers    map[string]string
-	namespaces map[string]int
-	partitions map[string]mpsV3Partition
-	calls      []string
-	fail       string
-	busy       bool
+	servers          map[string]string
+	weights          map[string]string
+	namespaces       map[string]int
+	namespaceServers map[string]string
+	assignments      map[string]map[string]string
+	partitions       map[string]mpsV3Partition
+	calls            []string
+	fail             string
+	busy             bool
+	timeslice        string
+	yield            string
+	serverCSV        string
 }
 
 func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
@@ -45,12 +52,26 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 	require.NoError(t, os.Mkdir(m.cdiRoot, 0755))
 	m.geometry = map[string]nvidia.MPSV3Geometry{"GPU-a": {SMs: 72, Chunk: 2}, "GPU-b": {SMs: 72, Chunk: 2}}
 	m.healthy.Store(true)
-	f := &fakeMPSV3{servers: make(map[string]string), namespaces: make(map[string]int), partitions: make(map[string]mpsV3Partition)}
+	f := &fakeMPSV3{
+		servers: make(map[string]string), weights: make(map[string]string), namespaces: make(map[string]int),
+		namespaceServers: make(map[string]string), assignments: make(map[string]map[string]string),
+		partitions: make(map[string]mpsV3Partition), timeslice: "default", yield: "unset",
+	}
 	m.run = func(ctx context.Context, args ...string) (string, error) {
 		call := strings.Join(args, " ")
 		f.calls = append(f.calls, call)
 		if f.fail != "" && strings.Contains(call, f.fail) {
 			return "", fmt.Errorf("injected failure: %s", call)
+		}
+		if args[0] == "-q" {
+			if len(f.servers) != 0 {
+				return "", fmt.Errorf("servers exist")
+			}
+			f.timeslice, f.yield = "default", "unset"
+			return "", nil
+		}
+		if args[0] == "-d" {
+			return "", nil
 		}
 		flag := func(name string) string {
 			for _, arg := range args {
@@ -61,21 +82,37 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 			return ""
 		}
 		switch args[0] + " " + args[1] {
-		case "client list":
-			if f.busy {
-				for name := range f.namespaces {
-					return "123,srv,GPU-a,0,0," + flag("server") + "/" + name, nil
-				}
+		case "compute-policy get":
+			if args[2] == "timeslice-yield-level" {
+				return f.yield, nil
+			}
+			return f.timeslice, nil
+		case "compute-policy set":
+			if len(f.servers) != 0 {
+				return "", fmt.Errorf("servers exist")
+			}
+			f.timeslice = flag("timeslice")
+			if y := flag("timeslice-yield-level"); y != "" {
+				f.yield = y
 			}
 			return "", nil
+		case "context-share set":
+			return "", nil
 		case "server list":
+			if f.serverCSV != "" {
+				return f.serverCSV, nil
+			}
 			var rows []string
-			for name := range f.servers {
-				rows = append(rows, name+",0,123,Ready")
+			for name, gpus := range f.servers {
+				rows = append(rows, fmt.Sprintf("%s,0,123,Ready,/run/mps/%s,%s,1,%s", name, name, gpus, f.weights[name]))
 			}
 			return strings.Join(rows, "\n"), nil
 		case "server create":
 			f.servers[args[2]] = flag("allowed-devices")
+			f.weights[args[2]] = "0"
+			return "", nil
+		case "server set":
+			f.weights[args[2]] = flag("timeslice-pct")
 			return "", nil
 		case "server get":
 			switch args[3] {
@@ -85,12 +122,17 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 				return "Ready", nil
 			case "allowed-devices":
 				return f.servers[args[2]], nil
+			case "timeslice-pct":
+				return f.weights[args[2]], nil
 			}
 		case "server delete":
 			delete(f.servers, args[2])
+			delete(f.weights, args[2])
 			return "", nil
 		case "namespace create":
 			f.namespaces[args[2]] = 100
+			f.namespaceServers[args[2]] = flag("server")
+			f.assignments[args[2]] = make(map[string]string)
 			dir := filepath.Join(root, "pipe", flag("server"), args[2])
 			require.NoError(t, os.MkdirAll(dir, 0755))
 			listener, err := net.Listen("unix", filepath.Join(dir, "control"))
@@ -98,6 +140,10 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 			t.Cleanup(func() { listener.Close() })
 			return "", nil
 		case "namespace set":
+			if partition := flag("sm-partition"); partition != "" {
+				f.assignments[args[2]][flag("device")] = partition
+				return "", nil
+			}
 			n, _ := strconv.Atoi(flag("active-thread-percentage"))
 			f.namespaces[args[2]] = n
 			return "", nil
@@ -106,11 +152,20 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 			if !ok {
 				return "", fmt.Errorf("missing namespace")
 			}
+			if args[4] == "sm-partitions" {
+				var bindings []string
+				for gpu, partition := range f.assignments[args[2]] {
+					bindings = append(bindings, gpu+":"+partition)
+				}
+				return strings.Join(bindings, "\n"), nil
+			}
 			return strconv.Itoa(n), nil
 		case "namespace list":
 			var rows []string
-			for name := range f.namespaces {
-				rows = append(rows, name+","+flag("server")+",Ready")
+			for name, cap := range f.namespaces {
+				if server := f.namespaceServers[name]; server == flag("server") {
+					rows = append(rows, fmt.Sprintf("%s,%s,Ready,unlimited,%d.00,0,-,-,/run/mps/%s/%s,-,-", name, server, cap, server, name))
+				}
 			}
 			return strings.Join(rows, "\n"), nil
 		case "namespace delete":
@@ -118,23 +173,34 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 				return "", fmt.Errorf("active client")
 			}
 			delete(f.namespaces, args[2])
+			delete(f.namespaceServers, args[2])
+			delete(f.assignments, args[2])
 			return "", nil
 		case "sm-partition create":
 			chunks, _ := strconv.ParseInt(flag("chunks"), 10, 64)
-			f.partitions[flag("device")+"/"+args[2]] = mpsV3Partition{SMs: chunks * 2, ID: "opaque_" + args[2]}
+			maxChunks := flag("max-chunks")
+			if maxChunks == "" {
+				maxChunks = "-"
+			}
+			f.partitions[flag("device")+"/"+args[2]] = mpsV3Partition{
+				SMs: chunks * 2, Chunks: chunks, ID: "opaque_" + args[2], Status: "created", MaxChunks: maxChunks,
+				Shareable: flag("shareable") == "true", Remainder: flag("include-remainder") == "true",
+			}
 			return "", nil
 		case "sm-partition list":
 			var rows []string
 			for key, p := range f.partitions {
 				gpu, name, _ := strings.Cut(key, "/")
 				if gpu == flag("device") {
-					rows = append(rows, fmt.Sprintf("%s,%s,%s,%d,%d,false,created,%s", flag("server"), gpu, name, p.SMs/2, p.SMs, p.ID))
+					rows = append(rows, fmt.Sprintf("%s,%s,%s,%d,%d,%t,%t,%s,-,%s,%s", flag("server"), gpu, name, p.Chunks, p.SMs, p.Remainder, p.Shareable, p.MaxChunks, p.Status, p.ID))
 				}
 			}
 			return strings.Join(rows, "\n"), nil
 		case "sm-partition delete":
-			if f.busy {
-				return "", fmt.Errorf("partition in use")
+			for _, bindings := range f.assignments {
+				if bindings[flag("device")] == args[2] {
+					return "", fmt.Errorf("partition in use")
+				}
 			}
 			delete(f.partitions, flag("device")+"/"+args[2])
 			return "", nil
@@ -170,7 +236,7 @@ func TestMPSV3Lifecycle(t *testing.T) {
 			saved := m.allocations[a.Namespace]
 			require.True(t, saved.Prepared)
 			if sms > 0 {
-				require.NotEmpty(t, saved.Partitions["GPU-a"])
+				require.Equal(t, m.partitionName(a, "GPU-a"), f.assignments[a.Namespace]["GPU-a"])
 				require.Equal(t, 100, f.namespaces[a.Namespace])
 			} else {
 				require.Equal(t, 25, f.namespaces[a.Namespace])
@@ -180,10 +246,13 @@ func TestMPSV3Lifecycle(t *testing.T) {
 			var spec cdspec.Spec
 			require.NoError(t, json.Unmarshal(data, &spec))
 			require.Contains(t, spec.Devices[0].ContainerEdits.Env, "NVIDIA_GPU_MEMORY_LIMIT=2048")
-			if sms > 0 {
-				require.Contains(t, strings.Join(spec.Devices[0].ContainerEdits.Env, "\n"), "CUDA_MPS_SM_PARTITION=GPU-a/opaque_")
-			}
-			// Retry uses the same namespace and opaque driver partition ID.
+			require.NotContains(t, strings.Join(spec.Devices[0].ContainerEdits.Env, "\n"), "CUDA_MPS_SM_PARTITION=")
+			mounts := spec.Devices[0].ContainerEdits.Mounts
+			require.Len(t, mounts, 1)
+			require.Equal(t, filepath.Join(m.root, "pipe", a.Server, a.Namespace), mounts[0].HostPath)
+			require.Equal(t, mpsV3ContainerPipe, mounts[0].ContainerPath)
+			require.Contains(t, mounts[0].Options, "ro")
+			// A retry verifies the existing namespace and its bindings.
 			calls := len(f.calls)
 			created, err = m.ensure(context.Background(), a)
 			require.NoError(t, err)
@@ -282,10 +351,7 @@ func TestMPSV3Response(t *testing.T) {
 	_, _, err := plugin.allocateMPSV3(context.Background(), pod, ctr, device.ContainerDevices{cd("GPU-a", "NVIDIA", 2048, 25)}, response)
 	require.NoError(t, err)
 	require.Equal(t, "2048", response.Envs["NVIDIA_GPU_MEMORY_LIMIT"])
-	require.Len(t, response.Mounts, 1)
-	require.Equal(t, mpsV3ContainerPipe, response.Mounts[0].ContainerPath)
-	require.True(t, response.Mounts[0].ReadOnly)
-	require.NotContains(t, response.Mounts[0].HostPath, "default")
+	require.Empty(t, response.Mounts)
 	require.Len(t, response.CdiDevices, 1)
 	require.True(t, strings.HasPrefix(response.CdiDevices[0].Name, "hami.io/mps-v3="))
 	for key := range response.Envs {
@@ -317,7 +383,7 @@ func TestAllocateMPSV3ExcludesHAMiCore(t *testing.T) {
 	require.Equal(t, "2048", ctr.Envs["NVIDIA_GPU_MEMORY_LIMIT"])
 	require.Len(t, ctr.CdiDevices, 2)
 	require.False(t, hasLdSoPreloadMount(ctr.Mounts))
-	require.Len(t, ctr.Mounts, 1)
+	require.Empty(t, ctr.Mounts)
 	require.NotContains(t, ctr.Envs, "CUDA_DEVICE_MEMORY_SHARED_CACHE")
 	require.NotContains(t, ctr.Envs, "CUDA_DEVICE_MEMORY_LIMIT_0")
 	require.NotContains(t, ctr.Envs, "CUDA_DEVICE_SM_LIMIT")
@@ -338,6 +404,32 @@ func TestMPSV3MultiGPURollback(t *testing.T) {
 	require.Empty(t, f.partitions)
 	require.Empty(t, m.allocations)
 }
+
+func TestMPSV3MultiGPUStaticBindings(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 2)
+	a.GPUs = append(a.GPUs, "GPU-b")
+	a.Server = a.serverName()
+	b := a
+	b.Container = "other"
+	b.Namespace = mpsV3Name("ns", b.PodUID+"/"+b.Container)
+	for _, allocation := range []mpsV3Allocation{a, b} {
+		created, err := m.ensure(ctx, allocation)
+		require.NoError(t, err)
+		require.True(t, created)
+		require.Equal(t, map[string]string{
+			"GPU-a": m.partitionName(allocation, "GPU-a"),
+			"GPU-b": m.partitionName(allocation, "GPU-b"),
+		}, f.assignments[allocation.Namespace])
+	}
+	require.Len(t, f.servers, 1)
+	require.NoError(t, m.release(ctx, a.Namespace))
+	require.NoError(t, m.check(ctx, b))
+	require.NoError(t, m.release(ctx, b.Namespace))
+	require.Empty(t, f.servers)
+}
+
 func TestMPSV3PreservesForeignCDI(t *testing.T) {
 	m, _ := testMPSV3(t)
 	a := testMPSAllocation(t, 0)
@@ -372,4 +464,177 @@ func TestMPSV3RejectsCorruptState(t *testing.T) {
 	require.NoError(t, os.WriteFile(m.statePath(), data, 0600))
 	require.Error(t, m.load())
 	require.Empty(t, m.allocations)
+}
+
+func TestMPSV3PartitionCSV620(t *testing.T) {
+	a := mpsV3Allocation{Server: "probe", Namespace: "test"}
+	const gpu = "GPU-7f40b924-1290-f254-98d4-1aa4acafc19d"
+	const id = "00820000007lB2gl36uRJhnTKcWcSxfc"
+	m := &mpsV3Manager{}
+	for _, tc := range []struct {
+		fields string
+		want   mpsV3Partition
+	}{
+		{"2,4,false,true,unlimited,-,created," + id, mpsV3Partition{Status: "created", ID: id, SMs: 4, Chunks: 2, Shareable: true, MaxChunks: "unlimited"}},
+		{"2,-,false,true,4,-,configured,-", mpsV3Partition{Status: "configured", ID: "-", Chunks: 2, Shareable: true, MaxChunks: "4"}},
+		{"2,4,false,created," + id, mpsV3Partition{}},
+	} {
+		m.run = func(context.Context, ...string) (string, error) {
+			return fmt.Sprintf("probe,%s,%s,%s\nprobe,%s,-,34,68,-,-,-,-,unallocated,-", gpu, m.partitionName(a, gpu), tc.fields, gpu), nil
+		}
+		part, err := m.partition(context.Background(), a, gpu)
+		if tc.want.Status == "" {
+			require.ErrorContains(t, err, "unexpected r620")
+			continue
+		}
+		require.NoError(t, err)
+		require.Equal(t, tc.want, part)
+	}
+}
+
+func TestMPSV3ServerTimesliceRecovery(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	level := 1
+	m.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3ServerTimeslice, Timeslice: "long", TimesliceYieldLevel: &level}
+	require.NoError(t, m.configureComputePolicy(ctx))
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test-pod", Annotations: map[string]string{nvidia.MPSV3ComputeModeAnnotation: nvidia.MPSV3ServerTimeslice}}}
+	allocate := func(name string, percent int64, devs device.ContainerDevices) mpsV3Allocation {
+		t.Helper()
+		a, err := mpsV3AllocationFor(pod, &corev1.Container{Name: name}, devs)
+		require.NoError(t, err)
+		created, err := m.ensure(ctx, a)
+		require.NoError(t, err)
+		require.True(t, created)
+		require.Equal(t, strconv.FormatInt(percent, 10), f.weights[a.Server])
+		require.Equal(t, 100, f.namespaces[a.Namespace])
+		return a
+	}
+	a := allocate("first", 25, device.ContainerDevices{cd("GPU-a", "NVIDIA", 2048, 25)})
+	b := allocate("second", 75, device.ContainerDevices{cd("GPU-a", "NVIDIA", 2048, 75)})
+	require.NotEqual(t, a.Server, b.Server)
+	overlap, err := mpsV3AllocationFor(pod, &corev1.Container{Name: "third"}, device.ContainerDevices{cd("GPU-a", "NVIDIA", 2048, 25), cd("GPU-b", "NVIDIA", 2048, 25)})
+	require.NoError(t, err)
+	created, err := m.ensure(ctx, overlap)
+	require.False(t, created)
+	require.ErrorContains(t, err, "another GPU set")
+
+	recovered := newMPSV3Manager()
+	recovered.root, recovered.cdiRoot, recovered.run, recovered.policy = m.root, m.cdiRoot, m.run, m.policy
+	require.NoError(t, recovered.load())
+	require.Equal(t, m.allocations, recovered.allocations)
+	require.NoError(t, recovered.recover(ctx, map[string]bool{"test-pod": true}))
+	require.NoError(t, recovered.check(ctx, a))
+	require.NoError(t, recovered.check(ctx, b))
+	f.weights[a.Server] = "75"
+	require.ErrorContains(t, recovered.check(ctx, a), "unexpected timeslice percentage")
+	f.timeslice = "medium"
+	require.ErrorContains(t, recovered.configureComputePolicy(ctx), "drain")
+	require.NoError(t, recovered.release(ctx, a.Namespace))
+	require.Contains(t, f.servers, b.Server)
+	require.NoError(t, recovered.release(ctx, b.Namespace))
+	recovered.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3NamespaceCap}
+	require.NoError(t, recovered.configureComputePolicy(ctx))
+	require.Equal(t, "default", f.timeslice)
+	require.Equal(t, "unset", f.yield)
+}
+
+func TestMPSV3TimesliceCapabilityProbe(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	m.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3ServerTimeslice, Timeslice: "short"}
+	require.NoError(t, m.configureComputePolicy(ctx))
+	require.NoError(t, m.probeTimeslice(ctx, []string{"GPU-b", "GPU-a"}))
+	require.Empty(t, m.allocations)
+	require.Empty(t, f.servers)
+	second := mpsV3Allocation{PodUID: "timeslice-probe", Container: "second", ComputeMode: nvidia.MPSV3ServerTimeslice, GPUs: []string{"GPU-a"}}
+	f.fail = "server create " + second.serverName()
+	require.ErrorContains(t, m.probeTimeslice(ctx, []string{"GPU-a"}), "injected failure")
+	require.Empty(t, m.allocations)
+	require.Empty(t, f.servers)
+}
+
+func TestMPSV3RejectsLiveLegacyState(t *testing.T) {
+	m, f := testMPSV3(t)
+	a := testMPSAllocation(t, 0)
+	a.Version, a.ComputeMode, a.Prepared = 0, "", true
+	m.allocations[a.Namespace] = a
+	require.NoError(t, m.save())
+	require.NoError(t, m.load())
+	require.ErrorContains(t, m.recover(context.Background(), map[string]bool{a.PodUID: true}), "drain the node first")
+	require.Empty(t, f.calls)
+	require.Equal(t, a, m.allocations[a.Namespace])
+}
+
+func TestMPSV3NodeConfigOverride(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "node1")
+	path := filepath.Join(t.TempDir(), "node.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"nodeconfig":[
+		{"name":"node1","operatingmode":"mps-v3","mpsv3":{"computeMode":"server-timeslice","timeslice":"long","timesliceYieldLevel":1}},
+		{"name":"node1","mpsv3":{"computeMode":"namespace-cap"}}
+	]}`), 0600))
+	var config nvidia.NvidiaConfig
+	mode, err := readFromConfigFile(&config, path, nil)
+	require.NoError(t, err)
+	require.Equal(t, nvidia.MpsV3Mode, mode)
+	require.NotNil(t, config.MPSV3)
+	resolved, err := config.MPSV3.Resolve()
+	require.NoError(t, err)
+	require.Equal(t, nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3NamespaceCap}, resolved)
+}
+
+func TestMPSV3BorrowingAndBindingDrift(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 4)
+	a.SMPolicy = nvidia.MPSV3SMPolicy{Shareable: true, MaxChunks: "5"}
+	_, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+	name := m.partitionName(a, "GPU-a")
+	key := "GPU-a/" + name
+	p := f.partitions[key]
+	p.SMs = 10
+	f.partitions[key] = p
+	require.NoError(t, m.check(ctx, a))
+	f.assignments[a.Namespace]["GPU-a"] = "another_partition"
+	require.ErrorContains(t, m.check(ctx, a), "unexpected MPS namespace partition assignment")
+	f.assignments[a.Namespace]["GPU-a"] = name
+	p.MaxChunks = "6"
+	f.partitions[key] = p
+	require.ErrorContains(t, m.check(ctx, a), "configuration changed")
+}
+
+func TestMPSV3UnknownInventoryPreservesAllocation(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 0)
+	_, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+	f.serverCSV = a.Server + ",0,123,Ready"
+	require.ErrorContains(t, m.release(ctx, a.Namespace), "unexpected r620")
+	require.True(t, m.allocations[a.Namespace].Prepared)
+	require.Contains(t, f.namespaces, a.Namespace)
+	require.FileExists(t, m.cdiPath(a.Namespace))
+}
+
+func TestMPSV3DaemonLeavesSocketOnExit(t *testing.T) {
+	m, _ := testMPSV3(t)
+	ctx := context.Background()
+	dir := filepath.Join(m.root, "pipe")
+	require.NoError(t, os.Mkdir(dir, 0755))
+	socket := filepath.Join(dir, "control")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	require.NoError(t, err)
+	listener.SetUnlinkOnClose(false)
+	defer listener.Close()
+	listening, err := m.daemonListening(ctx)
+	require.NoError(t, err)
+	require.True(t, listening)
+	require.NoError(t, listener.Close())
+	_, err = os.Lstat(socket)
+	require.NoError(t, err)
+	listening, err = m.daemonListening(ctx)
+	require.NoError(t, err)
+	require.False(t, listening)
 }
