@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,7 +81,7 @@ func TestValidateDeviceConfig(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestValidateCommandProcess$", "--"}, args...)...)
+			command := validateTestProcess(ctx, "TestValidateCommandProcess", append([]string{"--"}, args...)...)
 			command.Env = append(os.Environ(),
 				"HAMI_TEST_VALIDATE_COMMAND=1",
 				"KUBECONFIG="+filepath.Join(directory, "missing-kubeconfig"),
@@ -130,5 +131,84 @@ func TestValidateCommandProcess(t *testing.T) {
 	main()
 	if sher != nil || client.GetClient() != nil {
 		t.Fatal("validation started scheduler or Kubernetes client")
+	}
+}
+
+type validateErrorWriter struct{}
+
+func (validateErrorWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
+func validateTestProcess(ctx context.Context, test string, args ...string) *exec.Cmd {
+	testArgs := []string{"-test.run=^" + test + "$"}
+	// go test sets GOCOVERDIR, but successful test subprocesses also need the
+	// testing flag to write their counters into the parent's coverage report.
+	if testing.CoverMode() != "" {
+		if directory := os.Getenv("GOCOVERDIR"); directory != "" {
+			testArgs = append(testArgs, "-test.gocoverdir="+directory)
+		}
+	}
+	return exec.CommandContext(ctx, os.Args[0], append(testArgs, args...)...)
+}
+
+// Execute directly in an isolated process so returned errors can be checked
+// without main's fatal exit preventing the testing framework from finishing.
+func TestValidateCommandReturnsErrors(t *testing.T) {
+	if scenario := os.Getenv("HAMI_TEST_VALIDATE_RESULT_CASE"); scenario != "" {
+		path := filepath.Join(t.TempDir(), "device config.yaml")
+		input := "nvidia:\n  resourceCountName: nvidia.com/gpu\n"
+		if scenario == "invalid config" {
+			input = "nvidia:\n  defaultCores: 101\n"
+		}
+		if scenario != "missing file" {
+			if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		command := newValidateCommand()
+		command.SetOut(io.Discard)
+		command.SetErr(io.Discard)
+		command.SetArgs([]string{"device-config", path})
+		if scenario == "output error" {
+			command.SetOut(validateErrorWriter{})
+		}
+		err := command.Execute()
+		switch scenario {
+		case "missing file":
+			if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "load device config") || !strings.Contains(err.Error(), path) {
+				t.Fatalf("want wrapped file error with path, got %v", err)
+			}
+		case "invalid config":
+			if err == nil || !strings.Contains(err.Error(), "validate device config") || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "defaultCores is a percentage") {
+				t.Fatalf("want config validation error with path, got %v", err)
+			}
+		case "output error":
+			if !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("want output write error, got %v", err)
+			}
+		default:
+			t.Fatalf("unknown scenario %q", scenario)
+		}
+		if sher != nil || client.GetClient() != nil {
+			t.Fatal("validation started scheduler or Kubernetes client")
+		}
+		return
+	}
+
+	for _, scenario := range []string{"missing file", "invalid config", "output error"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			command := validateTestProcess(ctx, "TestValidateCommandReturnsErrors")
+			command.Env = append(os.Environ(),
+				"HAMI_TEST_VALIDATE_RESULT_CASE="+scenario,
+				"KUBECONFIG="+filepath.Join(t.TempDir(), "missing-kubeconfig"),
+				"KUBERNETES_SERVICE_HOST=", "KUBERNETES_SERVICE_PORT=",
+			)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("command result check failed: %v\n%s", err, output)
+			}
+		})
 	}
 }
