@@ -754,7 +754,7 @@ func (s *Scheduler) refreshCordonAnnotation(node *corev1.Node) {
 	}
 	klog.InfoS("Refreshing cached node for device-cordon annotation change",
 		"nodeName", node.Name, "from", cachedCordon, "to", liveCordon)
-	s.refreshNodeObject(node.Name, node)
+	s.refreshNodeAnnotation(node.Name, common.DeviceCordonAnnotation, node)
 }
 
 func (s *Scheduler) updateSchedulerLabel() {

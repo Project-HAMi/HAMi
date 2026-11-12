@@ -104,23 +104,36 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	}
 }
 
-// refreshNodeObject replaces just the cached Node for an already-registered
-// node, leaving its Devices untouched. register calls this when a vendor's
-// CheckHealth reports needUpdate=false but the live Node differs from the
-// cached one in a way CheckHealth does not look at (such as the
-// hami.io/device-cordon annotation), so that change reaches Fit() without
-// waiting for a vendor-triggered cache refresh.
-func (m *nodeManager) refreshNodeObject(nodeID string, node *corev1.Node) {
+// refreshNodeAnnotation copies one annotation from the live Node onto the
+// cached one for an already-registered node, leaving every other field -
+// including the rest of Annotations - exactly as the vendor's own
+// CheckHealth-driven refresh last set them. It never replaces the whole
+// cached Node: the Ascend and MetaX backends read other annotations directly
+// off it, so swapping in the live object would surface those other,
+// unrelated annotation changes to them ahead of the vendor's own refresh
+// cycle. register calls this when a vendor's CheckHealth reports
+// needUpdate=false but a live annotation CheckHealth does not look at (such
+// as hami.io/device-cordon) has changed, so that change still reaches Fit()
+// without waiting for a vendor-triggered cache refresh.
+func (m *nodeManager) refreshNodeAnnotation(nodeID, key string, node *corev1.Node) {
 	if node == nil {
 		return
 	}
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	existing, ok := m.nodes[nodeID]
-	if !ok {
+	if !ok || existing.Node == nil {
 		return
 	}
-	existing.Node = node.DeepCopy()
+	value, present := node.Annotations[key]
+	if !present {
+		delete(existing.Node.Annotations, key)
+		return
+	}
+	if existing.Node.Annotations == nil {
+		existing.Node.Annotations = make(map[string]string)
+	}
+	existing.Node.Annotations[key] = value
 }
 
 func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {

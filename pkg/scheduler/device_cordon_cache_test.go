@@ -187,11 +187,12 @@ func Test_register_UncordonAfterRegistrationReachesFit(t *testing.T) {
 	require.True(t, fit, "the cordon was removed, so the pod must fit; reason %q", reason)
 }
 
-// The tests below exercise onUpdateNode, refreshNodeObject and
+// The tests below exercise onUpdateNode, refreshNodeAnnotation and
 // refreshCordonAnnotation directly. The two tests above seed the node
 // lister's indexer without starting the informer, so the informer's own
 // UpdateFunc is never invoked by them, and they only ever call
-// refreshCordonAnnotation/refreshNodeObject on a node already in the cache.
+// refreshCordonAnnotation/refreshNodeAnnotation on a node already in the
+// cache.
 
 // onUpdateNode must request a register pass when the cordon annotation
 // changes, so the change reaches Fit() without waiting for the ticker.
@@ -238,26 +239,54 @@ func Test_onUpdateNode_IgnoresNonNodeObjects(t *testing.T) {
 	}
 }
 
-// refreshNodeObject must do nothing for a nil Node rather than panic or
+// refreshNodeAnnotation must do nothing for a nil Node rather than panic or
 // clear the cached one.
-func Test_refreshNodeObject_NilNodeIsNoop(t *testing.T) {
+func Test_refreshNodeAnnotation_NilNodeIsNoop(t *testing.T) {
 	s, indexer := newCordonTestScheduler(t)
 	require.NoError(t, indexer.Add(cordonTestNode("GPU-0,GPU-1")))
 	s.register(labels.Everything())
 
 	before := cachedCordon(t, s)
-	require.NotPanics(t, func() { s.refreshNodeObject(cordonTestNodeName, nil) })
+	require.NotPanics(t, func() {
+		s.refreshNodeAnnotation(cordonTestNodeName, common.DeviceCordonAnnotation, nil)
+	})
 	require.Equal(t, before, cachedCordon(t, s), "a nil node must leave the cache untouched")
 }
 
-// refreshNodeObject must not create a cache entry for a node that was never
-// registered; only addNode does that.
-func Test_refreshNodeObject_UnknownNodeIsNoop(t *testing.T) {
+// refreshNodeAnnotation must not create a cache entry for a node that was
+// never registered; only addNode does that.
+func Test_refreshNodeAnnotation_UnknownNodeIsNoop(t *testing.T) {
 	s, _ := newCordonTestScheduler(t)
 
 	require.NotPanics(t, func() {
-		s.refreshNodeObject("node-never-registered", cordonTestNode("GPU-0"))
+		s.refreshNodeAnnotation("node-never-registered", common.DeviceCordonAnnotation, cordonTestNode("GPU-0"))
 	})
 	_, err := s.GetNode("node-never-registered")
-	require.Error(t, err, "refreshNodeObject must not create a cache entry for an unregistered node")
+	require.Error(t, err, "refreshNodeAnnotation must not create a cache entry for an unregistered node")
+}
+
+// refreshNodeAnnotation must leave every other annotation on the cached Node
+// exactly as it was, even when the live Node's value for it has already
+// changed. This is the behavior Shouren asked for in review: Ascend and
+// MetaX read other annotations directly off the cached Node, so copying the
+// whole live Node here (as an earlier version of this fix did) would surface
+// an unrelated annotation change to them ahead of the vendor's own
+// CheckHealth-driven refresh cycle.
+func Test_refreshNodeAnnotation_LeavesOtherAnnotationsUntouched(t *testing.T) {
+	s, indexer := newCordonTestScheduler(t)
+
+	node := cordonTestNode("")
+	node.Annotations["some.vendor/other-annotation"] = "untouched-value"
+	require.NoError(t, indexer.Add(node))
+	s.register(labels.Everything())
+
+	live := cordonTestNode("GPU-0,GPU-1")
+	live.Annotations["some.vendor/other-annotation"] = "changed-on-live-node"
+	s.refreshNodeAnnotation(cordonTestNodeName, common.DeviceCordonAnnotation, live)
+
+	require.Equal(t, "GPU-0,GPU-1", cachedCordon(t, s), "the cordon annotation must still be refreshed")
+	info, err := s.GetNode(cordonTestNodeName)
+	require.NoError(t, err)
+	require.Equal(t, "untouched-value", info.Node.Annotations["some.vendor/other-annotation"],
+		"refreshNodeAnnotation must not let an unrelated annotation change leak into the cache")
 }
