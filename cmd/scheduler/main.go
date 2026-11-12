@@ -93,9 +93,9 @@ func init() {
 	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
+	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.AddCommand(newValidateCommand())
-	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
 // profilingMux keeps diagnostic handlers off the cluster and extender routers.
@@ -113,9 +113,7 @@ func listenProfiling(enabled bool, address string) (net.Listener, error) {
 	if !enabled {
 		return nil, nil
 	}
-	if !isLoopbackAddr(address) {
-		klog.Warningf("--profiling-bind-address=%s is not a loopback address: pprof authenticates no caller and exposes process diagnostics", address)
-	}
+	warnProfilingAddress(address)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on the profiling address %s: %w", address, err)
@@ -168,13 +166,8 @@ func start() error {
 	// Refuse to start with an unusable /refit identity: empty namespace or
 	// service-account means every TokenReview will fail, but silently – the
 	// scheduler would appear healthy while all refit calls are rejected.
-	if config.DevicePluginNamespace == "" || config.DevicePluginServiceAccount == "" {
-		return fmt.Errorf(
-			"--device-plugin-namespace and --device-plugin-service-account must both be set; "+
-				"they identify the ServiceAccount whose token is accepted on the /refit endpoint "+
-				"(see issue #2878). Got namespace=%q service-account=%q",
-			config.DevicePluginNamespace, config.DevicePluginServiceAccount,
-		)
+	if err := validateDevicePluginIdentity(config.DevicePluginNamespace, config.DevicePluginServiceAccount); err != nil {
+		return err
 	}
 
 	sher = scheduler.NewScheduler()
@@ -187,10 +180,7 @@ func start() error {
 
 	router := clusterRouter(sher)
 
-	if !isLoopbackAddr(config.ExtenderBind) {
-		klog.Warningf("--extender-bind=%s is not a loopback address: /filter and /bind authenticate no caller, "+
-			"so anyone able to reach it can drop a pod's device reservation or have its annotations patched", config.ExtenderBind)
-	}
+	warnExtenderAddress(config.ExtenderBind)
 
 	var tlsCfg *tls.Config
 	if len(tlsCertFile) > 0 && len(tlsKeyFile) > 0 {

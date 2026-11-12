@@ -54,5 +54,32 @@ func newValidateCommand() *cobra.Command {
 			return err
 		},
 	})
+	validate.AddCommand(newSchedulerConfigCommand())
 	return validate
+}
+
+func newSchedulerConfigCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "scheduler-config",
+		Short: "Validate HAMi scheduler startup options offline",
+		Long: "Check HAMi's node-affinity score weight and device-plugin ServiceAccount options " +
+			"without creating a Kubernetes client or starting servers. " +
+			"Non-loopback extender and enabled profiling addresses keep their startup warnings. " +
+			"Use 'validate device-config <path>' separately for device configuration files.",
+		Example: "  scheduler validate scheduler-config --device-plugin-namespace=kube-system --device-plugin-service-account=hami-device-plugin",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateSchedulerOptions(); err != nil {
+				return err
+			}
+			warnExtenderAddress(config.ExtenderBind)
+			if enableProfiling {
+				warnProfilingAddress(profilingBindAddress)
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "Scheduler options passed offline startup validation.")
+			return err
+		},
+	}
+	command.Flags().AddFlagSet(rootCmd.LocalNonPersistentFlags())
+	return command
 }

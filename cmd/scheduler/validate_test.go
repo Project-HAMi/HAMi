@@ -53,7 +53,7 @@ func TestValidateDeviceConfig(t *testing.T) {
 		{name: "missing file", missing: true, wantError: "load device config"},
 		{name: "missing argument", args: []string{"validate", "device-config"}, wantError: "accepts 1 arg(s), received 0"},
 		{name: "extra argument", args: []string{"validate", "device-config", "one.yaml", "two.yaml"}, wantError: "accepts 1 arg(s), received 2"},
-		{name: "unknown config type", args: []string{"validate", "scheduler-config", "one.yaml"}, wantError: "unknown command"},
+		{name: "unknown config type", args: []string{"validate", "unknown-config", "one.yaml"}, wantError: "unknown command"},
 		{name: "inherited vendor flag", config: "vnpus:\n  configs:\n  - commonWord: AscendA\n    resourceName: shared.com/npu\n  - commonWord: AscendB\n    resourceName: shared.com/npu\n", args: []string{"validate", "device-config", "<path>", "--enable-ascend"}, wantError: "both claim resource"},
 		{name: "root help", args: []string{"--help"}, wantOutput: "validate"},
 		{name: "parent without a subcommand", args: []string{"validate"}, wantOutput: "device-config"},
