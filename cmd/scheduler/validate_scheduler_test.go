@@ -24,8 +24,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestValidateSchedulerConfig(t *testing.T) {
@@ -121,18 +126,7 @@ func TestSchedulerStartupRejectsInvalidOptions(t *testing.T) {
 		{"identity", "0", "--device-plugin-namespace and --device-plugin-service-account must both be set"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			directory := t.TempDir()
-			deviceConfig := filepath.Join(directory, "devices.yaml")
-			if err := os.WriteFile(deviceConfig, []byte("nvidia:\n  resourceCountName: nvidia.com/gpu\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			kubeconfig := filepath.Join(directory, "kubeconfig")
-			// Client construction needs a config, but these option checks must
-			// reject startup before any Kubernetes API operation is required.
-			data := "apiVersion: v1\nkind: Config\nclusters:\n- name: offline\n  cluster:\n    server: https://127.0.0.1:1\n    insecure-skip-tls-verify: true\ncontexts:\n- name: offline\n  context:\n    cluster: offline\n    user: offline\ncurrent-context: offline\nusers:\n- name: offline\n  user:\n    token: unused\n"
-			if err := os.WriteFile(kubeconfig, []byte(data), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			deviceConfig, kubeconfig := schedulerStartupFiles(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			command := validateTestProcess(ctx, "TestValidateCommandProcess", "--",
@@ -148,4 +142,72 @@ func TestSchedulerStartupRejectsInvalidOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Isolate startup's clients, device registry and informers from other tests.
+// A fake client lets startup reach its listener checks without a cluster.
+func TestSchedulerStartupExtenderBindFailure(t *testing.T) {
+	if address := os.Getenv("HAMI_TEST_STARTUP_EXTENDER_ADDRESS"); address != "" {
+		deviceConfig, kubeconfig := schedulerStartupFiles(t)
+		t.Setenv("KUBECONFIG", kubeconfig)
+		// Finish the client's one-time construction before substituting the
+		// fake used by startup's informers. No API requests are made here.
+		client.InitGlobalClient()
+		client.KubeClient = fake.NewClientset()
+
+		occupied, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer occupied.Close()
+		address = occupied.Addr().String()
+		rootCmd.SetArgs([]string{
+			"--device-config-file=" + deviceConfig,
+			"--device-plugin-namespace=kube-system",
+			"--device-plugin-service-account=hami-device-plugin",
+			"--extender-bind=" + address,
+		})
+		err = rootCmd.Execute()
+		if !errors.Is(err, syscall.EADDRINUSE) || !strings.Contains(err.Error(), "failed to listen on the extender address") {
+			t.Fatalf("want synchronous extender bind error, got %v", err)
+		}
+		return
+	}
+	for _, address := range []string{"127.0.0.1:0", "0.0.0.0:0"} {
+		t.Run(address, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			command := validateTestProcess(ctx, "TestSchedulerStartupExtenderBindFailure")
+			command.Env = append(os.Environ(), "HAMI_TEST_STARTUP_EXTENDER_ADDRESS="+address,
+				"KUBERNETES_SERVICE_HOST=", "KUBERNETES_SERVICE_PORT=")
+			output, err := command.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("startup did not return its listener error: %v\n%s", ctx.Err(), output)
+			}
+			if err != nil {
+				t.Fatalf("startup listener check failed: %v\n%s", err, output)
+			}
+			warned := strings.Contains(string(output), "is not a loopback address: /filter and /bind authenticate no caller")
+			if want := !isLoopbackAddr(address); warned != want {
+				t.Fatalf("startup warning = %v, want %v:\n%s", warned, want, output)
+			}
+		})
+	}
+}
+
+func schedulerStartupFiles(t *testing.T) (deviceConfig, kubeconfig string) {
+	t.Helper()
+	directory := t.TempDir()
+	deviceConfig = filepath.Join(directory, "devices.yaml")
+	if err := os.WriteFile(deviceConfig, []byte("nvidia:\n  resourceCountName: nvidia.com/gpu\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kubeconfig = filepath.Join(directory, "kubeconfig")
+	// Client construction needs a config, but these option checks must
+	// reject startup before any Kubernetes API operation is required.
+	data := "apiVersion: v1\nkind: Config\nclusters:\n- name: offline\n  cluster:\n    server: https://127.0.0.1:1\n    insecure-skip-tls-verify: true\ncontexts:\n- name: offline\n  context:\n    cluster: offline\n    user: offline\ncurrent-context: offline\nusers:\n- name: offline\n  user:\n    token: unused\n"
+	if err := os.WriteFile(kubeconfig, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return deviceConfig, kubeconfig
 }
