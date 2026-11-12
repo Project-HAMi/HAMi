@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -170,7 +171,7 @@ func TestTopologyGroupKey(t *testing.T) {
 			assert.Equal(t, tt.group, topologyGroupKey(pod))
 		})
 	}
-	assert.Equal(t, "", topologyGroupKey(nil))
+	assert.Empty(t, topologyGroupKey(nil))
 }
 
 // TestRebuildTopologyFromTierLabels covers the flag that turns the feature on.
@@ -949,12 +950,7 @@ func TestTopologyGangDomainCanAssignSearchesAfterRejectedFit(t *testing.T) {
 		if nodeID != "node-a" {
 			return true
 		}
-		for _, member := range members {
-			if member == 2 {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(members, 2)
 	}
 
 	assigned, ok := topologyGangDomainCanAssign(nodes, fits, "node-a", 3, verify)

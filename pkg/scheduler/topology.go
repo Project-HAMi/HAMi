@@ -249,20 +249,20 @@ func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) ([]st
 		}
 	}
 	for _, info := range s.podManager.ListPodsInfo() {
-		if info.Pod == nil || info.Pod.UID == task.UID || info.Namespace != task.Namespace {
+		if info.Pod == nil || info.UID == task.UID || info.Namespace != task.Namespace {
 			continue
 		}
 		if topologyGroupKey(info.Pod) != group {
 			continue
 		}
 		if info.NodeID == "" {
-			if _, ok := active[info.Pod.UID]; !ok {
-				pending[info.Pod.UID] = info.Pod
+			if _, ok := active[info.UID]; !ok {
+				pending[info.UID] = info.Pod
 			}
 			continue
 		}
-		delete(pending, info.Pod.UID)
-		active[info.Pod.UID] = info.NodeID
+		delete(pending, info.UID)
+		active[info.UID] = info.NodeID
 		placed[info.NodeID] = struct{}{}
 	}
 	pendingPods := make([]*corev1.Pod, 0, len(pending))
@@ -1008,7 +1008,7 @@ func topologyGangDomainSearch(nodes []string, fits map[string]topologyGangDomain
 				return false
 			}
 			previous := assigned[nodeID]
-			next := append(previous[:len(previous):len(previous)], choice.member)
+			next := append(slices.Clip(previous), choice.member)
 			slices.Sort(next)
 			if !verify(nodeID, next) {
 				continue

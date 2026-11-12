@@ -111,7 +111,7 @@ func ParseTiers(spec string) ([]Tier, error) {
 	entries := make([]entry, 0, 4)
 	seenKey := make(map[string]bool)
 	seenLevel := make(map[int]bool)
-	for _, raw := range strings.Split(spec, ",") {
+	for raw := range strings.SplitSeq(spec, ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -362,7 +362,7 @@ func (t *Tree) LCA(a, b string) *HyperNode {
 	}
 	// Levels count up from the node, so the first level the two chains agree on
 	// is the deepest domain they share: the lowest common ancestor.
-	for level := 0; level < min(len(left), len(right)); level++ {
+	for level := range min(len(left), len(right)) {
 		if left[level] == nil || right[level] == nil {
 			continue
 		}
