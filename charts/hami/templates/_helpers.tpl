@@ -298,6 +298,13 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
+{{/* Tecorigin resources */}}
+{{- if .Values.devices.tecorigin.enabled -}}
+{{- $standardResources := list .Values.devices.tecorigin.resourceCountName -}}
+{{- range (concat $standardResources (.Values.devices.tecorigin.customresources | default (list)) | uniq) -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
 {{/* AMD resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.amd.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
 {{- range .Values.devices.amd.customresources -}}

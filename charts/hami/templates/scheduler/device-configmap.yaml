@@ -109,6 +109,8 @@ data:
       resourceCountName: {{ .Values.devices.vastai.resourceCountName }}
     biren:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
+    tecorigin:
+      resourceCountName: {{ .Values.devices.tecorigin.resourceCountName }}
     vnpus:
       deviceSplitCount: {{ .Values.devices.ascend.deviceSplitCount | int64 }}
       hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
