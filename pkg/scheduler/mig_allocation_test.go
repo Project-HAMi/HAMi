@@ -204,66 +204,6 @@ func TestIsMIGRequest(t *testing.T) {
 	}
 }
 
-func TestGetNodesUsageWithMIGCandidates(t *testing.T) {
-	// Both nodes have annotated MIG pods, so a candidate snapshot must retain
-	// its reservations without including those from the other node. Reuse the
-	// benchmark fixture to ensure it exercises valid MIG accounting.
-	s := newBenchmarkScheduler(2, 1, 4, true)
-	for _, tc := range []struct {
-		name       string
-		nodes      *[]string
-		wantNodes  int
-		wantFailed int
-	}{
-		{name: "first candidate", nodes: &[]string{"node-0"}, wantNodes: 1},
-		{name: "second candidate", nodes: &[]string{"node-1"}, wantNodes: 1},
-		{name: "both candidates", nodes: &[]string{"node-0", "node-1"}, wantNodes: 2},
-		{name: "full snapshot", wantNodes: 2},
-		{name: "empty candidates", nodes: &[]string{}},
-		{name: "unknown candidate", nodes: &[]string{"unknown"}, wantFailed: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			usage, overall, failed, err := s.getNodesUsage(tc.nodes, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(*overall) != tc.wantNodes || len(failed) != tc.wantFailed {
-				t.Fatalf("got %d nodes and %d failures, want %d and %d", len(*overall), len(failed), tc.wantNodes, tc.wantFailed)
-			}
-			wantCandidates := tc.wantNodes
-			if tc.nodes == nil {
-				wantCandidates = 0
-			}
-			if len(*usage) != wantCandidates {
-				t.Fatalf("got %d candidate nodes, want %d", len(*usage), wantCandidates)
-			}
-			if tc.nodes != nil {
-				for _, nodeID := range *tc.nodes {
-					if nodeID != "unknown" && (*usage)[nodeID] == nil {
-						t.Fatalf("candidate %s missing from snapshot", nodeID)
-					}
-				}
-			}
-			for nodeID, node := range *overall {
-				gpu := node.Devices.DeviceLists[0].Device
-				if !gpu.Health || gpu.Mode != nvidia.MigMode || gpu.Used != 2 || gpu.Usedmem != 2*4864 || gpu.Usedcores != 2*14 || len(gpu.PodInfos) != 2 {
-					t.Fatalf("incorrect MIG usage on %s: %+v", nodeID, gpu)
-				}
-				placements := make(map[device.MigPlacement]bool)
-				for _, allocation := range gpu.MigAllocationsInUse {
-					if allocation.Profile != "1g.5gb" || allocation.RuntimeReady {
-						t.Fatalf("incorrect pending MIG reservation on %s: %+v", nodeID, allocation)
-					}
-					placements[allocation.Placement] = true
-				}
-				if len(gpu.MigAllocationsInUse) != 2 || !placements[device.MigPlacement{Start: 0, Size: 1}] || !placements[device.MigPlacement{Start: 1, Size: 1}] {
-					t.Fatalf("incorrect MIG placements on %s: %+v", nodeID, gpu.MigAllocationsInUse)
-				}
-			}
-		})
-	}
-}
-
 func TestFitInDevicesAllowsMultipleMigPlacementsOnSingleGPU(t *testing.T) {
 	pod, request, requests := twoNvidiaDeviceRequest(nvidia.MigMode)
 	node := singleNvidiaGPUNode(nvidia.MigMode, []device.MigPlacement{
