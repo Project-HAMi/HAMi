@@ -966,14 +966,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
-		allocationsByGPU := map[string][]nvidia.MigAllocation{}
-		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
-			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
-				for _, allocation := range allocations {
-					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
-				}
-			}
-		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			// With a candidate list most Pods sit on nodes that were
@@ -984,6 +976,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
 			}
 			continue
+		}
+		allocationsByGPU := map[string][]nvidia.MigAllocation{}
+		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
+			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
+				for _, allocation := range allocations {
+					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
+				}
+			}
 		}
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
