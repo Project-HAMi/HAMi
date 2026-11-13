@@ -302,6 +302,9 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !ok {
 		return
 	}
+	if oldPod, ok := oldObj.(*corev1.Pod); ok {
+		s.observeAllocateResult(oldPod, newPod)
+	}
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
@@ -344,6 +347,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	s.podManager.UpdatePod(newPod)
 
 	s.releaseCompletedInitContainersLocked(newPod, pi, nil)
+}
+
+// observeAllocateResult counts the device plugin result once, when bind-phase leaves allocating.
+func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
+	if oldPod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+		return
+	}
+	if !s.leaderManager.IsLeader() {
+		return
+	}
+	switch newPod.Annotations[util.DeviceBindPhase] {
+	case util.DeviceBindSuccess:
+		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+	case util.DeviceBindFailed:
+		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
+	}
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
