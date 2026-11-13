@@ -1368,7 +1368,15 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 	return aligned, nil
 }
 
-// Allocate which return list of devices.
+// Allocate assigns GPU and MIG devices to requesting containers, atomically coordinating
+// device discovery, allocation recovery, pod annotations, and node locks.
+// If dynamic MIG allocation preparation fails, it attempts to look up the pending pod and invoke
+// PodAllocationFailed to set DeviceBindFailed and release the node lock prior to returning an error.
+// Parameters:
+//   - ctx: request context from Kubelet gRPC call.
+//   - reqs: allocate request containing device IDs requested by containers.
+// Returns:
+//   - AllocateResponse containing container device allocations, or an error on failure.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	// Kubelet may issue Allocate calls concurrently. The pending-pod
 	// annotation protocol and dynamic MIG preparation are node-global, so keep
@@ -1377,10 +1385,29 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	defer plugin.applyMutex.Unlock()
 	plugin.migAllocationGeneration++
 	allocationCompleted := false
+	nodename := os.Getenv(util.NodeNameEnvName)
 	if plugin.operatingMode == nvidia.MigMode && plugin.migMgr != nil {
 		// Adopt existing instances before recording the rollback baseline;
 		// a later allocation failure must never release recovered workloads.
 		if err := plugin.prepareMigAllocationsLocked(); err != nil {
+			if nodename != "" {
+				lookupCtx := ctx
+				var cancel context.CancelFunc
+				if lookupCtx == nil || lookupCtx.Err() != nil {
+					lookupCtx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+				}
+				pendingPod, podErr := getPendingPod(lookupCtx, nodename)
+				if podErr != nil && lookupCtx == ctx {
+					fallbackCtx, fallbackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer fallbackCancel()
+					pendingPod, podErr = getPendingPod(fallbackCtx, nodename)
+				}
+				if podErr != nil {
+					klog.ErrorS(podErr, "failed to get pending pod to invoke PodAllocationFailed after MIG recovery failure", "node", nodename)
+				}
+				PodAllocationFailed(nodename, pendingPod, NodeLockNvidia)
+			}
 			return nil, fmt.Errorf("recover MIG allocations before allocation: %w", err)
 		}
 		plugin.migMgr.mu.Lock()
@@ -1419,7 +1446,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
-	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := getPendingPod(ctx, nodename)
 	if err != nil {
 		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)

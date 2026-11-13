@@ -580,7 +580,36 @@ func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
 }
 
+// updatePodAnnotationsAndReleaseLock updates the device binding phase annotation on the pod
+// and releases the node lock associated with the allocation. If pod is nil, it attempts to
+// determine the lock owner from the node's lock annotation so the held lock can still be released.
+// Parameters:
+//   - nodeName: name of the node where the allocation occurred.
+//   - pod: the target pod reference. If nil, lock owner recovery is attempted via node annotations.
+//   - lockName: name of the node lock to release.
+//   - deviceBindPhase: the target device binding phase (e.g. DeviceBindSuccess or DeviceBindFailed).
 func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockName string, deviceBindPhase string) {
+	if nodeName == "" {
+		return
+	}
+	if pod == nil && client.GetClient() != nil {
+		if node, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{}); err == nil && node != nil {
+			if val, ok := node.Annotations[nodelock.NodeLockKey]; ok {
+				if _, ns, name, err := nodelock.ParseNodeLock(val); err == nil && ns != "" && name != "" {
+					pod = &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: ns,
+							Name:      name,
+						},
+					}
+				}
+			}
+		}
+	}
+	if pod == nil {
+		klog.Infof("Skip pod annotation update and lock release on node %s: pod is nil and node lock annotation not found", nodeName)
+		return
+	}
 	newAnnos := map[string]string{util.DeviceBindPhase: deviceBindPhase}
 	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
 		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -590,11 +619,31 @@ func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockNa
 	}
 }
 
+// podAllocationFailed logs allocation failure and delegates to updatePodAnnotationsAndReleaseLock
+// with DeviceBindFailed to update pod annotations and release the node lock.
+// Parameters:
+//   - nodeName: name of the node where the allocation failed.
+//   - pod: the target pod reference, or nil if pending pod lookup failed.
+//   - lockName: name of the node lock to release.
 var podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
-	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
+	if nodeName == "" {
+		klog.Infof("Pod allocation failed skipped: nodeName is empty")
+		return
+	}
+	if pod != nil {
+		klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
+	} else {
+		klog.Infof("Pod allocation failed on node %s with nil pod reference; attempting lock recovery", nodeName)
+	}
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
 }
 
+// PodAllocationFailed marks a pod allocation attempt as failed by setting the device bind phase
+// to DeviceBindFailed and releasing the node lock on the specified node.
+// Parameters:
+//   - nodeName: name of the node where the allocation failed.
+//   - pod: the target pod reference, or nil if pending pod lookup failed.
+//   - lockName: name of the node lock to release.
 func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
 	podAllocationFailed(nodeName, pod, lockName)
 }
