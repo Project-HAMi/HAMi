@@ -269,13 +269,18 @@ var (
 	GPUSchedulerPolicy string
 	InRequestDevices   map[string]string
 	SupportDevices     map[string]string
-	DevicesMap         map[string]Devices
-	DevicesToHandle    []string
+	// PodDeviceAnnoAliases lists older annotation keys that DecodePodDevices
+	// reads when the primary key is absent. Hygon uses this so a resourcePrefix
+	// change still accounts pods scheduled under the previous key.
+	PodDeviceAnnoAliases map[string][]string
+	DevicesMap           map[string]Devices
+	DevicesToHandle      []string
 )
 
 func init() {
 	InRequestDevices = make(map[string]string)
 	SupportDevices = make(map[string]string)
+	PodDeviceAnnoAliases = make(map[string][]string)
 }
 
 // DeepCopy returns a copy of DeviceUsage. It clones the PodInfos slice but
@@ -587,6 +592,18 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 	pd := make(PodDevices)
 	for devID, devs := range checklist {
 		str, ok := annos[devs]
+		if !ok {
+			for _, alias := range PodDeviceAnnoAliases[devs] {
+				if alias == devs {
+					continue
+				}
+				if alt, found := annos[alias]; found {
+					str = alt
+					ok = true
+					break
+				}
+			}
+		}
 		if !ok {
 			continue
 		}

@@ -41,10 +41,12 @@ data:
       resourceMemoryName: {{ .Values.devices.cambricon.resourceMemoryName }}
       resourceCoreName: {{ .Values.devices.cambricon.resourceCoreName }}
     hygon:
-      resourceCountName: {{ .Values.devices.hygon.resourceCountName }}
-      resourceMemoryName: {{ .Values.devices.hygon.resourceMemoryName }}
-      resourceCoreName: {{ .Values.devices.hygon.resourceCoreName }}
+      {{- $hygonPrefix := include "hami-vgpu.hygon.prefix" . }}
+      resourceCountName: {{ include "hami-vgpu.hygon.resourceCountName" . }}
+      resourceMemoryName: {{ include "hami-vgpu.hygon.resourceMemoryName" . }}
+      resourceCoreName: {{ include "hami-vgpu.hygon.resourceCoreName" . }}
       memoryFactor: {{ .Values.devices.hygon.memoryFactor }}
+      resourcePrefix: {{ $hygonPrefix }}
     metax:
       resourceCountName: {{ .Values.devices.metax.resourceCountName }}
       resourceVCountName: {{ .Values.devices.metax.resourceVCountName }}

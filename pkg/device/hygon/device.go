@@ -37,12 +37,6 @@ type HCUDevices struct {
 }
 
 const (
-	HandshakeAnnos     = "hami.io/node-handshake-hcu"
-	RegisterAnnos      = "hami.io/node-hcu-register"
-	HygonHCUDevice     = "HCU"
-	HygonHCUCommonWord = "HCU"
-	HCUInUse           = "hygon.com/use-hcutype"
-	HCUNoUse           = "hygon.com/nouse-hcutype"
 	// HCUUseUUID annotation specifies a comma-separated list of HCU UUIDs to use.
 	HCUUseUUID = "hygon.com/use-gpuuuid"
 	// HCUNoUseUUID annotation specifies a comma-separated list of HCU UUIDs to exclude.
@@ -52,33 +46,215 @@ const (
 	// there is a bug with nodelock package utils, the key is hard coded as "hami.io/mutex.lock"
 	// so we can only use this value now.
 	NodeLockHCU = "hami.io/mutex.lock"
+
+	defaultHygonResourcePrefix = "hcu"
 )
 
 var (
+	// HygonHCUDevice stays "HCU". Allocation annotations and the scheduler
+	// device map are keyed by this word. Changing it when resourcePrefix is
+	// dcu would drop pods already recorded under "HCU". The card model is
+	// matched against configuredResourcePrefix instead.
+	HygonHCUDevice     = "HCU"
+	HygonHCUCommonWord = "HCU"
+
+	// Prefix-dependent keys. Defaults match resourcePrefix "hcu" so callers
+	// that never re-init still see the current HCU names.
+	HandshakeAnnos = "hami.io/node-handshake-hcu"
+	RegisterAnnos  = "hami.io/node-hcu-register"
+	HCUInUse       = "hygon.com/use-hcutype"
+	HCUNoUse       = "hygon.com/nouse-hcutype"
+
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
 	MemoryFactor        int64
+
+	// defaultResourcePrefix is the -hcu-prefix flag. YAML resourcePrefix wins when set.
+	defaultResourcePrefix = defaultHygonResourcePrefix
+	// configuredResourcePrefix is the prefix Apply last accepted. Card models
+	// such as DCU-K100_AI are selected when they contain this prefix.
+	configuredResourcePrefix = defaultHygonResourcePrefix
+
+	// Prefixes already applied in this process, plus the historical hcu and dcu
+	// keys, stay readable after resourcePrefix changes.
+	seenHygonRequestKeys   []string
+	seenHygonAllocatedKeys []string
+	hygonAliasPrimaries    []string
 )
 
 type HygonConfig struct {
-	ResourceCountName  string `yaml:"resourceCountName"`
-	ResourceMemoryName string `yaml:"resourceMemoryName"`
-	ResourceCoreName   string `yaml:"resourceCoreName"`
+	ResourcePrefix     string `yaml:"resourcePrefix,omitempty"`
+	ResourceCountName  string `yaml:"resourceCountName,omitempty"`
+	ResourceMemoryName string `yaml:"resourceMemoryName,omitempty"`
+	ResourceCoreName   string `yaml:"resourceCoreName,omitempty"`
 	MemoryFactor       int64  `yaml:"memoryFactor"`
 }
 
-func InitHCUDevice(config HygonConfig) *HCUDevices {
-	HygonResourceCount = config.ResourceCountName
-	HygonResourceMemory = config.ResourceMemoryName
-	HygonResourceCores = config.ResourceCoreName
-	MemoryFactor = config.MemoryFactor
-	_, ok := device.InRequestDevices[HygonHCUDevice]
-	if !ok {
-		device.InRequestDevices[HygonHCUDevice] = "hami.io/hcu-devices-to-allocate"
-		device.SupportDevices[HygonHCUDevice] = "hami.io/hcu-devices-allocated"
-		util.HandshakeAnnos[HygonHCUDevice] = HandshakeAnnos
+// Apply checks resourcePrefix and derives resource and annotation names from it.
+// An empty prefix uses -hcu-prefix, then "hcu". A non-empty resource name in
+// this config overrides the derived name. --hcu-name, --hcu-memory, and
+// --hcu-cores stay registered so existing command lines still parse; chart
+// deployments already set the YAML names, and the scheduler parses flags
+// through cobra, so those three flags are not a second source of names.
+// The device id stays "HCU"; annotation keys follow the prefix, and the
+// previous hcu/dcu keys remain readable so existing pods stay accounted.
+func (c *HygonConfig) Apply() error {
+	prefix := strings.TrimSpace(c.ResourcePrefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(defaultResourcePrefix)
 	}
+	if prefix == "" {
+		prefix = defaultHygonResourcePrefix
+	}
+	if !validResourcePrefix(prefix) {
+		return fmt.Errorf("hygon resourcePrefix %q must match ^[a-z0-9]+$ and contain \"cu\"", prefix)
+	}
+	count := resolveResourceName(c.ResourceCountName, fmt.Sprintf("hygon.com/%snum", prefix))
+	mem := resolveResourceName(c.ResourceMemoryName, fmt.Sprintf("hygon.com/%smem", prefix))
+	cores := resolveResourceName(c.ResourceCoreName, fmt.Sprintf("hygon.com/%scores", prefix))
+
+	c.ResourcePrefix = prefix
+	c.ResourceCountName = count
+	c.ResourceMemoryName = mem
+	c.ResourceCoreName = cores
+	HygonResourceCount = count
+	HygonResourceMemory = mem
+	HygonResourceCores = cores
+	configuredResourcePrefix = prefix
+	HandshakeAnnos = fmt.Sprintf("hami.io/node-handshake-%s", prefix)
+	RegisterAnnos = fmt.Sprintf("hami.io/node-%s-register", prefix)
+	HCUInUse = fmt.Sprintf("hygon.com/use-%stype", prefix)
+	HCUNoUse = fmt.Sprintf("hygon.com/nouse-%stype", prefix)
+	activeRequest := fmt.Sprintf("hami.io/%s-devices-to-allocate", prefix)
+	activeAllocated := fmt.Sprintf("hami.io/%s-devices-allocated", prefix)
+	device.InRequestDevices[HygonHCUDevice] = activeRequest
+	device.SupportDevices[HygonHCUDevice] = activeAllocated
+	util.HandshakeAnnos[HygonHCUDevice] = HandshakeAnnos
+	bindHygonPodDeviceAliases(activeRequest, activeAllocated)
+	return nil
+}
+
+// resolveResourceName uses an explicit config value, otherwise the name derived
+// from resourcePrefix.
+func resolveResourceName(configured, derived string) string {
+	if name := strings.TrimSpace(configured); name != "" {
+		return name
+	}
+	return derived
+}
+
+// IsHygonRequest reports whether requestedType is the stable Hygon device id.
+func IsHygonRequest(requestedType string) bool {
+	return strings.EqualFold(requestedType, HygonHCUDevice)
+}
+
+// ModelMatchesPrefix reports whether a card model registered by the device
+// plugin belongs to the configured resource prefix.
+//
+// A prefixed model follows the current device plugin: DCU-K100_AI matches dcu
+// and does not match hcu. dcu-vgpu-device-plugin instead stores the raw DMI
+// name (K100_AI, Z100, Z100L) with no family marker. Master accepted those
+// names, and they are not the other prefix, so they match the configured one.
+func ModelMatchesPrefix(availableType string) bool {
+	prefix := configuredResourcePrefix
+	if prefix == "" {
+		prefix = defaultHygonResourcePrefix
+	}
+	model := strings.ToLower(strings.TrimSpace(availableType))
+	if model == "" {
+		return false
+	}
+	if strings.Contains(model, strings.ToLower(prefix)) {
+		return true
+	}
+	if strings.Contains(model, "hcu") || strings.Contains(model, "dcu") {
+		return false
+	}
+	return legacyUnprefixedHygonModel(model)
+}
+
+// legacyUnprefixedHygonModel reports raw DMI names. The token check keeps
+// unrelated single-token types such as MLU370 off the Hygon path.
+func legacyUnprefixedHygonModel(model string) bool {
+	for _, family := range []string{"k100", "z100", "bw100", "bw150", "z100"} {
+		if strings.HasPrefix(model, family) && hygonModelToken(model) {
+			return true
+		}
+	}
+	return false
+}
+
+func hygonModelToken(model string) bool {
+	if model == "" {
+		return false
+	}
+	for _, r := range model {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func bindHygonPodDeviceAliases(activeRequest, activeAllocated string) {
+	for _, key := range hygonAliasPrimaries {
+		delete(device.PodDeviceAnnoAliases, key)
+	}
+	requestKeys := append(append([]string{}, seenHygonRequestKeys...),
+		"hami.io/hcu-devices-to-allocate",
+		"hami.io/dcu-devices-to-allocate",
+		activeRequest,
+	)
+	allocatedKeys := append(append([]string{}, seenHygonAllocatedKeys...),
+		"hami.io/hcu-devices-allocated",
+		"hami.io/dcu-devices-allocated",
+		activeAllocated,
+	)
+	if device.PodDeviceAnnoAliases == nil {
+		device.PodDeviceAnnoAliases = map[string][]string{}
+	}
+	device.PodDeviceAnnoAliases[activeRequest] = otherAnnotationKeys(requestKeys, activeRequest)
+	device.PodDeviceAnnoAliases[activeAllocated] = otherAnnotationKeys(allocatedKeys, activeAllocated)
+	hygonAliasPrimaries = []string{activeRequest, activeAllocated}
+	seenHygonRequestKeys = otherAnnotationKeys(append(requestKeys, activeRequest), "")
+	seenHygonAllocatedKeys = otherAnnotationKeys(append(allocatedKeys, activeAllocated), "")
+}
+
+func otherAnnotationKeys(keys []string, skip string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == "" || key == skip {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func validResourcePrefix(prefix string) bool {
+	if !strings.Contains(prefix, "cu") {
+		return false
+	}
+	for _, r := range prefix {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return prefix != ""
+}
+
+func InitHCUDevice(config HygonConfig) *HCUDevices {
+	if err := config.Apply(); err != nil {
+		klog.ErrorS(err, "invalid hygon config")
+		return nil
+	}
+	MemoryFactor = config.MemoryFactor
 	return &HCUDevices{}
 }
 
@@ -87,6 +263,11 @@ func (dev *HCUDevices) CommonWord() string {
 }
 
 func ParseConfig(fs *flag.FlagSet) {
+	fs.StringVar(&defaultResourcePrefix, "hcu-prefix", defaultHygonResourcePrefix, "Hygon resource prefix used when resourcePrefix is empty. Lowercase letters and digits, and it must contain \"cu\". The device plugin must advertise the same prefix.")
+	// These three flags stay so existing command lines still parse. Apply does
+	// not read them: a YAML resource name wins, and an empty name is derived
+	// from resourcePrefix. cobra parses the scheduler flags, so FlagSet.Visit
+	// on this set would not see values the user passed.
 	fs.StringVar(&HygonResourceCount, "hcu-name", "hygon.com/hcunum", "hcu resource count")
 	fs.StringVar(&HygonResourceMemory, "hcu-memory", "hygon.com/hcumem", "hcu memory resource")
 	fs.StringVar(&HygonResourceCores, "hcu-cores", "hygon.com/hcucores", "hcu core resource")
@@ -169,6 +350,9 @@ func (dev *HCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) 
 
 func (dev *HCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, HygonHCUDevice) == 0 {
+		if !ModelMatchesPrefix(d.Type) {
+			return true, false, false
+		}
 		return true, checkHCUtype(annos, d.Type), false
 	}
 	return false, false, false
