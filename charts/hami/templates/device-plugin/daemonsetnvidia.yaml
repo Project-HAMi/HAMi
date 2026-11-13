@@ -145,6 +145,10 @@ spec:
             {{- if .Values.devicePlugin.hostPIDBroker.enabled }}
             - name: LIBVGPU_HOSTPID_BROKER
               value: "1"
+            - name: HAMI_HOSTPID_DRIVER_ADMISSION_PERMITS
+              value: {{ .Values.devicePlugin.hostPIDBroker.driverAdmissionPermits | quote }}
+            - name: HAMI_HOSTPID_DRIVER_ADMISSION_MAX_HOLD_SECONDS
+              value: {{ .Values.devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds | quote }}
             {{- end }}
             {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}
             - name: PASS_DEVICE_SPECS
