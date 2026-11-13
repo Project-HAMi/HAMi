@@ -1,0 +1,1546 @@
+/*
+Copyright 2026 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package scheduler
+
+import (
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+)
+
+// cceTierSpec is the tier label scheme of the CCE multi-level topology example,
+// smallest domain first.
+const cceTierSpec = "test-tier-1,test-tier-2,test-tier-3"
+
+// cceTopologyNodes is the eight node, three level fabric of the same example:
+// two nodes per tier 1 domain, two tier 1 domains per tier 2 domain, and both
+// tier 2 domains under a single tier 3 domain.
+func cceTopologyNodes() []*corev1.Node {
+	fabric := [][4]string{
+		{"node0", "HyperNode0", "HyperNode4", "HyperNode6"},
+		{"node1", "HyperNode0", "HyperNode4", "HyperNode6"},
+		{"node2", "HyperNode1", "HyperNode4", "HyperNode6"},
+		{"node3", "HyperNode1", "HyperNode4", "HyperNode6"},
+		{"node4", "HyperNode2", "HyperNode5", "HyperNode6"},
+		{"node5", "HyperNode2", "HyperNode5", "HyperNode6"},
+		{"node6", "HyperNode3", "HyperNode5", "HyperNode6"},
+		{"node7", "HyperNode3", "HyperNode5", "HyperNode6"},
+	}
+	nodes := make([]*corev1.Node, 0, len(fabric))
+	for _, entry := range fabric {
+		nodes = append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: entry[0],
+			Labels: map[string]string{
+				"test-tier-1": entry[1],
+				"test-tier-2": entry[2],
+				"test-tier-3": entry[3],
+			},
+		}})
+	}
+	return nodes
+}
+
+// topologyTestScheduler returns a scheduler whose cached hierarchy is the CCE
+// fabric, with the tier labels flag pointed at it. It restores the configuration
+// when the test ends, so the tests stay independent of each other.
+func topologyTestScheduler(t *testing.T, nodes []*corev1.Node) *Scheduler {
+	t.Helper()
+
+	originalLabels := config.TopologyTierLabels
+	originalMode := config.TopologyMode
+	originalWeight := config.TopologyScoreWeight
+	t.Cleanup(func() {
+		config.TopologyTierLabels = originalLabels
+		config.TopologyMode = originalMode
+		config.TopologyScoreWeight = originalWeight
+	})
+
+	config.TopologyTierLabels = cceTierSpec
+	config.TopologyMode = util.TopologyModeSoft
+	config.TopologyScoreWeight = config.DefaultTopologyScoreWeight
+
+	scheduler := NewScheduler()
+	scheduler.rebuildTopology(nodes)
+	require.NotNil(t, scheduler.topologySnapshot())
+	return scheduler
+}
+
+// topologyPod returns a Pod carrying the given topology annotations and labels.
+func topologyPod(annotations map[string]string, labels map[string]string) *corev1.Pod {
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:        "topology-pod",
+		Namespace:   "default",
+		UID:         "topology-pod-uid",
+		Annotations: annotations,
+		Labels:      labels,
+	}}
+}
+
+// TestTopologyRequirement covers the per-Pod opt-in. The feature must stay off
+// for a Pod that does not ask for it, and a Pod that asks for it without naming
+// a tier must only be ranked, never rejected, which is what the unlimited
+// sentinel encodes.
+func TestTopologyRequirement(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantTier    int
+		wantMode    string
+		wantOK      bool
+	}{
+		{"no annotation keeps the feature off", nil, 0, "", false},
+		{"mode alone asks for ranking only", map[string]string{util.TopologyModeAnnotationKey: "soft"}, unlimitedTier, "soft", true},
+		{"mode and tier", map[string]string{util.TopologyModeAnnotationKey: "hard", util.TopologyHighestTierAnnotationKey: "1"}, 1, "hard", true},
+		{"mode is case insensitive and trimmed", map[string]string{util.TopologyModeAnnotationKey: " HARD "}, unlimitedTier, "hard", true},
+		{"unrecognized mode falls back to the configured one", map[string]string{util.TopologyModeAnnotationKey: "strict"}, unlimitedTier, "", true},
+		{"tier alone opts the Pod in", map[string]string{util.TopologyHighestTierAnnotationKey: "2"}, 2, "", true},
+		{"tier zero is the node itself", map[string]string{util.TopologyHighestTierAnnotationKey: "0"}, 0, "", true},
+		{"non numeric tier is ignored", map[string]string{util.TopologyModeAnnotationKey: "hard", util.TopologyHighestTierAnnotationKey: "edge"}, 0, "", false},
+		{"negative tier is ignored", map[string]string{util.TopologyHighestTierAnnotationKey: "-1"}, 0, "", false},
+		{"unrelated annotation is ignored", map[string]string{"hami.io/unrelated": "hard"}, 0, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tier, mode, ok := topologyRequirement(topologyPod(tt.annotations, nil))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantMode, mode)
+			assert.Equal(t, tt.wantTier, tier)
+		})
+	}
+}
+
+// TestTopologyGroupKey covers how the set of Pods that has to stay together is
+// identified. An explicit annotation wins over the job labels, a job label wins
+// over the controller reference, and a Pod in no group reports none.
+func TestTopologyGroupKey(t *testing.T) {
+	controller := func(kind string, uid string) []metav1.OwnerReference {
+		owned := true
+		return []metav1.OwnerReference{{Kind: kind, UID: types.UID(uid), Controller: &owned}}
+	}
+	tests := []struct {
+		name  string
+		pod   *corev1.Pod
+		group string
+	}{
+		{"no group at all", topologyPod(nil, nil), ""},
+		{"job-name label", topologyPod(nil, map[string]string{"job-name": "train"}), "default/job-name/train"},
+		{"kubeflow label", topologyPod(nil, map[string]string{"training.kubeflow.org/job-name": "train"}), "default/training.kubeflow.org/job-name/train"},
+		{"volcano label", topologyPod(nil, map[string]string{"volcano.sh/job-name": "train"}), "default/volcano.sh/job-name/train"},
+		{"pod group label", topologyPod(nil, map[string]string{util.PodGroupLabel: "train"}), "default/" + util.PodGroupLabel + "/train"},
+		{"controller reference", topologyPod(nil, nil), "default/Job/job-uid"},
+		{"annotation overrides the labels", topologyPod(map[string]string{util.TopologyGroupAnnotationKey: "explicit"}, map[string]string{"job-name": "train"}), "default/explicit"},
+		{"job label overrides the controller reference", topologyPod(nil, map[string]string{"job-name": "train"}), "default/job-name/train"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := tt.pod
+			if tt.name == "controller reference" || tt.name == "job label overrides the controller reference" {
+				pod = pod.DeepCopy()
+				pod.OwnerReferences = controller("Job", "job-uid")
+			}
+			assert.Equal(t, tt.group, topologyGroupKey(pod))
+		})
+	}
+	assert.Empty(t, topologyGroupKey(nil))
+}
+
+// TestRebuildTopologyFromTierLabels covers the flag that turns the feature on.
+// An unset flag, and a flag that does not parse, both leave the scheduler
+// without a hierarchy, so the placement path is exactly the one it had before.
+func TestRebuildTopologyFromTierLabels(t *testing.T) {
+	nodes := cceTopologyNodes()
+	originalLabels := config.TopologyTierLabels
+	t.Cleanup(func() { config.TopologyTierLabels = originalLabels })
+
+	tests := []struct {
+		name       string
+		tierLabels string
+		loaded     bool
+		maxTier    int
+	}{
+		{"unset flag keeps the feature off", "", false, 0},
+		{"invalid flag keeps the feature off", "npu.io/rack=1,npu.io/rack=2", false, 0},
+		{"valid flag loads the hierarchy", cceTierSpec, true, 3},
+		{"explicit levels load the hierarchy", "test-tier-2=2,test-tier-1=1", true, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.TopologyTierLabels = tt.tierLabels
+			scheduler := NewScheduler()
+			scheduler.rebuildTopology(nodes)
+
+			snapshot := scheduler.topologySnapshot()
+			if !tt.loaded {
+				assert.Nil(t, snapshot)
+				return
+			}
+			require.NotNil(t, snapshot)
+			assert.Equal(t, tt.maxTier, snapshot.tree.MaxTier())
+			assert.NotEmpty(t, snapshot.tiers)
+		})
+	}
+}
+
+// topologyPlanForTest builds the plan the way Filter does, from an explicit
+// placement instead of from the Pod lists, so the filter and the scorer can be
+// exercised on their own.
+func topologyPlanForTest(scheduler *Scheduler, mode string, highest int, placed ...string) *topologyPlan {
+	return &topologyPlan{
+		view:    scheduler.topologySnapshot(),
+		group:   "default/job-name/train",
+		placed:  placed,
+		mode:    mode,
+		highest: highest,
+	}
+}
+
+// candidateNodes returns an empty device inventory for each named node, which
+// is all the pure domain and gang arithmetic tests need.
+func candidateNodes(names ...string) map[string]*NodeUsage {
+	candidates := make(map[string]*NodeUsage, len(names))
+	for _, name := range names {
+		candidates[name] = &NodeUsage{Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}}
+	}
+	return candidates
+}
+
+// TestApplyTopologyFilter covers the hard half: a candidate that would stretch
+// the group past the allowed tier is dropped and reported, a node the hierarchy
+// does not describe is rejected as unknown, and a soft request rejects nothing.
+func TestApplyTopologyFilter(t *testing.T) {
+	allNodes := cceTopologyNodes()
+	scheduler := topologyTestScheduler(t, allNodes)
+	pod := topologyPod(nil, nil)
+
+	t.Run("hard mode keeps only the domains within the allowed tier", func(t *testing.T) {
+		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 2, "only the two nodes of the tier 1 domain of the group survive")
+		assert.Contains(t, candidates, "node0")
+		assert.Contains(t, candidates, "node1")
+		assert.Len(t, failedNodes, 6)
+		for node := range candidates {
+			assert.NotContains(t, failedNodes, node)
+		}
+		for _, node := range []string{"node2", "node3", "node4", "node5", "node6", "node7"} {
+			assert.Equal(t, 1, common.ParseReason(failedNodes[node])[common.HyperNodeTierNotFit],
+				"rejected node %s must report the topology reason", node)
+		}
+	})
+
+	t.Run("a wider tier keeps the nodes inside it", func(t *testing.T) {
+		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 3, "node0"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 8)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("soft mode rejects nothing", func(t *testing.T) {
+		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeSoft, 1, "node0"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 8)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("the first pod of a group is never rejected", func(t *testing.T) {
+		candidates := candidateNodes("node0", "node1", "node2")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 3)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("nodes outside the described fabric are rejected as unknown", func(t *testing.T) {
+		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
+		candidates := candidateNodes("node0", "node2", "node-unlabeled")
+		failedNodes := map[string]string{}
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 1)
+		assert.Contains(t, candidates, "node0")
+		assert.Len(t, failedNodes, 2)
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node-unlabeled"])[common.HyperNodeTierNotFit])
+	})
+
+	t.Run("a pod group already placed outside the fabric only matches its own unknown node", func(t *testing.T) {
+		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
+		candidates := candidateNodes("node0", "node2", "node-unlabeled")
+		failedNodes := map[string]string{}
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node-unlabeled"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 1)
+		assert.Contains(t, candidates, "node-unlabeled")
+		assert.Len(t, failedNodes, 2)
+		assert.Contains(t, failedNodes, "node0")
+		assert.Contains(t, failedNodes, "node2")
+	})
+
+	t.Run("a rejection that leaves nothing reports an event", func(t *testing.T) {
+		recorder := record.NewFakeRecorder(4)
+		scheduler := topologyTestScheduler(t, allNodes)
+		scheduler.eventRecorder = recorder
+		candidates := candidateNodes("node4")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+
+		assert.Empty(t, candidates)
+		assert.Len(t, failedNodes, 1)
+		require.Len(t, recorder.Events, 1)
+		assert.Contains(t, <-recorder.Events, common.HyperNodeTierNotFit)
+	})
+
+	t.Run("a partial rejection reports no event", func(t *testing.T) {
+		recorder := record.NewFakeRecorder(4)
+		scheduler := topologyTestScheduler(t, allNodes)
+		scheduler.eventRecorder = recorder
+		candidates := candidateNodes("node0", "node4")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 1)
+		assert.Empty(t, recorder.Events, "the pod is still schedulable, so no warning event")
+	})
+
+	t.Run("a nil plan and a nil candidate map are no-ops", func(t *testing.T) {
+		candidates := candidateNodes("node4")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(nil, pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, nil, failedNodes)
+
+		assert.Len(t, candidates, 1)
+		assert.Empty(t, failedNodes)
+	})
+}
+
+// TestApplyTopologyScore covers the soft half: the bonus points at the node
+// closest to the group and follows the direction of the node policy, so binpack
+// and spread both end up preferring it.
+func TestApplyTopologyScore(t *testing.T) {
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	pod := topologyPod(nil, nil)
+	// The nodes of the CCE fabric, one per distinct distance from node0: the
+	// same tier 1 domain, the same tier 2 domain, and only the tier 3 domain.
+	scored := func() *policy.NodeScoreList {
+		return &policy.NodeScoreList{NodeList: []*policy.NodeScore{
+			{NodeID: "node1", Score: 100},
+			{NodeID: "node2", Score: 100},
+			{NodeID: "node4", Score: 100},
+			{NodeID: "node-unlabeled", Score: 100},
+		}}
+	}
+
+	t.Run("binpack rewards the closer node", func(t *testing.T) {
+		scores := scored()
+		scores.Policy = util.NodeSchedulerPolicyBinpack.String()
+		plan := topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0")
+		scheduler.applyTopologyScore(plan, pod, scores)
+
+		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.75, scores.NodeList[0].Score, 0.001)
+		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.5, scores.NodeList[1].Score, 0.001)
+		assert.InDelta(t, 100+float32(config.DefaultTopologyScoreWeight)*0.25, scores.NodeList[2].Score, 0.001)
+		assert.InDelta(t, 100, scores.NodeList[3].Score, 0.001, "a node outside the fabric earns no soft bonus")
+	})
+
+	t.Run("spread rewards the closer node too", func(t *testing.T) {
+		scores := scored()
+		scores.Policy = util.NodeSchedulerPolicySpread.String()
+		plan := topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0")
+		scheduler.applyTopologyScore(plan, pod, scores)
+
+		assert.InDelta(t, 100-float32(config.DefaultTopologyScoreWeight)*0.75, scores.NodeList[0].Score, 0.001)
+		assert.InDelta(t, 100-float32(config.DefaultTopologyScoreWeight)*0.5, scores.NodeList[1].Score, 0.001)
+		assert.InDelta(t, 100-float32(config.DefaultTopologyScoreWeight)*0.25, scores.NodeList[2].Score, 0.001)
+	})
+
+	t.Run("the configured weight scales the bonus", func(t *testing.T) {
+		config.TopologyScoreWeight = 40
+		scores := scored()
+		scores.Policy = util.NodeSchedulerPolicyBinpack.String()
+		plan := topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0")
+		scheduler.applyTopologyScore(plan, pod, scores)
+
+		assert.InDelta(t, 100+float32(40)*0.75, scores.NodeList[0].Score, 0.001)
+	})
+
+	t.Run("nothing placed and no plan are no-ops", func(t *testing.T) {
+		scores := scored()
+		scores.Policy = util.NodeSchedulerPolicyBinpack.String()
+		scheduler.applyTopologyScore(topologyPlanForTest(scheduler, util.TopologyModeHard, 1), pod, scores)
+		assert.InDelta(t, 100, scores.NodeList[0].Score, 0.001)
+
+		scheduler.applyTopologyScore(nil, pod, scores)
+		assert.InDelta(t, 100, scores.NodeList[0].Score, 0.001)
+	})
+}
+
+// TestTopologyPlacedNodes collects the nodes the group occupies from both the
+// Pod lister, which covers the pods the API server has already bound, and the
+// scheduler's own reservations, which cover the siblings of this gang placed in
+// this same round.
+func TestTopologyPlacedNodes(t *testing.T) {
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	factory := informers.NewSharedInformerFactoryWithOptions(fake.NewSimpleClientset(), time.Hour)
+	scheduler.podLister = factory.Core().V1().Pods().Lister()
+	indexer := factory.Core().V1().Pods().Informer().GetIndexer()
+
+	task := topologyPod(
+		map[string]string{util.TopologyModeAnnotationKey: util.TopologyModeHard, util.TopologyHighestTierAnnotationKey: "1"},
+		map[string]string{"job-name": "train"},
+	)
+	bound := func(name, node string, phase corev1.PodPhase) *corev1.Pod {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "default", UID: types.UID(name),
+			Labels: map[string]string{"job-name": "train"},
+		}}
+		pod.Spec.NodeName = node
+		pod.Status.Phase = phase
+		return pod
+	}
+	unrelated := bound("other-0", "node5", corev1.PodRunning)
+	unrelated.Labels = map[string]string{"job-name": "other"}
+
+	pending := bound("train-2", "", corev1.PodPending)
+	pending.Spec.NodeName = ""
+	finished := bound("train-3", "node2", corev1.PodSucceeded)
+	reserved := bound("train-4", "", corev1.PodPending)
+
+	for _, pod := range []*corev1.Pod{task, bound("train-1", "node1", corev1.PodRunning), pending, finished, unrelated, reserved} {
+		require.NoError(t, indexer.Add(pod))
+	}
+	// The sibling placed by this scheduler in this same round is only known to
+	// the reservation manager, which is exactly what makes a gang stay together
+	// before the API server sees it as bound.
+	require.True(t, scheduler.podManager.AddPod(reserved, "node0", device.PodDevices{}))
+
+	require.Equal(t, []string{"node0", "node1"}, scheduler.topologyPlacedNodes(task, topologyGroupKey(task)))
+
+	plan := scheduler.topologyPlanFor(task)
+	require.NotNil(t, plan)
+	assert.Equal(t, []string{"node0", "node1"}, plan.placed)
+	assert.Equal(t, util.TopologyModeHard, plan.mode)
+	assert.Equal(t, 1, plan.highest)
+	assert.Equal(t, "default/job-name/train", plan.group)
+}
+
+// TestTopologyPlanGating covers the cases where the plan must stay nil, which is
+// what keeps the placement of every other workload byte for byte what it was.
+func TestTopologyPlanGating(t *testing.T) {
+	t.Run("the feature is off when no tier labels are configured", func(t *testing.T) {
+		originalLabels := config.TopologyTierLabels
+		t.Cleanup(func() { config.TopologyTierLabels = originalLabels })
+		config.TopologyTierLabels = ""
+
+		scheduler := NewScheduler()
+		scheduler.rebuildTopology(cceTopologyNodes())
+		assert.Nil(t, scheduler.topologySnapshot())
+
+		task := topologyPod(map[string]string{util.TopologyHighestTierAnnotationKey: "1"}, map[string]string{"job-name": "train"})
+		assert.Nil(t, scheduler.topologyPlanFor(task))
+	})
+
+	t.Run("a pod that does not opt in is not constrained", func(t *testing.T) {
+		scheduler := topologyTestScheduler(t, cceTopologyNodes())
+		task := topologyPod(nil, map[string]string{"job-name": "train"})
+		assert.Nil(t, scheduler.topologyPlanFor(task))
+	})
+
+	t.Run("a pod in no group is not constrained", func(t *testing.T) {
+		scheduler := topologyTestScheduler(t, cceTopologyNodes())
+		task := topologyPod(map[string]string{util.TopologyModeAnnotationKey: util.TopologyModeHard}, nil)
+		assert.Nil(t, scheduler.topologyPlanFor(task))
+		assert.Nil(t, scheduler.topologyPlanFor(nil))
+	})
+
+	t.Run("a mode without a tier ranks within the whole hierarchy", func(t *testing.T) {
+		scheduler := topologyTestScheduler(t, cceTopologyNodes())
+		config.TopologyMode = util.TopologyModeHard
+		task := topologyPod(map[string]string{util.TopologyModeAnnotationKey: util.TopologyModeSoft}, map[string]string{"job-name": "train"})
+
+		plan := scheduler.topologyPlanFor(task)
+		require.NotNil(t, plan)
+		assert.Equal(t, util.TopologyModeSoft, plan.mode, "the Pod names its own mode")
+		assert.Equal(t, 3, plan.highest, "unlimited resolves to the depth of the configured hierarchy")
+	})
+
+	t.Run("a tier without a mode takes the configured mode", func(t *testing.T) {
+		scheduler := topologyTestScheduler(t, cceTopologyNodes())
+		config.TopologyMode = util.TopologyModeHard
+		task := topologyPod(map[string]string{util.TopologyHighestTierAnnotationKey: "2"}, map[string]string{"job-name": "train"})
+
+		plan := scheduler.topologyPlanFor(task)
+		require.NotNil(t, plan)
+		assert.Equal(t, util.TopologyModeHard, plan.mode)
+		assert.Equal(t, 2, plan.highest)
+	})
+}
+
+// superPodAnnotation is the node annotation the ascend device plugin writes with
+// the super-pod the NPUs of a node are wired to. The plugin knows its own key,
+// the scheduler is told about it, so the literal is repeated here on purpose:
+// this is the wire contract between the two components.
+const superPodAnnotation = "hami.io/npu-super-pod-id"
+
+// superPodTierSpec is the tier list such a cluster is started with. The "@"
+// makes the tier an annotation tier, which is what lets the hardware place the
+// node in the hierarchy instead of an operator.
+const superPodTierSpec = "@" + superPodAnnotation
+
+// superPodNodes is the fabric the plugin reports on a four node cluster: node0
+// and node1 sit in super-pod 0, node2 and node3 in super-pod 1, and node4 runs
+// a product without a super-pod, for which the plugin publishes nothing.
+func superPodNodes() []*corev1.Node {
+	fabric := [][2]string{
+		{"node0", "0"},
+		{"node1", "0"},
+		{"node2", "1"},
+		{"node3", "1"},
+	}
+	nodes := make([]*corev1.Node, 0, len(fabric)+1)
+	for _, entry := range fabric {
+		nodes = append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        entry[0],
+			Annotations: map[string]string{superPodAnnotation: entry[1]},
+		}})
+	}
+	return append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node4"}})
+}
+
+// superPodTestScheduler returns a scheduler whose cached hierarchy was built
+// from the annotations the device plugin publishes, with the tier flag pointed
+// at them. It restores the configuration when the test ends.
+func superPodTestScheduler(t *testing.T) *Scheduler {
+	t.Helper()
+
+	originalLabels := config.TopologyTierLabels
+	originalMode := config.TopologyMode
+	originalWeight := config.TopologyScoreWeight
+	t.Cleanup(func() {
+		config.TopologyTierLabels = originalLabels
+		config.TopologyMode = originalMode
+		config.TopologyScoreWeight = originalWeight
+	})
+
+	config.TopologyTierLabels = superPodTierSpec
+	config.TopologyMode = util.TopologyModeSoft
+	config.TopologyScoreWeight = config.DefaultTopologyScoreWeight
+
+	scheduler := NewScheduler()
+	scheduler.rebuildTopology(superPodNodes())
+	require.NotNil(t, scheduler.topologySnapshot())
+	return scheduler
+}
+
+// TestTopologyFromSuperPodAnnotations is the acceptance test of the migration:
+// the device plugin publishes where the NPUs of a node are wired, the scheduler
+// reads that annotation as its smallest tier, and a training job then stays in
+// one super-pod without a single node label written by hand.
+func TestTopologyFromSuperPodAnnotations(t *testing.T) {
+	scheduler := superPodTestScheduler(t)
+	pod := topologyPod(nil, nil)
+
+	t.Run("the published super pod becomes the smallest tier", func(t *testing.T) {
+		snapshot := scheduler.topologySnapshot()
+		require.NotNil(t, snapshot)
+		assert.Equal(t, 1, snapshot.tree.MaxTier())
+		assert.Equal(t, []string{"node0", "node1"}, snapshot.tree.Chain("node0")[1].Nodes)
+		assert.False(t, snapshot.tree.InModel("node4"), "a node the plugin said nothing about stays outside")
+	})
+
+	t.Run("a hard request keeps the job in the super pod of its first pod", func(t *testing.T) {
+		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node1"), pod, &candidates, failedNodes)
+
+		assert.Len(t, candidates, 2, "only the two nodes of the super pod survive")
+		assert.Contains(t, candidates, "node1")
+		assert.Contains(t, candidates, "node0")
+		assert.NotContains(t, candidates, "node4", "a node outside the described fabric is unknown")
+		assert.Len(t, failedNodes, 3)
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node2"])[common.HyperNodeTierNotFit],
+			"a node of another super pod must report the topology reason")
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node3"])[common.HyperNodeTierNotFit])
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node4"])[common.HyperNodeTierNotFit])
+	})
+
+	t.Run("ranking prefers the nodes of the super pod of the group", func(t *testing.T) {
+		scores := &policy.NodeScoreList{NodeList: []*policy.NodeScore{
+			{NodeID: "node1", Score: 100},
+			{NodeID: "node2", Score: 100},
+			{NodeID: "node4", Score: 100},
+		}}
+		scores.Policy = util.NodeSchedulerPolicyBinpack.String()
+		scheduler.applyTopologyScore(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, scores)
+
+		// The only tier above the node is the super-pod, so a node sharing it
+		// is halfway to being the same place, and a node of another super-pod
+		// shares nothing at all. A node outside the described fabric is treated
+		// as UnknownTier and earns no locality bonus.
+		closer := 100 + float32(config.DefaultTopologyScoreWeight)*0.5
+		assert.InDelta(t, closer, scores.NodeList[0].Score, 0.001)
+		assert.InDelta(t, 100, scores.NodeList[1].Score, 0.001)
+		assert.InDelta(t, 100, scores.NodeList[2].Score, 0.001)
+	})
+}
+
+// TestOnUpdateNodeNotifiesTopologyChange covers the notification the node
+// UpdateFunc sends. It has to fire when the place of a node in the fabric
+// changed, which is how the annotation the device plugin writes seconds after
+// the node reached the scheduler is picked up, and must stay silent for the
+// updates the kubelet produces on its own every few seconds.
+func TestOnUpdateNodeNotifiesTopologyChange(t *testing.T) {
+	nodeWith := func(annotations, labels map[string]string) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: "node0", Annotations: annotations, Labels: labels,
+		}}
+	}
+	notified := func(scheduler *Scheduler) bool {
+		select {
+		case <-scheduler.nodeNotify:
+			return true
+		default:
+			return false
+		}
+	}
+
+	tests := []struct {
+		name       string
+		tierLabels string
+		oldNode    *corev1.Node
+		newNode    *corev1.Node
+		want       bool
+	}{
+		{
+			name:       "the device plugin published the super pod of the node",
+			tierLabels: superPodTierSpec,
+			oldNode:    nodeWith(nil, nil),
+			newNode:    nodeWith(map[string]string{superPodAnnotation: "0"}, nil),
+			want:       true,
+		},
+		{
+			name:       "the node moved to another super pod",
+			tierLabels: superPodTierSpec,
+			oldNode:    nodeWith(map[string]string{superPodAnnotation: "0"}, nil),
+			newNode:    nodeWith(map[string]string{superPodAnnotation: "1"}, nil),
+			want:       true,
+		},
+		{
+			name:       "an annotation the hierarchy does not read changed",
+			tierLabels: superPodTierSpec,
+			oldNode:    nodeWith(map[string]string{"hami.io/node-handshake-Ascend910B4": "Reported_a"}, nil),
+			newNode:    nodeWith(map[string]string{"hami.io/node-handshake-Ascend910B4": "Reported_b"}, nil),
+			want:       false,
+		},
+		{
+			name:       "a label tier changed",
+			tierLabels: cceTierSpec,
+			oldNode:    nodeWith(nil, map[string]string{"test-tier-1": "HyperNode0"}),
+			newNode:    nodeWith(nil, map[string]string{"test-tier-1": "HyperNode1"}),
+			want:       true,
+		},
+		{
+			name:       "a hierarchy built from labels and annotations watches both",
+			tierLabels: "test-tier-1," + superPodTierSpec,
+			oldNode:    nodeWith(map[string]string{superPodAnnotation: "0"}, map[string]string{"test-tier-1": "HyperNode0"}),
+			newNode:    nodeWith(map[string]string{superPodAnnotation: "2"}, map[string]string{"test-tier-1": "HyperNode0"}),
+			want:       true,
+		},
+		{
+			name:       "the hierarchy is not configured",
+			tierLabels: "",
+			oldNode:    nodeWith(nil, nil),
+			newNode:    nodeWith(map[string]string{superPodAnnotation: "0"}, nil),
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalLabels := config.TopologyTierLabels
+			t.Cleanup(func() { config.TopologyTierLabels = originalLabels })
+			config.TopologyTierLabels = tt.tierLabels
+
+			scheduler := NewScheduler()
+			scheduler.rebuildTopology([]*corev1.Node{tt.oldNode})
+
+			scheduler.onUpdateNode(tt.oldNode, tt.newNode)
+
+			assert.Equal(t, tt.want, notified(scheduler))
+		})
+	}
+
+	t.Run("an update that did not move the node is not worth a refresh", func(t *testing.T) {
+		scheduler := superPodTestScheduler(t)
+		oldNode := nodeWith(map[string]string{superPodAnnotation: "0"}, nil)
+		newNode := nodeWith(map[string]string{superPodAnnotation: "0"}, nil)
+
+		scheduler.onUpdateNode(oldNode, newNode)
+
+		assert.False(t, notified(scheduler))
+	})
+
+	t.Run("objects that are not nodes are ignored", func(t *testing.T) {
+		scheduler := superPodTestScheduler(t)
+
+		scheduler.onUpdateNode(&corev1.Pod{}, &corev1.Pod{})
+		scheduler.onUpdateNode("not a node", 42)
+
+		assert.False(t, notified(scheduler))
+	})
+}
+
+// gangFabric describes a three-node fabric: A and B share a switch in row-1,
+// C sits alone in row-2, and all three share fabric-1. It is the smallest
+// fabric that exercises every configured level.
+func gangFabric() []*corev1.Node {
+	fabric := [][4]string{
+		{"gang-a", "switch-1", "row-1", "fabric-1"},
+		{"gang-b", "switch-1", "row-1", "fabric-1"},
+		{"gang-c", "switch-2", "row-2", "fabric-1"},
+	}
+	nodes := make([]*corev1.Node, 0, len(fabric))
+	for _, entry := range fabric {
+		nodes = append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: entry[0],
+			Labels: map[string]string{
+				"test-tier-1": entry[1],
+				"test-tier-2": entry[2],
+				"test-tier-3": entry[3],
+			},
+		}})
+	}
+	return nodes
+}
+
+// TestTopologyGangSize checks the annotation parser and its fixed safety bound.
+func TestTopologyGangSize(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "unset keeps incremental behavior", raw: "", want: 1},
+		{name: "trimmed valid size", raw: " 8 ", want: 8},
+		{name: "maximum is accepted", raw: "1024", want: 1024},
+		{name: "above maximum is rejected", raw: "1025", want: 1},
+		{name: "zero is rejected", raw: "0", want: 1},
+		{name: "negative is rejected", raw: "-1", want: 1},
+		{name: "non-numeric is rejected", raw: "abc", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := topologyPod(map[string]string{util.TopologyGangSizeAnnotationKey: tt.raw}, nil)
+			assert.Equal(t, tt.want, topologyGangSize(pod))
+		})
+	}
+	assert.Equal(t, 1, topologyGangSize(nil))
+}
+
+// TestTopologyGangFilterFailsClosedOnUnknownPlacedNode verifies that a gang
+// already anchored outside the described fabric cannot claim a domain fit.
+func TestTopologyGangFilterFailsClosedOnUnknownPlacedNode(t *testing.T) {
+	unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+	scheduler := topologyTestScheduler(t, append(cceTopologyNodes(), unlabeled))
+	task := topologyPod(nil, nil)
+	plan := &topologyPlan{
+		view:          scheduler.topologySnapshot(),
+		group:         "default/job-name/train",
+		mode:          util.TopologyModeHard,
+		highest:       1,
+		gangSize:      3,
+		placedMembers: 1,
+		placed:        []string{"node-unlabeled"},
+	}
+	nodes := candidateNodes("node0", "node1", "node-unlabeled")
+	failedNodes := map[string]string{}
+
+	scheduler.applyTopologyGangFilter(plan, task, nil, &nodes, failedNodes)
+
+	assert.Empty(t, nodes)
+	assert.Len(t, failedNodes, 3)
+	for node := range candidateNodes("node0", "node1", "node-unlabeled") {
+		assert.Equal(t, 1, common.ParseReason(failedNodes[node])[common.GangTopologyNotFit])
+	}
+}
+
+// TestTopologyGangFeasibleNodes covers the domain arithmetic of the
+// all-or-nothing check independently of device scoring.
+func TestTopologyGangFeasibleNodes(t *testing.T) {
+	scheduler := topologyTestScheduler(t, gangFabric())
+	tree := scheduler.topologySnapshot().tree
+	candidates := candidateNodes("gang-a", "gang-b", "gang-c")
+
+	t.Run("two separate ToRs cannot hold a gang of two", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{1}, 1),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Empty(t, feasible, "each tier 1 domain only has room for one member")
+	})
+
+	t.Run("only the ToR with a complete assignment can hold the gang", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{0, 1}, 2),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
+		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Contains(t, feasible, "gang-a")
+		assert.Contains(t, feasible, "gang-b")
+		assert.NotContains(t, feasible, "gang-c")
+		assert.Len(t, domains, 2, "gang-b and switch-1 both fit the gang")
+	})
+
+	t.Run("a pinned member cannot be displaced from its anchor", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 1),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Equal(t, map[string]struct{}{"gang-b": {}}, feasible,
+			"only the anchor that leaves member 1 a node can be feasible")
+		assert.Len(t, domains, 1)
+	})
+
+	t.Run("a member counted on two nodes cannot satisfy the gang", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Empty(t, feasible, "member 0 cannot stand in for member 1 on both nodes")
+		assert.Empty(t, domains)
+	})
+
+	t.Run("a node that can only host a sibling is not a candidate", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0}, 1),
+			"gang-b": gangNodeFit([]int{1}, 1),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, domains := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 1, 2)
+		assert.Equal(t, map[string]struct{}{"gang-a": {}}, feasible)
+		assert.Len(t, domains, 1)
+	})
+
+	t.Run("a middle tier domain can satisfy the gang on its own", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0, 1}, 2),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 2, 2)
+		assert.Equal(t, map[string]struct{}{"gang-c": {}}, feasible)
+	})
+
+	t.Run("the cluster tier admits every node", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 2),
+			"gang-b": gangNodeFit([]int{0, 1}, 2),
+			"gang-c": gangNodeFit([]int{0, 1}, 2),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, nil, 3, 2)
+		assert.Len(t, feasible, 3)
+	})
+
+	t.Run("a placed member pins the gang to its domain", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit([]int{0}, 1),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 1, 1)
+		assert.Equal(t, map[string]struct{}{"gang-b": {}}, feasible)
+	})
+
+	t.Run("no domain under the cap can hold the last member", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 2, 1)
+		assert.Empty(t, feasible, "gang-c is in another rack and the cap is rack level")
+	})
+
+	t.Run("a wider cap lets the last member leave the rack", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit(nil, 0),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit([]int{0}, 1),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidates, assignments, []string{"gang-a"}, 3, 1)
+		assert.Equal(t, map[string]struct{}{"gang-c": {}}, feasible)
+	})
+
+	t.Run("pinning a member consumes a shared slot", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 1),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidateNodes("gang-a"), assignments, nil, 1, 2)
+		assert.Empty(t, feasible, "the node admits both members alone but has only one shared slot")
+	})
+
+	t.Run("pinning a member does not consume an extra shared slot", func(t *testing.T) {
+		assignments := map[string]topologyGangNodeFit{
+			"gang-a": gangNodeFit([]int{0, 1}, 2),
+			"gang-b": gangNodeFit(nil, 0),
+			"gang-c": gangNodeFit(nil, 0),
+		}
+		feasible, _ := topologyGangFeasibleNodes(tree, candidateNodes("gang-a"), assignments, nil, 1, 2)
+		assert.Equal(t, map[string]struct{}{"gang-a": {}}, feasible,
+			"the pinned member occupies one of the node's two shared slots, not two")
+	})
+}
+
+// TestTopologyGangDomainCanAssignSearchesAfterRejectedFit verifies that the
+// matcher tries another partition when device verification rejects the fast
+// capacity match.
+func TestTopologyGangDomainCanAssignSearchesAfterRejectedFit(t *testing.T) {
+	nodes := []string{"node-a", "node-b"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true, true}, capacity: 2},
+		"node-b": {admits: []bool{true, true, true}, capacity: 2},
+	}
+	verify := func(nodeID string, members []int) bool {
+		if nodeID != "node-a" {
+			return true
+		}
+		return !slices.Contains(members, 2)
+	}
+
+	assigned, ok := topologyGangDomainCanAssign(nodes, fits, "node-a", 3, verify)
+	require.True(t, ok)
+	assert.Equal(t, []int{0, 1}, assigned["node-a"])
+	assert.Equal(t, []int{2}, assigned["node-b"])
+}
+
+// TestTopologyGangDomainCanAssignSearchesWhenCapacityIsTooLow covers the
+// review case of 80,20,20,20,20 on two 100-core nodes. The greedy shared-node
+// simulation admits only two members per node (80+20), so the fast capacity
+// matcher rejects the domain even though 80+20 on one node and 20+20+20 on the
+// other is a valid partition. The verified search must find it.
+func TestTopologyGangDomainCanAssignSearchesWhenCapacityIsTooLow(t *testing.T) {
+	nodes := []string{"node-a", "node-b"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true, true, true, true}, capacity: 2},
+		"node-b": {admits: []bool{true, true, true, true, true}, capacity: 2},
+	}
+	verify := func(_ string, members []int) bool {
+		used := 0
+		for _, member := range members {
+			if member == 0 {
+				used += 80
+				continue
+			}
+			used += 20
+		}
+		return used <= 100
+	}
+
+	assigned, ok := topologyGangDomainCanAssign(nodes, fits, "", 5, verify)
+	require.True(t, ok)
+	require.Len(t, assigned, 2)
+
+	total := 0
+	for nodeID, members := range assigned {
+		total += len(members)
+		assert.True(t, verify(nodeID, members), "node %s exceeds its 100 cores: %v", nodeID, members)
+	}
+	assert.Equal(t, 5, total)
+}
+
+// TestTopologyGangMemoizedVerifierCanonicalizesMemberOrder covers an
+// order-sensitive device allocator: reaching the same member set in another
+// search order must verify the set in member-index order and reuse that result.
+func TestTopologyGangMemoizedVerifierCanonicalizesMemberOrder(t *testing.T) {
+	calls := 0
+	verify := topologyGangMemoizedVerifier(func(nodeID string, members []int) bool {
+		calls++
+		assert.Equal(t, "node-a", nodeID)
+		assert.Equal(t, []int{0, 1, 2}, members)
+		return true
+	})
+
+	require.True(t, verify("node-a", []int{2, 0, 1}))
+	require.True(t, verify("node-a", []int{1, 2, 0}))
+	assert.Equal(t, 1, calls, "the cached result should be reused independent of arrival order")
+}
+
+// TestTopologyGangSearchBudgetSharedAndFailsClosed verifies that consecutive
+// searches charged to one budget do not reset it, and that an exhausted budget
+// rejects the search before another device verification runs.
+func TestTopologyGangSearchBudgetSharedAndFailsClosed(t *testing.T) {
+	nodes := []string{"node-a"}
+	fits := map[string]topologyGangDomainFit{
+		"node-a": {admits: []bool{true, true}, capacity: 1},
+	}
+	verifyCalls := 0
+	verify := func(_ string, _ []int) bool {
+		verifyCalls++
+		return false
+	}
+	budget := &topologyGangSearchBudget{attempts: maxTopologyGangSearchStates - 1}
+
+	_, ok := topologyGangDomainCanAssignWithin(nodes, fits, "", 2, budget, verify)
+	require.False(t, ok)
+	assert.Equal(t, 1, verifyCalls)
+	assert.Equal(t, maxTopologyGangSearchStates, budget.attempts)
+
+	_, ok = topologyGangDomainCanAssignWithin(nodes, fits, "", 2, budget, verify)
+	require.False(t, ok)
+	assert.Equal(t, 1, verifyCalls, "an exhausted shared budget must fail closed before verification")
+	assert.Equal(t, maxTopologyGangSearchStates+1, budget.attempts)
+}
+
+// gangNodeFit is shorthand for the two properties returned by the per-node
+// simulation: the members that fit alone and the number that fit together.
+func gangNodeFit(admits []int, capacity int) topologyGangNodeFit {
+	return topologyGangNodeFit{admits: admits, capacity: capacity}
+}
+
+// TestTopologyGangNeedsDistinctNodes checks that the capacity simulation knows
+// when a hostname anti-affinity term makes one Pod per node the limit.
+func TestTopologyGangNeedsDistinctNodes(t *testing.T) {
+	affinity := func(selectorLabels map[string]string) *corev1.Pod {
+		pod := topologyPod(nil, map[string]string{"job": "train"})
+		pod.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+				TopologyKey:   corev1.LabelHostname,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: selectorLabels},
+			}},
+		}}
+		return pod
+	}
+
+	assert.True(t, topologyGangNeedsDistinctNodes(affinity(map[string]string{"job": "train"})))
+	assert.False(t, topologyGangNeedsDistinctNodes(affinity(map[string]string{"job": "other"})))
+	assert.False(t, topologyGangNeedsDistinctNodes(topologyPod(nil, nil)))
+}
+
+const gangTestDeviceType = "gang-test"
+
+var gangTestResourceName corev1.ResourceName = gangTestDeviceType + "/cores"
+
+type gangTestDevice struct{}
+
+// CommonWord returns the resource prefix of the test device.
+func (m *gangTestDevice) CommonWord() string { return gangTestDeviceType }
+
+// MutateAdmission implements device.Devices; the test device changes nothing.
+func (m *gangTestDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
+	return false, nil
+}
+
+// CheckHealth reports the test device as healthy.
+func (m *gangTestDevice) CheckHealth(_ string, _ *corev1.Node) (bool, bool) { return true, true }
+
+// NodeCleanUp implements device.Devices; the test device has nothing to clean.
+func (m *gangTestDevice) NodeCleanUp(_ string) error { return nil }
+
+// GetResourceNames implements device.Devices; tests request cores directly.
+func (m *gangTestDevice) GetResourceNames() device.ResourceNames { return device.ResourceNames{} }
+
+// GetNodeDevices implements device.Devices; tests supply device usage directly.
+func (m *gangTestDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+	return nil, nil
+}
+
+// LockNode implements device.Devices without taking a lock.
+func (m *gangTestDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+
+// ReleaseNodeLock implements device.Devices without releasing a lock.
+func (m *gangTestDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+
+// GenerateResourceRequests maps the test core limit to one device request.
+func (m *gangTestDevice) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {
+	cores := ctr.Resources.Limits[gangTestResourceName]
+	if cores.IsZero() {
+		return device.ContainerDeviceRequest{}, nil
+	}
+	return device.ContainerDeviceRequest{Nums: 1, Type: gangTestDeviceType, Coresreq: cores.Value()}, nil
+}
+
+// PatchAnnotations implements device.Devices; tests inspect no annotations.
+func (m *gangTestDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
+	return nil
+}
+
+// ScoreNode implements device.Devices and contributes no vendor score.
+func (m *gangTestDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
+	return 0
+}
+
+// AddResourceUsage charges the allocated cores to the simulated device.
+func (m *gangTestDevice) AddResourceUsage(_ *corev1.Pod, usage *device.DeviceUsage, allocated *device.ContainerDevice) error {
+	usage.Used++
+	usage.Usedcores += allocated.Usedcores
+	return nil
+}
+
+// Fit admits the request when one device has enough free cores.
+func (m *gangTestDevice) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	for _, usage := range devices {
+		if usage.Health && usage.Totalcore-usage.Usedcores >= request.Coresreq {
+			return true, map[string]device.ContainerDevices{
+				gangTestDeviceType: {{UUID: usage.ID, Type: usage.Type, Usedcores: request.Coresreq}},
+			}, ""
+		}
+	}
+	return false, nil, "not enough gang-test cores"
+}
+
+// gangTestPod returns a job member whose container requests cores of the test
+// device.
+func gangTestPod(name string, cores int64) *corev1.Pod {
+	pod := topologyPod(nil, map[string]string{"job-name": "train"})
+	pod.Name = name
+	pod.UID = types.UID(name)
+	pod.Spec.Containers = []corev1.Container{{
+		Name: "worker",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{gangTestResourceName: *resource.NewQuantity(cores, resource.DecimalSI)},
+		},
+	}}
+	return pod
+}
+
+// TestTopologyGangMembersUseEachPodsRequest verifies that every gang member
+// keeps its own device request instead of inheriting the first Pod's.
+func TestTopologyGangMembersUseEachPodsRequest(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	task := gangTestPod("train-0", 40)
+	sibling := gangTestPod("train-1", 80)
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	members, ok := new(Scheduler).topologyGangMembers(task, resourceReqs, []*corev1.Pod{sibling}, 2)
+	require.True(t, ok)
+	require.Len(t, members, 2)
+	assert.Equal(t, int64(40), members[0].resourceReqs[0][gangTestDeviceType].Coresreq)
+	assert.Equal(t, int64(80), members[1].resourceReqs[0][gangTestDeviceType].Coresreq)
+}
+
+// TestTopologyGangFilterUsesSiblingRequest is the regression test for the gang
+// filter scoring every remaining member with the request of the Pod being
+// scheduled. One node has room for two 40-core members but not for a 40-core
+// plus an 80-core member; the filter must see the sibling's request rather than
+// assuming the gang is homogeneous.
+func TestTopologyGangFilterUsesSiblingRequest(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	nodeName := "node0"
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "0",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	gangNode := func() map[string]*NodeUsage {
+		return map[string]*NodeUsage{nodeName: buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: "gang-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)}
+	}
+	plan := func(sibling *corev1.Pod) *topologyPlan {
+		return &topologyPlan{
+			view:     scheduler.topologySnapshot(),
+			group:    "default/job-name/train",
+			mode:     util.TopologyModeHard,
+			highest:  0,
+			gangSize: 2,
+			pending:  []*corev1.Pod{sibling},
+		}
+	}
+
+	t.Run("sibling that fits keeps the node", func(t *testing.T) {
+		nodes := gangNode()
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyGangFilter(plan(gangTestPod("train-1", 40)), task, resourceReqs, &nodes, failedNodes)
+		assert.Contains(t, nodes, nodeName)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("sibling that does not fit rejects the node", func(t *testing.T) {
+		nodes := gangNode()
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyGangFilter(plan(gangTestPod("train-1", 80)), task, resourceReqs, &nodes, failedNodes)
+		assert.Empty(t, nodes)
+		assert.Contains(t, failedNodes, nodeName)
+	})
+}
+
+// TestTopologyGangFilterChecksSiblingNodeSelectors is the regression test for a
+// sibling whose nodeSelector restricts it to one node. The scheduler itself
+// prefilters only the Pod being scheduled, so without an explicit check the
+// first Pod could take the sibling's only eligible node and leave the gang
+// permanently Pending.
+func TestTopologyGangFilterChecksSiblingNodeSelectors(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	fabric := gangFabric()
+	fabric[0].Labels["gang-node"] = "gang-a"
+	fabric[1].Labels["gang-node"] = "gang-b"
+	scheduler := topologyTestScheduler(t, fabric)
+
+	task := gangTestPod("train-0", 10)
+	task.Spec.NodeSelector = map[string]string{"gang-node": "gang-a"}
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	sibling := gangTestPod("train-1", 10)
+	sibling.Spec.NodeSelector = map[string]string{"gang-node": "gang-b"}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"gang-a", "gang-b"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID: nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name:   nodeName,
+				Labels: map[string]string{"gang-node": nodeName},
+			}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{sibling},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Contains(t, nodes, "gang-a", "the current Pod may only use its own node")
+	assert.NotContains(t, nodes, "gang-b", "the sibling's only eligible node must be preserved")
+	assert.Equal(t, 1, common.ParseReason(failedNodes["gang-b"])[common.GangTopologyNotFit])
+}
+
+// TestTopologyGangFilterSeparatesHeterogeneousMembers verifies that a node does
+// not need to host every member itself. A 40-core Pod and an 80-core sibling do
+// not fit together on one 100-core node, but each fits alone, so two nodes in
+// the same topology domain are a valid assignment.
+func TestTopologyGangFilterSeparatesHeterogeneousMembers(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{gangTestPod("train-1", 80)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterFindsAlternativePartition is the regression test for a
+// fast capacity match whose concrete set does not fit. Each 100-core node has
+// two shared slots for this gang, so the capacity matcher may pick 90+90 while
+// the only valid partitions are 90+10 on each node. Both nodes in the tier 1
+// domain must remain feasible anchors.
+func TestTopologyGangFilterFindsAlternativePartition(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 90)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 4,
+		pending: []*corev1.Pod{
+			gangTestPod("train-1", 90),
+			gangTestPod("train-2", 10),
+			gangTestPod("train-3", 10),
+		},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterRejectsHeterogeneousOvercommit verifies that matching
+// by per-node capacity alone cannot admit a gang whose concrete member sets
+// exceed the device resources. Each 100-core node individually admits every
+// member and greedily fits two 10-core members, but 10/10/95/95 cannot be
+// partitioned across two nodes.
+func TestTopologyGangFilterRejectsHeterogeneousOvercommit(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 10)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 4,
+		pending: []*corev1.Pod{
+			gangTestPod("train-1", 10),
+			gangTestPod("train-2", 95),
+			gangTestPod("train-3", 95),
+		},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Empty(t, nodes)
+	assert.Len(t, failedNodes, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		assert.Equal(t, 1, common.ParseReason(failedNodes[nodeName])[common.GangTopologyNotFit])
+	}
+}
+
+// TestTopologyGangFilterUsesDistinctNodes verifies that hostname anti-affinity
+// is enforced during domain matching: each node can admit both homogeneous
+// members alone, but one node can only host one of them at a time.
+func TestTopologyGangFilterUsesDistinctNodes(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	task.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			TopologyKey: corev1.LabelHostname,
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+				"job-name": "train",
+			}},
+		}},
+	}}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{gangTestPod("train-1", 40)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Len(t, nodes, 2)
+	assert.Empty(t, failedNodes)
+}
+
+// TestTopologyGangFilterRejectsDuplicateAssignments is the regression test for
+// summing per-node capacities. Both tier 1 nodes can host the 40-core current
+// Pod but neither can host the 120-core sibling. The filter must not count the
+// current Pod on both nodes and admit a gang that can never become Ready.
+func TestTopologyGangFilterRejectsDuplicateAssignments(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	device.DevicesMap = map[string]device.Devices{gangTestDeviceType: &gangTestDevice{}}
+
+	scheduler := topologyTestScheduler(t, cceTopologyNodes())
+	task := gangTestPod("train-0", 40)
+	task.Annotations = map[string]string{
+		util.TopologyModeAnnotationKey:        util.TopologyModeHard,
+		util.TopologyHighestTierAnnotationKey: "1",
+	}
+	resourceReqs, err := device.Resourcereqs(task)
+	require.NoError(t, err)
+
+	nodes := make(map[string]*NodeUsage, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		nodes[nodeName] = buildNodeUsage(&device.NodeInfo{
+			ID:   nodeName,
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			Devices: map[string][]device.DeviceInfo{
+				gangTestDeviceType: {{
+					ID: nodeName + "-npu-0", Index: 0, Count: 1, Devcore: 100,
+					Type: gangTestDeviceType, Health: true,
+				}},
+			},
+		}, task)
+	}
+	failedNodes := map[string]string{}
+	plan := &topologyPlan{
+		view:     scheduler.topologySnapshot(),
+		group:    "default/job-name/train",
+		mode:     util.TopologyModeHard,
+		highest:  1,
+		gangSize: 2,
+		pending:  []*corev1.Pod{gangTestPod("train-1", 120)},
+	}
+
+	scheduler.applyTopologyGangFilter(plan, task, resourceReqs, &nodes, failedNodes)
+
+	assert.Empty(t, nodes)
+	assert.Len(t, failedNodes, 2)
+	for _, nodeName := range []string{"node0", "node1"} {
+		assert.Equal(t, 1, common.ParseReason(failedNodes[nodeName])[common.GangTopologyNotFit])
+	}
+}

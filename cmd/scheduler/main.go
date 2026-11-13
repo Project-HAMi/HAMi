@@ -20,10 +20,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -35,6 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/topology"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -75,6 +78,9 @@ func init() {
 	rootCmd.Flags().Float32Var(&config.NodeAffinityScoreWeight, "node-affinity-score-weight", 0.0, "Bonus added to the node score for nodes matching the pod's preferred nodeAffinity, scaled by the matched weight ratio (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
+	rootCmd.Flags().StringVar(&config.TopologyTierLabels, "npu-topology-tier-labels", "", "comma separated node label keys describing the NPU interconnect hierarchy, from the smallest domain to the largest, e.g. 'npu.io/hypernode,@npu.io/rack=2'. Prefix a key with '@' to read it from the node annotations. Empty disables NPU topology aware scheduling.")
+	rootCmd.Flags().StringVar(&config.TopologyMode, "npu-topology-mode", util.TopologyModeSoft, "default mode for Pods that opt into NPU topology aware scheduling without naming one: 'hard' rejects nodes outside the allowed tier, 'soft' only ranks closer nodes higher")
+	rootCmd.Flags().Float32Var(&config.TopologyScoreWeight, "npu-topology-score-weight", config.DefaultTopologyScoreWeight, "weight of the locality bonus the NPU topology scorer adds to the score of a node")
 
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
@@ -139,8 +145,30 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 	return listener, nil
 }
 
+// validateTopologyConfig normalizes the topology mode and rejects malformed
+// topology flags before the scheduler starts. A typo must not silently disable
+// hard placement guarantees or invert the locality bonus.
+func validateTopologyConfig() error {
+	config.TopologyMode = strings.ToLower(strings.TrimSpace(config.TopologyMode))
+	if config.TopologyMode != util.TopologyModeHard && config.TopologyMode != util.TopologyModeSoft {
+		return fmt.Errorf("--npu-topology-mode must be %q or %q, got %q",
+			util.TopologyModeHard, util.TopologyModeSoft, config.TopologyMode)
+	}
+	if _, err := topology.ParseTiers(config.TopologyTierLabels); err != nil {
+		return fmt.Errorf("invalid --npu-topology-tier-labels: %w", err)
+	}
+	weight := float64(config.TopologyScoreWeight)
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || config.TopologyScoreWeight < 0 {
+		return fmt.Errorf("--npu-topology-score-weight must be finite and non-negative, got %v", config.TopologyScoreWeight)
+	}
+	return nil
+}
+
 func start() error {
 	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
+		return err
+	}
+	if err := validateTopologyConfig(); err != nil {
 		return err
 	}
 
