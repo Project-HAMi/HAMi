@@ -58,12 +58,6 @@ const (
 	// clears this one after Allocate, so it stays readable for the lifetime
 	// of the pod.
 	AllocatedDevicesAnnotation = "hami.io/vgpu-devices-allocated"
-	// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
-	// GPU UUIDs to exclude from new allocations, without affecting pods already
-	// running on those devices. It's a live, per-GPU equivalent of `kubectl cordon`;
-	// unlike FilterDeviceToRegister, it takes effect immediately and needs no
-	// device-plugin restart.
-	DeviceCordonAnnotation = "hami.io/device-cordon"
 	// LimitDeliveryAnnotation lets a pod choose how its containers' limits reach
 	// HAMi-core, "file" or "env", overriding the device configuration.
 	LimitDeliveryAnnotation = "hami.io/limit-delivery"
@@ -1000,27 +994,6 @@ func fitQuotaForDevices(pod *corev1.Pod, devs device.ContainerDevices, allocated
 	return true
 }
 
-// cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID
-// lookup set. Missing node, missing annotation, or an empty value all mean
-// "nothing cordoned". Malformed entries (stray whitespace/commas) are
-// tolerated by trimming and skipping empties, same as CheckUUID's parsing.
-func cordonedDevices(nodeInfo *device.NodeInfo) map[string]struct{} {
-	cordoned := make(map[string]struct{})
-	if nodeInfo == nil || nodeInfo.Node == nil {
-		return cordoned
-	}
-	raw, ok := nodeInfo.Node.Annotations[DeviceCordonAnnotation]
-	if !ok || strings.TrimSpace(raw) == "" {
-		return cordoned
-	}
-	for uuid := range strings.SplitSeq(raw, ",") {
-		if uuid = strings.TrimSpace(uuid); uuid != "" {
-			cordoned[uuid] = struct{}{}
-		}
-	}
-	return cordoned
-}
-
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -1032,7 +1005,10 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
-	cordoned := cordonedDevices(nodeInfo)
+	var cordoned map[string]struct{}
+	if nodeInfo != nil && nodeInfo.Node != nil {
+		cordoned = common.CordonedDevices(nodeInfo.Node.Annotations)
+	}
 	preferred := migProfilePreference(pod.GetAnnotations())
 	if len(preferred) > 0 {
 		klog.V(4).InfoS("MIG profile preference", "pod", klog.KObj(pod), "preferred", preferred)
