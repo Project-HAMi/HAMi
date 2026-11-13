@@ -199,6 +199,33 @@ func resolvePreferredNodeAffinity(task *corev1.Pod) *policy.PreferredNodeAffinit
 	return parsed
 }
 
+// applyTaintTolerationScore penalizes candidate nodes for the PreferNoSchedule
+// taints the pod does not tolerate. It runs after every node is scored because
+// the penalty is normalized by the highest untolerated count among the nodes
+// that fit, the same way kube-scheduler's TaintToleration plugin normalizes.
+// Taints are read from the informer's copy of the node, so `kubectl taint`
+// takes effect without waiting for a device handshake. It does nothing when
+// --taint-toleration-score-weight is 0.
+func (s *Scheduler) applyTaintTolerationScore(res *policy.NodeScoreList, task *corev1.Pod) {
+	weight := config.TaintTolerationScoreWeight
+	if weight == 0 || len(res.NodeList) == 0 {
+		return
+	}
+	tolerations := policy.PreferNoScheduleTolerations(task.Spec.Tolerations)
+	counts := make([]int, len(res.NodeList))
+	maxCount := 0
+	for i, ns := range res.NodeList {
+		counts[i] = policy.CountIntolerablePreferNoScheduleTaints(s.currentNode(ns.NodeID, ns.Node), tolerations)
+		maxCount = max(maxCount, counts[i])
+	}
+	if maxCount == 0 {
+		return
+	}
+	for i, ns := range res.NodeList {
+		ns.AddTaintTolerationScore(counts[i], maxCount, res.Policy, weight)
+	}
+}
+
 type peakUsageSnapshot struct {
 	used      int64
 	usedcores int64
@@ -538,6 +565,8 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 	}
 	wg.Wait()
 	close(errCh)
+
+	s.applyTaintTolerationScore(&res, task)
 
 	if recordEvents && len(res.NodeList) == 0 {
 		s.recordFilteringFailures(task, failureReason)

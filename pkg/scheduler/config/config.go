@@ -72,6 +72,11 @@ var (
 	// scaled by the matched weight ratio. 0 (the default) disables the bonus.
 	NodeAffinityScoreWeight float32
 
+	// TaintTolerationScoreWeight is the penalty applied to a node's score for the PreferNoSchedule taints
+	// the pod does not tolerate, scaled by that node's count over the highest count among the candidate
+	// nodes. 0 (the default) disables the penalty.
+	TaintTolerationScoreWeight float32
+
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
 
@@ -645,9 +650,21 @@ func LoadConfig(path string) (*Config, error) {
 // would corrupt node ordering: a negative weight turns the preferred-node bonus
 // into a penalty, and NaN or Inf make every score comparison meaningless.
 func ValidateNodeAffinityScoreWeight(weight float32) error {
+	return validateScoreWeight("--node-affinity-score-weight", weight)
+}
+
+// ValidateTaintTolerationScoreWeight rejects a --taint-toleration-score-weight
+// that would corrupt node ordering: a negative weight turns the penalty for
+// untolerated PreferNoSchedule taints into a bonus, and NaN or Inf make every
+// score comparison meaningless.
+func ValidateTaintTolerationScoreWeight(weight float32) error {
+	return validateScoreWeight("--taint-toleration-score-weight", weight)
+}
+
+func validateScoreWeight(flag string, weight float32) error {
 	w := float64(weight)
 	if math.IsNaN(w) || math.IsInf(w, 0) || w < 0 {
-		return fmt.Errorf("--node-affinity-score-weight must be a finite number >= 0, got %v", weight)
+		return fmt.Errorf("%s must be a finite number >= 0, got %v", flag, weight)
 	}
 	return nil
 }
