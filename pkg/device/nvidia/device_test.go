@@ -1409,7 +1409,7 @@ func TestFit_DeviceCordon(t *testing.T) {
 
 	nodeWithCordon := func(uuids string) *device.NodeInfo {
 		return &device.NodeInfo{Node: &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{DeviceCordonAnnotation: uuids}},
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{common.DeviceCordonAnnotation: uuids}},
 		}}
 	}
 
