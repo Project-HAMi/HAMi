@@ -3478,6 +3478,44 @@ func TestSchedulerIsSynced(t *testing.T) {
 	assert.Equal(t, true, s.IsSynced())
 }
 
+// failingNodeLister is a NodeLister whose List always fails, used to exercise
+// the list-error branch of register.
+type failingNodeLister struct{ err error }
+
+func (l failingNodeLister) List(labels.Selector) ([]*corev1.Node, error) { return nil, l.err }
+func (l failingNodeLister) Get(string) (*corev1.Node, error)             { return nil, l.err }
+
+// Test_register_LastSyncSuccessTime verifies that a successful sync records the
+// time and a failed sync keeps the previous value.
+func Test_register_LastSyncSuccessTime(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{}
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	assert.Equal(t, int64(0), s.LastSyncSuccessTime())
+
+	before := time.Now().Unix()
+	s.register(labels.Everything())
+	assert.Assert(t, s.LastSyncSuccessTime() >= before)
+
+	s.lastSyncSuccessTime.Store(1)
+	s.nodeLister = failingNodeLister{err: errors.New("list failed")}
+	s.register(labels.Everything())
+	assert.Equal(t, int64(1), s.LastSyncSuccessTime())
+}
+
 // Test_register_OverviewIncludesCachedNodesOutsideSelector covers a cached node
 // that stops matching the registration selector. The selector controls which
 // nodes are refreshed, but overviewstatus must continue to include the entire
