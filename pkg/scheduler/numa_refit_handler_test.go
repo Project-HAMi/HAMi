@@ -39,6 +39,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/record"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -1711,4 +1712,375 @@ func TestRefitNumaAllocationInitContainerRefitRecordsCollapsedUsage(t *testing.T
 	// Namespace usage reflects the true 15000 total, not the undercounted 10000.
 	dq := s.quotaManager.GetResourceQuota()["default"]
 	assert.Equal(t, (*dq)[memoryResource].Used, int64(15000))
+}
+
+// standbyReplica returns a scheduler with its own caches that sees pods only
+// through informer updates, like a standby replica.
+func standbyReplica() *Scheduler {
+	nodes := newNodeManager()
+	nodes.addNode(refitNode, &device.NodeInfo{
+		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "GPU-a", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-b", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	})
+	// NewQuotaManager is shared by the whole process, so each replica needs
+	// its own.
+	quotas := &device.QuotaManager{Quotas: map[string]*device.DeviceQuota{}}
+	return &Scheduler{nodeManager: nodes, podManager: device.NewPodManager(), quotaManager: quotas}
+}
+
+// informerUpdates returns the pod after Filter assigned it, and after patch
+// landed.
+func informerUpdates(pod *corev1.Pod, patch map[string]string) (assigned, patched *corev1.Pod) {
+	assigned = pod.DeepCopy()
+	assigned.Annotations[util.AssignedNodeAnnotations] = refitNode
+	patched = assigned.DeepCopy()
+	maps.Copy(patched.Annotations, patch)
+	return assigned, patched
+}
+
+// nodeUsedmem returns the memory s accounts on each device of refitNode.
+func nodeUsedmem(t *testing.T, s *Scheduler) map[string]int64 {
+	t.Helper()
+	task := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "usage-probe", Namespace: "default"}}
+	usage, _, _, err := s.getNodesUsage(&[]string{refitNode}, task)
+	assert.NilError(t, err)
+	used := map[string]int64{}
+	for _, deviceList := range (*usage)[refitNode].Devices.DeviceLists {
+		used[deviceList.Device.ID] = deviceList.Device.Usedmem
+	}
+	return used
+}
+
+// TestOnUpdatePodFollowsRefitFromAnotherReplica is the regression test for
+// #3366: a standby replica must follow a refit it only sees as a pod update.
+func TestOnUpdatePodFollowsRefitFromAnotherReplica(t *testing.T) {
+	leader, pod := refitFixture(t, 40000)
+	patch, _ := stubRefitPatch(t, nil)
+	response := leader.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+	assert.Equal(t, len(leader.refitWrites), 1)
+
+	created := pod.DeepCopy()
+	created.Annotations = nil
+	assigned, refitted := informerUpdates(pod, patch)
+
+	standby := standbyReplica()
+	standby.onAddPod(created)
+	standby.onUpdatePod(created, assigned)
+	assert.Equal(t, trackedUUID(t, standby), "GPU-a")
+
+	standby.onUpdatePod(assigned, refitted)
+	assert.Equal(t, trackedUUID(t, standby), "GPU-b")
+	assert.DeepEqual(t, nodeUsedmem(t, standby), map[string]int64{"GPU-a": 0, "GPU-b": 20000})
+
+	// The leader gets the same updates. Its own patch changes nothing and
+	// ends the wait.
+	leader.onUpdatePod(created, assigned)
+	leader.onUpdatePod(assigned, refitted)
+	assert.Equal(t, trackedUUID(t, leader), "GPU-b")
+	assert.Equal(t, len(leader.refitWrites), 0)
+	assert.DeepEqual(t, nodeUsedmem(t, leader), nodeUsedmem(t, standby))
+}
+
+// TestOnUpdatePodKeepsOwnRefitOverOlderUpdates checks that a late update for
+// the first refit does not undo the second refit.
+func TestOnUpdatePodKeepsOwnRefitOverOlderUpdates(t *testing.T) {
+	reserved := device.PodSingleDevice{
+		{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+		{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+	}
+	leader, pod := phaseAwareRefitFixture(t, nil, []corev1.Container{{Name: "first"}, {Name: "second"}}, reserved, 40000, 0)
+	patch, _ := stubRefitPatch(t, nil)
+
+	first := refitTestRequestFor("GPU-b")
+	first.ContainerName = "first"
+	response := leader.RefitNumaAllocation(context.Background(), first, validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "first refit failed: %s", response.FailureReason)
+	assigned, afterFirst := informerUpdates(pod, patch)
+
+	second := refitTestRequestFor("GPU-b")
+	second.ContainerIndex = 1
+	second.ContainerName = "second"
+	response = leader.RefitNumaAllocation(context.Background(), second, validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "second refit failed: %s", response.FailureReason)
+	afterSecond := afterFirst.DeepCopy()
+	maps.Copy(afterSecond.Annotations, patch)
+
+	bothOnGPUB := map[string]int64{"GPU-a": 0, "GPU-b": 10000}
+	assert.DeepEqual(t, nodeUsedmem(t, leader), bothOnGPUB)
+
+	leader.onUpdatePod(assigned, afterFirst)
+	assert.DeepEqual(t, nodeUsedmem(t, leader), bothOnGPUB)
+	assert.Equal(t, len(leader.refitWrites), 1)
+
+	leader.onUpdatePod(afterFirst, afterSecond)
+	assert.DeepEqual(t, nodeUsedmem(t, leader), bothOnGPUB)
+	assert.Equal(t, len(leader.refitWrites), 0)
+}
+
+// TestOnUpdatePodFollowsLaterRefitByAnotherReplica checks that a replica
+// follows a newer refit by another replica, even if it never sees its own
+// patch.
+func TestOnUpdatePodFollowsLaterRefitByAnotherReplica(t *testing.T) {
+	s, pod := refitFixture(t, 40000)
+	stubRefitPatch(t, nil)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+
+	onGPUC := device.EncodePodSingleDevice(device.PodSingleDevice{{{UUID: "GPU-c", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}})
+	assigned, movedAgain := informerUpdates(pod, map[string]string{
+		device.InRequestDevices[nvidia.NvidiaGPUDevice]: onGPUC,
+		device.SupportDevices[nvidia.NvidiaGPUDevice]:   onGPUC,
+	})
+	s.onUpdatePod(assigned, movedAgain)
+	assert.Equal(t, trackedUUID(t, s), "GPU-c")
+	assert.Equal(t, len(s.refitWrites), 0)
+}
+
+// TestOnUpdatePodEndsWaitWithoutRewrite checks that any update showing the
+// patch ends the wait, even if it does not change the allocation.
+func TestOnUpdatePodEndsWaitWithoutRewrite(t *testing.T) {
+	s, pod := refitFixture(t, 40000)
+	patch, _ := stubRefitPatch(t, nil)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+
+	_, refitted := informerUpdates(pod, patch)
+	s.onUpdatePod(refitted, refitted)
+	assert.Equal(t, len(s.refitWrites), 0)
+	assert.Equal(t, trackedUUID(t, s), "GPU-b")
+}
+
+// TestOnUpdatePodLateResyncFollowsMoveBack checks that a resync well after
+// the refit follows a container another replica moved back. An early resync
+// still waits, since the refit's own update may be on its way.
+func TestOnUpdatePodLateResyncFollowsMoveBack(t *testing.T) {
+	s, pod := refitFixture(t, 40000)
+	stubRefitPatch(t, nil)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+
+	movedBack, _ := informerUpdates(pod, nil)
+	movedBack.ResourceVersion = "7"
+	running := movedBack.DeepCopy()
+	running.ResourceVersion = "8"
+	running.Status.Phase = corev1.PodRunning
+
+	s.onUpdatePod(movedBack, running)
+	s.onUpdatePod(running, running)
+	assert.Equal(t, len(s.refitWrites), 1)
+	assert.Equal(t, trackedUUID(t, s), "GPU-b")
+
+	uid := k8stypes.UID(refitPodUID)
+	write := s.refitWrites[uid]
+	write.at = write.at.Add(-refitWriteSettle)
+	s.refitWrites[uid] = write
+	s.onUpdatePod(running, running)
+	assert.Equal(t, len(s.refitWrites), 0)
+	assert.Equal(t, trackedUUID(t, s), "GPU-a")
+	assert.DeepEqual(t, nodeUsedmem(t, s), map[string]int64{"GPU-a": 20000, "GPU-b": 0})
+}
+
+// TestOnUpdatePodPendingRefitDecodeFailureNotRepeated checks that a bad
+// allocation is not reported again by updates that don't change it.
+func TestOnUpdatePodPendingRefitDecodeFailureNotRepeated(t *testing.T) {
+	s, pod := refitFixture(t, 40000)
+	stubRefitPatch(t, nil)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+
+	_, broken := informerUpdates(pod, map[string]string{
+		device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU-b,NVIDIA,bad,30:;",
+	})
+	broken.Spec.NodeName = refitNode
+	running := broken.DeepCopy()
+	running.Status.Phase = corev1.PodRunning
+
+	recorder := record.NewFakeRecorder(10)
+	s.eventRecorder = recorder
+	s.onUpdatePod(broken, running)
+	assert.Equal(t, len(recorder.Events), 0)
+	assert.Equal(t, len(s.refitWrites), 1)
+}
+
+// TestOnUpdatePodOlderUpdateSkipsInitRelease checks that an update older
+// than the refit does not run the init release.
+func TestOnUpdatePodOlderUpdateSkipsInitRelease(t *testing.T) {
+	s, pod, _ := initRefitFixture(t, 20000)
+	patch, _ := stubRefitPatch(t, nil)
+	request := refitTestRequestFor("GPU-b")
+	request.ContainerIndex = 1
+	request.ContainerName = "app-0"
+	response := s.RefitNumaAllocation(context.Background(), request, validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+	afterRefit := map[string]int64{"GPU-a": 5000, "GPU-b": 5000}
+	assert.DeepEqual(t, nodeUsedmem(t, s), afterRefit)
+
+	initDone := func(p *corev1.Pod) *corev1.Pod {
+		done := p.DeepCopy()
+		done.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+			Name: "init-0", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		}}
+		return done
+	}
+	assigned, refitted := informerUpdates(pod, patch)
+
+	s.onUpdatePod(assigned, initDone(assigned))
+	pi, _ := s.podManager.GetPod(pod)
+	assert.Equal(t, pi.InitContainerResourceReleased, false)
+	assert.DeepEqual(t, nodeUsedmem(t, s), afterRefit)
+
+	s.onUpdatePod(initDone(assigned), initDone(refitted))
+	pi, _ = s.podManager.GetPod(pod)
+	assert.Equal(t, pi.InitContainerResourceReleased, true)
+	assert.DeepEqual(t, nodeUsedmem(t, s), afterRefit)
+}
+
+// TestOnUpdatePodFollowsInitContainerRefitQuota checks the quota on a
+// standby replica: moving the init container off GPU-a raises usage from
+// 10000 to 15000.
+func TestOnUpdatePodFollowsInitContainerRefitQuota(t *testing.T) {
+	leader, pod, memoryResource := initRefitFixture(t, 20000)
+	patch, _ := stubRefitPatch(t, nil)
+	response := leader.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+	assigned, refitted := informerUpdates(pod, patch)
+
+	standby := standbyReplica()
+	standby.onUpdatePod(pod, assigned)
+	assert.Equal(t, (*standby.quotaManager.GetResourceQuota()["default"])[memoryResource].Used, int64(10000))
+
+	standby.onUpdatePod(assigned, refitted)
+	assert.Equal(t, (*standby.quotaManager.GetResourceQuota()["default"])[memoryResource].Used, int64(15000))
+	assert.DeepEqual(t, nodeUsedmem(t, standby), nodeUsedmem(t, leader))
+}
+
+// TestOnUpdatePodKeepsDevicesOnUndecodableRewrite checks that an undecodable
+// rewrite keeps the cached allocation.
+func TestOnUpdatePodKeepsDevicesOnUndecodableRewrite(t *testing.T) {
+	_, pod := refitFixture(t, 40000)
+	assigned, broken := informerUpdates(pod, map[string]string{
+		device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU-b,NVIDIA,bad,30:;",
+	})
+
+	standby := standbyReplica()
+	standby.onUpdatePod(pod, assigned)
+	standby.onUpdatePod(assigned, broken)
+	assert.Equal(t, trackedUUID(t, standby), "GPU-a")
+	assert.DeepEqual(t, nodeUsedmem(t, standby), map[string]int64{"GPU-a": 20000, "GPU-b": 0})
+}
+
+// TestRemovePodAllocationDropsPendingRefitWrite checks that removing a pod
+// does not leave its pending refit write behind.
+func TestRemovePodAllocationDropsPendingRefitWrite(t *testing.T) {
+	s, pod := refitFixture(t, 40000)
+	stubRefitPatch(t, nil)
+	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+	// Not fatal, so the removal below still clears the shared quota usage.
+	assert.Check(t, len(s.refitWrites) == 1)
+
+	s.removePodAllocation(pod)
+	assert.Equal(t, len(s.refitWrites), 0)
+}
+
+func TestAllocationRewritten(t *testing.T) {
+	allocated := device.SupportDevices[nvidia.NvidiaGPUDevice]
+	pending := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	onGPUA := device.EncodePodSingleDevice(device.PodSingleDevice{{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}})
+	onGPUB := device.EncodePodSingleDevice(device.PodSingleDevice{{{UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}})
+	podOn := func(node string, annotations map[string]string) *corev1.Pod {
+		all := map[string]string{}
+		if node != "" {
+			all[util.AssignedNodeAnnotations] = node
+		}
+		maps.Copy(all, annotations)
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: all}}
+	}
+
+	tests := []struct {
+		name          string
+		before, after *corev1.Pod
+		want          bool
+	}{
+		{
+			name:   "refit on the same node",
+			before: podOn(refitNode, map[string]string{allocated: onGPUA}),
+			after:  podOn(refitNode, map[string]string{allocated: onGPUB}),
+			want:   true,
+		},
+		{
+			name:   "first assignment",
+			before: podOn("", nil),
+			after:  podOn(refitNode, map[string]string{allocated: onGPUA}),
+		},
+		{
+			name:   "assigned to another node",
+			before: podOn(refitNode, map[string]string{allocated: onGPUA}),
+			after:  podOn("node-2", map[string]string{allocated: onGPUB}),
+		},
+		{
+			name:   "only the pending entry consumed",
+			before: podOn(refitNode, map[string]string{allocated: onGPUA, pending: onGPUA}),
+			after:  podOn(refitNode, map[string]string{allocated: onGPUA, pending: ""}),
+		},
+		{
+			name:   "resync",
+			before: podOn(refitNode, map[string]string{allocated: onGPUA}),
+			after:  podOn(refitNode, map[string]string{allocated: onGPUA}),
+		},
+		{
+			name:   "allocation removed",
+			before: podOn(refitNode, map[string]string{allocated: onGPUA}),
+			after:  podOn(refitNode, nil),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, allocationRewritten(test.before, test.after), test.want)
+		})
+	}
+}
+
+func TestRefitWritePredates(t *testing.T) {
+	write := refitWrite{deviceType: nvidia.NvidiaGPUDevice, containerIndex: 1, replaced: []string{"GPU-a"}}
+	on := func(uuid string) device.ContainerDevices {
+		return device.ContainerDevices{{UUID: uuid, Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}}
+	}
+
+	tests := []struct {
+		name      string
+		allocated device.PodDevices
+		want      bool
+	}{
+		{
+			name:      "still on the replaced devices",
+			allocated: device.PodDevices{nvidia.NvidiaGPUDevice: {on("GPU-b"), on("GPU-a")}},
+			want:      true,
+		},
+		{
+			name:      "carries the write",
+			allocated: device.PodDevices{nvidia.NvidiaGPUDevice: {on("GPU-a"), on("GPU-b")}},
+		},
+		{
+			name:      "moved again by another replica",
+			allocated: device.PodDevices{nvidia.NvidiaGPUDevice: {on("GPU-a"), on("GPU-c")}},
+		},
+		{
+			name:      "no entry for the container",
+			allocated: device.PodDevices{nvidia.NvidiaGPUDevice: {on("GPU-a")}},
+		},
+		{
+			name:      "no allocation for the device type",
+			allocated: device.PodDevices{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, write.predates(test.allocated), test.want)
+		})
+	}
 }

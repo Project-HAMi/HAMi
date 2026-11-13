@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -335,6 +336,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 		effective := effectivePodDeviceUsage(pod, rawDevices, pi.InitContainerResourceReleased)
 		if _, ok := s.podManager.ReplacePodDevices(key, effective); ok {
 			s.quotaManager.AddUsage(pod, effective)
+			s.recordRefitWrite(key.UID, req.DeviceType, req.ContainerIndex, current)
 		} else {
 			// Pod removals take allocLock, so the pod cannot leave the cache
 			// while the refit holds it. This only guards against a future
@@ -351,6 +353,37 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	s.recordNumaRefitResultEvent(pod, message, nil)
 	s.GetAllocationMetrics().ObserveAllocation("refit", req.DeviceType)
 	return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(newDevices)}
+}
+
+// refitWriteSettle is how long a resync cannot end the wait for a refit.
+const refitWriteSettle = time.Minute
+
+// refitWrite is a NUMA refit this replica made: the container, the devices
+// it replaced, and when.
+type refitWrite struct {
+	deviceType     string
+	containerIndex int
+	replaced       []string
+	at             time.Time
+}
+
+// predates reports whether an update is older than the refit: the container
+// still has the replaced devices.
+func (w refitWrite) predates(allocated device.PodDevices) bool {
+	single := allocated[w.deviceType]
+	if w.containerIndex >= len(single) {
+		return false
+	}
+	return slices.Equal(containerDeviceIDs(single[w.containerIndex]), w.replaced)
+}
+
+// recordRefitWrite remembers a refit until the informer shows a newer state.
+// See syncAllocationLocked. Callers hold allocLock.
+func (s *Scheduler) recordRefitWrite(uid k8stypes.UID, deviceType string, containerIndex int, replaced device.ContainerDevices) {
+	if s.refitWrites == nil {
+		s.refitWrites = make(map[k8stypes.UID]refitWrite)
+	}
+	s.refitWrites[uid] = refitWrite{deviceType: deviceType, containerIndex: containerIndex, replaced: containerDeviceIDs(replaced), at: time.Now()}
 }
 
 // effectivePodDeviceUsage mirrors the accounting shape stored by PodManager.
