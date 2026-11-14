@@ -18,6 +18,7 @@ package policy
 
 import (
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -50,11 +51,75 @@ func (l NodeScoreList) Swap(i, j int) {
 }
 
 func (l NodeScoreList) Less(i, j int) bool {
+	// Comma-separated policy: chain binpack/spread as sort keys in the
+	// order the caller wrote them. superpod is a filter applied in the
+	// scheduler's filter stage, not a sort key, so it doesn't appear here.
+	if strings.Contains(l.Policy, ",") {
+		return l.lessByChain(i, j)
+	}
 	if l.Policy == util.NodeSchedulerPolicySpread.String() {
 		return l.NodeList[i].Score > l.NodeList[j].Score
 	}
 	// default policy is Binpack
 	return l.NodeList[i].Score < l.NodeList[j].Score
+}
+
+// nodeSortKeyOrder lists the recognized node sort-key policies, in the
+// priority used when a caller-supplied chain doesn't disambiguate them
+// further.
+var nodeSortKeyOrder = []util.SchedulerPolicyName{
+	util.NodeSchedulerPolicyBinpack,
+	util.NodeSchedulerPolicySpread,
+}
+
+// nodeSortKeyChain parses policy as a comma-separated ordered list and
+// returns the sort-key policies (binpack/spread) it names, in the order
+// written, deduplicated. superpod is a filter consumed via
+// util.PolicyContains in the scheduler's filter stage, not a sort key, so
+// it's dropped here.
+func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
+	seen := make(map[util.SchedulerPolicyName]bool, len(nodeSortKeyOrder))
+	var chain []util.SchedulerPolicyName
+	for p := range strings.SplitSeq(policy, ",") {
+		name := util.SchedulerPolicyName(strings.TrimSpace(p))
+		for _, key := range nodeSortKeyOrder {
+			if name == key && !seen[key] {
+				chain = append(chain, key)
+				seen[key] = true
+			}
+		}
+	}
+	return chain
+}
+
+func nodePolicyUsesSpread(policy string) bool {
+	chain := nodeSortKeyChain(policy)
+	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread
+}
+
+// lessByChain compares nodes i and j by the ordered sort-key chain parsed
+// from l.Policy, falling back to binpack (today's default node policy)
+// when the comma list names no recognized sort key (e.g. "superpod").
+func (l NodeScoreList) lessByChain(i, j int) bool {
+	chain := nodeSortKeyChain(l.Policy)
+	if len(chain) == 0 {
+		chain = []util.SchedulerPolicyName{util.NodeSchedulerPolicyBinpack}
+	}
+	a, b := l.NodeList[i], l.NodeList[j]
+	for _, key := range chain {
+		switch key {
+		case util.NodeSchedulerPolicyBinpack:
+			if a.Score != b.Score {
+				return a.Score < b.Score
+			}
+		case util.NodeSchedulerPolicySpread:
+			if a.Score != b.Score {
+				return a.Score > b.Score
+			}
+		}
+	}
+	// Deterministic tiebreak when every chained key is equal.
+	return a.NodeID < b.NodeID
 }
 
 // policyNeutralScorer is an optional interface a device backend may implement to
@@ -80,13 +145,13 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 		score := dev.ScoreNode(ns.Node, val, previous, policy)
 
 		// Backends implementing policyNeutralScorer return policy-independent
-		// "higher is better" scores. For the Spread policy (which selects the
-		// lowest score), we invert the score to preserve the ranking.
+		// "higher is better" scores. For Spread (which selects the lowest
+		// score), we invert the score to preserve the ranking.
 		// We also apply a weight of 10000 to ensure device scores dominate
 		// the base node score.
 		if _, ok := dev.(policyNeutralScorer); ok {
 			weight := float32(10000)
-			if policy == util.NodeSchedulerPolicySpread.String() {
+			if nodePolicyUsesSpread(policy) {
 				weight = -10000
 			}
 			score = weight * score
@@ -204,7 +269,7 @@ func (ns *NodeScore) AddNodeAffinityScore(pref *PreferredNodeAffinity, policy st
 	matched := pref.terms.Score(ns.Node)
 	r := float32(matched) / float32(pref.totalWeight)
 	bonus := weight * r
-	if policy == util.NodeSchedulerPolicySpread.String() {
+	if nodePolicyUsesSpread(policy) {
 		bonus = -bonus
 	}
 	ns.Score += bonus

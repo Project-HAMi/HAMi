@@ -164,6 +164,9 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 	if err := fitResourceQuota(pod); err != nil {
 		return admission.Denied(err.Error())
 	}
+
+	injectSuperpodAffinity(pod)
+
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
@@ -381,4 +384,42 @@ func fitResourceQuota(pod *corev1.Pod) error {
 		}
 	}
 	return nil
+}
+
+// injects a required podAffinity term that converges
+// pods of the same task (hami.io/taskid) into the same superpod
+// (topologyKey hami.io/superpodid). It is a hard constraint, mirroring the
+// scheduler's superpod filter. Activated when the pod's superpod policy is
+// enabled and it carries a taskid label.
+func injectSuperpodAffinity(pod *corev1.Pod) {
+	userNodePolicy := resolveNodeSchedulerPolicy(pod)
+	if !util.PolicyContains(userNodePolicy, util.NodeSchedulerPolicySuperpod) {
+		return
+	}
+	taskid, ok := pod.Labels[util.TaskIDLabel]
+	if !ok || taskid == "" {
+		return
+	}
+	selector := &metav1.LabelSelector{
+		MatchLabels: map[string]string{util.TaskIDLabel: taskid},
+	}
+	term := corev1.PodAffinityTerm{
+		LabelSelector: selector,
+		TopologyKey:   util.SuperPodIDLabel,
+	}
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+	if pod.Spec.Affinity.PodAffinity == nil {
+		pod.Spec.Affinity.PodAffinity = &corev1.PodAffinity{}
+	}
+	for _, existing := range pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+		if existing.TopologyKey == util.SuperPodIDLabel {
+			// Already injected or user-managed: never duplicate.
+			return
+		}
+	}
+	pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
+		pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution, term)
+	klog.V(3).InfoS("Injected superpod podAffinity", "pod", klog.KObj(pod), "taskid", taskid)
 }
