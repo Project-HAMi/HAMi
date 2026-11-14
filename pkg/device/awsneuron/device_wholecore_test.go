@@ -296,3 +296,203 @@ func Test_PatchAnnotations_EmitsAllInferentia1CoreIndexes(t *testing.T) {
 	})
 	assert.Equal(t, annotations[AWSNeuronAssignedIndex], "4,5,6,7")
 }
+
+func Test_Fit_MultiDeviceCoreRequestPermitsPartiallyOccupiedFinalDevice(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.6xlarge", 2, 8))
+	assert.NilError(t, err)
+	assert.Equal(t, len(registered), 2)
+
+	// Device 0: completely free (Used = 0, Usedcores = 0)
+	dev0 := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	// Device 1: 1 core allocated at core 3 (Used = 1, Usedcores = 8, free cores: 0, 1, 2)
+	dev1 := &device.DeviceUsage{
+		ID: registered[1].ID, Index: registered[1].Index,
+		Count: registered[1].Count, Totalcore: registered[1].Devcore,
+		Used: 1, Usedcores: 8,
+		Type: registered[1].Type, Health: true,
+		CustomInfo: maps.Clone(registered[1].CustomInfo),
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workload-5cores", Namespace: "default", Annotations: map[string]string{}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("5"),
+			}},
+		}}},
+	}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, allocations, reason := dev.Fit([]*device.DeviceUsage{dev0, dev1}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, len(allocations[AWSNeuronDevice]), 2)
+	assert.Equal(t, allocations[AWSNeuronDevice][0].Idx, 0)
+	assert.Equal(t, allocations[AWSNeuronDevice][0].Usedcores, int64(15))
+	assert.Equal(t, allocations[AWSNeuronDevice][1].Idx, 1)
+	assert.Equal(t, allocations[AWSNeuronDevice][1].Usedcores, int64(1))
+
+	annotations := map[string]string{util.AssignedNodeAnnotations: "inf1-node"}
+	dev.PatchAnnotations(pod, &annotations, device.PodDevices{
+		AWSNeuronDevice: device.PodSingleDevice{allocations[AWSNeuronDevice]},
+	})
+	assert.Equal(t, annotations[AWSNeuronAssignedIndex], "0,1,2,3,4")
+}
+
+func Test_Fit_MultiDeviceCoreRequestRejectsNonContiguousBoundary(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.6xlarge", 2, 8))
+	assert.NilError(t, err)
+
+	// Device 0: free
+	dev0 := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	// Device 1: core 0 is used (Used = 1, Usedcores = 1). Cores 1, 2, 3 are free (3 free cores).
+	// Because core 0 (global core 4) is occupied, allocating 5 cores across dev0 and dev1
+	// cannot form a contiguous range across the device boundary.
+	dev1 := &device.DeviceUsage{
+		ID: registered[1].ID, Index: registered[1].Index,
+		Count: registered[1].Count, Totalcore: registered[1].Devcore,
+		Used: 1, Usedcores: 1,
+		Type: registered[1].Type, Health: true,
+		CustomInfo: maps.Clone(registered[1].CustomInfo),
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workload-5cores", Namespace: "default", Annotations: map[string]string{}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("5"),
+			}},
+		}}},
+	}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{dev0, dev1}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func Test_Fit_MultiDeviceCoreRequestRejectsPartiallyOccupiedIntermediateDevice(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.6xlarge", 3, 12))
+	assert.NilError(t, err)
+
+	dev0 := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	// Device 1 is intermediate for a 10-core request (4 on dev0, 4 on dev1, 2 on dev2).
+	// Device 1 has 1 core used (Used = 1, Usedcores = 8), so it cannot satisfy 4 full cores.
+	dev1 := &device.DeviceUsage{
+		ID: registered[1].ID, Index: registered[1].Index,
+		Count: registered[1].Count, Totalcore: registered[1].Devcore,
+		Used: 1, Usedcores: 8,
+		Type: registered[1].Type, Health: true,
+		CustomInfo: maps.Clone(registered[1].CustomInfo),
+	}
+	dev2 := &device.DeviceUsage{
+		ID: registered[2].ID, Index: registered[2].Index,
+		Count: registered[2].Count, Totalcore: registered[2].Devcore,
+		Type: registered[2].Type, Health: true,
+		CustomInfo: maps.Clone(registered[2].CustomInfo),
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workload-10cores", Namespace: "default", Annotations: map[string]string{}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("10"),
+			}},
+		}}},
+	}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{dev0, dev1, dev2}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func Test_Fit_MultiDeviceCoreRequestHonorsMutexPolicy(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.6xlarge", 2, 8))
+	assert.NilError(t, err)
+
+	dev0 := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	dev1 := &device.DeviceUsage{
+		ID: registered[1].ID, Index: registered[1].Index,
+		Count: registered[1].Count, Totalcore: registered[1].Devcore,
+		Used: 1, Usedcores: 8,
+		Type: registered[1].Type, Health: true,
+		CustomInfo: maps.Clone(registered[1].CustomInfo),
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "workload-mutex",
+			Namespace:   "default",
+			Annotations: map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuroncore": resource.MustParse("5"),
+			}},
+		}}},
+	}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{dev0, dev1}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func Test_Fit_MultiDeviceWholeDeviceRequestRejectsPartiallyOccupiedDevice(t *testing.T) {
+	dev := newNeuronBackend()
+	registered, err := dev.GetNodeDevices(newNeuronNode("inf1-node", "inf1.6xlarge", 2, 8))
+	assert.NilError(t, err)
+
+	dev0 := &device.DeviceUsage{
+		ID: registered[0].ID, Index: registered[0].Index,
+		Count: registered[0].Count, Totalcore: registered[0].Devcore,
+		Type: registered[0].Type, Health: true,
+		CustomInfo: maps.Clone(registered[0].CustomInfo),
+	}
+	dev1 := &device.DeviceUsage{
+		ID: registered[1].ID, Index: registered[1].Index,
+		Count: registered[1].Count, Totalcore: registered[1].Devcore,
+		Used: 1, Usedcores: 8,
+		Type: registered[1].Type, Health: true,
+		CustomInfo: maps.Clone(registered[1].CustomInfo),
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workload-2devices", Namespace: "default", Annotations: map[string]string{}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"aws.amazon.com/neuron": resource.MustParse("2"),
+			}},
+		}}},
+	}
+	req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{dev0, dev1}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}

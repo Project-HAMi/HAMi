@@ -373,14 +373,52 @@ func coreAllocationInfo(info map[string]any, selected int64) map[string]any {
 	return result
 }
 
-// continuousDeviceAvailable reports the device indexes of a free run of count
-// devices starting at slice position start. It returns indexes rather than
-// positions because Fit matches its result against DeviceUsage.Index.
-func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
+// continuousDeviceAvailable reports the device indexes of a run of count
+// devices starting at slice position start that can satisfy the request.
+// It returns indexes rather than positions because Fit matches its result
+// against DeviceUsage.Index.
+func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int, totalCoresreq ...int64) []int {
 	if len(devices) < start+count {
 		return []int{}
 	}
 	res := []int{}
+	if len(totalCoresreq) > 0 && totalCoresreq[0] > 0 {
+		remainingCores := totalCoresreq[0]
+		iterator := start
+		for iterator < start+count {
+			dev := devices[iterator]
+			if !dev.Health {
+				return []int{}
+			}
+			devTotalCores := countMaskAvailable(dev.Totalcore)
+			if devTotalCores == 0 {
+				return []int{}
+			}
+			needed := min(remainingCores, devTotalCores)
+			if needed <= 0 {
+				return []int{}
+			}
+			isFinalDevice := (iterator == start+count-1)
+			if !isFinalDevice {
+				if needed < devTotalCores || dev.Usedcores != 0 || dev.Count <= dev.Used {
+					return []int{}
+				}
+			} else {
+				requiredMask := (int64(1) << needed) - 1
+				if (dev.Totalcore&requiredMask) != requiredMask || (dev.Usedcores&requiredMask) != 0 || dev.Count <= dev.Used {
+					return []int{}
+				}
+			}
+			res = append(res, int(dev.Index))
+			remainingCores -= needed
+			iterator++
+		}
+		if remainingCores > 0 {
+			return []int{}
+		}
+		return res
+	}
+
 	iterator := start
 	for iterator < start+count {
 		if devices[iterator].Used > 0 || !devices[iterator].Health {
@@ -392,7 +430,7 @@ func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count i
 	return res
 }
 
-func graphSelect(devices []*device.DeviceUsage, count int) []int {
+func graphSelect(devices []*device.DeviceUsage, count int, totalCoresreq ...int64) []int {
 	if len(devices) == 0 {
 		return []int{}
 	}
@@ -419,7 +457,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 		//Deal with ring
 		start := 0
 		for start < len(devices) {
-			res := continuousDeviceAvailable(devices, start, count)
+			res := continuousDeviceAvailable(devices, start, count, totalCoresreq...)
 			if len(res) > 0 {
 				return res
 			}
@@ -432,7 +470,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 		{
 			start := 0
 			for start < len(devices) {
-				res := continuousDeviceAvailable(devices, start, count)
+				res := continuousDeviceAvailable(devices, start, count, totalCoresreq...)
 				if len(res) > 0 {
 					return res
 				}
@@ -467,18 +505,47 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		candidates := make([]*device.DeviceUsage, len(devices))
 		for i, candidate := range devices {
 			copy := candidate.DeepCopy()
-			requiredCores := k.Coresreq
-			if remainingCores > 0 {
-				requiredCores = min(remainingCores, countMaskAvailable(copy.Totalcore))
-			} else if requiredCores == 0 {
-				requiredCores = countMaskAvailable(copy.Totalcore)
-			}
-			if _, found := allocateCoreMask(copy.Usedcores, copy.Totalcore, requiredCores); !found {
+			if !copy.Health ||
+				!device.CheckUUID(pod.GetAnnotations(), copy.ID, AWSNeuronUseUUID, AWSNeuronNoUseUUID, neuron.CommonWord()) ||
+				copy.Count <= copy.Used ||
+				(isMutex && copy.Used > 0) {
 				copy.Health = false
+				candidates[i] = copy
+				continue
+			}
+
+			if remainingCores > 0 {
+				coresPerDevice := countMaskAvailable(copy.Totalcore)
+				if coresPerDevice == 0 {
+					copy.Health = false
+					candidates[i] = copy
+					continue
+				}
+				remainder := remainingCores - (k.Nums-1)*coresPerDevice
+				if remainder <= 0 {
+					remainder = coresPerDevice
+				}
+				remainderMask := (int64(1) << remainder) - 1
+
+				canBeIntermediate := copy.Usedcores == 0 && countMaskAvailable(copy.Totalcore) >= coresPerDevice
+				canBeFinal := (copy.Totalcore&remainderMask) == remainderMask && (copy.Usedcores&remainderMask) == 0
+				if !canBeIntermediate && !canBeFinal {
+					copy.Health = false
+				}
+			} else {
+				requiredCores := k.Coresreq
+				if requiredCores == 0 {
+					requiredCores = countMaskAvailable(copy.Totalcore)
+				}
+				if copy.Used > 0 {
+					copy.Health = false
+				} else if _, found := allocateCoreMask(copy.Usedcores, copy.Totalcore, requiredCores); !found {
+					copy.Health = false
+				}
 			}
 			candidates[i] = copy
 		}
-		alloc := graphSelect(candidates, int(k.Nums))
+		alloc := graphSelect(candidates, int(k.Nums), remainingCores)
 		if len(alloc) == 0 {
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
@@ -494,7 +561,18 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 					} else if requiredCores == 0 {
 						requiredCores = countMaskAvailable(val.Totalcore)
 					}
-					selected, found := allocateCoreMask(val.Usedcores, val.Totalcore, requiredCores)
+					var selected int64
+					var found bool
+					if k.TotalCoresreq > 0 {
+						mask := (int64(1) << requiredCores) - 1
+						if (val.Totalcore&mask) == mask && (val.Usedcores&mask) == 0 {
+							selected = mask
+							found = true
+						}
+					}
+					if !found {
+						selected, found = allocateCoreMask(val.Usedcores, val.Totalcore, requiredCores)
+					}
 					if !found {
 						reason[common.CardInsufficientCore]++
 						return false, tmpDevs, common.GenReason(reason, len(devices))
