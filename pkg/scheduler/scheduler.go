@@ -377,8 +377,8 @@ func allocationRewritten(oldPod, newPod *corev1.Pod) bool {
 // replica (#3366).
 //
 // The replica that did the refit has already updated its cache. Updates that
-// still show the old devices are older than the refit, so they are skipped,
-// also for the init release.
+// still show the old devices are older than the refit, so for up to a minute
+// they are skipped, also for the init release.
 //
 // It returns the decoded allocation (nil if not needed), and false if the
 // update must be skipped. Callers hold allocLock.
@@ -403,11 +403,10 @@ func (s *Scheduler) syncAllocationLocked(oldObj any, newPod *corev1.Pod, pi *dev
 	}
 	if pending {
 		if write.predates(rawDevices) {
-			// The refit's own update arrives within seconds. A resync that
-			// still shows the old devices well after that means another
+			// The refit's own update arrives within seconds. An update that
+			// still shows the old devices after a minute means another
 			// replica moved the container back, so follow it.
-			resync := oldPod != nil && oldPod.ResourceVersion != "" && oldPod.ResourceVersion == newPod.ResourceVersion
-			if !resync || time.Since(write.at) < refitWriteSettle {
+			if time.Since(write.at) < refitWriteSettle {
 				return nil, false
 			}
 			rewritten = true

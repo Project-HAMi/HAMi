@@ -336,7 +336,8 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 	return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(newDevices)}
 }
 
-// refitWriteSettle is how long a resync cannot end the wait for a refit.
+// refitWriteSettle is how long a refit skips updates that still show the
+// old devices.
 const refitWriteSettle = time.Minute
 
 // refitWrite is a NUMA refit this replica made: the container, the devices

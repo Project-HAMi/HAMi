@@ -1688,23 +1688,20 @@ func TestOnUpdatePodEndsWaitWithoutRewrite(t *testing.T) {
 	assert.Equal(t, trackedUUID(t, s), "GPU-b")
 }
 
-// TestOnUpdatePodLateResyncFollowsMoveBack checks that a resync well after
-// the refit follows a container another replica moved back. An early resync
-// still waits, since the refit's own update may be on its way.
-func TestOnUpdatePodLateResyncFollowsMoveBack(t *testing.T) {
+// TestOnUpdatePodFollowsMoveBackAfterSettle checks that updates showing the
+// old devices are skipped right after the refit, and followed after a
+// minute, when another replica must have moved the container back.
+func TestOnUpdatePodFollowsMoveBackAfterSettle(t *testing.T) {
 	s, pod := refitFixture(t, 40000)
 	stubRefitPatch(t, nil)
 	response := s.RefitNumaAllocation(context.Background(), refitTestRequestFor("GPU-b"), validRefitToken)
 	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
 
 	movedBack, _ := informerUpdates(pod, nil)
-	movedBack.ResourceVersion = "7"
 	running := movedBack.DeepCopy()
-	running.ResourceVersion = "8"
 	running.Status.Phase = corev1.PodRunning
 
 	s.onUpdatePod(movedBack, running)
-	s.onUpdatePod(running, running)
 	assert.Equal(t, len(s.refitWrites), 1)
 	assert.Equal(t, trackedUUID(t, s), "GPU-b")
 
@@ -1712,7 +1709,7 @@ func TestOnUpdatePodLateResyncFollowsMoveBack(t *testing.T) {
 	write := s.refitWrites[uid]
 	write.at = write.at.Add(-refitWriteSettle)
 	s.refitWrites[uid] = write
-	s.onUpdatePod(running, running)
+	s.onUpdatePod(movedBack, running)
 	assert.Equal(t, len(s.refitWrites), 0)
 	assert.Equal(t, trackedUUID(t, s), "GPU-a")
 	assert.DeepEqual(t, nodeUsedmem(t, s), map[string]int64{"GPU-a": 20000, "GPU-b": 0})
