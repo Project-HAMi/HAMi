@@ -369,6 +369,15 @@ func (p *pool) refresh(ctx context.Context) {
 	} else {
 		inUse, listed = reservations(ctx, previousInUse)
 	}
+	if !listed {
+		// Previous reservations cannot establish ownership of newly discovered
+		// cards, especially after a restart when inUse is empty. Report the
+		// current fleet as unavailable until a complete refresh restores its
+		// health, while still propagating server removals and readiness changes.
+		for _, d := range devices {
+			d.Health = false
+		}
+	}
 	// Ask every server concurrently: one unreachable server pays its own
 	// metricsTimeout instead of adding it to everyone else's.
 	busy := askServers(ctx, endpoints, previousBusy, listedServers)
@@ -582,16 +591,16 @@ func (p *pool) revision() uint64 {
 	return p.fleetRev
 }
 
-// deviceIDs is the set of cards the pool currently carries, so a caller
-// holding a pre-refresh view can tell which of its cards survived.
-func (p *pool) deviceIDs() map[string]struct{} {
+// deviceHealth snapshots the current cards and their health, so callers with
+// older usage can check both server identity and allocation eligibility.
+func (p *pool) deviceHealth() map[string]bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ids := make(map[string]struct{}, len(p.devices))
+	health := make(map[string]bool, len(p.devices))
 	for _, d := range p.devices {
-		ids[d.ID] = struct{}{}
+		health[d.ID] = d.Health
 	}
-	return ids
+	return health
 }
 
 // refreshNow re-reads the fleet without waiting for poolTTL to lapse, so a

@@ -371,6 +371,88 @@ func TestCheckHealth_OnlyAsksForAnUpdateWhenTheFleetMoves(t *testing.T) {
 	assert.Assert(t, update, "a node that came back has taken no copy")
 }
 
+// A fleet with unknown reservation ownership must not allow new allocations.
+func TestPool_FailedPodListBlocksAllocation(t *testing.T) {
+	for _, warm := range []bool{false, true} {
+		name := "cold start"
+		if warm {
+			name = "new server after a successful refresh"
+		}
+		t.Run(name, func(t *testing.T) {
+			known := lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})
+			newServer := lupineNode("gpu-b", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-2", 80000)})
+			stubFleet(t, []corev1.Node{known}, nil, nil)
+			// A bound Pod can still be starting its containers, with no CUDA
+			// connection for the server's metrics endpoint to report yet.
+			stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {}, "10.0.0.6:14833": {}})
+			dev := InitRemoteGPUDevice(testConfig())
+			clientNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cpu-2"}}
+			if warm {
+				_, err := dev.GetNodeDevices(clientNode)
+				assert.NilError(t, err)
+			}
+			listLupineNodes = func(context.Context) ([]corev1.Node, error) {
+				return []corev1.Node{known, newServer}, nil
+			}
+			allocation := device.EncodePodSingleDevice(device.PodSingleDevice{{{
+				UUID: "gpu-b/GPU-2", Type: RemoteGPUCommonWord, Usedmem: 80000, Usedcores: 100,
+			}}})
+			owners := []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{Name: "already-bound", Namespace: "workloads", Annotations: map[string]string{AllocatedAnnos: allocation}},
+				Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			}}
+			podListCalls := 0
+			podListErr := errors.New("pod list unavailable")
+			listPods = func(context.Context) ([]corev1.Pod, error) {
+				podListCalls++
+				if podListErr != nil {
+					return nil, podListErr
+				}
+				return owners, nil
+			}
+			dev.pool.fetchedAt = time.Time{}
+
+			fitReported := func(mem int64) bool {
+				t.Helper()
+				reported, err := dev.GetNodeDevices(clientNode)
+				assert.NilError(t, err)
+				var devices []*device.DeviceUsage
+				for _, d := range reported {
+					devices = append(devices, &device.DeviceUsage{
+						ID: d.ID, Index: d.Index, Type: d.Type, Count: d.Count,
+						Totalmem: d.Devmem, Totalcore: d.Devcore, Health: d.Health,
+					})
+				}
+				fit, _, _ := dev.Fit(devices, request(1, mem), &corev1.Pod{}, nil, nil)
+				return fit
+			}
+
+			assert.Check(t, !fitReported(50000), "a failed Pod list must not expose a new server whose reservations are unknown")
+			assert.Check(t, !fitReported(50000), "the incomplete snapshot must not become eligible on a cached read")
+			assert.Equal(t, podListCalls, 1, "a failed refresh must still respect poolTTL")
+			assert.Check(t, !fitReported(1000), "an incomplete reservation read must make the fleet unavailable")
+			setNodeReady(&known, corev1.ConditionFalse)
+			dev.pool.fetchedAt = time.Time{}
+			reported, err := dev.GetNodeDevices(clientNode)
+			assert.NilError(t, err)
+			for _, d := range reported {
+				assert.Check(t, d.ID != "gpu-a/GPU-1", "a failed Pod list must not preserve a server that became NotReady")
+			}
+			setNodeReady(&known, corev1.ConditionTrue)
+
+			podListErr = nil
+			dev.pool.fetchedAt = time.Time{}
+			assert.Check(t, !fitReported(50000), "recovery must restore the existing reservation on the other client node")
+			assert.Check(t, fitReported(1000), "a successful refresh must restore healthy, unreserved servers")
+
+			owners = nil
+			dev.pool.fetchedAt = time.Time{}
+			assert.Check(t, fitReported(50000), "a complete refresh after the owner leaves must make the server available")
+		})
+	}
+}
+
 // A pod list that failed has seen nothing, so ageing a booking out on its word
 // would free the card of a pod that did bind and let a second pod onto it.
 func TestPool_FailedPodListDoesNotExpireABooking(t *testing.T) {

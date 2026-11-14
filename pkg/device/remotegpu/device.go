@@ -747,7 +747,7 @@ func committedAllocation(allocated *device.PodDevices) (string, map[string]struc
 // is handed out whole, so one that lost a card is no longer the thing the
 // candidate described either.
 func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string) []string {
-	live := dev.pool.deviceIDs()
+	live := dev.pool.deviceHealth()
 	liveCards := map[string]int{}
 	for id := range live {
 		liveCards[serverOf(id)]++
@@ -784,6 +784,10 @@ func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.Dev
 func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, requirements []device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
+	// Usage may predate a pool refresh, including the forced refresh in Fit.
+	// Missing cards and failed reservation reads must not be treated as free
+	// devices just because the caller's cached usage still reports them healthy.
+	health := dev.pool.deviceHealth()
 
 	// A server is taken whole or not at all. Pointing a client at one exposes
 	// every GPU that server owns, and nothing on the wire narrows that down, so
@@ -801,8 +805,9 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 		taken := false
 		for _, d := range byServer[server] {
 			_, ownedByPod := committed[d.ID]
+			currentHealth, known := health[d.ID]
 			switch {
-			case !d.Health:
+			case !d.Health || !known || !currentHealth:
 				// An unhealthy card is still visible to whoever holds the
 				// server, but it is not one this request can count on.
 				reason[common.CardNotHealth]++
