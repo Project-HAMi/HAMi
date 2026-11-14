@@ -493,12 +493,17 @@ func (dev *RemoteGPUDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 	return nil
 }
 
+// Release frees any pool reservations held for pod.
+func (dev *RemoteGPUDevices) Release(pod *corev1.Pod) {
+	dev.pool.release(podUID(pod))
+}
+
 // ReleaseNodeLock has no lock to release, but it is the hook the scheduler
 // calls when an attempt it had already allocated for falls through. Giving the
 // booking back here frees a whole server in that moment rather than at the end
 // of heldTTL.
 func (dev *RemoteGPUDevices) ReleaseNodeLock(_ *corev1.Node, pod *corev1.Pod) error {
-	dev.pool.release(podUID(pod))
+	dev.Release(pod)
 	return nil
 }
 
