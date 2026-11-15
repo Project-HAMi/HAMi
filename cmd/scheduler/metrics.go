@@ -128,6 +128,13 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect creates constant metrics for each host on the fly based on the returned data.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
+	cc.collectSchedulerStateMetrics(ch)
+	cc.collectSchedulerOutcomeMetrics(ch)
+
+	if lm := cc.metricsProvider.GetLeaderManager(); lm != nil && !lm.IsLeader() {
+		return
+	}
+
 	legacy := cc.ClusterManager.LegacyMetrics
 	// A single snapshot is shared by the node- and container-level collectors so
 	// they observe a consistent cluster state within one scrape.
@@ -140,8 +147,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectQuotaMetrics(ch, legacy)
 	cc.collectContainerMetrics(ch, deviceMetaByUUID, legacy)
 	cc.collectRemoteGPUMetrics(ch)
-	cc.collectSchedulerStateMetrics(ch)
-	cc.collectSchedulerOutcomeMetrics(ch)
 }
 
 // remoteGPUPool reads the lupine fleet when the remote-gpu backend is
