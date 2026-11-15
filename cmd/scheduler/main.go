@@ -139,7 +139,7 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 }
 
 func start() error {
-	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
+	if err := validateSchedulerOptions(); err != nil {
 		return err
 	}
 
@@ -161,13 +161,6 @@ func start() error {
 	}
 	if config.HostName == "" {
 		return fmt.Errorf("empty hostname returned")
-	}
-
-	// Refuse to start with an unusable /refit identity: empty namespace or
-	// service-account means every TokenReview will fail, but silently – the
-	// scheduler would appear healthy while all refit calls are rejected.
-	if err := validateDevicePluginIdentity(config.DevicePluginNamespace, config.DevicePluginServiceAccount); err != nil {
-		return err
 	}
 
 	sher = scheduler.NewScheduler()

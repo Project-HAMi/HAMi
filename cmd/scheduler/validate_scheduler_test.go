@@ -121,16 +121,22 @@ func TestValidateSchedulerConfig(t *testing.T) {
 }
 
 func TestSchedulerStartupRejectsInvalidOptions(t *testing.T) {
-	for _, tt := range []struct{ name, weight, want string }{
-		{"weight", "-1", "--node-affinity-score-weight must be a finite number >= 0"},
-		{"identity", "0", "--device-plugin-namespace and --device-plugin-service-account must both be set"},
+	for _, tt := range []struct{ name, weight, namespace, serviceAccount, want string }{
+		{"weight", "-1", "kube-system", "hami-device-plugin", "--node-affinity-score-weight must be a finite number >= 0"},
+		{"identity", "0", "", "", "--device-plugin-namespace and --device-plugin-service-account must both be set"},
+		{"namespace", "0", "", "hami-device-plugin", `Got namespace="" service-account="hami-device-plugin"`},
+		{"service account", "0", "kube-system", "", `Got namespace="kube-system" service-account=""`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			deviceConfig, kubeconfig := schedulerStartupFiles(t)
+			// Static option errors must be returned before loading either file.
+			directory := t.TempDir()
+			deviceConfig := filepath.Join(directory, "missing-devices.yaml")
+			kubeconfig := filepath.Join(directory, "missing-kubeconfig")
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			command := validateTestProcess(ctx, "TestValidateCommandProcess", "--",
-				"--device-config-file="+deviceConfig, "--node-affinity-score-weight="+tt.weight)
+				"--device-config-file="+deviceConfig, "--node-affinity-score-weight="+tt.weight,
+				"--device-plugin-namespace="+tt.namespace, "--device-plugin-service-account="+tt.serviceAccount)
 			command.Env = append(os.Environ(), "HAMI_TEST_VALIDATE_COMMAND=1", "KUBECONFIG="+kubeconfig,
 				"KUBERNETES_SERVICE_HOST=", "KUBERNETES_SERVICE_PORT=")
 			output, err := command.CombinedOutput()
