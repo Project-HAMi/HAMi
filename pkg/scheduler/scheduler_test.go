@@ -3124,6 +3124,26 @@ hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",
 `), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
 }
 
+func Test_Bind_SuccessCountsAllocation(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-bind-ok", Namespace: "default", UID: types.UID("uid-bind-ok"),
+		},
+	}
+	mock := &bindLockMockDevice{}
+	s, args, cleanup := setupBindLockRetryTest(t, 5*time.Second, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="unknown",failure_reason="none",phase="bind"} 1
+`), "hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
+}
+
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
