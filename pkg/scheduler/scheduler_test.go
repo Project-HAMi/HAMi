@@ -53,6 +53,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
@@ -2829,6 +2830,81 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 	require.NotNil(t, coresQuota)
 	assert.Equal(t, int64(10000), memQuota.Used)
 	assert.Equal(t, int64(5), coresQuota.Used)
+}
+
+func Test_onUpdatePod_CountsAllocateResult(t *testing.T) {
+	podWithPhase := func(phase string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-allocate", Name: "pod-allocate", Namespace: "allocate-metrics",
+				Annotations: map[string]string{util.DeviceBindPhase: phase},
+			},
+		}
+	}
+	tests := []struct {
+		name      string
+		oldPhase  string
+		newPhase  string
+		isLeader  bool
+		notCached bool
+		newStatus corev1.PodPhase
+		want      string
+	}{
+		{
+			name: "allocating to success", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: true,
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="allocate"} 1
+`,
+		},
+		{
+			name: "allocating to failed", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindFailed, isLeader: true,
+			want: `
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="device_plugin",phase="allocate"} 1
+`,
+		},
+		{name: "already success", oldPhase: util.DeviceBindSuccess, newPhase: util.DeviceBindSuccess, isLeader: true},
+		{name: "still allocating", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindAllocating, isLeader: true},
+		{name: "not leader", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: false},
+		{
+			name: "pod not cached", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: true, notCached: true,
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="unknown",failure_reason="none",phase="allocate"} 1
+`,
+		},
+		{
+			name: "failed in the same update as pod failure", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindFailed, isLeader: true, newStatus: corev1.PodFailed,
+			want: `
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="device_plugin",phase="allocate"} 1
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(test.isLeader)
+			oldPod := podWithPhase(test.oldPhase)
+			if !test.notCached {
+				s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+					nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+				})
+			}
+			newPod := podWithPhase(test.newPhase)
+			newPod.Status.Phase = test.newStatus
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
+				"hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
+		})
+	}
 }
 
 func Test_getNodesUsage_WithInitContainers(t *testing.T) {
