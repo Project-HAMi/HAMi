@@ -332,7 +332,8 @@ devicePlugin:
       # -- Run the monitor liveness and readiness probes. Disable to debug inside the container.
       enabled: true
     # -- Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods.
-    # Does not control directory GC or Prometheus scrape frequency.
+    # Does not control directory GC or Prometheus scrape frequency. Must be positive; zero, negative
+    # or invalid values fall back to `5m`.
     resyncInterval: "5m"
     # -- Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1;
     # the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full
