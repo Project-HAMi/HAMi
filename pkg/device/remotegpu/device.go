@@ -29,7 +29,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -432,27 +431,6 @@ func (dev *RemoteGPUDevices) FleetRevision() uint64 {
 	return dev.pool.revision()
 }
 
-// InvalidateReservations requires a new Pod list after gaining leadership.
-// A previous leader's bookings are not in this scheduler's in-memory pool.
-func (dev *RemoteGPUDevices) InvalidateReservations() {
-	p := dev.pool
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.podsListed = false
-	p.ownershipRev++
-	p.fetchedAt = time.Time{}
-	p.forcedAt = time.Time{}
-	// Replace the snapshot: an in-flight refresh may still be reading it.
-	devices := make([]*device.DeviceInfo, 0, len(p.devices))
-	for _, d := range p.devices {
-		dup := d.DeepCopy()
-		dup.Health = false
-		devices = append(devices, &dup)
-	}
-	p.devices = devices
-	p.fleetRev++
-}
-
 func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devList, ok := pd[RemoteGPUCommonWord]
 	if !ok || len(devList) == 0 {
@@ -494,9 +472,9 @@ func (dev *RemoteGPUDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 }
 
 // ReleaseNodeLock has no lock to release, but it is the hook the scheduler
-// calls when an attempt it had already allocated for falls through. The booking
-// is released immediately; a Pod list must confirm the failed Bind's outcome
-// before the server can be offered again.
+// calls when an attempt it had already allocated for falls through. Giving the
+// booking back here frees a whole server in that moment rather than at the end
+// of heldTTL.
 func (dev *RemoteGPUDevices) ReleaseNodeLock(_ *corev1.Node, pod *corev1.Pod) error {
 	dev.pool.release(podUID(pod))
 	return nil
@@ -786,8 +764,7 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	// Usage may predate a pool refresh, including the forced refresh in Fit.
 	// Missing cards and failed reservation reads must not be treated as free
 	// devices just because the caller's cached usage still reports them healthy.
-	health := dev.pool.deviceHealth()
-	reserved := dev.pool.reservedServers()
+	health, reserved := dev.pool.allocationSnapshot()
 	whole := map[string]bool{}
 	for _, server := range dev.serversStillWhole(byServer, servers, health) {
 		whole[server] = true

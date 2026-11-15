@@ -144,11 +144,12 @@ func apiListPods(ctx context.Context) ([]corev1.Pod, error) {
 	if c == nil {
 		return nil, errNoClient
 	}
-	// Rebuilding ownership needs a most-recent read. ResourceVersion "0" may
-	// serve an older snapshot that forgets an owner already seen by this pool,
-	// or misses a previous leader's bindings. Annotations are filtered client
-	// side because they are not selectable server side.
-	list, err := c.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	// ponytail: full pod list, filtered client side, served from the watch
+	// cache. Annotations are not selectable server side. Swap for the
+	// scheduler's own pod informer if this ever runs on a cluster where
+	// listing every pod every poolTTL is too expensive; pkg/device cannot
+	// reach that lister today.
+	list, err := c.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{ResourceVersion: "0"})
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +169,7 @@ type pool struct {
 	defaultPort int
 
 	fetchedAt    time.Time
-	podsListed   bool   // an actual successful Pod list established the reservation baseline
-	ownershipRev uint64 // invalidates reads begun before leadership changes or booking releases
+	podsListed   bool // an actual successful Pod list established the reservation baseline
 	forcedAt     time.Time
 	refreshing   bool                  // a refresh is already fetching; do not start a second one
 	refreshed    chan struct{}         // closed when the in-flight refresh installs its result
@@ -304,7 +304,6 @@ func (p *pool) refresh(ctx context.Context) {
 	previousInUse := p.inUse
 	previousBusy := p.busy
 	previousDevices, previousEndpoints, podsListed := p.devices, p.endpoints, p.podsListed
-	ownershipRev := p.ownershipRev
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -411,14 +410,6 @@ func (p *pool) refresh(ctx context.Context) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if ownershipRev != p.ownershipRev {
-		// Ownership was invalidated while the read was in flight. It cannot
-		// establish a baseline for intervening binds or their outcomes.
-		listed = false
-		for _, d := range devices {
-			d.Health = false
-		}
-	}
 	if !sameFleet(p.devices, devices) {
 		p.fleetRev++
 		if waiting := p.takeWaiting(); len(waiting) > 0 {
@@ -678,38 +669,20 @@ func (p *pool) hold(pod types.UID, ids ...string) {
 	}
 }
 
-// release gives back every card booked for a pod. A failed Bind can have been
-// accepted by the API server, so that server needs a successful Pod list before
-// it can be allocated again; other known free servers remain usable.
+// release gives back every card booked for a pod. The scheduler calls this
+// when an attempt it had already allocated for falls through, which is sooner
+// than heldTTL would notice and the difference a whole server is held for.
 func (p *pool) release(pod types.UID) {
 	if pod == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	released := map[string]bool{}
 	for id, b := range p.held {
 		if b.pod == pod {
 			delete(p.held, id)
-			released[serverOf(id)] = true
 		}
 	}
-	if len(released) == 0 {
-		return
-	}
-	// Replace the snapshot rather than changing cards a refresh may be reading.
-	devices := make([]*device.DeviceInfo, 0, len(p.devices))
-	for _, d := range p.devices {
-		dup := d.DeepCopy()
-		if released[serverOf(d.ID)] {
-			dup.Health = false
-		}
-		devices = append(devices, &dup)
-	}
-	p.devices = devices
-	p.fleetRev++
-	p.ownershipRev++ // a read started before release cannot confirm its outcome
-	p.fetchedAt = time.Time{}
 }
 
 // reserved reports whether a device is already held by a live pod anywhere in
@@ -727,11 +700,18 @@ func (p *pool) reserved(id string) bool {
 	return ok
 }
 
-// reservedServers includes reservations on cards absent from registration or
-// marked unhealthy: a client still owns the entire server in either case.
-func (p *pool) reservedServers() map[string]bool {
+// allocationSnapshot reads health and server reservations under one lock. A
+// refresh can clear a busy report while marking its cards unhealthy; mixing
+// those snapshots would offer a server whose ownership is still unknown.
+// Reservations include cards absent from registration or marked unhealthy,
+// because a client still owns the entire server in either case.
+func (p *pool) allocationSnapshot() (map[string]bool, map[string]bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	health := make(map[string]bool, len(p.devices))
+	for _, d := range p.devices {
+		health[d.ID] = d.Health
+	}
 	servers := map[string]bool{}
 	for id := range p.inUse {
 		servers[serverOf(id)] = true
@@ -742,7 +722,7 @@ func (p *pool) reservedServers() map[string]bool {
 	for id := range p.busy {
 		servers[serverOf(id)] = true
 	}
-	return servers
+	return health, servers
 }
 
 // askServers collects the cards each lupine server reports a client on. A

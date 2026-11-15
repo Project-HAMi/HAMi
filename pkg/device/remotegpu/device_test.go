@@ -19,6 +19,7 @@ package remotegpu
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -604,6 +605,60 @@ func TestFit_FailedReservationRefreshBlocksStaleHealthyUsage(t *testing.T) {
 	assert.Assert(t, fit, reason)
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
 	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, usage[0].ID)
+}
+
+func TestFit_ConcurrentRefreshKeepsHealthAndReservationsConsistent(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	busy := true
+	listPods = func(context.Context) ([]corev1.Pod, error) {
+		if busy {
+			return nil, nil
+		}
+		return nil, errors.New("pod list unavailable")
+	}
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		if busy {
+			return map[string]struct{}{"GPU-1": {}}, nil
+		}
+		return nil, nil
+	}
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	usage := map[string][]*device.DeviceUsage{"gpu-a": {card("gpu-a", "GPU-1", 40000)}}
+
+	// Every installed snapshot forbids allocation: either the server reports
+	// a client, or a failed Pod list makes its newly idle cards uncertain.
+	// A reader mixing healthy cards from the first snapshot with cleared
+	// reservations from the second can incorrectly allocate this server.
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			busy = !busy
+			dev.pool.mu.Lock()
+			dev.pool.fetchedAt = time.Time{}
+			dev.pool.mu.Unlock()
+			dev.pool.refresh(context.Background())
+			runtime.Gosched()
+		}
+	}()
+	unexpectedFits := 0
+	for range 10000 {
+		req := request(1, 0)
+		fit, _, _ := dev.tryFit(usage, []string{"gpu-a"}, req, []device.ContainerDeviceRequest{req}, &corev1.Pod{}, nil)
+		if fit {
+			unexpectedFits++
+		}
+		runtime.Gosched()
+	}
+	close(stop)
+	<-done // Wait before stub cleanup or reading the writer's state.
+	assert.Equal(t, unexpectedFits, 0, "Fit must use health and reservations from one pool snapshot")
 }
 
 func TestFit_FailedPodListHonorsBusyUnregisteredCard(t *testing.T) {

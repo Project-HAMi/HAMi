@@ -17,16 +17,13 @@ limitations under the License.
 package scheduler
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"gotest.tools/v3/assert"
-	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +32,6 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -46,69 +42,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
-
-func TestRemoteGPULeadershipChangeRequiresNewPodList(t *testing.T) {
-	node := lupineServerNode("gpu-a", "127.0.0.1", []*device.DeviceInfo{{
-		ID: "GPU-1", Count: 1, Devmem: 40000, Devcore: 100, Health: true, Mode: nvidia.RemoteMode,
-	}})
-	dev := setupRemoteGPUScheduler(t, node)
-	previousElect, previousHost := config.LeaderElect, config.HostName
-	config.LeaderElect, config.HostName = true, "test-leader"
-	t.Cleanup(func() { config.LeaderElect, config.HostName = previousElect, previousHost })
-	s := NewScheduler()
-	holder, duration := config.HostName+"_identity", int32(15)
-	lease := &coordinationv1.Lease{
-		ObjectMeta: metav1.ObjectMeta{Name: config.LeaderElectResourceName, Namespace: config.LeaderElectResourceNamespace},
-		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder, LeaseDurationSeconds: &duration},
-	}
-	s.leaderManager.OnAdd(lease, false)
-	clientNode := *gpulessNode("cpu-2")
-	reported, err := dev.GetNodeDevices(clientNode)
-	assert.NilError(t, err)
-	assert.Equal(t, len(reported), 1)
-	assert.Check(t, reported[0].Health)
-
-	other := lease.DeepCopy()
-	otherHolder := "another-leader_identity"
-	other.Spec.HolderIdentity = &otherHolder
-	s.leaderManager.OnUpdate(lease, other)
-	// An intervening leader can bind a Pod without this pool recording a hold.
-	fakeClient, ok := client.GetClient().(*fake.Clientset)
-	assert.Assert(t, ok)
-	_, err = fakeClient.CoreV1().Pods("workloads").Create(context.Background(), &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "intervening-owner", Annotations: map[string]string{
-			remotegpu.AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{{{
-				UUID: "gpu-a/GPU-1", Type: remotegpu.RemoteGPUCommonWord,
-			}}}),
-		}},
-		Spec: corev1.PodSpec{NodeName: "cpu-1"},
-	}, metav1.CreateOptions{})
-	assert.NilError(t, err)
-	failPodList := true
-	fakeClient.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-		if failPodList {
-			return true, nil, errors.New("pod list unavailable")
-		}
-		return false, nil, nil
-	})
-	s.leaderManager.OnUpdate(other, lease)
-	reported, err = dev.GetNodeDevices(clientNode)
-	assert.NilError(t, err)
-	assert.Check(t, !reported[0].Health, "a previous leadership period cannot establish current ownership")
-	cached := []*device.DeviceUsage{{ID: "gpu-a/GPU-1", Count: 1, Totalmem: 40000, Totalcore: 100, Health: true}}
-	request := device.ContainerDeviceRequest{Nums: 1, Type: remotegpu.RemoteGPUCommonWord}
-	fit, _, _ := dev.Fit(cached, request, &corev1.Pod{}, nil, nil)
-	assert.Check(t, !fit, "old healthy usage must not bypass the leadership reset")
-
-	failPodList = false
-	// Gain leadership again to request an immediate read, without sleeping TTL.
-	s.leaderManager.OnUpdate(other, lease)
-	reported, err = dev.GetNodeDevices(clientNode)
-	assert.NilError(t, err)
-	assert.Check(t, reported[0].Health)
-	fit, _, _ = dev.Fit(cached, request, &corev1.Pod{}, nil, nil)
-	assert.Check(t, !fit, "recovery must discover the intervening leader's owner")
-}
 
 func TestRemoteGPUWebhookCopiesLibraryBeforeInitWorkload(t *testing.T) {
 	setupRemoteGPUScheduler(t)

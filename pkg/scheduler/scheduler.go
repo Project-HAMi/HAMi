@@ -123,9 +123,6 @@ func NewScheduler() *Scheduler {
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
 			OnStartedLeading: func() {
-				if remote, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
-					remote.InvalidateReservations()
-				}
 				select {
 				case s.leaderNotify <- struct{}{}:
 				default:
