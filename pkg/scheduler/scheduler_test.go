@@ -3519,6 +3519,163 @@ func Test_register_OverviewIncludesCachedNodesOutsideSelector(t *testing.T) {
 	assert.Assert(t, overview["node-b"] != nil)
 }
 
+func TestFilterBlocksNodeWithUndecodableBoundPodAllocation(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:  "hami.io/gpu",
+			ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName:   "hami.io/gpucores",
+			DefaultGPUNum:      1,
+		},
+	}))
+
+	s := NewScheduler()
+	s.kubeClient = fake.NewClientset()
+	client.KubeClient = s.kubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(
+		s.kubeClient, time.Hour,
+	).Core().V1().Pods().Lister()
+
+	// Register a node with one available NVIDIA GPU.
+	s.addNode("node1", testNodeInfo("node1", 1))
+
+	// This Pod is already bound and has an allocation annotation
+	// that the scheduler cannot decode.
+	badPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "bad-allocation-uid",
+			Name:      "bad-allocation",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations:                  "node1",
+				device.SupportDevices[nvidia.NvidiaGPUDevice]: "GPU0,NVIDIA,20000:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node1",
+		},
+	}
+
+	// A second Pod wants to use the same node.
+	newPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "new-pod-uid",
+			Name:      "new-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(1024, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(10, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	seedPods(t, s, badPod, newPod)
+
+	// Simulate the scheduler replaying the existing bound Pod after restart.
+	s.onAddPod(badPod)
+
+	nodeNames := []string{"node1"}
+	result, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod:       newPod,
+		NodeNames: &nodeNames,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// The node must not be treated as completely free when an existing
+	// bound Pod's GPU allocation cannot be reconstructed.
+	require.Nil(t, result.NodeNames)
+	require.Contains(t, result.FailedNodes, "node1")
+}
+
+func TestFilterBlocksNodeWithMissingRequestedDeviceAllocation(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:  "hami.io/gpu",
+			ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName:   "hami.io/gpucores",
+			DefaultGPUNum:      1,
+		},
+	}))
+
+	s := NewScheduler()
+	s.kubeClient = fake.NewClientset()
+	client.KubeClient = s.kubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(
+		s.kubeClient, time.Hour,
+	).Core().V1().Pods().Lister()
+
+	s.addNode("node1", testNodeInfo("node1", 1))
+
+	// This bound Pod requests a GPU but has no allocated-device annotation.
+	badPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "missing-allocation-uid",
+			Name:      "missing-allocation",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "node1",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node1",
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(1024, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(10, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	newPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "new-pod-missing-allocation",
+			Name:      "new-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(1024, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(10, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	seedPods(t, s, badPod, newPod)
+	s.onAddPod(badPod)
+
+	nodeNames := []string{"node1"}
+	result, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod:       newPod,
+		NodeNames: &nodeNames,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.NodeNames)
+	require.Contains(t, result.FailedNodes, "node1")
+}
+
 // TestFilterInvalidDeviceRequestFailsClosed makes sure a pod whose container
 // declares a HAMi device resource with an invalid value is rejected by the
 // filter instead of being treated as device-less and bound without any GPU.

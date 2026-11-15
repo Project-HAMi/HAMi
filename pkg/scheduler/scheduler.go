@@ -100,6 +100,10 @@ type Scheduler struct {
 	// usage, and removals of tracked pods, so these paths cannot observe or
 	// produce half-applied accounting.
 	allocLock sync.Mutex
+	// unresolvedAllocations tracks bound Pods whose device allocation could not
+	// be decoded. Their nodes must not accept new allocations until recovery.
+	unresolvedAllocationsMu sync.RWMutex
+	unresolvedAllocations   map[string]map[string]struct{}
 
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
 	allocationMetricsOnce sync.Once
@@ -109,13 +113,14 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:            make(chan struct{}),
-		overviewstatus:    make(map[string]*NodeUsage),
-		printedLog:        make(map[string]bool),
-		nodeNotify:        make(chan struct{}, 1),
-		leaderNotify:      make(chan struct{}, 1),
-		started:           0,
-		allocationMetrics: metrics.NewSchedulerOutcomeMetrics(),
+		stopCh:                make(chan struct{}),
+		overviewstatus:        make(map[string]*NodeUsage),
+		printedLog:            make(map[string]bool),
+		nodeNotify:            make(chan struct{}, 1),
+		leaderNotify:          make(chan struct{}, 1),
+		started:               0,
+		allocationMetrics:     metrics.NewSchedulerOutcomeMetrics(),
+		unresolvedAllocations: make(map[string]map[string]struct{}),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -281,11 +286,24 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
 		if pod.Spec.NodeName != "" {
+			s.markUnresolvedAllocation(pod.Spec.NodeName, string(pod.UID))
 			s.recordAllocationDecodeFailureEvent(pod, pod.Spec.NodeName, err)
 		}
-		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod), "assignedNode", assignedNodeName, "nodeName", pod.Spec.NodeName)
+
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
+
+	if err := validatePodAllocationAnnotations(pod); err != nil {
+		if pod.Spec.NodeName != "" {
+			s.markUnresolvedAllocation(pod.Spec.NodeName, string(pod.UID))
+			s.recordAllocationDecodeFailureEvent(pod, pod.Spec.NodeName, err)
+		}
+		klog.ErrorS(err, "pod has incomplete device allocation annotations", "pod", klog.KObj(pod))
+		return
+	}
+
+	s.clearUnresolvedAllocation(string(pod.UID))
 
 	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 
@@ -296,6 +314,26 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 	// already finished. Restore the same usage and release flag as an update,
 	// without waiting for another pod event to free the completed init usage.
 	s.releaseCompletedInitContainersLocked(pod, nil, rawDevices)
+}
+
+// validatePodAllocationAnnotations ensures requested devices have allocation data.
+func validatePodAllocationAnnotations(pod *corev1.Pod) error {
+	for devType, devInstance := range device.GetDevices() {
+		if !device.PodRequiresDevice(devInstance, pod) {
+			continue
+		}
+
+		annotationKey, ok := device.SupportDevices[devType]
+		if !ok || annotationKey == "" {
+			return fmt.Errorf("allocation annotation is not registered for device type %q", devType)
+		}
+
+		value, ok := pod.Annotations[annotationKey]
+		if !ok || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("allocation annotation %q is missing or empty for requested device type %q", annotationKey, devType)
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
@@ -345,6 +383,54 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	s.podManager.UpdatePod(newPod)
 
 	s.releaseCompletedInitContainersLocked(newPod, pi, nil)
+}
+
+func (s *Scheduler) markUnresolvedAllocation(nodeName, podUID string) {
+	if nodeName == "" || podUID == "" {
+		return
+	}
+
+	s.unresolvedAllocationsMu.Lock()
+	defer s.unresolvedAllocationsMu.Unlock()
+
+	if s.unresolvedAllocations == nil {
+		s.unresolvedAllocations = make(map[string]map[string]struct{})
+	}
+	if s.unresolvedAllocations[nodeName] == nil {
+		s.unresolvedAllocations[nodeName] = make(map[string]struct{})
+	}
+
+	s.unresolvedAllocations[nodeName][podUID] = struct{}{}
+}
+
+func (s *Scheduler) clearUnresolvedAllocation(podUID string) {
+	if podUID == "" {
+		return
+	}
+
+	s.unresolvedAllocationsMu.Lock()
+	defer s.unresolvedAllocationsMu.Unlock()
+
+	for nodeName, pods := range s.unresolvedAllocations {
+		delete(pods, podUID)
+		if len(pods) == 0 {
+			delete(s.unresolvedAllocations, nodeName)
+		}
+	}
+}
+
+func (s *Scheduler) unresolvedAllocationNodes() map[string]struct{} {
+	s.unresolvedAllocationsMu.RLock()
+	defer s.unresolvedAllocationsMu.RUnlock()
+
+	nodes := make(map[string]struct{}, len(s.unresolvedAllocations))
+	for nodeName, pods := range s.unresolvedAllocations {
+		if len(pods) > 0 {
+			nodes[nodeName] = struct{}{}
+		}
+	}
+
+	return nodes
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
@@ -417,6 +503,7 @@ func (s *Scheduler) onDelPod(obj any) {
 // twice and eat into other pods' usage in the namespace (#3027). Pods the
 // scheduler does not track return without waiting for the lock.
 func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
+	s.clearUnresolvedAllocation(string(pod.UID))
 	if _, tracked := s.podManager.GetPod(pod); !tracked {
 		return
 	}
@@ -981,12 +1068,25 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		if err != nil {
 			return &overallnodeMap, &overallnodeMap, failedNodes, err
 		}
+
+		unresolvedNodes := s.unresolvedAllocationNodes()
 		for _, node := range allNodes {
+			if task != nil {
+				if _, unresolved := unresolvedNodes[node.ID]; unresolved {
+					failedNodes[node.ID] = "node has a bound Pod with an undecodable device allocation"
+					continue
+				}
+			}
 			overallnodeMap[node.ID] = buildNodeUsage(node, task)
 		}
 	} else {
+		unresolvedNodes := s.unresolvedAllocationNodes()
 		candidateNodes := s.GetNodes(*nodes)
 		for _, nodeID := range *nodes {
+			if _, unresolved := unresolvedNodes[nodeID]; unresolved {
+				failedNodes[nodeID] = "node has a bound Pod with an undecodable device allocation"
+				continue
+			}
 			node, ok := candidateNodes[nodeID]
 			if !ok {
 				// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
