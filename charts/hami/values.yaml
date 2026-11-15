@@ -1029,7 +1029,7 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
-    # Ascend950DT 9582 whole-card configuration; see ../../docs/ascend/950dt-sku-reference.md for other SKU estimates.
+    # Ascend950DT 9582 whole-card configuration; see https://project-hami.io/docs/next/userguide/ascend-device/examples/950dt-sku-reference for other SKU estimates.
     - chipName: Ascend950DT
       commonWord: Ascend950DT
       resourceName: huawei.com/Ascend950DT
