@@ -371,6 +371,245 @@ func TestCheckHealth_OnlyAsksForAnUpdateWhenTheFleetMoves(t *testing.T) {
 	assert.Assert(t, update, "a node that came back has taken no copy")
 }
 
+// A successful reservation baseline and subsequent bookings protect known
+// servers even when later Pod lists fail.
+func TestPool_FailedPodListKeepsKnownFreeServer(t *testing.T) {
+	nodes := []corev1.Node{
+		lupineNode("gpu-free", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}),
+		lupineNode("gpu-booked", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-3", 40000), gpu("GPU-4", 40000)}),
+		lupineNode("gpu-owned", "10.0.0.7", "", []*device.DeviceInfo{gpu("GPU-5", 40000)}),
+	}
+	owner := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{{{
+			UUID: "gpu-owned/GPU-5", Type: RemoteGPUCommonWord,
+		}}})}},
+		Spec: corev1.PodSpec{NodeName: "cpu-1"},
+	}
+	stubFleet(t, nodes, []corev1.Pod{owner}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	clientNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cpu-2"}}
+	_, err := dev.GetNodeDevices(clientNode)
+	assert.NilError(t, err)
+
+	// Filter books every card before Bind. This Pod binds after the last
+	// successful list, but never connects to CUDA, so metrics cannot protect it.
+	bound := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "new-owner"}}
+	allocation := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{{
+		{UUID: "gpu-booked/GPU-3", Type: RemoteGPUCommonWord},
+		{UUID: "gpu-booked/GPU-4", Type: RemoteGPUCommonWord},
+	}}}
+	annos := map[string]string{}
+	dev.PatchAnnotations(bound, &annos, allocation)
+	for id, b := range dev.pool.held {
+		b.at = time.Now().Add(-heldTTL - time.Second)
+		dev.pool.held[id] = b
+	}
+	nodes = append(nodes, lupineNode("gpu-new", "10.0.0.8", "", []*device.DeviceInfo{gpu("GPU-6", 40000)}))
+	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nil }
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
+	stubServerUsage(t, map[string][]string{
+		"10.0.0.5:14833": {}, "10.0.0.6:14833": {}, "10.0.0.7:14833": {}, "10.0.0.8:14833": {},
+	})
+	for range 3 {
+		dev.pool.fetchedAt = time.Time{}
+		reported, err := dev.GetNodeDevices(clientNode)
+		assert.NilError(t, err)
+		for _, server := range []string{"gpu-free", "gpu-booked", "gpu-owned", "gpu-new"} {
+			var usage []*device.DeviceUsage
+			for _, d := range reported {
+				if serverOf(d.ID) == server {
+					// Exercise stale healthy usage as well as the current pool.
+					usage = append(usage, card(server, strings.TrimPrefix(d.ID, server+"/"), d.Devmem))
+				}
+			}
+			for range 2 {
+				fit, allocated, reason := dev.Fit(usage, request(1, 1000), &corev1.Pod{}, &device.NodeInfo{ID: "cpu-2"}, nil)
+				assert.Check(t, fit == (server == "gpu-free"), "server %s: fit=%v, reason=%s", server, fit, reason)
+				if fit {
+					assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2, "the free server must be allocated whole")
+				}
+			}
+		}
+		assert.Check(t, dev.pool.reserved("gpu-owned/GPU-5"), "the last successful Pod list still protects its owner")
+		assert.Check(t, dev.pool.reserved("gpu-booked/GPU-3"), "a post-snapshot booking must not expire on a failed list")
+		assert.Check(t, dev.pool.reserved("gpu-booked/GPU-4"), "the booking protects the entire server across client nodes")
+	}
+
+	// A real successful list is allowed to release old reservations and bookings.
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
+	dev.pool.fetchedAt = time.Time{}
+	reported, err := dev.GetNodeDevices(clientNode)
+	assert.NilError(t, err)
+	for _, d := range reported {
+		assert.Check(t, d.Health, "recovery restores %s", d.ID)
+		assert.Check(t, !dev.pool.reserved(d.ID), "recovery releases %s", d.ID)
+	}
+}
+
+// A partial fleet update cannot inherit an unchanged server's ownership proof.
+func TestPool_FailedPodListRequiresUnchangedServer(t *testing.T) {
+	for _, change := range []string{"added", "removed", "replaced", "unhealthy", "NotReady", "endpoint"} {
+		t.Run(change, func(t *testing.T) {
+			original := lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})
+			nodes := []corev1.Node{original}
+			stubFleet(t, nodes, nil, nil)
+			dev := InitRemoteGPUDevice(testConfig())
+			dev.pool.snapshot(context.Background())
+			cached := []*device.DeviceUsage{card("gpu-a", "GPU-1", 40000), card("gpu-a", "GPU-2", 40000)}
+			cards := []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)}
+			switch change {
+			case "added":
+				cards = append(cards, gpu("GPU-3", 40000))
+			case "removed":
+				cards = cards[:1]
+			case "replaced":
+				cards[1] = gpu("GPU-3", 40000)
+			case "unhealthy":
+				cards[1].Health = false
+			}
+			nodes[0] = lupineNode("gpu-a", "10.0.0.5", "", cards)
+			if change == "NotReady" {
+				setNodeReady(&nodes[0], corev1.ConditionFalse)
+			}
+			if change == "endpoint" {
+				nodes[0].Status.Addresses[0].Address = "10.0.0.6"
+			}
+			listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
+			for range 2 {
+				dev.pool.fetchedAt = time.Time{}
+				reported := dev.pool.snapshot(context.Background())
+				for _, d := range reported {
+					assert.Check(t, !d.Health, "a changed server's card %s must remain unavailable", d.ID)
+				}
+				fit, _, _ := dev.Fit(cached, request(1, 0), &corev1.Pod{}, nil, nil)
+				assert.Check(t, !fit, "stale healthy usage must not bypass the current pool")
+				// Reappearance of the old hardware or readiness is not a new
+				// reservation baseline, even when metrics respond successfully.
+				nodes[0] = original
+			}
+			listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
+			dev.pool.fetchedAt = time.Time{}
+			dev.pool.snapshot(context.Background())
+			fit, _, reason := dev.Fit(cached, request(1, 0), &corev1.Pod{}, nil, nil)
+			assert.Check(t, fit, "a successful Pod list restores the unchanged healthy server: %s", reason)
+		})
+	}
+}
+
+func TestPool_EmptyNodeListDoesNotEstablishReservationBaseline(t *testing.T) {
+	stubFleet(t, nil, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	assert.Check(t, !dev.pool.podsListed, "the Pod list was skipped")
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {}})
+	dev.pool.fetchedAt = time.Time{}
+	reported := dev.pool.snapshot(context.Background())
+	assert.Equal(t, len(reported), 1)
+	assert.Check(t, !reported[0].Health, "successful Node and metrics reads do not establish reservation ownership")
+}
+
+func TestPool_ReservationBaselineRequiresMostRecentPodList(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	previousClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	c := fake.NewClientset()
+	client.KubeClient = c
+	c.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		list, ok := action.(k8stesting.ListActionImpl)
+		assert.Assert(t, ok)
+		if list.GetListOptions().ResourceVersion == "0" {
+			// This stale empty response is permitted by the "Any" semantics.
+			return true, &corev1.PodList{}, nil
+		}
+		return true, &corev1.PodList{Items: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{{{
+				UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord,
+			}}})}},
+			Spec: corev1.PodSpec{NodeName: "cpu-1"},
+		}}}, nil
+	})
+	listPods = apiListPods
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	assert.Check(t, dev.pool.reserved("gpu-a/GPU-1"), "a stale successful list must not erase the bound owner")
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Check(t, !fit, "the baseline must protect the owner on the other client node")
+}
+
+func TestPool_FailedPodListAfterBookingReleaseDoesNotProveServerFree(t *testing.T) {
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-2", 40000)}),
+	}, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	dev.pool.hold("owner", "gpu-a/GPU-1")
+	dev.pool.release("owner") // Bind returned an error, but may have committed.
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
+	for range 2 {
+		dev.pool.fetchedAt = time.Time{}
+		dev.pool.snapshot(context.Background())
+		for _, server := range []string{"gpu-a", "gpu-b"} {
+			uuid := "GPU-1"
+			if server == "gpu-b" {
+				uuid = "GPU-2"
+			}
+			fit, _, reason := dev.Fit([]*device.DeviceUsage{card(server, uuid, 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+			assert.Check(t, fit == (server == "gpu-b"), "server %s: fit=%v reason=%s", server, fit, reason)
+		}
+	}
+	owner := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{{{
+			UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord,
+		}}})}},
+		Spec: corev1.PodSpec{NodeName: "cpu-1"},
+	}
+	listPods = func(context.Context) ([]corev1.Pod, error) { return []corev1.Pod{owner}, nil }
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.snapshot(context.Background())
+	assert.Check(t, dev.pool.reserved("gpu-a/GPU-1"), "recovery must reconstruct the successful bind")
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.snapshot(context.Background())
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Check(t, fit, "a successful list confirming release restores availability: %s", reason)
+}
+
+func TestPool_LeadershipChangeInvalidatesInFlightReservationRead(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	dev.pool.hold("owner", "gpu-a/GPU-1")
+	dev.pool.held["gpu-a/GPU-1"] = booking{at: time.Now().Add(-heldTTL - time.Second), pod: "owner"}
+	started, finish, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+		close(started)
+		<-finish
+		return nil, nil
+	}
+	dev.pool.fetchedAt = time.Time{}
+	go func() {
+		dev.pool.refresh(context.Background())
+		close(done)
+	}()
+	<-started // The successful Pod read belongs to the old leadership period.
+	dev.InvalidateReservations()
+	assert.Check(t, !dev.pool.deviceHealth()["gpu-a/GPU-1"], "invalidation must immediately block cached usage")
+	close(finish)
+	<-done
+	assert.Check(t, !dev.pool.podsListed, "the old in-flight Pod read cannot certify the new leadership period")
+	assert.Check(t, !dev.pool.deviceHealth()["gpu-a/GPU-1"])
+	assert.Check(t, dev.pool.reserved("gpu-a/GPU-1"), "the invalidated read cannot expire a booking")
+	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) { return nil, nil }
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.snapshot(context.Background())
+	assert.Check(t, dev.pool.podsListed)
+	assert.Check(t, dev.pool.deviceHealth()["gpu-a/GPU-1"], "a new successful Pod list restores availability")
+	assert.Check(t, !dev.pool.reserved("gpu-a/GPU-1"))
+}
+
 // A fleet with unknown reservation ownership must not allow new allocations.
 func TestPool_FailedPodListBlocksAllocation(t *testing.T) {
 	for _, warm := range []bool{false, true} {
@@ -431,7 +670,7 @@ func TestPool_FailedPodListBlocksAllocation(t *testing.T) {
 			assert.Check(t, !fitReported(50000), "a failed Pod list must not expose a new server whose reservations are unknown")
 			assert.Check(t, !fitReported(50000), "the incomplete snapshot must not become eligible on a cached read")
 			assert.Equal(t, podListCalls, 1, "a failed refresh must still respect poolTTL")
-			assert.Check(t, !fitReported(1000), "an incomplete reservation read must make the fleet unavailable")
+			assert.Equal(t, fitReported(1000), warm, "only the server covered by the successful Pod list remains usable")
 			setNodeReady(&known, corev1.ConditionFalse)
 			dev.pool.fetchedAt = time.Time{}
 			reported, err := dev.GetNodeDevices(clientNode)

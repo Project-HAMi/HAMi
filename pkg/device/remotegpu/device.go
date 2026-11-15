@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -431,6 +432,27 @@ func (dev *RemoteGPUDevices) FleetRevision() uint64 {
 	return dev.pool.revision()
 }
 
+// InvalidateReservations requires a new Pod list after gaining leadership.
+// A previous leader's bookings are not in this scheduler's in-memory pool.
+func (dev *RemoteGPUDevices) InvalidateReservations() {
+	p := dev.pool
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.podsListed = false
+	p.ownershipRev++
+	p.fetchedAt = time.Time{}
+	p.forcedAt = time.Time{}
+	// Replace the snapshot: an in-flight refresh may still be reading it.
+	devices := make([]*device.DeviceInfo, 0, len(p.devices))
+	for _, d := range p.devices {
+		dup := d.DeepCopy()
+		dup.Health = false
+		devices = append(devices, &dup)
+	}
+	p.devices = devices
+	p.fleetRev++
+}
+
 func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devList, ok := pd[RemoteGPUCommonWord]
 	if !ok || len(devList) == 0 {
@@ -472,9 +494,9 @@ func (dev *RemoteGPUDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 }
 
 // ReleaseNodeLock has no lock to release, but it is the hook the scheduler
-// calls when an attempt it had already allocated for falls through. Giving the
-// booking back here frees a whole server in that moment rather than at the end
-// of heldTTL.
+// calls when an attempt it had already allocated for falls through. The booking
+// is released immediately; a Pod list must confirm the failed Bind's outcome
+// before the server can be offered again.
 func (dev *RemoteGPUDevices) ReleaseNodeLock(_ *corev1.Node, pod *corev1.Pod) error {
 	dev.pool.release(podUID(pod))
 	return nil
@@ -566,7 +588,7 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		// the first refusal stands rather than becoming a refusal with nothing
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
-		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers)); len(intact) > 0 {
+		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers, dev.pool.deviceHealth())); len(intact) > 0 {
 			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, requirements, pod, committed)
 		}
 	}
@@ -716,16 +738,15 @@ func committedAllocation(allocated *device.PodDevices) (string, map[string]struc
 	return server, committed
 }
 
-// serversStillWhole drops the servers the forced refresh changed under us.
+// serversStillWhole drops servers whose current inventory differs from usage.
 //
-// The refresh clears the bookings that made tryFit refuse, but it can also
+// A refresh can clear the bookings that made tryFit refuse, but it can also
 // remove a server or one of its cards. Retrying with the pre-refresh view
 // would then read a card the fleet no longer has as merely unbooked, and
 // PatchAnnotations would find no endpoint for the server naming it. A server
 // is handed out whole, so one that lost a card is no longer the thing the
 // candidate described either.
-func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string) []string {
-	live := dev.pool.deviceHealth()
+func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string, live map[string]bool) []string {
 	liveCards := map[string]int{}
 	for id := range live {
 		liveCards[serverOf(id)]++
@@ -766,6 +787,11 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	// Missing cards and failed reservation reads must not be treated as free
 	// devices just because the caller's cached usage still reports them healthy.
 	health := dev.pool.deviceHealth()
+	reserved := dev.pool.reservedServers()
+	whole := map[string]bool{}
+	for _, server := range dev.serversStillWhole(byServer, servers, health) {
+		whole[server] = true
+	}
 
 	// A server is taken whole or not at all. Pointing a client at one exposes
 	// every GPU that server owns, and nothing on the wire narrows that down, so
@@ -779,6 +805,14 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
+		if !whole[server] {
+			reason[common.CardNotHealth] += len(byServer[server])
+			continue
+		}
+		if reserved[server] {
+			reason[common.ExclusiveDeviceAllocateConflict] += len(byServer[server])
+			continue
+		}
 		c := candidate{server: server}
 		taken := false
 		for _, d := range byServer[server] {

@@ -62,6 +62,7 @@ func registerFitDevices(dev *RemoteGPUDevices, devices []*device.DeviceUsage) {
 	dev.pool.devices = make([]*device.DeviceInfo, 0, len(devices))
 	for _, d := range devices {
 		dev.pool.devices = append(dev.pool.devices, &device.DeviceInfo{ID: d.ID, Health: d.Health})
+		dev.pool.endpoints[serverOf(d.ID)] = "10.0.0.5:14833"
 	}
 }
 
@@ -506,6 +507,33 @@ func TestFit_RejectsMissingDeviceAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestFit_RejectsChangedServerFromCachedUsage(t *testing.T) {
+	for _, change := range []string{"added", "removed", "replaced"} {
+		t.Run(change, func(t *testing.T) {
+			nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})}
+			stubFleet(t, nodes, nil, nil)
+			dev := InitRemoteGPUDevice(testConfig())
+			dev.pool.snapshot(context.Background())
+			cached := []*device.DeviceUsage{card("gpu-a", "GPU-1", 40000), card("gpu-a", "GPU-2", 40000)}
+			cards := []*device.DeviceInfo{gpu("GPU-1", 40000)}
+			switch change {
+			case "added":
+				cards = append(cards, gpu("GPU-2", 40000), gpu("GPU-3", 40000))
+			case "replaced":
+				cards = append(cards, gpu("GPU-3", 40000))
+			}
+			nodes[0] = lupineNode("gpu-a", "10.0.0.5", "", cards)
+			dev.pool.fetchedAt = time.Time{}
+			dev.pool.snapshot(context.Background())
+			for range 2 {
+				fit, allocated, reason := dev.Fit(cached, request(1, 0), &corev1.Pod{}, nil, nil)
+				assert.Check(t, !fit, "cached usage must describe the whole current server: %s", reason)
+				assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 0)
+			}
+		})
+	}
+}
+
 func TestFit_FailedReservationRefreshBlocksStaleHealthyUsage(t *testing.T) {
 	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}
 	stubFleet(t, nodes, nil, nil)
@@ -576,6 +604,31 @@ func TestFit_FailedReservationRefreshBlocksStaleHealthyUsage(t *testing.T) {
 	assert.Assert(t, fit, reason)
 	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
 	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, usage[0].ID)
+}
+
+func TestFit_FailedPodListHonorsBusyUnregisteredCard(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
+	// The server can report a client on a card that registration does not
+	// currently advertise. The reservation still applies to the whole server.
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-unregistered"}})
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.snapshot(context.Background())
+	assert.Assert(t, dev.pool.deviceHealth()["gpu-a/GPU-1"], "the known free card retains its health")
+	dev.pool.forcedAt = time.Now() // Also exercise cached Fit without another read.
+	for range 2 {
+		fit, allocated, _ := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+		assert.Check(t, !fit, "a busy card outside usage still reserves the whole server")
+		assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 0)
+	}
+	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {}})
+	dev.pool.fetchedAt = time.Time{}
+	dev.pool.snapshot(context.Background())
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Check(t, fit, "successful recovery releases the server: %s", reason)
 }
 
 // The forced re-read clears the booking that caused the refusal, but it can
