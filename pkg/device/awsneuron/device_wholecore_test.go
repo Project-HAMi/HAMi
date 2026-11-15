@@ -29,6 +29,42 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
+func TestInitContainerCoreMaskAccounting(t *testing.T) {
+	oldDevices, oldSupport := device.DevicesMap, maps.Clone(device.SupportDevices)
+	t.Cleanup(func() { device.DevicesMap, device.SupportDevices = oldDevices, oldSupport })
+	device.DevicesMap = map[string]device.Devices{AWSNeuronDevice: InitAWSNeuronDevice(AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron", ResourceCoreName: "aws.amazon.com/neuroncore",
+	})}
+	always := corev1.ContainerRestartPolicyAlways
+	for _, tc := range []struct {
+		name             string
+		init             []corev1.Container
+		masks            []int64
+		reserved, steady int64
+	}{
+		{name: "disjoint init and app", init: []corev1.Container{{}}, masks: []int64{0b1100, 0b0001}, reserved: 0b1101, steady: 0b0001},
+		{name: "overlapping init and app", init: []corev1.Container{{}}, masks: []int64{0b0011, 0b0001}, reserved: 0b0011, steady: 0b0001},
+		{name: "sequential inits reuse cores", init: []corev1.Container{{}, {}}, masks: []int64{0b0011, 0b0011, 0b0001}, reserved: 0b0011, steady: 0b0001},
+		{name: "sidecar before init", init: []corev1.Container{{RestartPolicy: &always}, {}}, masks: []int64{0b0001, 0b1100, 0b0010}, reserved: 0b1111, steady: 0b0011},
+		{name: "sidecar after init reuses core", init: []corev1.Container{{}, {RestartPolicy: &always}}, masks: []int64{0b0011, 0b0001, 0b0010}, reserved: 0b0011, steady: 0b0011},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: tc.init, Containers: []corev1.Container{{}}}}
+			rows := make(device.PodSingleDevice, len(tc.masks))
+			for i, mask := range tc.masks {
+				rows[i] = device.ContainerDevices{{UUID: "neuron-0", Type: AWSNeuronDevice, Usedcores: mask}}
+			}
+			raw := device.PodDevices{AWSNeuronDevice: rows}
+			original := raw.DeepCopy()
+			collapsed := device.CollapseInitContainerUsage(pod, raw)[AWSNeuronDevice]
+			assert.Equal(t, collapsed[0][0].Usedcores, tc.reserved)
+			steady := device.SteadyStateDeviceUsage(pod, raw)[AWSNeuronDevice]
+			assert.Equal(t, steady[0][0].Usedcores, tc.steady)
+			assert.DeepEqual(t, raw, original)
+		})
+	}
+}
+
 // A whole-device request must reserve every core exposed by the selected
 // device, so no core request can share it afterwards.
 
