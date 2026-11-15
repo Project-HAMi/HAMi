@@ -923,3 +923,30 @@ func TestOnLupineServerLookupFailureKeepsPreviousAnswer(t *testing.T) {
 		t.Fatal("empty node name looked like a lupine server")
 	}
 }
+
+func TestSetupResyncInterval(t *testing.T) {
+	original := resyncInterval
+	t.Cleanup(func() { resyncInterval = original })
+
+	tests := []struct {
+		name string
+		env  string
+		want time.Duration
+	}{
+		{"empty env keeps default", "", original},
+		{"valid duration sets interval", "30s", 30 * time.Second},
+		{"invalid duration keeps default", "notaduration", original},
+		{"zero duration keeps default", "0s", original},
+		{"negative duration keeps default", "-1m", original},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resyncInterval = original
+			t.Setenv("HAMI_RESYNC_INTERVAL", tt.env)
+			setupResyncInterval()
+			if resyncInterval != tt.want {
+				t.Errorf("got %v, want %v", resyncInterval, tt.want)
+			}
+		})
+	}
+}

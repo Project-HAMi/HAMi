@@ -138,7 +138,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devicePlugin.monitor.ctrPath | string | `"/usr/local/vgpu/containers"` | Shared per-container libvgpu cache path used by the device plugin and monitor. |
 | devicePlugin.monitor.metricsBindAddress | string | `":9394"` | Address the monitor serves `/metrics` on. The container port, Service target port and probes follow it. Loopback addresses are rejected. Set it here, not in `extraArgs`. |
 | devicePlugin.monitor.probes.enabled | bool | `true` | Run the monitor liveness and readiness probes. Disable to debug inside the container. |
-| devicePlugin.monitor.resyncInterval | string | `"5m"` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods. Does not control directory GC or Prometheus scrape frequency. |
+| devicePlugin.monitor.resyncInterval | string | `"5m"` | Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods. Does not control directory GC or Prometheus scrape frequency. Must be positive; zero, negative or invalid values fall back to `5m`. |
 | devicePlugin.monitor.disableHAMiCoreForWholeGPU | bool | `true` | Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1; the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full device memory allocated and cores unrequested or `gpucores=100`. |
 | devicePlugin.monitor.extraArgs | list | `["-v=4"]` | Additional monitor command-line arguments as a list of strings. |
 | devicePlugin.monitor.extraEnvs | list | `[]` | Extra Kubernetes env entries for the vGPU monitor, as a list of objects with name and value or valueFrom. |

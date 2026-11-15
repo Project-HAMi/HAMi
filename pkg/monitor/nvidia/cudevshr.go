@@ -114,14 +114,29 @@ type ContainerLister struct {
 var resyncInterval = 5 * time.Minute
 
 func init() {
-	if os.Getenv("HAMI_RESYNC_INTERVAL") != "" {
-		// If HAMI_RESYNC_INTERVAL is set, parse it
-		if interval, err := time.ParseDuration(os.Getenv("HAMI_RESYNC_INTERVAL")); err == nil {
-			resyncInterval = interval
-		} else {
-			klog.Warningf("Invalid HAMI_RESYNC_INTERVAL value: %s, using default %v", os.Getenv("HAMI_RESYNC_INTERVAL"), resyncInterval)
-		}
+	setupResyncInterval()
+}
+
+// setupResyncInterval configures resyncInterval from HAMI_RESYNC_INTERVAL.
+func setupResyncInterval() {
+	value := os.Getenv("HAMI_RESYNC_INTERVAL")
+	if value == "" {
+		return
 	}
+	interval, err := time.ParseDuration(value)
+	if err != nil {
+		klog.Warningf("Invalid HAMI_RESYNC_INTERVAL value: %s, using default %v", value, resyncInterval)
+		return
+	}
+	if interval <= 0 {
+		// The value is also the grace period before a directory whose Pod is not
+		// in the informer cache yet is unmapped. Zero or negative removes that
+		// grace period, and a negative resync period also makes the informer
+		// resync in a tight loop.
+		klog.Warningf("HAMI_RESYNC_INTERVAL must be positive: %s, using default %v", value, resyncInterval)
+		return
+	}
+	resyncInterval = interval
 }
 
 // NewContainerLister constructs the monitor mapping owner and starts its node Pod informer. Call
