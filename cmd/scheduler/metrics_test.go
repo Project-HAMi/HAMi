@@ -895,7 +895,7 @@ func TestClusterManagerCollector_NonLeaderSkipsClusterMetrics(t *testing.T) {
 	// Verify scheduler state metric reports non-leader.
 	if err := promtestutil.CollectAndCompare(
 		cc,
-		strings.NewReader(wantStr(0, 1)),
+		strings.NewReader(wantStr(0, 1, 0)),
 		"hami_scheduler_is_leader",
 		"hami_scheduler_cache_synced",
 	); err != nil {
