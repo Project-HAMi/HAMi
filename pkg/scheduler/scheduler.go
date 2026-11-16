@@ -101,6 +101,8 @@ type Scheduler struct {
 	lock   sync.RWMutex
 	synced atomic.Bool
 
+	lastSyncSuccessTime atomic.Int64
+
 	// allocLock serializes reservation mutations between Filter, the NUMA
 	// refit (RefitNumaAllocation), pod adds/updates that release init-container
 	// usage, and removals of tracked pods, so these paths cannot observe or
@@ -857,6 +859,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		cancel()
 	}
 
+	s.lastSyncSuccessTime.Store(time.Now().Unix())
 	s.synced.Store(true)
 }
 
@@ -950,6 +953,10 @@ func (s *Scheduler) IsSynced() bool {
 		return false
 	}
 	return s.synced.Load()
+}
+
+func (s *Scheduler) LastSyncSuccessTime() int64 {
+	return s.lastSyncSuccessTime.Load()
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
