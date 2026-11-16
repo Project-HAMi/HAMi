@@ -1673,6 +1673,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 				s.quotaManager.RmUsage(pod, effectiveDevices)
 			}
 			s.podManager.DelPod(pod)
+			if hasRGPU {
+				_ = rgpu.ReleaseNodeLock(nil, pod)
+			}
 			return nil, err
 		}
 	}
