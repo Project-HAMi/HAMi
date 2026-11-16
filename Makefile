@@ -5,6 +5,8 @@ HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
 
 # Go module proxy for the image builds. It follows the host Go setting, so a
 # GOPROXY set with `go env -w` or exported in the shell is passed to the build.
+# In mainland China, where proxy.golang.org is blocked, set a mirror once with
+# `go env -w GOPROXY=https://goproxy.cn,direct`.
 GOPROXY ?= $(shell go env GOPROXY)
 
 ifndef GITHUB_ACTIONS
