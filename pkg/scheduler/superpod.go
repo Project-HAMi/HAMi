@@ -94,13 +94,18 @@ func (s *Scheduler) prepareSuperpodContext(task *corev1.Pod, userNodePolicy stri
 		return nil
 	}
 	for _, p := range pods {
-		// The hami.io/vgpu-node annotation is patched onto the pod right after
-		// the scheduler picks a node, before the Bind lands, so it becomes
-		// visible in the informer cache earlier than spec.nodeName. Reading it
-		// first closes the cache-lag window where a sibling pod scheduled right
-		// after the first one would still see "no superpod established" and
-		// wrongly re-run the capacity check.
-		nodeName := p.Annotations[util.AssignedNodeAnnotations]
+		// Filter records an allocation in PodManager before patching the
+		// assigned-node annotation. Prefer that reservation to close the window
+		// where neither the informer nor the pod object shows the assignment.
+		nodeName := ""
+		if s.podManager != nil {
+			if podInfo, ok := s.podManager.GetPod(p); ok {
+				nodeName = podInfo.NodeID
+			}
+		}
+		if nodeName == "" {
+			nodeName = p.Annotations[util.AssignedNodeAnnotations]
+		}
 		if nodeName == "" {
 			nodeName = p.Spec.NodeName
 		}

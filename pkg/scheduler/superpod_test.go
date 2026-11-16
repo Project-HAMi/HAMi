@@ -316,6 +316,21 @@ func TestPrepareSuperpodContext(t *testing.T) {
 		assert.DeepEqual(t, ctx.Superpods, map[string]struct{}{"sp-1": {}, "sp-2": {}})
 		assert.DeepEqual(t, ctx.PreferredRacks, map[string]struct{}{"rack-A": {}, "rack-B": {}})
 	})
+
+	t.Run("prefers PodManager reservation before informer assignment", func(t *testing.T) {
+		sibling := makeGPUPod("sibling", "default", "", 1)
+		sibling.Labels[util.TaskIDLabel] = "task-1"
+		s.podLister = newTestPodLister(t, task, sibling)
+		s.podManager = device.NewPodManager()
+		assert.Assert(t, s.podManager.AddPod(sibling, "sp-node-2", nil))
+
+		ctx := s.prepareSuperpodContext(task, util.NodeSchedulerPolicySuperpod.String())
+
+		assert.Assert(t, ctx != nil)
+		assert.Assert(t, ctx.TaskAnchored)
+		assert.DeepEqual(t, ctx.Superpods, map[string]struct{}{"sp-2": {}})
+		assert.DeepEqual(t, ctx.PreferredRacks, map[string]struct{}{"rack-B": {}})
+	})
 }
 
 // ---------------------------------------------------------------------------
