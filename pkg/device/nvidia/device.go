@@ -1031,8 +1031,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	type limits struct{ memory, cores int64 }
 	groups := make(map[limits][]*device.DeviceUsage)
 	var order []limits
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for _, dev := range slices.Backward(devices) {
 		if dev.Mode != MpsV3Mode {
 			continue
 		}
