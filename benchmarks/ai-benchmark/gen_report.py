@@ -39,6 +39,9 @@ def compute_stats(rows):
     ttft = np.array(ttft)
     per_token = np.array(per_token)
 
+    if ttft.size == 0:
+        raise ValueError("no requests with a first-token timestamp")
+
     stats = {
         "p50": np.percentile(ttft, 50),
         "p95": np.percentile(ttft, 95),
@@ -63,7 +66,13 @@ def mad_filter(x, z=3.5):
     return x[dev < z]
 
 def clean_array(x, trim_pct, mad_z):
+    if x.size == 0:
+        return x
     a = trimmed(x, trim_pct)
+    # With two distinct samples, both percentile bounds fall between them.
+    # Keep the samples when trimming would discard the entire dataset.
+    if a.size == 0:
+        return x
     a = mad_filter(a, mad_z)
     return a
 
@@ -76,7 +85,8 @@ def fixed_range(data_list, margin=0.05):
     all_data = np.concatenate(data_list)
     lo, hi = np.min(all_data), np.max(all_data)
     span = hi - lo
-    return lo - margin * span, hi + margin * span
+    padding = margin * (span or abs(lo) or 1)
+    return lo - padding, hi + padding
 
 def plot_hist(datasets, xlabel, title, out):
     xs = [d[1] for d in datasets]
@@ -121,7 +131,7 @@ def plot_violin(datasets, xlabel, title, out):
 # Reporting
 ###############################################
 
-def generate_report(results, outdir):
+def generate_report(results, outdir, figures):
     lines = []
     lines.append("# LLM Benchmark Clean Report\n")
 
@@ -134,12 +144,14 @@ def generate_report(results, outdir):
         lines.append(f"- raw p95: `{s['p95']:.4f}`")
         lines.append(f"- raw p99: `{s['p99']:.4f}`")
         lines.append(f"- clean mean TTFT: `{c['ttft_clean_mean']:.4f}`")
-        lines.append(f"- clean mean per-token: `{c['pt_clean_mean']:.4f}`\n")
+        if c['pt_clean_mean'] is None:
+            lines.append("- clean mean per-token: N/A (no token intervals)\n")
+        else:
+            lines.append(f"- clean mean per-token: `{c['pt_clean_mean']:.4f}`\n")
 
     lines.append("## Figures\n")
-    for f in sorted(outdir.iterdir()):
-        if f.suffix == ".png":
-            lines.append(f"![{f.stem}]({f.name})")
+    for f in sorted(figures):
+        lines.append(f"![{f.stem}]({f.name})")
 
     report_path = outdir / "report.md"
     report_path.write_text("\n".join(lines))
@@ -170,7 +182,10 @@ def main():
     for name, file in args.dataset:
         print(f"Loading {name} from {file}...")
         rows = load_requests(file)
-        stats, ttft, pt = compute_stats(rows)
+        try:
+            stats, ttft, pt = compute_stats(rows)
+        except ValueError as err:
+            parser.error(f"{name} ({file}): {err}")
 
         ttft_clean = clean_array(ttft, args.trim_pct, args.mad_z)
         pt_clean = clean_array(pt, args.trim_pct, args.mad_z)
@@ -183,22 +198,30 @@ def main():
             "pt_clean": pt_clean,
             "clean": {
                 "ttft_clean_mean": ttft_clean.mean(),
-                "pt_clean_mean": pt_clean.mean(),
+                "pt_clean_mean": pt_clean.mean() if pt_clean.size else None,
             },
         }
 
     ttft_sets = [(name, r["ttft_clean"]) for name, r in results.items()]
-    pt_sets = [(name, r["pt_clean"]) for name, r in results.items()]
+    pt_sets = [(name, r["pt_clean"]) for name, r in results.items() if r["pt_clean"].size]
 
-    plot_hist(ttft_sets, "TTFT (s)", "TTFT Clean Histogram", outdir / "ttft_hist.png")
-    plot_violin(ttft_sets, "TTFT (s)", "TTFT Clean Violin", outdir / "ttft_violin.png")
-    plot_cdf(ttft_sets, "TTFT (s)", "TTFT Clean CDF", outdir / "ttft_cdf.png")
+    figures = []
+    for datasets, prefix, xlabel, title in [
+        (ttft_sets, "ttft", "TTFT (s)", "TTFT Clean"),
+        (pt_sets, "pt", "Per-token Latency (s)", "Per-token Clean"),
+    ]:
+        if not datasets:
+            continue
+        for plot, suffix, kind in [
+            (plot_hist, "hist", "Histogram"),
+            (plot_violin, "violin", "Violin"),
+            (plot_cdf, "cdf", "CDF"),
+        ]:
+            path = outdir / f"{prefix}_{suffix}.png"
+            plot(datasets, xlabel, f"{title} {kind}", path)
+            figures.append(path)
 
-    plot_hist(pt_sets, "Per-token Latency (s)", "Per-token Clean Histogram", outdir / "pt_hist.png")
-    plot_violin(pt_sets, "Per-token Latency (s)", "Per-token Violin", outdir / "pt_violin.png")
-    plot_cdf(pt_sets, "Per-token Latency (s)", "Per-token CDF", outdir / "pt_cdf.png")
-
-    generate_report(results, outdir)
+    generate_report(results, outdir, figures)
 
 
 if __name__ == "__main__":
