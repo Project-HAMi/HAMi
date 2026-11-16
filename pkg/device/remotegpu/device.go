@@ -26,7 +26,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -57,12 +59,26 @@ const (
 	// a GPU-less client node to inject it at Allocate time.
 	LupineServerAnno = "hami.io/lupine-endpoint"
 
+	// VisibleDevicesAnnoPrefix, followed by a container name, lists the
+	// indices of the GPUs the scheduler gave that container on its Lupine
+	// server. It reaches the client as CUDA_VISIBLE_DEVICES, which the Lupine
+	// client applies to the server's devices, so several pods, and containers
+	// of one pod, can share a server without seeing each other's cards in
+	// CUDA. The container name is the key's name part, as in the AppArmor
+	// annotation, because admission may reorder containers. Indices rather
+	// than UUIDs, because the Lupine build the chart pins ignores GPU UUIDs
+	// there (fixed upstream in lupinemachines/lupine#1135). They are the
+	// device plugin's NVML indices, which the server's CUDA ordinals follow
+	// under CUDA_DEVICE_ORDER=PCI_BUS_ID.
+	VisibleDevicesAnnoPrefix = "remote-gpu-visible-devices.hami.io/"
+
 	// LupineServerSelectorAnno optionally limits a RemoteGPU pod to Lupine
 	// servers with one exact Node-label match, for example
 	// "gpu-pool=inference". It selects the remote server, not the client node.
 	LupineServerSelectorAnno = "hami.io/remote-server"
 
 	lupineServerEnv     = "LUPINE_SERVER"
+	visibleDevicesEnv   = "CUDA_VISIBLE_DEVICES"
 	lupineWorkloadIDEnv = "LUPINE_WORKLOAD_ID"
 	remotePodUIDEnv     = "HAMI_REMOTE_POD_UID"
 
@@ -190,9 +206,10 @@ func (dev *RemoteGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	return dev.pool.snapshot(context.Background()), nil
 }
 
-// MutateAdmission wires LUPINE_SERVER to the annotation the scheduler writes in
-// PatchAnnotations. A literal value in the pod spec is replaced: the endpoint
-// is not known until placement.
+// MutateAdmission wires LUPINE_SERVER and CUDA_VISIBLE_DEVICES to the
+// annotations the scheduler writes in PatchAnnotations. A literal value in the
+// pod spec is replaced: neither the endpoint nor the cards are known until
+// placement.
 func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 	// The webhook visits every init container before app containers. An init
 	// container may have caused addLibDelivery to append the library copy.
@@ -216,15 +233,18 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 	if err != nil {
 		return false, err
 	}
-	setEnv(ctr, corev1.EnvVar{
-		Name: lupineServerEnv,
-		ValueFrom: &corev1.EnvVarSource{
-			FieldRef: &corev1.ObjectFieldSelector{
-				APIVersion: "v1",
-				FieldPath:  fmt.Sprintf("metadata.annotations['%s']", LupineServerAnno),
+	for _, wire := range [][2]string{{lupineServerEnv, LupineServerAnno}, {visibleDevicesEnv, VisibleDevicesAnnoPrefix + ctr.Name}} {
+		env, anno := wire[0], wire[1]
+		setEnv(ctr, corev1.EnvVar{
+			Name: env,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					APIVersion: "v1",
+					FieldPath:  fmt.Sprintf("metadata.annotations['%s']", anno),
+				},
 			},
-		},
-	})
+		})
+	}
 	// Kubelet expands the UID before launching the container. Admission cannot
 	// know the UID of a new Pod; container names are stable across restarts.
 	// A value the user already set to something else would make Lupine report
@@ -313,12 +333,23 @@ func armMemoryLimit(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 	// The unindexed limit is HAMi-core's fallback for every device, which is
 	// what a request spread evenly over the allocated cards means here.
 	setEnv(ctr, corev1.EnvVar{Name: memoryLimitEnv, Value: fmt.Sprintf("%vm", mem)})
-	// Whole-card allocation leaves nothing to divide, and HAMi-core already
+	// HAMi-core prefers a per-device limit to that fallback. One the workload
+	// sets, by env or envFrom, would let it past its share of a card other pods
+	// use, so each device the container sees gets the same limit explicitly.
+	count, _ := resourceValue(ctr, RemoteGPUResourceCount)
+	for i := range count {
+		setEnv(ctr, corev1.EnvVar{Name: fmt.Sprintf("%s_%d", memoryLimitEnv, i), Value: fmt.Sprintf("%vm", mem)})
+	}
+	// The scheduler divides a shared card by memory only, and HAMi-core
 	// defaults an unset SM limit to the whole device, so no core limit is set.
 	//
-	// A per-pod cache rather than the node-wide one the device plugin uses:
-	// the pod holds its cards outright, so it has no peers to account against.
-	setEnv(ctr, corev1.EnvVar{Name: sharedCacheEnv, Value: libMountPath + "/vgpu.cache"})
+	// A per-container cache rather than the node-wide one the device plugin
+	// uses: pods sharing a card run on different nodes and cannot share a
+	// file. Each container holds itself to its own limit, and the scheduler
+	// keeps the limits on a card within the card. Containers of one pod share
+	// the delivery volume, and one file there would hold them to a single
+	// limit between them.
+	setEnv(ctr, corev1.EnvVar{Name: sharedCacheEnv, Value: libMountPath + "/" + ctr.Name + ".cache"})
 	return true, nil
 }
 
@@ -430,10 +461,8 @@ func (dev *RemoteGPUDevices) GenerateResourceRequests(ctr *corev1.Container) (de
 	return device.ContainerDeviceRequest{
 		Nums: count,
 		Type: RemoteGPUCommonWord,
-		// ponytail: whole-server allocation for the first cut. Memreq filters
-		// candidate cards but never splits one, so cores are always the whole
-		// card. Relax both when lupine can scope a connection to a subset of
-		// the server's GPUs.
+		// Memreq shares a card when HAMi-core can enforce it, and only filters
+		// cards otherwise. Cores are never divided.
 		Memreq:   memreq,
 		Coresreq: 100,
 	}, nil
@@ -466,12 +495,21 @@ func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	// pod annotations at most once per poolTTL, so without this two pods
 	// scheduled inside the same window both see this card as free.
 	var allocated []string
-	for _, ctrDevs := range devList {
+	var booked device.ContainerDevices
+	for i, ctrDevs := range devList {
+		visible := make([]string, 0, len(ctrDevs))
 		for _, d := range ctrDevs {
 			allocated = append(allocated, d.UUID)
+			booked = append(booked, d)
+			visible = append(visible, strconv.Itoa(d.Idx))
+		}
+		// Each container sees only its own cards. Allocations are indexed
+		// by container, init containers first, the same way they were fitted.
+		if name := containerName(pod, i); name != "" && len(ctrDevs) > 0 {
+			(*annoinput)[VisibleDevicesAnnoPrefix+name] = strings.Join(visible, ",")
 		}
 	}
-	dev.pool.hold(podUID(pod), allocated...)
+	dev.pool.book(podKey(pod), podHostname(pod), booked)
 
 	// Fit refuses to span two servers, so any allocated device names the one
 	// the client must connect to.
@@ -485,6 +523,21 @@ func (dev *RemoteGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	return *annoinput
 }
 
+// containerName names the container at position i of a pod's allocation,
+// counting init containers first.
+func containerName(pod *corev1.Pod, i int) string {
+	if pod == nil || i < 0 {
+		return ""
+	}
+	if i < len(pod.Spec.InitContainers) {
+		return pod.Spec.InitContainers[i].Name
+	}
+	if i -= len(pod.Spec.InitContainers); i < len(pod.Spec.Containers) {
+		return pod.Spec.Containers[i].Name
+	}
+	return ""
+}
+
 // LockNode is deliberately a no-op. The shared node lock exists so a node's
 // device plugin can serialise Allocate against the scheduler; a GPU-less
 // client node has no such plugin, so a lock taken here would never be
@@ -495,8 +548,8 @@ func (dev *RemoteGPUDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 
 // ReleaseNodeLock has no lock to release, but it is the hook the scheduler
 // calls when an attempt it had already allocated for falls through. Giving the
-// booking back here frees a whole server in that moment rather than at the end
-// of heldTTL.
+// booking back here frees its cards in that moment rather than at the end of
+// heldTTL.
 func (dev *RemoteGPUDevices) ReleaseNodeLock(_ *corev1.Node, pod *corev1.Pod) error {
 	dev.pool.release(podUID(pod))
 	return nil
@@ -521,13 +574,15 @@ func (dev *RemoteGPUDevices) AddResourceUsage(_ *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
-// Fit hands out one lupine server, with every card on it.
+// Fit hands out cards from one lupine server.
 //
-// A client sees every GPU of every server it is pointed at, and nothing on the
-// wire narrows that down, so the server is the smallest thing that can be given
-// to one pod without giving it to another as well. Naming a second server would
-// only widen what the pod can reach, which is why a request for more cards than
-// any single server has goes unfilled even when the fleet holds enough.
+// Several pods can use one server: each sees only its own cards, through
+// CUDA_VISIBLE_DEVICES. A request that names its memory shares a card with
+// other such requests when HAMi-core can hold each to its limit; one that does
+// not takes whole cards. A pod never spans two servers, because each client
+// container is pointed at exactly one, which is why a request for more cards
+// than any single server has free goes unfilled even when the fleet holds
+// enough.
 func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, _ *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	selector, err := lupineServerSelector(pod)
 	if err != nil {
@@ -560,8 +615,8 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	// A previous container fixes this pod to one server. HAMi currently
 	// injects one LUPINE_SERVER endpoint into each client container, so a
 	// later container must use cards served by that same endpoint.
-	prior, committed := committedAllocation(allocated)
-	requirements := []device.ContainerDeviceRequest{request}
+	prior, own := committedAllocation(allocated, pod)
+	requirements := []phasedRequest{{request: request}}
 	if prior != "" {
 		if len(dev.pool.matchingServers(selector, []string{prior})) == 0 {
 			return false, map[string]device.ContainerDevices{}, errNoMatchingLupineServer.Error()
@@ -576,20 +631,21 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		requirements = podRequests
 	}
 
-	fit, tmpDevs, reason := dev.tryFit(byServer, servers, request, requirements, pod, committed)
-	if !fit && reason[common.ExclusiveDeviceAllocateConflict] > 0 {
-		// Only a booking stood in the way, and bookings come from a snapshot
-		// up to poolTTL old: a card freed moments ago still reads as taken.
-		// Refusing here is expensive, because kube-scheduler parks the pod
-		// until its next periodic flush of the unschedulable queue, minutes
-		// away. Pay for a fresh read instead of guessing wrong.
+	fit, tmpDevs, reason, contended := dev.tryFit(byServer, servers, request, requirements, pod, own)
+	if !fit && contended {
+		// Only other pods stood in the way, and what they hold comes from a
+		// snapshot up to poolTTL old: a card freed moments ago still reads as
+		// taken. Refusing here is expensive, because kube-scheduler parks the
+		// pod until its next periodic flush of the unschedulable queue,
+		// minutes away. Pay for a fresh read instead of guessing wrong.
 		dev.pool.refreshNow(context.Background())
 		// Only the servers the refresh left intact are retried. If none are,
 		// the first refusal stands rather than becoming a refusal with nothing
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
-		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers, dev.pool.deviceHealth())); len(intact) > 0 {
-			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, requirements, pod, committed)
+		cards, _ := dev.pool.allocationSnapshot("")
+		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers, cards)); len(intact) > 0 {
+			fit, tmpDevs, reason, _ = dev.tryFit(byServer, intact, request, requirements, pod, own)
 		}
 	}
 	if fit {
@@ -598,24 +654,38 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-// ValidateReservedServer verifies that a reserved RemoteGPU allocation still
-// belongs to a server selected by the Pod. Bind calls this after Filter has
-// recorded the allocation, before Kubernetes commits the Pod to its node.
+// ValidateReservedServer verifies that a reserved RemoteGPU allocation is
+// still booked and still belongs to a server selected by the Pod. Bind calls
+// this after Filter has recorded the allocation, before Kubernetes commits the
+// Pod to its node.
 func (dev *RemoteGPUDevices) ValidateReservedServer(pod *corev1.Pod, allocated device.PodDevices) error {
 	selector, err := lupineServerSelector(pod)
 	if err != nil {
 		return err
 	}
-	if selector == nil {
-		return nil
-	}
-	server, _ := committedAllocation(&allocated)
+	server, _ := committedAllocation(&allocated, pod)
 	if server == "" {
-		if PodRequestsRemoteGPU(pod) {
+		if selector != nil && PodRequestsRemoteGPU(pod) {
 			return fmt.Errorf("no Lupine server is reserved for RemoteGPU pod")
 		}
 		return nil
 	}
+	if selector != nil {
+		if err := dev.reservedServerMatches(selector, server); err != nil {
+			return err
+		}
+	}
+	// The booking is what keeps the pod's cards from other pods until it is
+	// bound. One that ran out before Bind, after heldTTL, may have let another
+	// pod onto them, so the pod is fitted again instead.
+	if !dev.pool.booked(podKey(pod)) {
+		return fmt.Errorf("the RemoteGPU booking for this pod has expired before Bind")
+	}
+	return nil
+}
+
+// reservedServerMatches checks the reserved server against the pod's selector.
+func (dev *RemoteGPUDevices) reservedServerMatches(selector labels.Selector, server string) error {
 	// After a scheduler restart the pool may not yet have been populated by
 	// registration. Load it before deciding that a reserved server mismatches.
 	dev.pool.mu.Lock()
@@ -683,84 +753,92 @@ func PodRequestsRemoteGPU(pod *corev1.Pod) bool {
 	return false
 }
 
-// podRequests returns every RemoteGPU request without merging container
-// boundaries. Native sidecars live in InitContainers, so walking both pod
-// container lists covers ordinary init containers, sidecars, and app
-// containers while preserving each request's count and memory combination.
-func (dev *RemoteGPUDevices) podRequests(pod *corev1.Pod) ([]device.ContainerDeviceRequest, error) {
+// phasedRequest is one container's request and when it runs. An ordinary
+// init container runs alone, beside the sidecars started before it, and is
+// done before the next container starts. Sidecars and app containers run
+// together.
+type phasedRequest struct {
+	request      device.ContainerDeviceRequest
+	ordinaryInit bool
+}
+
+// ordinaryInit reports whether allocation entry i of a pod, which counts init
+// containers first, is an init container that runs to completion rather than
+// a sidecar.
+func ordinaryInit(pod *corev1.Pod, i int) bool {
+	return pod != nil && i >= 0 && i < len(pod.Spec.InitContainers) && !util.IsSidecarContainer(&pod.Spec.InitContainers[i])
+}
+
+// podRequests returns every RemoteGPU request in the order the containers
+// start, without merging container boundaries. Native sidecars live in
+// InitContainers, so walking both pod container lists covers ordinary init
+// containers, sidecars, and app containers while preserving each request's
+// count and memory combination.
+func (dev *RemoteGPUDevices) podRequests(pod *corev1.Pod) ([]phasedRequest, error) {
 	if pod == nil {
 		return nil, nil
 	}
-	requests := make([]device.ContainerDeviceRequest, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
-	add := func(ctr *corev1.Container) error {
+	requests := make([]phasedRequest, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+	add := func(ctr *corev1.Container, ordinary bool) error {
 		request, err := dev.GenerateResourceRequests(ctr)
 		if err != nil {
 			return err
 		}
 		if request.Nums > 0 {
-			requests = append(requests, request)
+			requests = append(requests, phasedRequest{request: request, ordinaryInit: ordinary})
 		}
 		return nil
 	}
 	for i := range pod.Spec.InitContainers {
-		if err := add(&pod.Spec.InitContainers[i]); err != nil {
+		if err := add(&pod.Spec.InitContainers[i], ordinaryInit(pod, i)); err != nil {
 			return nil, err
 		}
 	}
 	for i := range pod.Spec.Containers {
-		if err := add(&pod.Spec.Containers[i]); err != nil {
+		if err := add(&pod.Spec.Containers[i], false); err != nil {
 			return nil, err
 		}
 	}
 	return requests, nil
 }
 
-// committedAllocation returns the lupine server and cards already owned by a
-// previous container of this pod. Whole-server allocation records every card
-// on the server for each container, so those cards are not conflicts when the
-// next container is fitted.
-func committedAllocation(allocated *device.PodDevices) (string, map[string]struct{}) {
+// committedAllocation returns the lupine server already chosen by a previous
+// container of this pod, and what those containers hold of each card while
+// the next one runs. An ordinary init container is done by then, so it fixes
+// the server but holds nothing.
+func committedAllocation(allocated *device.PodDevices, pod *corev1.Pod) (string, map[string]share) {
 	if allocated == nil {
 		return "", nil
 	}
 	var server string
-	committed := map[string]struct{}{}
-	for _, ctrList := range (*allocated)[RemoteGPUCommonWord] {
+	own := map[string]share{}
+	for i, ctrList := range (*allocated)[RemoteGPUCommonWord] {
 		for _, d := range ctrList {
 			if s := serverOf(d.UUID); s != "" {
 				if server == "" {
 					server = s
 				}
-				committed[d.UUID] = struct{}{}
+				if !ordinaryInit(pod, i) {
+					own[d.UUID] = own[d.UUID].add(grantShare(d))
+				}
 			}
 		}
 	}
-	return server, committed
+	return server, own
 }
 
-// serversStillWhole drops servers whose current inventory differs from usage.
+// serversStillWhole drops servers the pool no longer has, or no longer has
+// every card of.
 //
 // A refresh can clear the bookings that made tryFit refuse, but it can also
 // remove a server or one of its cards. Retrying with the pre-refresh view
 // would then read a card the fleet no longer has as merely unbooked, and
-// PatchAnnotations would find no endpoint for the server naming it. A server
-// is handed out whole, so one that lost a card is no longer the thing the
-// candidate described either.
-func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string, live map[string]bool) []string {
-	liveCards := map[string]int{}
-	for id := range live {
-		liveCards[serverOf(id)]++
-	}
+// PatchAnnotations would find no endpoint for the server naming it. A card the
+// server gained does not matter: cards are handed out one by one.
+func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string, live map[string]device.DeviceInfo) []string {
 	kept := make([]string, 0, len(servers))
 	for _, server := range servers {
 		if _, ok := dev.pool.endpoint(server); !ok {
-			continue
-		}
-		// The same cards and no others. A server that gained one is not the
-		// server the candidate described either: tryFit would allocate the
-		// stale subset and leave the new card free for a second pod, which is
-		// the thing whole-server allocation exists to prevent.
-		if liveCards[server] != len(byServer[server]) {
 			continue
 		}
 		intact := true
@@ -777,30 +855,126 @@ func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.Dev
 	return kept
 }
 
-// tryFit picks the server the request should come from. It reads pool
-// reservations, so the same call can answer differently before and after a
-// refresh.
-func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, requirements []device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
+// shareable reports whether a request may take part of a card. It must name
+// its memory, and HAMi-core must be delivered to hold it to that; without the
+// library the memory request is only a filter and the card is taken whole.
+func shareable(request device.ContainerDeviceRequest) bool {
+	return request.Memreq > 0 && RemoteGPULibImage != ""
+}
+
+// cardState is one card as a request sees it.
+type cardState struct {
+	d *device.DeviceUsage
+	// others is what other pods hold. own is what earlier containers of this
+	// pod hold, which the request may share without limit on users.
+	others cardUsage
+	own    share
+}
+
+func (c cardState) usedMem() int64 {
+	if c.own.whole {
+		return c.d.Totalmem
+	}
+	return c.others.mem + c.own.mem
+}
+
+// check reports why a card cannot serve one container of the request, or ""
+// when it can. contended says the reason is something another pod holds,
+// which a fresh read of the pool may show has gone.
+func (c cardState) check(request device.ContainerDeviceRequest) (reason string, contended bool) {
+	switch {
+	case !c.d.Health:
+		return common.CardNotHealth, false
+	case c.others.foreign:
+		return common.ExclusiveDeviceAllocateConflict, true
+	case request.Memreq > 0 && c.d.Totalmem < request.Memreq:
+		return common.CardInsufficientMemory, false
+	case c.others.users == 0 && c.own.whole:
+		// An earlier container of this pod took the card whole. It is the
+		// pod's alone, and its containers may share it as they like.
+		return "", false
+	case !shareable(request):
+		// A whole card: nobody else may be on it.
+		if c.others.users > 0 {
+			return common.ExclusiveDeviceAllocateConflict, true
+		}
+	case c.others.whole:
+		// Another pod took the card whole. Its grant records the card's
+		// memory when it was made, which a larger card now would read as
+		// room to share.
+		return common.ExclusiveDeviceAllocateConflict, true
+	case int64(c.others.users+c.own.users) >= c.d.Count:
+		return common.CardTimeSlicingExhausted, c.others.users > 0
+	case c.d.Totalmem-c.usedMem() < request.Memreq:
+		return common.CardInsufficientMemory, c.others.users > 0
+	}
+	return "", false
+}
+
+// grant is what one container is given of a card.
+func grant(c cardState, request device.ContainerDeviceRequest) device.ContainerDevice {
+	if shareable(request) {
+		return device.ContainerDevice{Idx: int(c.d.Index), UUID: c.d.ID, Type: request.Type, Usedmem: request.Memreq}
+	}
+	return device.ContainerDevice{Idx: int(c.d.Index), UUID: c.d.ID, Type: request.Type, Usedmem: c.d.Totalmem, Usedcores: c.d.Totalcore}
+}
+
+// pick returns the cards one container of the request would be given, or nil
+// when the server cannot serve it, and how many cards could serve it. reason,
+// when not nil, collects why the others were passed over. Cards this pod
+// already uses come first, then the fullest, so a shared request fills one
+// card before it starts on the next and whole cards stay whole.
+func pick(cards []cardState, request device.ContainerDeviceRequest, reason map[string]int) (picked []int, usableCards int, contended bool) {
+	usable := make([]int, 0, len(cards))
+	for i, c := range cards {
+		why, busy := c.check(request)
+		if why != "" {
+			if reason != nil {
+				reason[why]++
+			}
+			contended = contended || busy
+			continue
+		}
+		usable = append(usable, i)
+	}
+	if int64(len(usable)) < request.Nums {
+		return nil, len(usable), contended
+	}
+	sort.SliceStable(usable, func(i, j int) bool {
+		a, b := cards[usable[i]], cards[usable[j]]
+		if (a.own.users > 0) != (b.own.users > 0) {
+			return a.own.users > 0
+		}
+		if fa, fb := a.d.Totalmem-a.usedMem(), b.d.Totalmem-b.usedMem(); fa != fb {
+			return fa < fb
+		}
+		return a.d.Index < b.d.Index
+	})
+	return usable[:request.Nums], len(usable), contended
+}
+
+// tryFit picks the server and cards the request should come from. It reads
+// pool reservations, so the same call can answer differently before and after
+// a refresh.
+func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, requirements []phasedRequest, pod *corev1.Pod, own map[string]share) (bool, map[string]device.ContainerDevices, map[string]int, bool) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
+	contended := false
 	// Usage may predate a pool refresh, including the forced refresh in Fit.
-	// Missing cards and failed reservation reads must not be treated as free
-	// devices just because the caller's cached usage still reports them healthy.
-	health, reserved := dev.pool.allocationSnapshot()
+	// Missing or changed cards and failed reservation reads must not be
+	// treated as free just because the caller's cached usage still reports
+	// them healthy. Cards and holders are read under one lock.
+	live, holders := dev.pool.allocationSnapshot(podKey(pod))
 	whole := map[string]bool{}
-	for _, server := range dev.serversStillWhole(byServer, servers, health) {
+	for _, server := range dev.serversStillWhole(byServer, servers, live) {
 		whole[server] = true
 	}
 
-	// A server is taken whole or not at all. Pointing a client at one exposes
-	// every GPU that server owns, and nothing on the wire narrows that down, so
-	// leaving a card behind would leave it visible to this pod and free for the
-	// next one. The design puts the boundary in the same place: a GPU node is
-	// managed by lupine entirely, and runs one server.
 	type candidate struct {
 		server string
-		cards  []*device.DeviceUsage // every healthy card, all of them allocated
-		small  int                   // free cards below the current container's memory request
+		cards  []cardState
+		picked []int // the cards this container gets
+		usable int   // cards that could serve it
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
@@ -808,97 +982,82 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 			reason[common.CardNotHealth] += len(byServer[server])
 			continue
 		}
-		if reserved[server] {
-			reason[common.ExclusiveDeviceAllocateConflict] += len(byServer[server])
-			continue
-		}
-		c := candidate{server: server}
-		taken := false
+		c := candidate{server: server, cards: make([]cardState, 0, len(byServer[server]))}
 		for _, d := range byServer[server] {
-			_, ownedByPod := committed[d.ID]
-			currentHealth, known := health[d.ID]
-			switch {
-			case !d.Health || !known || !currentHealth:
-				// An unhealthy card is still visible to whoever holds the
-				// server, but it is not one this request can count on.
-				reason[common.CardNotHealth]++
-			case d.Used > 0 && !ownedByPod:
-				// Used covers pods already booked on this client node, except
-				// cards this pod committed while fitting an earlier container.
-				reason[common.ExclusiveDeviceAllocateConflict]++
-				taken = true
-			default:
-				c.cards = append(c.cards, d)
-				if request.Memreq > 0 && d.Totalmem < request.Memreq {
-					c.small++
-				}
-			}
+			// What the card offers comes from the same read as who holds it.
+			// The caller's copy may predate a refresh that changed its split
+			// count or memory, and sharing by those would overcommit it.
+			lc := live[d.ID]
+			cur := *d
+			cur.Index, cur.Count, cur.Totalmem, cur.Totalcore = lc.Index, lc.Count, lc.Devmem, lc.Devcore
+			cur.Health = d.Health && lc.Health
+			d = &cur
+			st := cardState{d: d, others: holders[d.ID], own: own[d.ID]}
+			// The node's usage view covers pods on this client node, which the
+			// pool counts too, plus this pod's earlier containers. Taking the
+			// larger of the two views never counts a pod twice.
+			ownMem := max(st.own.mem, 0)
+			st.others.users = max(st.others.users, int(d.Used)-st.own.users)
+			st.others.mem = max(st.others.mem, d.Usedmem-ownMem)
+			c.cards = append(c.cards, st)
 		}
-		if taken {
-			// One card in use means the server is, whatever the rest look like.
-			reason[common.CardInsufficientMemory] += c.small
+		picked, usable, busy := pick(c.cards, request, reason)
+		contended = contended || busy
+		fits, busy := podFits(c.cards, requirements)
+		contended = contended || busy
+		if picked == nil || !fits {
+			reason[common.NodeInsufficientDevice]++
 			continue
 		}
+		c.picked, c.usable = picked, usable
 		candidates = append(candidates, c)
 	}
 
-	// Among the servers that can serve the request, take the smallest. Whole
-	// servers are the unit, so the smallest sufficient one leaves the deeper
-	// servers intact for requests that need them. servers arrives sorted by
-	// name and the sort is stable, so equal servers are picked the same way on
-	// every call, which repeated Filter calls for one pod rely on.
+	// The server with the fewest usable cards that still serves the request
+	// leaves the deeper servers for requests that need them. servers arrives
+	// sorted by name and the sort is stable, so equal servers are picked the
+	// same way on every call, which repeated Filter calls for one pod rely on.
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return len(candidates[i].cards) < len(candidates[j].cards)
+		return candidates[i].usable < candidates[j].usable
 	})
-
-	for _, c := range candidates {
-		if smallCards, failed := firstRequestFailure(c.cards, requirements); failed {
-			// Count the undersized cards once per server, including those below
-			// the current request when another container is the first to fail.
-			reason[common.NodeInsufficientDevice]++
-			reason[common.CardInsufficientMemory] += max(c.small, smallCards)
-			continue
-		}
-		reason[common.CardInsufficientMemory] += c.small
-		for _, d := range c.cards {
-			tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
-				Idx:  int(d.Index),
-				UUID: d.ID,
-				Type: request.Type,
-				// Whole card: the request's memory is a filter, not a split.
-				Usedmem:   d.Totalmem,
-				Usedcores: d.Totalcore,
-			})
-		}
-		klog.V(4).InfoS("remotegpu: allocated a lupine server",
-			"pod", klog.KObj(pod), "server", c.server, "cards", len(c.cards), "requested", request.Nums)
-		return true, tmpDevs, reason
+	if len(candidates) == 0 {
+		return false, tmpDevs, reason, contended
 	}
-	return false, tmpDevs, reason
+	c := candidates[0]
+	for _, i := range c.picked {
+		tmpDevs[request.Type] = append(tmpDevs[request.Type], grant(c.cards[i], request))
+	}
+	klog.V(4).InfoS("remotegpu: allocated from a lupine server",
+		"pod", klog.KObj(pod), "server", c.server, "cards", request.Nums, "shared", shareable(request))
+	return true, tmpDevs, reason, contended
 }
 
-// firstRequestFailure reports how many cards are too small for the first
-// container request the server cannot satisfy. Requests are deliberately not
-// collapsed: a server with one large and one small card can satisfy 1x
-// large-memory and 2x low-memory requests even though it cannot satisfy a
-// synthetic 2x large-memory request.
-func firstRequestFailure(cards []*device.DeviceUsage, requests []device.ContainerDeviceRequest) (int, bool) {
-	for _, request := range requests {
-		var usable int64
-		smallCards := 0
-		for _, d := range cards {
-			if request.Memreq <= 0 || d.Totalmem >= request.Memreq {
-				usable++
-			} else {
-				smallCards++
-			}
+// podFits reports whether the server can serve every container request of the
+// pod, as the later containers will be fitted: in order, each on the cards
+// the ones still running before it left. Capacity is checked at the pod's
+// peak, so an ordinary init container is fitted beside the sidecars before it
+// and then gives its cards back. Requests are deliberately not collapsed: a
+// server with one large and one small card can satisfy 1x large-memory and 2x
+// low-memory requests even though it cannot satisfy a synthetic 2x
+// large-memory request.
+//
+// It also reports whether another pod stood in the way of a request, which a
+// fresh read of the pool may show has gone.
+func podFits(cards []cardState, requests []phasedRequest) (fits, contended bool) {
+	cards = slices.Clone(cards)
+	for _, r := range requests {
+		picked, _, busy := pick(cards, r.request, nil)
+		if picked == nil {
+			return false, busy
 		}
-		if usable >= request.Nums {
+		if r.ordinaryInit {
 			continue
 		}
-		return smallCards, true
+		for _, i := range picked {
+			cards[i].own = cards[i].own.add(grantShare(grant(cards[i], r.request)))
+		}
 	}
-	return 0, false
+	return true, false
 }
 
 // resourceValue reads a resource from limits, falling back to requests.

@@ -473,9 +473,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 }
 
 // collectRemoteGPUMetrics exports the lupine fleet once, keyed by the server
-// that owns each card rather than the client nodes that can reach it. A card
-// is handed out whole, so allocation is a flag and allocated memory is either
-// the whole card or nothing.
+// that owns each card rather than the client nodes that can reach it.
 func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.Metric) {
 	labels := []string{"server", "endpoint", "device_uuid", "device_index", "device_type"}
 	memoryLimitDesc := prometheus.NewDesc(
@@ -495,9 +493,9 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 	)
 	for _, pd := range remoteGPUPool() {
 		d := pd.Device
-		allocated, usedmem := 0.0, int64(0)
+		allocated, usedmem := 0.0, pd.Usedmem
 		if pd.Reserved {
-			allocated, usedmem = 1, d.Devmem
+			allocated = 1
 		}
 		if err := sendMetric(ch, memoryLimitDesc, prometheus.GaugeValue, mibToBytes(d.Devmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_memory_limit_bytes metric: %v", err)

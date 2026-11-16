@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -62,7 +65,9 @@ func registerFitDevices(dev *RemoteGPUDevices, devices []*device.DeviceUsage) {
 	defer dev.pool.mu.Unlock()
 	dev.pool.devices = make([]*device.DeviceInfo, 0, len(devices))
 	for _, d := range devices {
-		dev.pool.devices = append(dev.pool.devices, &device.DeviceInfo{ID: d.ID, Health: d.Health})
+		dev.pool.devices = append(dev.pool.devices, &device.DeviceInfo{
+			ID: d.ID, Index: d.Index, Count: d.Count, Devmem: d.Totalmem, Devcore: d.Totalcore, Health: d.Health,
+		})
 		dev.pool.endpoints[serverOf(d.ID)] = "10.0.0.5:14833"
 	}
 }
@@ -210,8 +215,9 @@ func TestValidateReservedServer_ColdPool(t *testing.T) {
 	nodes[0].Labels["gpu-pool"] = "inference"
 	stubFleet(t, nodes, nil, nil)
 	dev := InitRemoteGPUDevice(testConfig())
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-p", Annotations: map[string]string{LupineServerSelectorAnno: "gpu-pool=inference"}}}
 	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord}}}}
+	dev.pool.book(podKey(pod), "", allocated[RemoteGPUCommonWord][0])
 	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
 }
 
@@ -230,21 +236,19 @@ func TestFit_MultiContainerStaysOnSelectedServer(t *testing.T) {
 	fit1, alloc1, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, allocated)
 	assert.Equal(t, fit1, true)
 	assert.Equal(t, alloc1[RemoteGPUCommonWord][0].UUID, "gpu-b/GPU-1")
-	assert.Equal(t, len(alloc1[RemoteGPUCommonWord]), 2, "the pod owns the whole server")
+	assert.Equal(t, len(alloc1[RemoteGPUCommonWord]), 1, "a container takes only what it asked for")
 
 	// Accumulate the first allocation and its usage as fitInDevices does.
 	devices[1].Used = 1
-	devices[2].Used = 1
+	devices[1].Usedmem = 2000
 	(*allocated)[RemoteGPUCommonWord] = append((*allocated)[RemoteGPUCommonWord], alloc1[RemoteGPUCommonWord])
 
-	// Without the pod-level server constraint, gpu-a now fits while gpu-b reads
-	// as taken. The later container must retain this pod's ownership of gpu-b.
+	// gpu-a sorts first and is free, but the later container must stay on the
+	// server the pod is already connected to.
 	fit2, alloc2, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, allocated)
 	assert.Equal(t, fit2, true)
-	assert.Equal(t, len(alloc2[RemoteGPUCommonWord]), 2)
-	for _, d := range alloc2[RemoteGPUCommonWord] {
-		assert.Equal(t, serverOf(d.UUID), "gpu-b")
-	}
+	assert.Equal(t, len(alloc2[RemoteGPUCommonWord]), 1)
+	assert.Equal(t, serverOf(alloc2[RemoteGPUCommonWord][0].UUID), "gpu-b")
 }
 
 // The first request fits either server, but only gpu-b can also serve the
@@ -296,8 +300,8 @@ func TestFit_SelectsServerForEveryContainerRequest(t *testing.T) {
 func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{
-		card("gpu-a", "GPU-large", 80000),
-		card("gpu-a", "GPU-small", 40000),
+		shareCard("gpu-a", "GPU-large", 80000, 10),
+		shareCard("gpu-a", "GPU-small", 40000, 10),
 	}
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
 		requestingContainer("memory", 1, 60000),
@@ -311,7 +315,8 @@ func TestFit_ChecksCardCountAndMemoryPerContainer(t *testing.T) {
 	if !fit {
 		t.Fatalf("Fit rejected independently satisfiable requests: %s", reason)
 	}
-	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-large")
 }
 
 func TestFit_FailureReasonsCountCardsAndServers(t *testing.T) {
@@ -330,7 +335,7 @@ func TestFit_FailureReasonsCountCardsAndServers(t *testing.T) {
 	assert.Equal(t, reasons[common.NodeInsufficientDevice], 2, "retain one insufficient-device reason per server")
 }
 
-func TestFit_FailureReasonsCountFreeSmallCardsOnTakenServer(t *testing.T) {
+func TestFit_FailureReasonsCountTakenAndSmallCards(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	occupied := card("gpu-a", "GPU-a1", 80000)
 	occupied.Used = 1
@@ -344,9 +349,13 @@ func TestFit_FailureReasonsCountFreeSmallCardsOnTakenServer(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, request(2, 60000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, false)
 	reasons := common.ParseReason(reason)
-	assert.Equal(t, reasons[common.CardInsufficientMemory], 2, "count free undersized cards even when a server is taken")
-	assert.Equal(t, reasons[common.NodeInsufficientDevice], 1, "only the available server fails the count check")
-	assert.Equal(t, reasons[common.ExclusiveDeviceAllocateConflict], 1)
+	assert.Equal(t, reasons[common.CardInsufficientMemory], 2)
+	assert.Equal(t, reasons[common.CardTimeSlicingExhausted], 1, "the occupied card has no share left")
+	assert.Equal(t, reasons[common.NodeInsufficientDevice], 2)
+
+	fit, _, reason = dev.Fit(devices, request(2, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, common.ParseReason(reason)[common.ExclusiveDeviceAllocateConflict], 1, "a whole card cannot be taken from under a holder")
 }
 
 func TestFit_MultiContainerRejectsOtherServerFallback(t *testing.T) {
@@ -373,17 +382,31 @@ func TestFit_MultiContainerRejectsOtherServerFallback(t *testing.T) {
 	assert.Assert(t, reason != "")
 }
 
-func TestFit_AllocatesWholeCard(t *testing.T) {
+func TestFit_MemoryRequestTakesItsShare(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}
 
-	// A 2000MB request still consumes the entire card.
 	registerFitDevices(dev, devices)
 	fit, allocated, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	got := allocated[RemoteGPUCommonWord][0]
+	assert.Equal(t, got.Usedmem, int64(2000))
+	assert.Equal(t, got.Usedcores, int64(0))
+
+	// A count alone takes the card whole.
+	fit, allocated, _ = dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	got = allocated[RemoteGPUCommonWord][0]
 	assert.Equal(t, got.Usedmem, int64(40000))
 	assert.Equal(t, got.Usedcores, int64(100))
+
+	// Without HAMi-core to enforce it the memory request only filters, and
+	// the card is taken whole.
+	RemoteGPULibImage = ""
+	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
+	fit, allocated, _ = dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].Usedmem, int64(40000))
 }
 
 func TestFit_RejectsUnfitCards(t *testing.T) {
@@ -412,7 +435,7 @@ func TestFit_HonorsClusterWideReservation(t *testing.T) {
 	assert.Equal(t, fit, true)
 
 	dev.pool.mu.Lock()
-	dev.pool.inUse[free.ID] = struct{}{}
+	dev.pool.inUse[free.ID] = map[string]share{"other": {users: 1, mem: 40000}}
 	dev.pool.mu.Unlock()
 
 	fit, _, reason := dev.Fit([]*device.DeviceUsage{free}, request(1, 0), &corev1.Pod{}, nil, nil)
@@ -509,7 +532,7 @@ func TestFit_RejectsMissingDeviceAfterRefresh(t *testing.T) {
 }
 
 func TestFit_RejectsChangedServerFromCachedUsage(t *testing.T) {
-	for _, change := range []string{"added", "removed", "replaced"} {
+	for _, change := range []string{"removed", "replaced"} {
 		t.Run(change, func(t *testing.T) {
 			nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})}
 			stubFleet(t, nodes, nil, nil)
@@ -518,8 +541,6 @@ func TestFit_RejectsChangedServerFromCachedUsage(t *testing.T) {
 			cached := []*device.DeviceUsage{card("gpu-a", "GPU-1", 40000), card("gpu-a", "GPU-2", 40000)}
 			cards := []*device.DeviceInfo{gpu("GPU-1", 40000)}
 			switch change {
-			case "added":
-				cards = append(cards, gpu("GPU-2", 40000), gpu("GPU-3", 40000))
 			case "replaced":
 				cards = append(cards, gpu("GPU-3", 40000))
 			}
@@ -571,7 +592,7 @@ func TestFit_FailedReservationRefreshBlocksStaleHealthyUsage(t *testing.T) {
 		}
 		return owners, nil
 	}
-	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) {
 		metricsCalls++
 		return nil, nil
 	}
@@ -616,9 +637,9 @@ func TestFit_ConcurrentRefreshKeepsHealthAndReservationsConsistent(t *testing.T)
 		}
 		return nil, errors.New("pod list unavailable")
 	}
-	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) {
 		if busy {
-			return map[string]struct{}{"GPU-1": {}}, nil
+			return map[string][]string{"GPU-1": {"10.0.0.9:host:4026531836:42"}}, nil
 		}
 		return nil, nil
 	}
@@ -650,7 +671,7 @@ func TestFit_ConcurrentRefreshKeepsHealthAndReservationsConsistent(t *testing.T)
 	unexpectedFits := 0
 	for range 10000 {
 		req := request(1, 0)
-		fit, _, _ := dev.tryFit(usage, []string{"gpu-a"}, req, []device.ContainerDeviceRequest{req}, &corev1.Pod{}, nil)
+		fit, _, _, _ := dev.tryFit(usage, []string{"gpu-a"}, req, []phasedRequest{{request: req}}, &corev1.Pod{}, nil)
 		if fit {
 			unexpectedFits++
 		}
@@ -661,22 +682,23 @@ func TestFit_ConcurrentRefreshKeepsHealthAndReservationsConsistent(t *testing.T)
 	assert.Equal(t, unexpectedFits, 0, "Fit must use health and reservations from one pool snapshot")
 }
 
-func TestFit_FailedPodListHonorsBusyUnregisteredCard(t *testing.T) {
+func TestFit_FailedPodListLeavesCardsBesideABusyUnregisteredOneFree(t *testing.T) {
 	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
 	dev := InitRemoteGPUDevice(testConfig())
 	dev.pool.snapshot(context.Background())
 	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("pod list unavailable") }
 	// The server can report a client on a card that registration does not
-	// currently advertise. The reservation still applies to the whole server.
+	// currently advertise. That client cannot see the cards it was not given,
+	// so the others stay free.
 	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-unregistered"}})
 	dev.pool.fetchedAt = time.Time{}
 	dev.pool.snapshot(context.Background())
 	assert.Assert(t, dev.pool.deviceHealth()["gpu-a/GPU-1"], "the known free card retains its health")
 	dev.pool.forcedAt = time.Now() // Also exercise cached Fit without another read.
 	for range 2 {
-		fit, allocated, _ := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
-		assert.Check(t, !fit, "a busy card outside usage still reserves the whole server")
-		assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 0)
+		fit, allocated, reason := dev.Fit([]*device.DeviceUsage{card("gpu-a", "GPU-1", 40000)}, request(1, 0), &corev1.Pod{}, nil, nil)
+		assert.Check(t, fit, "a busy card outside usage leaves the registered card free: %s", reason)
+		assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
 	}
 	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
 	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {}})
@@ -796,10 +818,9 @@ func TestMutateAdmission_RefusesASourcedLdPreload(t *testing.T) {
 	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
 
-// A server that gained a card during the forced refresh is not the server the
-// candidate described: allocating the stale subset would leave the new card
-// free for a second pod, which whole-server allocation exists to prevent.
-func TestFit_DoesNotHandOutAServerThatGainedACard(t *testing.T) {
+// Cards are handed out one by one, so a card the forced refresh adds to a
+// server takes nothing from the cards the candidate described.
+func TestFit_HandsOutACardOfAServerThatGainedOne(t *testing.T) {
 	free := card("gpu-a", "GPU-1", 40000)
 	holder := corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "holder",
@@ -817,9 +838,9 @@ func TestFit_DoesNotHandOutAServerThatGainedACard(t *testing.T) {
 		[]*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})}, nil, nil)
 	dev.pool.forcedAt = dev.pool.forcedAt.Add(-forceInterval - time.Second)
 
-	fit, _, reason := dev.Fit([]*device.DeviceUsage{free}, request(1, 0), &corev1.Pod{}, nil, nil)
-	assert.Equal(t, fit, false, "the pre-refresh view no longer describes this server")
-	assert.Assert(t, reason != "")
+	fit, allocated, reason := dev.Fit([]*device.DeviceUsage{free}, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, free.ID)
 }
 
 func TestFit_SkipsDevicesWithoutServerPrefix(t *testing.T) {
@@ -882,12 +903,13 @@ func TestValidateReservedServer(t *testing.T) {
 	setServerLabels(dev, map[string]map[string]string{
 		"gpu-a": {"gpu-pool": "inference"},
 	})
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-p", Annotations: map[string]string{
 		LupineServerSelectorAnno: "gpu-pool=inference",
 	}}}
 	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{
 		device.ContainerDevices{{UUID: deviceID("gpu-a", "GPU-1"), Type: RemoteGPUCommonWord}},
 	}}
+	dev.pool.book(podKey(pod), "", allocated[RemoteGPUCommonWord][0])
 
 	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
 
@@ -1008,8 +1030,9 @@ func TestMutateAdmission_ArmsTheMemoryLimit(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	ctr := &corev1.Container{
 		Name: "app",
+		Env:  []corev1.EnvVar{{Name: memoryLimitEnv + "_1", Value: "99999m"}},
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-			"nvidia.com/remote-gpu":        resource.MustParse("1"),
+			"nvidia.com/remote-gpu":        resource.MustParse("2"),
 			"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
 		}},
 	}
@@ -1024,8 +1047,10 @@ func TestMutateAdmission_ArmsTheMemoryLimit(t *testing.T) {
 		env[e.Name] = e.Value
 	}
 	assert.Equal(t, env[memoryLimitEnv], "2000m")
+	assert.Equal(t, env[memoryLimitEnv+"_0"], "2000m", "a per-device limit is set too, so the workload cannot set its own")
+	assert.Equal(t, env[memoryLimitEnv+"_1"], "2000m", "one the workload set is replaced")
 	assert.Equal(t, env[ldPreloadEnv], libMountPath+"/libvgpu.so")
-	assert.Equal(t, env[sharedCacheEnv], libMountPath+"/vgpu.cache")
+	assert.Equal(t, env[sharedCacheEnv], libMountPath+"/app.cache", "each container keeps its own limit")
 
 	assert.Equal(t, len(pod.Spec.InitContainers), 1)
 	assert.Equal(t, pod.Spec.InitContainers[0].Image, "projecthami/hami:test")
@@ -1070,10 +1095,9 @@ func TestMutateAdmission_SkipsEnforcementWhenNotAsked(t *testing.T) {
 	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
 
-// Pointing a client at a server exposes every GPU that server owns, so a
-// server is taken whole. Leaving a card behind would leave it visible to this
-// pod and free for the next one, which is how two pods end up on one card.
-func TestFit_TakesTheWholeServer(t *testing.T) {
+// CUDA_VISIBLE_DEVICES limits the pod to its own cards, so the rest of the
+// server stays free for other pods.
+func TestFit_TakesOnlyTheCardsAskedFor(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{
 		card("gpu-a", "GPU-A1", 40000),
@@ -1084,12 +1108,11 @@ func TestFit_TakesTheWholeServer(t *testing.T) {
 	registerFitDevices(dev, devices)
 	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
-	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 3,
-		"one card was asked for, the server's three come with it")
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
 }
 
-// Whole servers are the unit, so the smallest one that can serve the request
-// leaves the deeper servers for requests that need them.
+// The server with the fewest usable cards that can serve the request leaves
+// the deeper servers for requests that need them.
 func TestFit_PrefersTheSmallestSufficientServer(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	// gpu-a sorts first and is the larger of the two.
@@ -1109,12 +1132,11 @@ func TestFit_PrefersTheSmallestSufficientServer(t *testing.T) {
 	fit, allocated, _ = dev.Fit(devices, request(2, 0), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
 	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-a")
-	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 3)
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2)
 }
 
-// A single card in use takes its whole server out of the running, because the
-// pod holding it can already see the rest.
-func TestFit_OneBusyCardWithholdsItsServer(t *testing.T) {
+// A card in use leaves the rest of its server on offer.
+func TestFit_OtherCardsOfABusyServerStayOnOffer(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	busy := card("gpu-a", "GPU-A1", 40000)
 	busy.Used = 1
@@ -1127,17 +1149,14 @@ func TestFit_OneBusyCardWithholdsItsServer(t *testing.T) {
 	registerFitDevices(dev, devices)
 	fit, allocated, _ := dev.Fit(devices, request(1, 0), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
-	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b",
-		"gpu-a still has a free card but is not on offer")
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-A2")
 
-	only := []*device.DeviceUsage{busy, card("gpu-a", "GPU-A2", 40000)}
-	fit, _, reason := dev.Fit(only, request(1, 0), &corev1.Pod{}, nil, nil)
-	assert.Equal(t, fit, false)
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{busy}, request(1, 0), &corev1.Pod{}, nil, nil)
+	assert.Equal(t, fit, false, "the busy card itself is not on offer")
 	assert.Assert(t, reason != "")
 }
 
-// Cards too small for the request do not count towards it, but they still come
-// with the server, since the client can see them either way.
+// Cards too small for the request do not count towards it.
 func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	devices := []*device.DeviceUsage{
@@ -1148,7 +1167,8 @@ func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	registerFitDevices(dev, devices)
 	fit, allocated, _ := dev.Fit(devices, request(1, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, true)
-	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2, "the small card comes along")
+	assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-A1")
 
 	fit, _, reason := dev.Fit(devices, request(2, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, false, "only one card is big enough")
@@ -1194,4 +1214,315 @@ func TestMutateAdmissionWorkloadIdentity(t *testing.T) {
 		assert.Equal(t, workloadCount, 1)
 		assert.Assert(t, uidIndex < workloadIndex)
 	}
+}
+
+// shareCard is a free card that up to count containers may share.
+func shareCard(server, uuid string, mem, count int64) *device.DeviceUsage {
+	d := card(server, uuid, mem)
+	d.Count = count
+	return d
+}
+
+// holderPod is a pod on another client node that holds part of a card.
+func holderPod(uid, uuid string, mem, cores int64) corev1.Pod {
+	return corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: uid, UID: types.UID(uid),
+		Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{
+			device.ContainerDevices{{UUID: uuid, Type: RemoteGPUCommonWord, Usedmem: mem, Usedcores: cores}},
+		})},
+	}, Spec: corev1.PodSpec{NodeName: "cpu-1"}}
+}
+
+// Pods on different client nodes share a card by memory. The node's own usage
+// view sees none of them, so the cluster-wide pool does the accounting.
+func TestFit_PodsShareACardByMemory(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})},
+		[]corev1.Pod{holderPod("uid-a", "gpu-a/GPU-1", 30000, 0)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: "uid-b"}}
+
+	fit, allocated, reason := dev.Fit(devices, request(1, 8000), pod, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].Usedmem, int64(8000))
+
+	fit, _, reason = dev.Fit(devices, request(1, 12000), pod, nil, nil)
+	assert.Equal(t, fit, false, "only 10000 MiB is left")
+	assert.Equal(t, common.ParseReason(reason)[common.CardInsufficientMemory], 1)
+
+	fit, _, reason = dev.Fit(devices, request(1, 0), pod, nil, nil)
+	assert.Equal(t, fit, false, "a whole card cannot be taken while another pod is on it")
+	assert.Equal(t, common.ParseReason(reason)[common.ExclusiveDeviceAllocateConflict], 1)
+}
+
+// A pod that took a card whole leaves no room to share it, and the split count
+// bounds how many pods share one card however little each asks for.
+func TestFit_WholeCardsAndSplitCountBoundSharing(t *testing.T) {
+	split := gpu("GPU-2", 40000)
+	split.Count = 2
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), split})},
+		[]corev1.Pod{
+			holderPod("uid-whole", "gpu-a/GPU-1", 40000, 100),
+			holderPod("uid-s1", "gpu-a/GPU-2", 1000, 0),
+			holderPod("uid-s2", "gpu-a/GPU-2", 1000, 0),
+		}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: "uid-c"}}
+
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}, request(1, 1000), pod, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, common.ParseReason(reason)[common.ExclusiveDeviceAllocateConflict], 1)
+
+	fit, _, reason = dev.Fit([]*device.DeviceUsage{shareCard("gpu-a", "GPU-2", 40000, 2)}, request(1, 1000), pod, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, common.ParseReason(reason)[common.CardTimeSlicingExhausted], 1)
+}
+
+// The cards of a server are handed to different pods: a server with one card
+// taken still serves a second pod from the other.
+func TestFit_SplitsAServerBetweenPods(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})},
+		[]corev1.Pod{holderPod("uid-a", "gpu-a/GPU-1", 40000, 100)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10), shareCard("gpu-a", "GPU-2", 40000, 10)}
+
+	fit, allocated, reason := dev.Fit(devices, request(1, 0), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-b"}}, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-2")
+
+	fit, _, _ = dev.Fit(devices, request(2, 0), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-b"}}, nil, nil)
+	assert.Equal(t, fit, false, "only one card of the server is left")
+}
+
+// A shared request fills the fullest card first, so whole cards stay whole for
+// requests that need one.
+func TestFit_SharedRequestPacksTheFullestCard(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})},
+		[]corev1.Pod{holderPod("uid-a", "gpu-a/GPU-2", 20000, 0)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10), shareCard("gpu-a", "GPU-2", 40000, 10)}
+
+	fit, allocated, reason := dev.Fit(devices, request(1, 5000), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-b"}}, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, allocated[RemoteGPUCommonWord][0].UUID, "gpu-a/GPU-2")
+}
+
+// Partial grants of one pod that add up to the card's memory are not a whole
+// grant: the next container of that pod still needs memory that is free.
+func TestFit_PartialGrantsOfAPodAreNotAWholeCard(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}
+	registerFitDevices(dev, devices)
+	prior := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{
+		{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 20000}},
+		{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 20000}},
+	}}
+
+	fit, _, reason := dev.Fit(devices, request(1, 20000), &corev1.Pod{}, nil, &prior)
+	assert.Equal(t, fit, false, "the card is already fully given out")
+	assert.Equal(t, common.ParseReason(reason)[common.CardInsufficientMemory], 1)
+}
+
+// Containers that each fit a server alone may not fit it together. The first
+// container's server must take all of them, since the rest are pinned to it.
+func TestFit_QualifiesAServerForThePodsContainersTogether(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	devices := []*device.DeviceUsage{
+		shareCard("gpu-a", "GPU-A1", 40000, 10),
+		shareCard("gpu-b", "GPU-B1", 40000, 10),
+		shareCard("gpu-b", "GPU-B2", 40000, 10),
+	}
+	registerFitDevices(dev, devices)
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
+		requestingContainer("first", 1, 30000),
+		requestingContainer("second", 1, 30000),
+	}}}
+	first, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+
+	fit, allocated, reason := dev.Fit(devices, first, pod, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b",
+		"gpu-a is smaller, but has room for one container only")
+
+	prior := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{allocated[RemoteGPUCommonWord]}}
+	fit, allocated, reason = dev.Fit(devices, first, pod, nil, &prior)
+	assert.Equal(t, fit, true, reason)
+	assert.Equal(t, serverOf(allocated[RemoteGPUCommonWord][0].UUID), "gpu-b")
+}
+
+// What a card offers is read with who holds it. A cached view from before
+// the card's split count shrank must not let one more pod on.
+func TestFit_UsesTheCurrentSplitCount(t *testing.T) {
+	split := gpu("GPU-1", 40000)
+	split.Count = 2
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{split})},
+		[]corev1.Pod{holderPod("uid-a", "gpu-a/GPU-1", 1000, 0), holderPod("uid-b", "gpu-a/GPU-1", 1000, 0)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}, request(1, 1000),
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-c"}}, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, common.ParseReason(reason)[common.CardTimeSlicingExhausted], 1)
+}
+
+// A whole grant keeps the card whole even after the card reads larger than
+// the grant recorded.
+func TestFit_NoSharingBesideAWholeGrantOnAGrownCard(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 80000)})},
+		[]corev1.Pod{holderPod("uid-whole", "gpu-a/GPU-1", 40000, 100)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+
+	fit, _, reason := dev.Fit([]*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 80000, 10)}, request(1, 10000),
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-c"}}, nil, nil)
+	assert.Equal(t, fit, false)
+	assert.Equal(t, common.ParseReason(reason)[common.ExclusiveDeviceAllocateConflict], 1)
+}
+
+// An ordinary init container is done before the app containers start, so the
+// two need the card one after the other, not together. A sidecar keeps
+// running beside them.
+func TestFit_OrdinaryInitContainerGivesItsCardBack(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	for _, sidecar := range []bool{false, true} {
+		dev := InitRemoteGPUDevice(testConfig())
+		devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}
+		registerFitDevices(dev, devices)
+		init := requestingContainer("init", 1, 30000)
+		if sidecar {
+			init.RestartPolicy = &always
+		}
+		pod := &corev1.Pod{Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{init},
+			Containers:     []corev1.Container{requestingContainer("app", 1, 30000)},
+		}}
+		first, err := dev.GenerateResourceRequests(&pod.Spec.InitContainers[0])
+		assert.NilError(t, err)
+
+		fit, allocated, reason := dev.Fit(devices, first, pod, nil, nil)
+		assert.Equal(t, fit, !sidecar, "sidecar=%v: %s", sidecar, reason)
+		if sidecar {
+			continue
+		}
+		prior := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{allocated[RemoteGPUCommonWord]}}
+		second, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+		assert.NilError(t, err)
+		fit, _, reason = dev.Fit(devices, second, pod, nil, &prior)
+		assert.Equal(t, fit, true, reason)
+	}
+}
+
+// Bind refuses a pod whose booking ran out after Filter: other pods may have
+// been put on its cards since.
+func TestValidateReservedServer_RequiresTheBooking(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", UID: "uid-p"}}
+	allocated := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{
+		{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 1000}},
+	}}
+	annos := map[string]string{}
+	dev.PatchAnnotations(pod, &annos, allocated)
+	assert.NilError(t, dev.ValidateReservedServer(pod, allocated))
+
+	dev.pool.release(pod.UID)
+	assert.ErrorContains(t, dev.ValidateReservedServer(pod, allocated), "booking")
+}
+
+// A later container of the pod may be the one another pod is in the way of.
+// That is reason enough to re-read the pool before refusing.
+func TestFit_RereadsWhenALaterContainerIsBlocked(t *testing.T) {
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-A", 40000), gpu("GPU-B", 40000)})}
+	stubFleet(t, nodes, []corev1.Pod{holderPod("uid-gone", "gpu-a/GPU-B", 20000, 0)}, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.snapshot(context.Background())
+	stubFleet(t, nodes, nil, nil) // the holder has gone, but the pool has not read it yet
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-p"}, Spec: corev1.PodSpec{Containers: []corev1.Container{
+		requestingContainer("small", 1, 5000),
+		requestingContainer("large", 2, 30000),
+	}}}
+	first, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+	assert.NilError(t, err)
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-A", 40000, 10), shareCard("gpu-a", "GPU-B", 40000, 10)}
+	fit, _, reason := dev.Fit(devices, first, pod, nil, nil)
+	assert.Equal(t, fit, true, reason)
+}
+
+// A pod's earlier booking from a failed attempt is not someone else's usage.
+func TestFit_IgnoresThePodsOwnBooking(t *testing.T) {
+	stubFleet(t, nil, nil, nil)
+	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.hold("uid-b", "gpu-a/GPU-1")
+	devices := []*device.DeviceUsage{shareCard("gpu-a", "GPU-1", 40000, 10)}
+	registerFitDevices(dev, devices)
+
+	fit, _, reason := dev.Fit(devices, request(1, 0), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-b"}}, nil, nil)
+	assert.Equal(t, fit, true, reason)
+	fit, _, _ = dev.Fit(devices, request(1, 0), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-c"}}, nil, nil)
+	assert.Equal(t, fit, false, "but it is for every other pod")
+}
+
+// The client applies CUDA_VISIBLE_DEVICES to the server's cards, which is what
+// keeps pods sharing a server out of each other's cards. Each container gets
+// its own list, keyed by name: the webhook may move containers around, and a
+// pod-wide list would show a container the cards its sibling was given.
+func TestPatchAnnotations_ListsTheVisibleCards(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	annos := map[string]string{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-a"}, Spec: corev1.PodSpec{
+		InitContainers: []corev1.Container{{Name: "lib"}},
+		Containers:     []corev1.Container{{Name: "a"}, {Name: "b"}, {Name: "cpu"}},
+	}}
+	got := dev.PatchAnnotations(pod, &annos, device.PodDevices{
+		RemoteGPUCommonWord: device.PodSingleDevice{
+			device.ContainerDevices{},
+			device.ContainerDevices{{Idx: 2, UUID: "gpu-a/GPU-2", Usedmem: 1000}, {Idx: 1, UUID: "gpu-a/GPU-1", Usedmem: 1000}},
+			device.ContainerDevices{{Idx: 3, UUID: "gpu-a/GPU-3", Usedmem: 1000}},
+			device.ContainerDevices{},
+		},
+	})
+	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"a"], "2,1")
+	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"b"], "3")
+	_, ok := got[VisibleDevicesAnnoPrefix+"lib"]
+	assert.Assert(t, !ok, "a container without cards gets no list")
+	_, ok = got[VisibleDevicesAnnoPrefix+"cpu"]
+	assert.Assert(t, !ok)
+	for key := range got {
+		if strings.HasPrefix(key, VisibleDevicesAnnoPrefix) {
+			assert.Equal(t, len(validation.IsQualifiedName(key)), 0, key)
+		}
+	}
+	u := dev.pool.usage("gpu-a/GPU-2", "")
+	assert.Equal(t, u.users, 1)
+	assert.Equal(t, u.mem, int64(1000))
+}
+
+func TestMutateAdmission_WiresTheVisibleCards(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{
+		Name: "app",
+		Env:  []corev1.EnvVar{{Name: visibleDevicesEnv, Value: "0"}},
+		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+			corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1"),
+		}},
+	}
+	_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	var found int
+	for _, env := range ctr.Env {
+		if env.Name == visibleDevicesEnv {
+			found++
+			assert.Equal(t, env.Value, "", "a literal value is replaced")
+			assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.annotations['"+VisibleDevicesAnnoPrefix+"app']")
+		}
+	}
+	assert.Equal(t, found, 1)
 }
