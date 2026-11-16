@@ -899,6 +899,15 @@ func (m *mpsV3Manager) release(ctx context.Context, key string) error {
 		return nil
 	}
 	m.generation++
+	if a.Prepared {
+		a.Prepared = false
+		m.allocations[key] = a
+		if err := m.save(); err != nil {
+			a.Prepared = true
+			m.allocations[key] = a
+			return err
+		}
+	}
 	exists, err := m.serverExists(ctx, a.Server)
 	if err != nil {
 		return err
@@ -909,15 +918,6 @@ func (m *mpsV3Manager) release(ctx context.Context, key string) error {
 		names, err := m.namespaceNames(ctx, a.Server)
 		if err != nil {
 			return err
-		}
-		if a.Prepared {
-			a.Prepared = false
-			m.allocations[key] = a
-			if err = m.save(); err != nil {
-				a.Prepared = true
-				m.allocations[key] = a
-				return err
-			}
 		}
 		if slices.Contains(names, a.Namespace) {
 			if _, err = m.run(ctx, "namespace", "delete", a.Namespace, "--server="+a.Server); err != nil {
@@ -1283,7 +1283,7 @@ func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
 	}
 	for key, a := range snapshot {
 		pod := live[a.PodUID]
-		if a.Prepared && pod != nil && !finishedMPSInitContainer(pod, a.Container) {
+		if a.Prepared && pod != nil {
 			continue
 		}
 		if !plugin.applyMutex.TryLock() {
@@ -1317,20 +1317,4 @@ func (plugin *NvidiaDevicePlugin) rollbackMPSV3(keys []string) {
 			klog.ErrorS(err, "rollback MPS allocation", "namespace", key)
 		}
 	}
-}
-
-// Keep normal containers' allocation across restarts: kubelet can reuse the
-// saved Allocate response without asking the plugin for a new namespace.
-func finishedMPSInitContainer(pod *corev1.Pod, name string) bool {
-	for _, ctr := range pod.Spec.InitContainers {
-		if ctr.Name != name || ctr.RestartPolicy != nil && *ctr.RestartPolicy == corev1.ContainerRestartPolicyAlways {
-			continue
-		}
-		for _, status := range pod.Status.InitContainerStatuses {
-			if status.Name == name && status.State.Terminated != nil && status.State.Terminated.ExitCode == 0 {
-				return true
-			}
-		}
-	}
-	return false
 }

@@ -1950,7 +1950,7 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 	devices := plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
 	if plugin.mpsV3 != nil {
 		for _, d := range devices {
-			if !plugin.mpsV3.gpuHealthy(rm.AnnotatedID(d.ID).GetID()) {
+			if !plugin.mpsV3.gpuHealthy(physicalDeviceID(d.ID)) {
 				d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			}
 		}

@@ -180,3 +180,30 @@ func TestMPSV3NodePolicy(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestMPSV3FitRetriesCompatibleMemoryGroup(t *testing.T) {
+	var devices []*device.DeviceUsage
+	for i, id := range []string{"GPU-a", "GPU-b", "GPU-c"} {
+		memory := int64(24 * 1024)
+		if i == 2 {
+			memory *= 2
+		}
+		devices = append(devices, &device.DeviceUsage{ID: id, Type: "NVIDIA", Mode: MpsV3Mode, Health: true, Count: 10, Totalcore: 100, Totalmem: memory})
+	}
+	nv := &NvidiaGPUDevices{}
+	request := device.ContainerDeviceRequest{Nums: 2, Type: NvidiaGPUDevice, MemPercentagereq: 50, Coresreq: 25}
+	ok, result, reason := nv.Fit(devices, request, &corev1.Pod{}, &device.NodeInfo{}, nil)
+	require.True(t, ok, reason)
+	require.Len(t, result[NvidiaGPUDevice], 2)
+	for _, selected := range result[NvidiaGPUDevice] {
+		require.Equal(t, int64(12*1024), selected.Usedmem)
+	}
+}
+
+func TestMPSV3RejectsPartialOverlapInEitherOrder(t *testing.T) {
+	a, b, c := device.ContainerDevice{UUID: "GPU-a"}, device.ContainerDevice{UUID: "GPU-b"}, device.ContainerDevice{UUID: "GPU-c"}
+	previous := device.PodSingleDevice{{a, b}}
+	require.False(t, mpsV3FitsPreviousSets(previous, c.UUID, 2, device.ContainerDevices{a}))
+	require.False(t, mpsV3FitsPreviousSets(previous, a.UUID, 2, device.ContainerDevices{c}))
+	require.True(t, mpsV3FitsPreviousSets(previous, b.UUID, 2, device.ContainerDevices{a}))
+}

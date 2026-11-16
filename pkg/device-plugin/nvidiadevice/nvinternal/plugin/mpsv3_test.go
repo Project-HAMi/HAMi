@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -450,18 +452,6 @@ func TestMPSV3PreservesForeignCDI(t *testing.T) {
 	require.Equal(t, foreign, data)
 }
 
-func TestMPSV3InitContainerCompletion(t *testing.T) {
-	pod := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init"}}}, Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{Name: "init", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}}}}
-	require.True(t, finishedMPSInitContainer(pod, "init"))
-	require.False(t, finishedMPSInitContainer(pod, "main"))
-	policy := corev1.ContainerRestartPolicyAlways
-	pod.Spec.InitContainers[0].RestartPolicy = &policy
-	require.False(t, finishedMPSInitContainer(pod, "init"))
-	pod.Spec.InitContainers[0].RestartPolicy = nil
-	pod.Status.InitContainerStatuses[0].State.Terminated.ExitCode = 1
-	require.False(t, finishedMPSInitContainer(pod, "init"))
-}
-
 func TestMPSV3RejectsCorruptState(t *testing.T) {
 	m, _ := testMPSV3(t)
 	a := testMPSAllocation(t, 0)
@@ -605,7 +595,7 @@ func TestMPSV3UnknownInventoryPreservesAllocation(t *testing.T) {
 	require.NoError(t, err)
 	f.serverCSV = a.Server + ",0,123,Ready"
 	require.ErrorContains(t, m.release(ctx, a.Namespace), "unexpected r620")
-	require.True(t, m.allocations[a.Namespace].Prepared)
+	require.False(t, m.allocations[a.Namespace].Prepared)
 	require.Contains(t, f.namespaces, a.Namespace)
 	require.FileExists(t, m.cdiPath(a.Namespace))
 }
@@ -698,4 +688,53 @@ func TestMPSV3AllocationHealthIsScopedToGPU(t *testing.T) {
 	f.fail = ""
 	plugin.reconcileMPSV3()
 	require.True(t, m.gpuHealthy("GPU-a"))
+}
+
+func TestMPSV3TimesliceComputeMode(t *testing.T) {
+	library := &nvmlmock.Interface{
+		DeviceGetHandleByUUIDFunc: func(id string) (nvml.Device, nvml.Return) {
+			if id == "GPU-missing" {
+				return nil, nvml.ERROR_NOT_FOUND
+			}
+			return &nvmlmock.Device{
+				GetComputeModeFunc: func() (nvml.ComputeMode, nvml.Return) {
+					switch id {
+					case "GPU-exclusive":
+						return nvml.COMPUTEMODE_EXCLUSIVE_PROCESS, nvml.SUCCESS
+					case "GPU-prohibited":
+						return nvml.COMPUTEMODE_PROHIBITED, nvml.SUCCESS
+					case "GPU-query-error":
+						return nvml.COMPUTEMODE_DEFAULT, nvml.ERROR_UNKNOWN
+					default:
+						return nvml.COMPUTEMODE_DEFAULT, nvml.SUCCESS
+					}
+				},
+			}, nvml.SUCCESS
+		},
+	}
+	m, _ := testMPSV3(t)
+	m.incompatibleGPUs = incompatibleMPSV3TimesliceGPUs(library, []string{
+		"GPU-a", "GPU-exclusive", "GPU-prohibited", "GPU-missing", "GPU-query-error",
+	})
+	require.True(t, m.gpuHealthy("GPU-a"))
+	for _, id := range []string{"GPU-exclusive", "GPU-prohibited", "GPU-missing", "GPU-query-error"} {
+		require.False(t, m.gpuHealthy(id), id)
+	}
+}
+
+func TestMPSV3ReplicaHealth(t *testing.T) {
+	const id = "GPU-7f40b924-1290-f254-98d4-1aa4acafc19d"
+	plugin := newTestPlugin(t)
+	m, _ := testMPSV3(t)
+	plugin.mpsV3 = m
+	m.incompatibleGPUs = map[string]bool{id: true}
+	plugin.rm = &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
+		return rm.Devices{id: {Device: kubeletdevicepluginv1beta1.Device{ID: id, Health: kubeletdevicepluginv1beta1.Healthy}}}
+	}}
+	devices := plugin.apiDevices()
+	require.NotEmpty(t, devices)
+	for _, d := range devices {
+		require.NotEqual(t, id, d.ID)
+		require.Equal(t, kubeletdevicepluginv1beta1.Unhealthy, d.Health)
+	}
 }

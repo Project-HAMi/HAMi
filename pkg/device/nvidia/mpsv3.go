@@ -241,6 +241,19 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 		if err := smPolicy.Validate(g, sms); err != nil {
 			return 0, false
 		}
+		_, remainder, _ := g.Partition(sms)
+		if remainder {
+			if allocated != nil && mpsV3HasRemainder((*allocated)[NvidiaGPUDevice], dev.ID) {
+				return 0, false
+			}
+			for _, p := range dev.PodInfos {
+				otherSMs, _ := MPSV3RequestedSMs(p.Annotations)
+				_, otherRemainder, _ := g.Partition(otherSMs)
+				if otherRemainder && mpsV3HasRemainder(p.Devices[NvidiaGPUDevice], dev.ID) {
+					return 0, false
+				}
+			}
+		}
 		charge, err := g.Percent(sms)
 		if err != nil || (cores > 0 && cores < charge) {
 			return 0, false
@@ -277,10 +290,13 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 
 func mpsV3FitsPreviousSets(previous device.PodSingleDevice, id string, count int64, selected device.ContainerDevices) bool {
 	for _, set := range previous {
-		if !slices.ContainsFunc(set, func(d device.ContainerDevice) bool { return d.UUID == id }) {
+		contains := func(uuid string) bool {
+			return slices.ContainsFunc(set, func(d device.ContainerDevice) bool { return d.UUID == uuid })
+		}
+		if !contains(id) && !slices.ContainsFunc(selected, func(d device.ContainerDevice) bool { return contains(d.UUID) }) {
 			continue
 		}
-		if int64(len(set)) != count {
+		if int64(len(set)) != count || !contains(id) {
 			return false
 		}
 		for _, chosen := range selected {
@@ -290,4 +306,13 @@ func mpsV3FitsPreviousSets(previous device.PodSingleDevice, id string, count int
 		}
 	}
 	return true
+}
+
+func mpsV3HasRemainder(previous device.PodSingleDevice, id string) bool {
+	for _, set := range previous {
+		if slices.ContainsFunc(set, func(d device.ContainerDevice) bool { return d.UUID == id }) {
+			return true
+		}
+	}
+	return false
 }

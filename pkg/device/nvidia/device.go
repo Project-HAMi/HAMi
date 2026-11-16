@@ -1024,6 +1024,47 @@ func cordonedDevices(nodeInfo *device.NodeInfo) map[string]struct{} {
 }
 
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	fit, result, reason := nv.fit(devices, request, pod, nodeInfo, allocated)
+	if fit || request.Nums < 2 || util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyTopology) {
+		return fit, result, reason
+	}
+	type limits struct{ memory, cores int64 }
+	groups := make(map[limits][]*device.DeviceUsage)
+	var order []limits
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
+		if dev.Mode != MpsV3Mode {
+			continue
+		}
+		cores, ok := mpsV3Fits(pod, dev, request.Nums, nil, request.Coresreq, allocated)
+		if !ok {
+			continue
+		}
+		key := limits{request.Memreq, cores}
+		if request.Memreq == 0 && request.MemPercentagereq != 101 {
+			key.memory = dev.Totalmem * request.MemPercentagereq / 100
+		}
+		if _, exists := groups[key]; !exists {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], dev)
+	}
+	if len(groups) > 1 {
+		for _, key := range order {
+			group := groups[key]
+			if int64(len(group)) < request.Nums {
+				continue
+			}
+			slices.Reverse(group)
+			if ok, selected, _ := nv.fit(group, request, pod, nodeInfo, allocated); ok {
+				return true, selected, ""
+			}
+		}
+	}
+	return fit, result, reason
+}
+
+func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
