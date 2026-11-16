@@ -158,11 +158,11 @@ func (m *mpsV3Manager) load() error {
 		return fmt.Errorf("read MPS allocation state: %w", err)
 	}
 	for key, a := range saved {
-		if a.Version != 0 && a.Version != mpsV3StateVersion {
+		if a.Version != mpsV3StateVersion {
 			return fmt.Errorf("unrecognized MPS allocation state version %d", a.Version)
 		}
-		if a.Version == mpsV3StateVersion && ((a.ComputeMode != nvidia.MPSV3NamespaceCap && a.ComputeMode != nvidia.MPSV3ServerTimeslice) ||
-			(a.SMCount > 0 && a.ComputeMode != nvidia.MPSV3NamespaceCap) || (a.SMCount == 0 && a.SMPolicy.Elastic())) {
+		if (a.ComputeMode != nvidia.MPSV3NamespaceCap && a.ComputeMode != nvidia.MPSV3ServerTimeslice) ||
+			(a.SMCount > 0 && a.ComputeMode != nvidia.MPSV3NamespaceCap) || (a.SMCount == 0 && a.SMPolicy.Elastic()) {
 			return fmt.Errorf("invalid MPS compute policy in allocation state for %q", key)
 		}
 		if key != a.Namespace || a.PodUID == "" || a.Container == "" || a.Namespace != mpsV3Name("ns", a.PodUID+"/"+a.Container) || len(a.GPUs) == 0 || !slices.IsSorted(a.GPUs) || a.Server != a.serverName() || a.Memory <= 0 || a.Percent < 1 || a.Percent > 100 || a.SMCount < 0 {
@@ -230,8 +230,8 @@ func (m *mpsV3Manager) start(ctx context.Context, live map[string]bool) (resultE
 
 func (m *mpsV3Manager) recover(ctx context.Context, live map[string]bool) error {
 	for _, a := range m.allocations {
-		if live[a.PodUID] && (a.Version != mpsV3StateVersion || a.ComputeMode != m.policy.ComputeMode) {
-			return fmt.Errorf("MPS allocation %s uses an older state format or different compute mode; drain the node first", a.Namespace)
+		if live[a.PodUID] && a.ComputeMode != m.policy.ComputeMode {
+			return fmt.Errorf("MPS allocation %s uses a different compute mode; drain the node first", a.Namespace)
 		}
 	}
 	if _, err := m.run(ctx, "compute-policy", "get", "timeslice"); err != nil {

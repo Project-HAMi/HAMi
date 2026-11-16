@@ -529,16 +529,16 @@ func TestMPSV3ServerTimesliceRecovery(t *testing.T) {
 	require.Equal(t, "unset", f.yield)
 }
 
-func TestMPSV3RejectsLiveLegacyState(t *testing.T) {
+func TestMPSV3RejectsUnversionedState(t *testing.T) {
 	m, f := testMPSV3(t)
 	a := testMPSAllocation(t, 0)
-	a.Version, a.ComputeMode, a.Prepared = 0, "", true
+	a.Version = 0
 	m.allocations[a.Namespace] = a
 	require.NoError(t, m.save())
-	require.NoError(t, m.load())
-	require.ErrorContains(t, m.recover(context.Background(), map[string]bool{a.PodUID: true}), "drain the node first")
+	clear(m.allocations)
+	require.ErrorContains(t, m.load(), "unrecognized MPS allocation state version 0")
+	require.Empty(t, m.allocations)
 	require.Empty(t, f.calls)
-	require.Equal(t, a, m.allocations[a.Namespace])
 }
 
 func TestMPSV3NodeConfigOverride(t *testing.T) {

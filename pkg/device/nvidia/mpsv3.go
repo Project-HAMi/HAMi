@@ -148,9 +148,6 @@ type MPSV3Geometry struct {
 }
 
 func MPSV3RequestedSMs(annotations map[string]string) (int64, error) {
-	if _, legacy := annotations["nvidia.com/mps-sm-count"]; legacy {
-		return 0, fmt.Errorf("use %s instead of nvidia.com/mps-sm-count", MPSV3SMCountAnnotation)
-	}
 	raw, ok := annotations[MPSV3SMCountAnnotation]
 	if !ok {
 		return 0, nil
