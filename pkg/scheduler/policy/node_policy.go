@@ -132,11 +132,11 @@ func nodeScorePolicy(policy string) string {
 // nodeScorePolicy returns the primary node sort key for device scorers.
 // Filtering policies such as superpod are not device scoring strategies.
 func nodeScorePolicy(policy string) string {
-	chain := nodeSortKeyChain(policy)
-	if len(chain) == 0 {
+	key := primaryNodeSortKey(policy)
+	if key == "" {
 		return util.NodeSchedulerPolicyBinpack.String()
 	}
-	return chain[0].String()
+	return key.String()
 }
 
 // lessByChain compares nodes i and j by the ordered sort-key chain parsed
