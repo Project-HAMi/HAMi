@@ -3,6 +3,10 @@ include version.mk Makefile.defs
 
 HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
 
+# Go module proxy for the image builds. Override it to use a mirror, e.g.
+# GOPROXY=https://goproxy.cn,direct make docker.
+GOPROXY ?= https://proxy.golang.org,direct
+
 ifndef GITHUB_ACTIONS
 	REVISION?=$(shell git rev-parse --short HEAD)
 else
@@ -27,7 +31,7 @@ docker:
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
-	--build-arg GOPROXY=https://goproxy.cn,direct \
+	--build-arg GOPROXY=$(GOPROXY) \
 	. -f=docker/Dockerfile -t ${IMG_NAME}:${IMG_TAG}
 
 dockerwithlib:
@@ -38,7 +42,7 @@ dockerwithlib:
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
-	--build-arg GOPROXY=https://goproxy.cn,direct \
+	--build-arg GOPROXY=$(GOPROXY) \
 	. -f=docker/Dockerfile.withlib -t ${IMG_NAME}:${IMG_TAG}
 
 tidy:

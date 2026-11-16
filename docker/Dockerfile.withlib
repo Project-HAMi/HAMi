@@ -4,7 +4,7 @@ FROM $GOLANG_IMAGE AS build
 
 FROM $GOLANG_IMAGE AS GOBUILD
 ADD . /k8s-vgpu
-ARG GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
