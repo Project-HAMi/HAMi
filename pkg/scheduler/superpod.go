@@ -31,6 +31,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	schedulerpolicy "github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -283,8 +284,9 @@ func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod
 		"rackNodeCounts", ctx.RackSlotCounts)
 }
 
-// nodeUsableSlots returns the total available device slots on a node by
-// summing Count - Used across all healthy devices.
+// nodeUsableSlots returns the number of healthy physical devices with
+// remaining allocatable capacity. Count and Used describe virtual shares, so
+// they determine whether a physical device is exhausted but not its capacity.
 func nodeUsableSlots(node *NodeUsage) int64 {
 	if node == nil {
 		return 0
@@ -294,8 +296,9 @@ func nodeUsableSlots(node *NodeUsage) int64 {
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
 			continue
 		}
-		avail := max(ds.Device.Count-ds.Device.Used, 0)
-		total += avail
+		if ds.Device.Count > ds.Device.Used {
+			total++
+		}
 	}
 	return total
 }
@@ -568,7 +571,7 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 			return baseScore
 		}
 		finalScore := baseScore + superpodRackBoost
-		if util.PolicyContains(policy, util.NodeSchedulerPolicySpread) {
+		if schedulerpolicy.nodePolicyUsesSpread(policy) {
 			finalScore = baseScore - superpodRackBoost
 		}
 		klog.V(5).InfoS("Superpod rack boost applied (anchored)",
@@ -614,7 +617,7 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 	}
 	boost := superpodRackBoost * float32(rackSlots) / float32(maxRackSlots)
 	finalScore := baseScore + boost
-	if util.PolicyContains(policy, util.NodeSchedulerPolicySpread) {
+	if schedulerpolicy.nodePolicyUsesSpread(policy) {
 		finalScore = baseScore - boost
 	}
 	klog.V(5).InfoS("Superpod rack boost applied (first pod)",

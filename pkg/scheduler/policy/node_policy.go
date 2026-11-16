@@ -92,6 +92,7 @@ func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
 	return chain
 }
 
+// nodePolicyUsesSpread reports whether spread is the primary node sort key.
 func nodePolicyUsesSpread(policy string) bool {
 	chain := nodeSortKeyChain(policy)
 	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread

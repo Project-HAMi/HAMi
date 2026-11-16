@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -139,6 +140,20 @@ func makeNodeUsage(name string, labels map[string]string, count, used int64) *No
 	}
 }
 
+func makeNodeUsageWithPhysicalCount(name string, labels map[string]string, physicalCount int, virtualCount, used int64) *NodeUsage {
+	devices := make([]*device.DeviceUsage, physicalCount)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{
+			ID:     fmt.Sprintf("%s-gpu%d", name, i),
+			Type:   nvidia.NvidiaGPUDevice,
+			Count:  virtualCount,
+			Used:   used,
+			Health: true,
+		}
+	}
+	return makeNodeUsageMultiDevices(name, labels, devices)
+}
+
 // makeNodeUsageMultiDevices creates a NodeUsage with multiple healthy GPU devices.
 func makeNodeUsageMultiDevices(name string, labels map[string]string, devices []*device.DeviceUsage) *NodeUsage {
 	list := make([]*policy.DeviceListsScore, 0, len(devices))
@@ -179,14 +194,18 @@ func newSuperpodTestScheduler() *Scheduler {
 	}
 }
 
-// registerSuperpodNode adds a node carrying the given labels and one healthy
-// GPU device with count slots to the scheduler's node snapshot.
-func (s *Scheduler) registerSuperpodNode(name string, labels map[string]string, count int64) {
+// registerSuperpodNode adds a node with the requested number of physical GPUs,
+// each advertising virtualCount allocatable shares.
+func (s *Scheduler) registerSuperpodNode(name string, labels map[string]string, physicalCount int, virtualCount int64) {
+	devices := make([]device.DeviceInfo, physicalCount)
+	for i := range devices {
+		devices[i] = makeGPUDeviceInfo(fmt.Sprintf("%s-gpu%d", name, i), uint(i), virtualCount)
+	}
 	s.addNode(name, &device.NodeInfo{
 		ID:   name,
 		Node: makeNodeWithLabels(name, labels),
 		Devices: map[string][]device.DeviceInfo{
-			nvidia.NvidiaGPUDevice: {makeGPUDeviceInfo(name+"-gpu0", 0, count)},
+			nvidia.NvidiaGPUDevice: devices,
 		},
 	})
 }
@@ -318,7 +337,7 @@ func TestNodeUsableSlots(t *testing.T) {
 		assert.Equal(t, int64(0), nodeUsableSlots(node))
 	})
 
-	t.Run("single healthy device", func(t *testing.T) {
+	t.Run("single physical device with virtual shares", func(t *testing.T) {
 		node := &NodeUsage{
 			Node: &corev1.Node{},
 			Devices: policy.DeviceUsageList{
@@ -327,7 +346,12 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(7), nodeUsableSlots(node))
+		assert.Equal(t, int64(1), nodeUsableSlots(node))
+	})
+
+	t.Run("fully consumed physical device excluded", func(t *testing.T) {
+		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 10)
+		assert.Equal(t, int64(0), nodeUsableSlots(node))
 	})
 
 	t.Run("unhealthy device excluded", func(t *testing.T) {
@@ -340,10 +364,10 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(1), nodeUsableSlots(node))
 	})
 
-	t.Run("negative available clamped to 0", func(t *testing.T) {
+	t.Run("exhausted physical device excluded", func(t *testing.T) {
 		node := &NodeUsage{
 			Node: &corev1.Node{},
 			Devices: policy.DeviceUsageList{
@@ -353,7 +377,12 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(7), nodeUsableSlots(node))
+		assert.Equal(t, int64(1), nodeUsableSlots(node))
+	})
+
+	t.Run("multiple physical devices count once each", func(t *testing.T) {
+		node := makeNodeUsageWithPhysicalCount("n1", nil, 3, 10, 4)
+		assert.Equal(t, int64(3), nodeUsableSlots(node))
 	})
 
 	t.Run("nil device entries skipped", func(t *testing.T) {
@@ -366,7 +395,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(1), nodeUsableSlots(node))
 	})
 
 	t.Run("nil device list entries skipped", func(t *testing.T) {
@@ -379,7 +408,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(1), nodeUsableSlots(node))
 	})
 }
 
@@ -653,21 +682,20 @@ func TestCollectRackSlotCounts(t *testing.T) {
 	t.Run("accumulates device slots per rack per superpod", func(t *testing.T) {
 		ctx.RackSlotCounts = make(map[string]map[string]int64)
 		nodes := map[string]*NodeUsage{
-			"n1": makeNodeUsage("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 0),
-			"n2": makeNodeUsage("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 0),
-			"n3": makeNodeUsage("n3", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-B"}, 10, 0),
-			"n4": makeNodeUsage("n4", map[string]string{util.SuperPodIDLabel: "sp-2", util.RackIDLabel: "rack-A"}, 10, 0),
+			"n1": makeNodeUsageWithPhysicalCount("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 2, 10, 0),
+			"n2": makeNodeUsageWithPhysicalCount("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 2, 10, 0),
+			"n3": makeNodeUsageWithPhysicalCount("n3", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-B"}, 1, 10, 0),
+			"n4": makeNodeUsageWithPhysicalCount("n4", map[string]string{util.SuperPodIDLabel: "sp-2", util.RackIDLabel: "rack-A"}, 1, 10, 0),
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
 
-		// rack-A in sp-1: n1(10) + n2(10) = 20
-		assert.Equal(t, int64(20), ctx.RackSlotCounts["sp-1"]["rack-A"])
-		// rack-B in sp-1: n3(10) = 10
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-B"])
-		// rack-A in sp-2: n4(10) = 10
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-2"]["rack-A"])
+		// rack-A in sp-1: n1(2 physical GPUs) + n2(2 physical GPUs) = 4
+		assert.Equal(t, int64(4), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		// rack-B in sp-1 and rack-A in sp-2 each have one physical GPU.
+		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-1"]["rack-B"])
+		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-2"]["rack-A"])
 	})
 
 	t.Run("skips nodes without superpod or rack label", func(t *testing.T) {
@@ -687,15 +715,15 @@ func TestCollectRackSlotCounts(t *testing.T) {
 	t.Run("skips nodes with insufficient single-pod capacity", func(t *testing.T) {
 		ctx.RackSlotCounts = make(map[string]map[string]int64)
 		nodes := map[string]*NodeUsage{
-			"n1": makeNodeUsage("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 4, 0),
-			"n2": makeNodeUsage("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 0),
+			"n1": makeNodeUsageWithPhysicalCount("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 4, 10, 0),
+			"n2": makeNodeUsageWithPhysicalCount("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 10, 0),
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		// podRequest=8: n1 has only 4 usable (skipped), n2 has 10 usable
+		// podRequest=8 physical devices: n1 has 4 (skipped), n2 has 10
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 8)
 
-		// Only n2 contributes: 10 slots
+		// Only n2 contributes: 10 physical devices
 		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -708,7 +736,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 0)
 
-		// count=0, used=0 → 0 usable slots
+		// A physical device with no virtual capacity contributes no usable slot.
 		assert.Equal(t, int64(0), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -716,14 +744,14 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		ctx.RackSlotCounts = make(map[string]map[string]int64)
 		nodes := map[string]*NodeUsage{
 			"nil-node": nil,
-			"n1":       makeNodeUsage("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 0),
+			"n1":       makeNodeUsageWithPhysicalCount("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 1, 10, 0),
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
 
-		// Only n1 contributes: 10 slots
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		// Only n1 contributes: one physical device.
+		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 }
 
@@ -765,6 +793,16 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
 		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicySpread.String())
 		assert.Equal(t, float32(5.0-superpodRackBoost), score)
+	})
+
+	t.Run("anchored binpack-first chain keeps the boost", func(t *testing.T) {
+		ctx := &superpodContext{
+			TaskAnchored:   true,
+			PreferredRacks: map[string]struct{}{"rack-A": {}},
+		}
+		node := makeNodeWithLabels("n1", map[string]string{util.RackIDLabel: "rack-A"})
+		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, "binpack,spread")
+		assert.Equal(t, float32(5.0+superpodRackBoost), score)
 	})
 
 	t.Run("anchored non-preferred rack keeps base score", func(t *testing.T) {
@@ -869,6 +907,18 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		// rack-A has 20 slots, the largest rack, boost = superpodRackBoost * 20/20 (full)
 		expectedBoost := superpodRackBoost
 		assert.Equal(t, float32(5.0-expectedBoost), score)
+	})
+
+	t.Run("first pod binpack-first chain keeps proportional boost", func(t *testing.T) {
+		ctx := &superpodContext{
+			podRequest: 1,
+			RackSlotCounts: map[string]map[string]int64{
+				"sp-1": {"rack-A": 20, "rack-B": 10},
+			},
+		}
+		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
+		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, "binpack,spread")
+		assert.Equal(t, float32(5.0+superpodRackBoost), score)
 	})
 
 	t.Run("first pod all slots in same rack gets full boost", func(t *testing.T) {
@@ -1313,15 +1363,15 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		// sp-2: two nodes with 10 usable slots each → capacity 20 ≥ 10, kept.
 		// plain node: no superpod label, rejected (superpod-aware scheduling
 		// only considers superpod nodes).
-		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 5)
-		s.registerSuperpodNode("n-sp2a", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10)
-		s.registerSuperpodNode("n-sp2b", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10)
+		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 5, 10)
+		s.registerSuperpodNode("n-sp2a", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 10)
+		s.registerSuperpodNode("n-sp2b", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 10)
 
 		// Candidate nodes mirror the registered snapshot.
 		nodes := map[string]*NodeUsage{
-			"n-sp1":   makeNodeUsage("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 5, 0),
-			"n-sp2a":  makeNodeUsage("n-sp2a", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 0),
-			"n-sp2b":  makeNodeUsage("n-sp2b", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 0),
+			"n-sp1":   makeNodeUsageWithPhysicalCount("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 5, 10, 0),
+			"n-sp2a":  makeNodeUsageWithPhysicalCount("n-sp2a", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 10, 0),
+			"n-sp2b":  makeNodeUsageWithPhysicalCount("n-sp2b", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 10, 0),
 			"n-plain": makeNodeUsage("n-plain", map[string]string{}, 10, 0),
 		}
 		failed := map[string]string{}
@@ -1356,11 +1406,11 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		// sp-1's capacity is spread across two nodes: only one of them is in
 		// the candidate set. The full snapshot must still see both, so sp-1
 		// has capacity 6+6=12 ≥ 12 and its candidate node survives.
-		s.registerSuperpodNode("n-sp1a", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6)
-		s.registerSuperpodNode("n-sp1b", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6)
+		s.registerSuperpodNode("n-sp1a", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
+		s.registerSuperpodNode("n-sp1b", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
 
 		nodes := map[string]*NodeUsage{
-			"n-sp1a": makeNodeUsage("n-sp1a", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 0),
+			"n-sp1a": makeNodeUsageWithPhysicalCount("n-sp1a", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10, 0),
 		}
 		failed := map[string]string{}
 
