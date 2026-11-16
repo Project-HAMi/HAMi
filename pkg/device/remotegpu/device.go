@@ -49,6 +49,9 @@ const (
 	InRequestAnnos = "hami.io/remote-gpu-devices-to-allocate"
 	AllocatedAnnos = "hami.io/remote-gpu-devices-allocated"
 
+	// RemoteGPUPodLabel marks a client Pod the remote GPU monitor should watch.
+	RemoteGPUPodLabel = "hami.io/remote-gpu"
+
 	// LupineServerAnno carries the scheduler's placement decision to the
 	// client container through the downward API. There is no device plugin on
 	// a GPU-less client node to inject it at Allocate time.
@@ -61,6 +64,7 @@ const (
 
 	lupineServerEnv     = "LUPINE_SERVER"
 	lupineWorkloadIDEnv = "LUPINE_WORKLOAD_ID"
+	remotePodUIDEnv     = "HAMI_REMOTE_POD_UID"
 
 	// DefaultLupinePort is lupine's listen port when a server node does not
 	// override it through the LupineServerLabel value.
@@ -221,13 +225,31 @@ func (dev *RemoteGPUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.
 			},
 		},
 	})
-	// Pod UID is the workload identity lupine's usage endpoint groups by.
-	setEnv(ctr, corev1.EnvVar{
-		Name: lupineWorkloadIDEnv,
+	// Kubelet expands the UID before launching the container. Admission cannot
+	// know the UID of a new Pod; container names are stable across restarts.
+	// A value the user already set to something else would make Lupine report
+	// an identity the monitor cannot match, so admission refuses it.
+	if err := rejectForeignWorkloadIdentity(ctr); err != nil {
+		return false, err
+	}
+	if pod != nil {
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		pod.Labels[RemoteGPUPodLabel] = "true"
+	}
+	filtered := ctr.Env[:0]
+	for _, env := range ctr.Env {
+		if env.Name != remotePodUIDEnv && env.Name != lupineWorkloadIDEnv {
+			filtered = append(filtered, env)
+		}
+	}
+	ctr.Env = append(filtered, corev1.EnvVar{
+		Name: remotePodUIDEnv,
 		ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.uid"},
 		},
-	})
+	}, corev1.EnvVar{Name: lupineWorkloadIDEnv, Value: "$(" + remotePodUIDEnv + ")/" + ctr.Name})
 	// Last, because it appends to pod.Spec.InitContainers and ctr may point
 	// into that slice: the webhook hands out &pod.Spec.InitContainers[i] for an
 	// init container that asks for a card. Appending can move the backing
@@ -880,6 +902,37 @@ func resourceValue(ctr *corev1.Container, name string) (int64, bool) {
 	}
 	n, ok := v.AsInt64()
 	return n, ok
+}
+
+// rejectForeignWorkloadIdentity refuses a workload identity admission would
+// otherwise replace. The monitor matches Lupine's client_id to the Pod UID
+// and container name, so a different value cannot be attributed.
+func rejectForeignWorkloadIdentity(ctr *corev1.Container) error {
+	wantID := "$(" + remotePodUIDEnv + ")/" + ctr.Name
+	for _, env := range ctr.Env {
+		switch env.Name {
+		case remotePodUIDEnv:
+			if !canonicalPodUIDEnv(env) {
+				return fmt.Errorf("container %q sets %s; leave it unset so admission can use the Pod UID", ctr.Name, remotePodUIDEnv)
+			}
+		case lupineWorkloadIDEnv:
+			if env.ValueFrom != nil || env.Value != wantID {
+				return fmt.Errorf("container %q sets %s to %q; leave it unset so admission can use the Pod UID and container name", ctr.Name, lupineWorkloadIDEnv, env.Value)
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalPodUIDEnv(env corev1.EnvVar) bool {
+	if env.Value != "" || env.ValueFrom == nil || env.ValueFrom.FieldRef == nil {
+		return false
+	}
+	src := env.ValueFrom
+	if src.ConfigMapKeyRef != nil || src.SecretKeyRef != nil || src.ResourceFieldRef != nil {
+		return false
+	}
+	return src.FieldRef.FieldPath == "metadata.uid"
 }
 
 // setEnv replaces an env var of the same name rather than appending a second

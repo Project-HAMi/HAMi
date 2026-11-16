@@ -46,6 +46,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -112,6 +113,7 @@ type Config struct {
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	BirenConfig     biren.BirenConfig         `yaml:"biren"`
+	TecoConfig      tecorigin.TecoConfig      `yaml:"tecorigin"`
 	RemoteGPUConfig remotegpu.RemoteGPUConfig `yaml:"remotegpu"`
 	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
@@ -145,8 +147,8 @@ func InitDevicesWithConfig(config *Config) error {
 			return
 		}
 		device.DevicesMap[dev.CommonWord()] = dev
-		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
-		klog.Infof("%s device initialized successfully", commonWord)
+		device.DevicesToHandle = append(device.DevicesToHandle, dev.CommonWord())
+		klog.Infof("%s device initialized successfully", dev.CommonWord())
 	}
 
 	// Wrapper for each device's initialization function to include type assertion check
@@ -175,7 +177,14 @@ func InitDevicesWithConfig(config *Config) error {
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonHCUCommonWord)
 			}
-			return hygon.InitHCUDevice(hygonConfig), nil
+			if err := hygonConfig.Apply(); err != nil {
+				return nil, err
+			}
+			dev := hygon.InitHCUDevice(hygonConfig)
+			if dev == nil {
+				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonHCUCommonWord)
+			}
+			return dev, nil
 		}, config.HygonConfig},
 		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
@@ -254,6 +263,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return biren.InitBirenDevice(birenConfig), nil
 		}, config.BirenConfig},
+		{tecorigin.TecoDevice, tecorigin.TecoCommonWord, func(cfg any) (device.Devices, error) {
+			tecoConfig, ok := cfg.(tecorigin.TecoConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", tecorigin.TecoCommonWord)
+			}
+			return tecorigin.InitTecoDevice(tecoConfig), nil
+		}, config.TecoConfig},
 		{remotegpu.RemoteGPUDevice, remotegpu.RemoteGPUCommonWord, func(cfg any) (device.Devices, error) {
 			remoteGPUConfig, ok := cfg.(remotegpu.RemoteGPUConfig)
 			if !ok {
@@ -311,6 +327,7 @@ func anyDeviceConfigured(config *Config) bool {
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
+		!reflect.DeepEqual(config.TecoConfig, tecorigin.TecoConfig{}) ||
 		!reflect.DeepEqual(config.RemoteGPUConfig, remotegpu.RemoteGPUConfig{}) ||
 		len(config.VNPUs.Configs) > 0
 }
@@ -454,11 +471,21 @@ iluvatars:
     resourceCountName: iluvatar.ai/MR-V100-vgpu
     resourceMemoryName: iluvatar.ai/MR-V100.vMem
     resourceCoreName: iluvatar.ai/MR-V100.vCore
+  - chipName: MR-V100A
+    commonWord: MR-V100A
+    resourceCountName: iluvatar.ai/MR-V100A-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V100A.vMem
+    resourceCoreName: iluvatar.ai/MR-V100A.vCore
   - chipName: MR-V50
     commonWord: MR-V50
     resourceCountName: iluvatar.ai/MR-V50-vgpu
     resourceMemoryName: iluvatar.ai/MR-V50.vMem
     resourceCoreName: iluvatar.ai/MR-V50.vCore
+  - chipName: MR-V50A
+    commonWord: MR-V50A
+    resourceCountName: iluvatar.ai/MR-V50A-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V50A.vMem
+    resourceCoreName: iluvatar.ai/MR-V50A.vCore
   - chipName: BI-V150
     commonWord: BI-V150
     resourceCountName: iluvatar.ai/BI-V150-vgpu

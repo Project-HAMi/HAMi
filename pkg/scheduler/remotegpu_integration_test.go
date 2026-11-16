@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -363,6 +365,60 @@ func TestRemoteGPU_BindSelectorMismatchReleasesOnlyRejectedPodsBooking(t *testin
 	reservedScores, err := s.calcScore(&reservedNodes, reservedReqs, reserved, map[string]string{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(reservedScores.NodeList), 0)
+}
+
+// When Filter fails to patch pod annotations, any RemoteGPU reservation made
+// for that pod must be rolled back immediately so that another pod can acquire
+// the server's cards without waiting for heldTTL.
+func TestRemoteGPU_FilterAnnotationPatchFailureReleasesReservation(t *testing.T) {
+	gpuA := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
+	gpuB := lupineServerNode("gpu-b", "10.0.0.6", []*device.DeviceInfo{fleetGPU("GPU-b", 40000)})
+	clientNode := gpulessNode("cpu-1")
+	podA := remoteGPUPod("pod-a", 1, 0)
+	podB := remoteGPUPod("pod-b", 1, 0)
+	other := remoteGPUPod("other", 1, 0)
+
+	dev := setupRemoteGPUScheduler(t, gpuA, gpuB, clientNode, podA, podB, other)
+	s := remoteGPUBindScheduler(t, []*corev1.Node{gpuA, gpuB, clientNode}, podA, podB, other)
+
+	// Hold gpu-b for other pod to verify targeted cleanup does not release
+	// reservations of other pods.
+	otherAllocation := device.PodDevices{remotegpu.RemoteGPUCommonWord: device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-b/GPU-b", Type: remotegpu.RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
+	}}
+	dev.PatchAnnotations(other, &map[string]string{}, otherAllocation)
+
+	fakeClient, ok := client.KubeClient.(*fake.Clientset)
+	assert.Assert(t, ok)
+	fakeClient.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		patchAction, ok := action.(k8stesting.PatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		if patchAction.GetName() == podA.Name {
+			return true, nil, fmt.Errorf("injected annotation patch error")
+		}
+		return false, nil, nil
+	})
+
+	filtered, err := s.Filter(extenderv1.ExtenderArgs{Pod: podA, NodeNames: &[]string{clientNode.Name}})
+	assert.Assert(t, err != nil, "Filter must fail when annotation patch fails")
+	assert.Assert(t, filtered == nil)
+
+	// gpu-a must NOT remain reserved by the failed podA.
+	for _, pDev := range dev.Inspect() {
+		if pDev.Device.ID == "gpu-a/GPU-a" {
+			assert.Assert(t, !pDev.Reserved, "failed Filter patch must not leave card reserved")
+		}
+		if pDev.Device.ID == "gpu-b/GPU-b" {
+			assert.Assert(t, pDev.Reserved, "other pod's reservation on gpu-b must remain intact")
+		}
+	}
+
+	// podB must be able to immediately acquire gpu-a during Filter.
+	filteredB, errB := s.Filter(extenderv1.ExtenderArgs{Pod: podB, NodeNames: &[]string{clientNode.Name}})
+	assert.NilError(t, errB)
+	assert.DeepEqual(t, *filteredB.NodeNames, []string{clientNode.Name})
 }
 
 // Two lupine servers with one free card each must not satisfy a two-card

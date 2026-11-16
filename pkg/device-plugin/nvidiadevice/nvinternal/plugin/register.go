@@ -163,7 +163,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		}
 
 		registeredmem := int64(memoryTotal / 1024 / 1024)
-		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
+		if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
 			registeredmem = int64(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
 			klog.V(3).Infof("Device id=%v: MemoryScaling=%v, registeredmem=%v", idx, *plugin.schedulerConfig.DeviceMemoryScaling, registeredmem)
 		}
@@ -186,13 +186,18 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 		}
 		Model = nvidia.NormalizeDeviceModel(Model)
 		devcore := int64(100)
-		if !isMigMode {
+		if !isMigMode && plugin.schedulerConfig.DeviceCoreScaling != nil {
 			devcore = int64(*plugin.schedulerConfig.DeviceCoreScaling * 100)
 		}
+		deviceSplitCount := uint(10)
+		if plugin.schedulerConfig.DeviceSplitCount != nil {
+			deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+		}
+
 		info := &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
-			Count:   int64(*plugin.schedulerConfig.DeviceSplitCount),
+			Count:   int64(deviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: devcore,
 			Type:    Model,

@@ -51,13 +51,15 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	numInit := len(pod.Spec.InitContainers)
 
 	type devState struct {
-		sc   usage // running sum of sidecars declared so far
-		peak usage // peak concurrent usage observed during the init phase
-		app  usage // sum over app containers
+		sc       usage // running sum of sidecars declared so far
+		peak     usage // peak concurrent usage observed during the init phase
+		app      usage // sum over app containers
+		coreMask int64 // union of every reserved core identity across phases
 	}
 
 	collapsed := make(PodDevices)
 	for devType, podSingle := range raw {
+		coreAccounting, coresAreMasks := GetDevices()[devType].(CoreMaskAccounting)
 		states := make(map[string]*devState)
 		get := func(uuid string) *devState {
 			s, ok := states[uuid]
@@ -69,6 +71,12 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 		}
 
 		for cidx, ctrDevs := range podSingle {
+			if coresAreMasks {
+				for _, dev := range ctrDevs {
+					s := get(dev.UUID)
+					s.coreMask = coreAccounting.AccumulateCores(s.coreMask, dev.Usedcores)
+				}
+			}
 			switch {
 			case cidx < numInit && isSidecarAt(pod, cidx):
 				for _, dev := range ctrDevs {
@@ -102,11 +110,17 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 		collapsedSingle := make(PodSingleDevice, 1)
 		var containerDevs ContainerDevices
 		for uuid, s := range states {
+			cores := max(s.peak.cores, s.sc.cores+s.app.cores)
+			if coresAreMasks {
+				// Different phases can select different core IDs. Reserve all
+				// of them until init completion releases the init-only cores.
+				cores = s.coreMask
+			}
 			containerDevs = append(containerDevs, ContainerDevice{
 				UUID:      uuid,
 				Type:      devType,
 				Usedmem:   max(s.peak.mem, s.sc.mem+s.app.mem),
-				Usedcores: max(s.peak.cores, s.sc.cores+s.app.cores),
+				Usedcores: cores,
 				Slots:     max(max(s.peak.slots, s.sc.slots+s.app.slots), 1),
 			})
 		}

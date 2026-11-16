@@ -1528,10 +1528,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%s", hostHookPath, sharedCacheName)
-				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
+				if plugin.schedulerConfig.DeviceMemoryScaling != nil && *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
-				if *plugin.schedulerConfig.LogLevel != "" {
+				if plugin.schedulerConfig.LogLevel != nil && *plugin.schedulerConfig.LogLevel != "" {
 					response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
 				}
 				if plugin.schedulerConfig.DisableCoreLimit {
@@ -1879,7 +1879,11 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
-	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
+	deviceSplitCount := uint(10)
+	if plugin.schedulerConfig.DeviceSplitCount != nil {
+		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
+	}
+	return plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
 }
 
 // wholeGPUDisableHAMiCore turns on injecting CUDA_DISABLE_CONTROL=true
