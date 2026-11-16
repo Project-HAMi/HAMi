@@ -24,13 +24,23 @@ func acquireGranted(controller *driverAdmissionController,
 	return granted
 }
 
-func startAdmission(controller *driverAdmissionController,
+// startAdmission requests a permit in a goroutine. A request that still waits
+// when the test ends is cancelled through shutdown, so the goroutine exits.
+func startAdmission(t *testing.T, controller *driverAdmissionController,
 	priority driverAdmissionPriority) <-chan admissionGrant {
+	t.Helper()
+	shutdown := make(chan struct{})
+	done := make(chan struct{})
 	result := make(chan admissionGrant, 1)
 	go func() {
-		granted, borrowed := controller.acquire(priority, nil, nil)
+		defer close(done)
+		granted, borrowed := controller.acquire(priority, nil, shutdown)
 		result <- admissionGrant{granted, borrowed}
 	}()
+	t.Cleanup(func() {
+		close(shutdown)
+		<-done
+	})
 	return result
 }
 
@@ -83,7 +93,7 @@ func expectWaiting(t *testing.T, result <-chan admissionGrant) {
 
 func TestDriverAdmissionReleaseUsesOwnSlotFirst(t *testing.T) {
 	controller := newDriverAdmissionController(4)
-	if waitGranted(t, startAdmission(controller, driverAdmissionRelease)).borrowed {
+	if waitGranted(t, startAdmission(t, controller, driverAdmissionRelease)).borrowed {
 		t.Fatal("the first release borrowed a forward permit")
 	}
 	if releaseActive, _ := controllerState(controller); !releaseActive {
@@ -93,14 +103,14 @@ func TestDriverAdmissionReleaseUsesOwnSlotFirst(t *testing.T) {
 
 func TestDriverAdmissionReleaseBorrowsBelowCap(t *testing.T) {
 	controller := newDriverAdmissionController(4)
-	waitGranted(t, startAdmission(controller, driverAdmissionRelease))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionRelease))
 	for index := 0; index < 2; index++ {
-		if !waitGranted(t, startAdmission(controller, driverAdmissionRelease)).borrowed {
+		if !waitGranted(t, startAdmission(t, controller, driverAdmissionRelease)).borrowed {
 			t.Fatal("release did not borrow an idle forward permit")
 		}
 	}
-	expectWaiting(t, startAdmission(controller, driverAdmissionRelease))
-	waitGranted(t, startAdmission(controller, driverAdmissionInit))
+	expectWaiting(t, startAdmission(t, controller, driverAdmissionRelease))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionInit))
 	if got := controller.activeCount(); got != 4 {
 		t.Fatalf("active admissions=%d, want 4", got)
 	}
@@ -108,10 +118,10 @@ func TestDriverAdmissionReleaseBorrowsBelowCap(t *testing.T) {
 
 func TestDriverAdmissionTwoPermitsNeverBorrow(t *testing.T) {
 	controller := newDriverAdmissionController(2)
-	waitGranted(t, startAdmission(controller, driverAdmissionRelease))
-	release := startAdmission(controller, driverAdmissionRelease)
+	waitGranted(t, startAdmission(t, controller, driverAdmissionRelease))
+	release := startAdmission(t, controller, driverAdmissionRelease)
 	expectWaiting(t, release)
-	waitGranted(t, startAdmission(controller, driverAdmissionRetain))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionRetain))
 	controller.release(driverAdmissionRetain, false)
 	expectWaiting(t, release)
 	if _, borrowed := controllerState(controller); borrowed != 0 {
@@ -121,12 +131,12 @@ func TestDriverAdmissionTwoPermitsNeverBorrow(t *testing.T) {
 
 func TestDriverAdmissionReleaseDoesNotBorrowWhileForwardWaits(t *testing.T) {
 	controller := newDriverAdmissionController(3)
-	waitGranted(t, startAdmission(controller, driverAdmissionRelease))
-	waitGranted(t, startAdmission(controller, driverAdmissionInit))
-	waitGranted(t, startAdmission(controller, driverAdmissionInit))
-	init := startAdmission(controller, driverAdmissionInit)
+	waitGranted(t, startAdmission(t, controller, driverAdmissionRelease))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionInit))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionInit))
+	init := startAdmission(t, controller, driverAdmissionInit)
 	waitQueued(t, controller, driverAdmissionInit)
-	release := startAdmission(controller, driverAdmissionRelease)
+	release := startAdmission(t, controller, driverAdmissionRelease)
 	waitQueued(t, controller, driverAdmissionRelease)
 
 	controller.release(driverAdmissionInit, false)
@@ -136,12 +146,12 @@ func TestDriverAdmissionReleaseDoesNotBorrowWhileForwardWaits(t *testing.T) {
 
 func TestDriverAdmissionBorrowedPermitReturnsToForwardPool(t *testing.T) {
 	controller := newDriverAdmissionController(3)
-	waitGranted(t, startAdmission(controller, driverAdmissionRelease))
-	if !waitGranted(t, startAdmission(controller, driverAdmissionRelease)).borrowed {
+	waitGranted(t, startAdmission(t, controller, driverAdmissionRelease))
+	if !waitGranted(t, startAdmission(t, controller, driverAdmissionRelease)).borrowed {
 		t.Fatal("release did not borrow an idle forward permit")
 	}
-	waitGranted(t, startAdmission(controller, driverAdmissionInit))
-	init := startAdmission(controller, driverAdmissionInit)
+	waitGranted(t, startAdmission(t, controller, driverAdmissionInit))
+	init := startAdmission(t, controller, driverAdmissionInit)
 	expectWaiting(t, init)
 
 	controller.release(driverAdmissionRelease, true)
@@ -154,8 +164,8 @@ func TestDriverAdmissionBorrowedPermitReturnsToForwardPool(t *testing.T) {
 
 func TestDriverAdmissionInitNeverTakesReleaseSlot(t *testing.T) {
 	controller := newDriverAdmissionController(2)
-	waitGranted(t, startAdmission(controller, driverAdmissionInit))
-	expectWaiting(t, startAdmission(controller, driverAdmissionInit))
+	waitGranted(t, startAdmission(t, controller, driverAdmissionInit))
+	expectWaiting(t, startAdmission(t, controller, driverAdmissionInit))
 	if releaseActive, _ := controllerState(controller); releaseActive {
 		t.Fatal("init took the release slot")
 	}
