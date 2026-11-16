@@ -1,6 +1,9 @@
 English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
-<img src="imgs/hami-horizontal-colordark.png" width="600px" alt="HAMi logo">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="imgs/hami-horizontal-color-white.svg">
+  <img src="imgs/hami-horizontal-color-black.svg" width="600px" alt="HAMi logo">
+</picture>
 
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
@@ -8,7 +11,7 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Project-HAMi/HAMi/badge)](https://scorecard.dev/viewer/?uri=github.com/Project-HAMi/HAMi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
-[![codecov](https://app.codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://app.codecov.io/gh/Project-HAMi/HAMi)
+[![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://app.codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
@@ -19,13 +22,19 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 **Kubernetes GPU virtualization and heterogeneous accelerator scheduling for AI infrastructure.**
 
-![HAMi Architecture](imgs/hami-architecture.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="imgs/hami-architecture-dark.png">
+  <img src="imgs/hami-architecture.png" alt="HAMi Architecture">
+</picture>
 
 HAMi stands for **Heterogeneous AI Computing Virtualization Middleware**. Formerly known as `k8s-vGPU-scheduler`, HAMi helps platform teams share expensive GPUs and other AI accelerators across Kubernetes workloads, isolate device memory and compute, and schedule pods with device-aware policies without changing application code.
 
 HAMi is a [CNCF Incubating](https://www.cncf.io/projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
 
-![CNCF logo](imgs/cncf-logo.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="imgs/cncf-color-whitetext.svg">
+  <img src="imgs/cncf-color.svg" width="300px" alt="CNCF logo">
+</picture>
 
 ## Documentation
 
