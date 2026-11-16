@@ -510,11 +510,17 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 	}
 }
 
+var lastSyncSuccessDesc = prometheus.NewDesc(
+	"hami_scheduler_last_sync_success_timestamp_seconds",
+	"Timestamp of the last successful sync of the scheduler's internal node/device cache.",
+	nil, nil,
+)
+
 // collectSchedulerStateMetrics emits hami_scheduler_is_leader and
 // hami_scheduler_cache_synced as gauges (0 or 1) every scrape. These allow
 // operators to alert on leader-loss or cache-desync without log-scraping.
-// hami_scheduler_last_sync_success_timestamp_seconds is emitted only by the
-// leader, after its first successful sync.
+// hami_scheduler_last_sync_success_timestamp_seconds shows the sync loop
+// liveness of the leader; it is emitted only after the first sync.
 func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometheus.Metric) {
 	isLeaderDesc := prometheus.NewDesc(
 		"hami_scheduler_is_leader",
@@ -524,11 +530,6 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	cacheSyncedDesc := prometheus.NewDesc(
 		"hami_scheduler_cache_synced",
 		"1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.",
-		nil, nil,
-	)
-	lastSyncSuccessDesc := prometheus.NewDesc(
-		"hami_scheduler_last_sync_success_timestamp_seconds",
-		"Timestamp of the last successful sync of the scheduler's internal node/device cache.",
 		nil, nil,
 	)
 
