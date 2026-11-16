@@ -248,65 +248,51 @@ func TestLess(t *testing.T) {
 			j:        1,
 			expected: false,
 		},
+		{
+			name: "superpod then spread uses spread score direction",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 20},
+					{NodeID: "node2", Score: 10},
+				},
+				Policy: "superpod,spread",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
+		},
+		{
+			name: "binpack then spread uses binpack score direction",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 10},
+					{NodeID: "node2", Score: 20},
+				},
+				Policy: "binpack,spread",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
+		},
+		{
+			name: "superpod without sort key defaults to binpack",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 10},
+					{NodeID: "node2", Score: 20},
+				},
+				Policy: "superpod",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.nodeScoreList.Less(test.i, test.j)
 			assert.Equal(t, test.expected, result)
-		})
-	}
-}
-
-func TestLessByChain(t *testing.T) {
-	tests := []struct {
-		name     string
-		policy   string
-		first    *NodeScore
-		second   *NodeScore
-		expected bool
-	}{
-		{
-			name:     "superpod then spread uses descending score",
-			policy:   "superpod,spread",
-			first:    &NodeScore{NodeID: "a", Score: 20},
-			second:   &NodeScore{NodeID: "b", Score: 10},
-			expected: true,
-		},
-		{
-			name:     "superpod then binpack uses ascending score",
-			policy:   "superpod,binpack",
-			first:    &NodeScore{NodeID: "a", Score: 10},
-			second:   &NodeScore{NodeID: "b", Score: 20},
-			expected: true,
-		},
-		{
-			name:     "first sort key decides a mixed chain",
-			policy:   "binpack,spread",
-			first:    &NodeScore{NodeID: "a", Score: 10},
-			second:   &NodeScore{NodeID: "b", Score: 20},
-			expected: true,
-		},
-		{
-			name:     "unrecognized keys fall back to binpack",
-			policy:   "superpod",
-			first:    &NodeScore{NodeID: "a", Score: 10},
-			second:   &NodeScore{NodeID: "b", Score: 20},
-			expected: true,
-		},
-		{
-			name:     "equal scores use node id as deterministic tiebreak",
-			policy:   "superpod,spread",
-			first:    &NodeScore{NodeID: "a", Score: 10},
-			second:   &NodeScore{NodeID: "b", Score: 10},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			list := NodeScoreList{NodeList: []*NodeScore{tt.first, tt.second}, Policy: tt.policy}
-			assert.Equal(t, tt.expected, list.Less(0, 1))
 		})
 	}
 }
