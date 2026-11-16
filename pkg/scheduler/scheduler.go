@@ -34,6 +34,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -46,6 +47,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	metrics "github.com/Project-HAMi/HAMi/pkg/metrics"
@@ -100,6 +102,10 @@ type Scheduler struct {
 	// produce half-applied accounting.
 	allocLock sync.Mutex
 
+	// refitWrites keeps the last NUMA refit this replica made for each pod,
+	// until the informer shows a newer state. Guarded by allocLock.
+	refitWrites map[k8stypes.UID]refitWrite
+
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
 	allocationMetricsOnce sync.Once
 }
@@ -128,14 +134,19 @@ func NewScheduler() *Scheduler {
 				default:
 				}
 			},
-			OnStoppedLeading: func() {
-				s.synced.Store(false)
-			},
+			OnStoppedLeading: s.onStoppedLeading,
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) onStoppedLeading() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.overviewstatus = make(map[string]*NodeUsage)
+	s.synced.Store(false)
 }
 
 func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
@@ -302,6 +313,9 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !ok {
 		return
 	}
+	if oldPod, ok := oldObj.(*corev1.Pod); ok {
+		s.observeAllocateResult(oldPod, newPod)
+	}
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
@@ -343,7 +357,101 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	s.podManager.UpdatePod(newPod)
 
-	s.releaseCompletedInitContainersLocked(newPod, pi, nil)
+	rawDevices, current := s.syncAllocationLocked(oldObj, newPod, pi)
+	if !current {
+		return
+	}
+
+	s.releaseCompletedInitContainersLocked(newPod, pi, rawDevices)
+}
+
+// allocationRewritten reports whether an update changed a pod's device
+// allocation on the same node, as a NUMA refit does. The first assignment
+// and a removed allocation don't count.
+func allocationRewritten(oldPod, newPod *corev1.Pod) bool {
+	if oldPod.Annotations[util.AssignedNodeAnnotations] != newPod.Annotations[util.AssignedNodeAnnotations] {
+		return false
+	}
+	for _, key := range device.SupportDevices {
+		before, after := oldPod.Annotations[key], newPod.Annotations[key]
+		if before != "" && after != "" && before != after {
+			return true
+		}
+	}
+	return false
+}
+
+// syncAllocationLocked updates a tracked pod's devices and quota when an
+// update changes its allocation, for example after a NUMA refit on another
+// replica (#3366).
+//
+// The replica that did the refit has already updated its cache. Updates that
+// still show the old devices are older than the refit, so for up to a minute
+// they are skipped, also for the init release.
+//
+// It returns the decoded allocation (nil if not needed), and false if the
+// update must be skipped. Callers hold allocLock.
+func (s *Scheduler) syncAllocationLocked(oldObj any, newPod *corev1.Pod, pi *device.PodInfo) (device.PodDevices, bool) {
+	oldPod, _ := oldObj.(*corev1.Pod)
+	rewritten := oldPod != nil && allocationRewritten(oldPod, newPod)
+	write, pending := s.refitWrites[newPod.UID]
+	if !rewritten && !pending {
+		return nil, true
+	}
+
+	rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
+	if err != nil {
+		// Report it only on the update that changed the allocation.
+		if rewritten {
+			if newPod.Spec.NodeName != "" {
+				s.recordAllocationDecodeFailureEvent(newPod, newPod.Spec.NodeName, err)
+			}
+			klog.ErrorS(err, "failed to decode updated pod devices, keeping the cached allocation", "pod", klog.KObj(newPod))
+		}
+		return nil, false
+	}
+	if pending {
+		if write.predates(rawDevices) {
+			// The refit's own update arrives within seconds. An update that
+			// still shows the old devices after a minute means another
+			// replica moved the container back, so follow it.
+			if time.Since(write.at) < refitWriteSettle {
+				return nil, false
+			}
+			rewritten = true
+		}
+		delete(s.refitWrites, newPod.UID)
+	}
+	if !rewritten {
+		return rawDevices, true
+	}
+
+	effective := effectivePodDeviceUsage(newPod, rawDevices, pi.InitContainerResourceReleased)
+	if oldDevices, ok := s.podManager.ReplacePodDevices(newPod, effective); ok {
+		s.quotaManager.ReplaceUsage(newPod, oldDevices, effective)
+		klog.InfoS("Pod allocation rewritten, rebuilt devices from annotations",
+			"pod", klog.KObj(newPod),
+			"oldDevices", oldDevices,
+			"newDevices", effective,
+		)
+	}
+	return rawDevices, true
+}
+
+// observeAllocateResult counts the device plugin result once, when bind-phase leaves allocating.
+func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
+	if oldPod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+		return
+	}
+	if !s.leaderManager.IsLeader() {
+		return
+	}
+	switch newPod.Annotations[util.DeviceBindPhase] {
+	case util.DeviceBindSuccess:
+		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+	case util.DeviceBindFailed:
+		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
+	}
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
@@ -423,6 +531,7 @@ func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
 	defer s.allocLock.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
+		delete(s.refitWrites, pod.UID)
 	}
 }
 
@@ -459,6 +568,24 @@ func (s *Scheduler) onDelNode(obj any) {
 		if nd, ok := devInstance.(*nvidia.NvidiaGPUDevices); ok {
 			nd.NodeDeleted(nodeName)
 		}
+	}
+}
+
+// onUpdateNode notifies register promptly when the hami.io/device-cordon
+// annotation changes, instead of waiting up to 15s for
+// RegisterFromNodeAnnotations' ticker. It ignores every other node change;
+// those still reach register on the ticker, same as before.
+func (s *Scheduler) onUpdateNode(oldObj, newObj any) {
+	oldNode, ok := oldObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	newNode, ok := newObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if oldNode.Annotations[common.DeviceCordonAnnotation] != newNode.Annotations[common.DeviceCordonAnnotation] {
+		s.doNodeNotify()
 	}
 }
 
@@ -544,6 +671,7 @@ func (s *Scheduler) Start() error {
 	}
 	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: s.onUpdateNode,
 		DeleteFunc: s.onDelNode,
 	})
 	if err != nil {
@@ -637,6 +765,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
 	for _, val := range rawNodes {
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
+		s.refreshCordonAnnotation(val)
 
 		for devhandsk, devInstance := range device.GetDevices() {
 			klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -723,6 +852,30 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 	s.synced.Store(true)
 }
 
+// refreshCordonAnnotation keeps the scheduler's cached Node in step with the
+// hami.io/device-cordon annotation on the live, listed Node, independent of
+// each vendor's CheckHealth/needUpdate signal in the loop above. Without this,
+// a cordon or uncordon written to an otherwise-steady node (same GPU count,
+// same register annotation) is silently ignored, because no vendor ever
+// reports needUpdate for a cordon-only change.
+func (s *Scheduler) refreshCordonAnnotation(node *corev1.Node) {
+	cached, err := s.GetNode(node.Name)
+	if err != nil || cached.Node == nil {
+		// Not yet in the cache (or a cache miss); the addNode path below, on
+		// first registration, will set the cordon value, so there is nothing
+		// to refresh yet.
+		return
+	}
+	liveCordon := node.Annotations[common.DeviceCordonAnnotation]
+	cachedCordon := cached.Node.Annotations[common.DeviceCordonAnnotation]
+	if liveCordon == cachedCordon {
+		return
+	}
+	klog.InfoS("Refreshing cached node for device-cordon annotation change",
+		"nodeName", node.Name, "from", cachedCordon, "to", liveCordon)
+	s.refreshNodeAnnotation(node.Name, common.DeviceCordonAnnotation, node)
+}
+
 func (s *Scheduler) updateSchedulerLabel() {
 	schedulerSelector := labels.Set(map[string]string{util.HAMiComponentLabel: util.HAMiComponentScheduler}).AsSelector()
 	schedulerPods, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).List(schedulerSelector)
@@ -785,12 +938,15 @@ func (s *Scheduler) updateSchedulerLabel() {
 // It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
 // without contending on the scheduler's write lock during cache refreshes.
 func (s *Scheduler) IsSynced() bool {
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		return false
+	}
 	return s.synced.Load()
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		return s.synced.Load(), nil
+		return s.IsSynced(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
@@ -804,6 +960,11 @@ func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		empty := make(map[string]*NodeUsage)
+		return &empty
+	}
 
 	snapshot := make(map[string]*NodeUsage, len(s.overviewstatus))
 	for nodeID, usage := range s.overviewstatus {
@@ -966,14 +1127,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
-		allocationsByGPU := map[string][]nvidia.MigAllocation{}
-		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
-			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
-				for _, allocation := range allocations {
-					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
-				}
-			}
-		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			// With a candidate list most Pods sit on nodes that were
@@ -984,6 +1137,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
 			}
 			continue
+		}
+		allocationsByGPU := map[string][]nvidia.MigAllocation{}
+		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
+			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
+				for _, allocation := range allocations {
+					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
+				}
+			}
 		}
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
@@ -1236,7 +1397,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	var res *extenderv1.ExtenderBindingResult
 
 	binding := &corev1.Binding{
-		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
+		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, Namespace: args.PodNamespace, UID: args.PodUID},
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 
@@ -1323,6 +1484,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(err)
 	}
 
+	s.GetAllocationMetrics().ObserveAllocation("bind", s.podAllocationType(current))
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
@@ -1431,6 +1593,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
+		delete(s.refitWrites, pod.UID)
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
 	if err != nil {
