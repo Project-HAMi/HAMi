@@ -576,7 +576,7 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 			return baseScore
 		}
 		finalScore := baseScore + superpodRackBoost
-		if schedulerpolicy.nodePolicyUsesSpread(policy) {
+		if schedulerpolicy.NodePolicyUsesSpread(policy) {
 			finalScore = baseScore - superpodRackBoost
 		}
 		klog.V(5).InfoS("Superpod rack boost applied (anchored)",
@@ -622,7 +622,7 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 	}
 	boost := superpodRackBoost * float32(rackSlots) / float32(maxRackSlots)
 	finalScore := baseScore + boost
-	if schedulerpolicy.nodePolicyUsesSpread(policy) {
+	if schedulerpolicy.NodePolicyUsesSpread(policy) {
 		finalScore = baseScore - boost
 	}
 	klog.V(5).InfoS("Superpod rack boost applied (first pod)",

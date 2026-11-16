@@ -92,8 +92,8 @@ func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
 	return chain
 }
 
-// nodePolicyUsesSpread reports whether spread is the primary node sort key.
-func nodePolicyUsesSpread(policy string) bool {
+// NodePolicyUsesSpread reports whether spread is the primary node sort key.
+func NodePolicyUsesSpread(policy string) bool {
 	chain := nodeSortKeyChain(policy)
 	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread
 }
@@ -163,7 +163,7 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 		// the base node score.
 		if _, ok := dev.(policyNeutralScorer); ok {
 			weight := float32(10000)
-			if nodePolicyUsesSpread(policy) {
+			if NodePolicyUsesSpread(policy) {
 				weight = -10000
 			}
 			score = weight * score
@@ -281,7 +281,7 @@ func (ns *NodeScore) AddNodeAffinityScore(pref *PreferredNodeAffinity, policy st
 	matched := pref.terms.Score(ns.Node)
 	r := float32(matched) / float32(pref.totalWeight)
 	bonus := weight * r
-	if nodePolicyUsesSpread(policy) {
+	if NodePolicyUsesSpread(policy) {
 		bonus = -bonus
 	}
 	ns.Score += bonus

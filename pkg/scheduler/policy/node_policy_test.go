@@ -131,8 +131,8 @@ func TestNodePolicyUsesSpread(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.policy, func(t *testing.T) {
-			if got := nodePolicyUsesSpread(tt.policy); got != tt.want {
-				t.Errorf("nodePolicyUsesSpread(%q) = %t, want %t", tt.policy, got, tt.want)
+			if got := NodePolicyUsesSpread(tt.policy); got != tt.want {
+				t.Errorf("NodePolicyUsesSpread(%q) = %t, want %t", tt.policy, got, tt.want)
 			}
 		})
 	}
