@@ -4,15 +4,6 @@ SHELL := /bin/bash
 
 ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
-INSTALL = install
-
-PREFIX?=/usr
-BINDIR?=$(PREFIX)/bin
-TARGETARCH ?= amd64
-
-DESTDIR_BIN ?= $(ROOT_DIR)/output/$(TARGETARCH)/bin
-DESTDIR_BASH_COMPLETION ?= $(ROOT_DIR)/output/$(TARGETARCH)/bash-completion
-
 VERSION?=""
 ifeq ($(VERSION), "")
     VERSION=$(shell cat $(dir $(lastword $(MAKEFILE_LIST)))/VERSION)
@@ -21,7 +12,7 @@ endif
 ECHO_GEN=echo "  GEN   $(RELATIVE_DIR)/"
 
 LINT_TRIVY_SEVERITY_LEVEL ?= CRITICAL
-TRIVY_VERSION=0.76.1
+TRIVY_VERSION=0.76.2
 
 .PHONY: print-version
 print-version:
