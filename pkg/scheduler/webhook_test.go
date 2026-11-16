@@ -1400,9 +1400,11 @@ func TestHandleSchedulerPolicyAnnotation(t *testing.T) {
 			wantMessage: util.GPUSchedulerPolicyAnnotationKey,
 		},
 		{
-			name:        "node policy chain is admitted",
+			name:        "conflicting node sort keys are denied",
 			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "binpack,spread"},
 			hasResource: true,
+			wantDenied:  true,
+			wantMessage: util.NodeSchedulerPolicyAnnotationKey,
 		},
 		{
 			name:        "superpod and binpack chain is admitted",

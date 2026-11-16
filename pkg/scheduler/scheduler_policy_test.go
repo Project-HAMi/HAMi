@@ -192,7 +192,8 @@ func TestResolveNodeSchedulerPolicy(t *testing.T) {
 		}{
 			{"valid value overrides the configured policy", withPolicy(override), override},
 			{"surrounding whitespace is trimmed off an accepted value", withPolicy(" " + override + " "), override},
-			{"sort-key chain is accepted", withPolicy("binpack,spread"), "binpack,spread"},
+			{"conflicting sort keys keep the configured policy", withPolicy("binpack,spread"), clusterDefault},
+			{"reverse conflicting sort keys keep the configured policy", withPolicy("spread,binpack"), clusterDefault},
 			{"superpod filter and sort key are accepted", withPolicy("superpod,binpack"), "superpod,binpack"},
 			{"unrecognized value keeps the configured policy", withPolicy("spraed"), clusterDefault},
 			{"empty value keeps the configured policy", withPolicy(""), clusterDefault},
