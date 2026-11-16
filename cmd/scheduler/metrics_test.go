@@ -1167,7 +1167,7 @@ func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
 	prev := remoteGPUPool
 	remoteGPUPool = func() []remotegpu.PoolDevice {
 		return []remotegpu.PoolDevice{
-			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true,
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true, Usedmem: 1024,
 				Device: device.DeviceInfo{ID: "gpu-a/GPU-1", Index: 0, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
 			{Server: "gpu-a", Endpoint: "10.0.0.5:14833",
 				Device: device.DeviceInfo{ID: "gpu-a/GPU-2", Index: 1, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},

@@ -585,8 +585,8 @@ func TestRemoteGPU_ServerSelectionIncludesInitSidecarAndAppContainers(t *testing
 	}
 	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
 	assert.Equal(t, len(allocated), 4)
-	for _, ctrDevices := range allocated {
-		assert.Equal(t, len(ctrDevices), 3)
+	for i, ctrDevices := range allocated {
+		assert.Equal(t, len(ctrDevices), []int{1, 3, 2, 1}[i], "each container gets the cards it asked for")
 		for _, d := range ctrDevices {
 			assert.Assert(t, strings.HasPrefix(d.UUID, "gpu-d/"))
 		}
@@ -721,4 +721,40 @@ func TestRequestsDevice(t *testing.T) {
 	assert.Assert(t, requestsDevice(reqs, remotegpu.RemoteGPUCommonWord))
 	assert.Assert(t, !requestsDevice(reqs[:1], remotegpu.RemoteGPUCommonWord))
 	assert.Assert(t, !requestsDevice(nil, remotegpu.RemoteGPUCommonWord))
+}
+
+// A pod on one client node shares a card by memory, and a second pod on
+// another client node is placed on the same card for the memory left.
+func TestRemoteGPU_PodsOnTwoClientNodesShareACard(t *testing.T) {
+	held := device.EncodePodSingleDevice(device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-aaa", Type: "RemoteGPU", Usedmem: 30000}},
+	})
+	running := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "first", Namespace: "default", UID: k8stypes.UID("uid-first"),
+			Annotations: map[string]string{"hami.io/remote-gpu-devices-allocated": held},
+		},
+		Spec:   corev1.PodSpec{NodeName: "cpu-1"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		gpulessNode("cpu-1"), gpulessNode("cpu-2"), running,
+	)
+	// HAMi-core is delivered, so a memory request shares a card.
+	remotegpu.RemoteGPULibImage = "projecthami/hami:test"
+	t.Cleanup(func() { remotegpu.RemoteGPULibImage = "" })
+
+	for _, tc := range []struct {
+		mem  int64
+		fits bool
+	}{{8000, true}, {12000, false}} {
+		task := remoteGPUPod("second", 1, tc.mem)
+		nodes := map[string]*NodeUsage{"cpu-2": nodeUsageFor(t, dev, gpulessNode("cpu-2"), task)}
+		reqs, err := device.Resourcereqs(task)
+		assert.NilError(t, err)
+		scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+		assert.NilError(t, err)
+		assert.Equal(t, len(scores.NodeList) == 1, tc.fits, "request %d MiB next to 30000 MiB on a 40000 MiB card", tc.mem)
+	}
 }
