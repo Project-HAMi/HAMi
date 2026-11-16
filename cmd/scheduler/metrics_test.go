@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,6 +203,11 @@ func TestStartMetricsLifecycle(t *testing.T) {
 		config.MetricsBindAddress = occupied.Addr().String()
 
 		var acquired []net.Listener
+		t.Cleanup(func() {
+			for _, listener := range acquired {
+				listener.Close()
+			}
+		})
 		listenTCP = func(network, address string) (net.Listener, error) {
 			listener, err := net.Listen(network, address)
 			if err == nil {
@@ -231,30 +237,54 @@ func TestStartMetricsLifecycle(t *testing.T) {
 	t.Run("supervised server failure releases all listeners", func(t *testing.T) {
 		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
 		config.MetricsBindAddress = "127.0.0.1:0"
+		var (
+			listenersMu sync.Mutex
+			listeners   []net.Listener
+			stopping    bool
+		)
 		acquired := make(chan net.Listener, 3)
 		listenTCP = func(network, address string) (net.Listener, error) {
 			listener, err := net.Listen(network, address)
 			if err == nil {
+				listenersMu.Lock()
+				listeners = append(listeners, listener)
+				closeImmediately := stopping
+				listenersMu.Unlock()
+				if closeImmediately {
+					listener.Close()
+				}
 				acquired <- listener
 			}
 			return listener, err
 		}
 
 		result := make(chan error, 1)
+		done := make(chan struct{})
+		t.Cleanup(func() {
+			listenersMu.Lock()
+			stopping = true
+			acquiredListeners := append([]net.Listener(nil), listeners...)
+			listenersMu.Unlock()
+			for _, listener := range acquiredListeners {
+				listener.Close()
+			}
+			<-done
+		})
 		go func() {
 			result <- start()
+			close(done)
 		}()
 
-		listeners := make([]net.Listener, 0, 3)
-		for len(listeners) < cap(acquired) {
+		startedListeners := make([]net.Listener, 0, cap(acquired))
+		for len(startedListeners) < cap(acquired) {
 			select {
 			case listener := <-acquired:
-				listeners = append(listeners, listener)
+				startedListeners = append(startedListeners, listener)
 			case <-time.After(5 * time.Second):
-				t.Fatalf("startup acquired %d listeners, want 3", len(listeners))
+				t.Fatalf("startup acquired %d listeners, want 3", len(startedListeners))
 			}
 		}
-		if err := listeners[0].Close(); err != nil {
+		if err := startedListeners[0].Close(); err != nil {
 			t.Fatal(err)
 		}
 		select {
@@ -265,7 +295,7 @@ func TestStartMetricsLifecycle(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("startup did not return the supervised server error")
 		}
-		for _, listener := range listeners {
+		for _, listener := range startedListeners {
 			rebound, err := net.Listen("tcp", listener.Addr().String())
 			if err != nil {
 				t.Errorf("listener %s was not released: %v", listener.Addr(), err)

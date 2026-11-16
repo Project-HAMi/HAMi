@@ -229,11 +229,11 @@ func start() error {
 	}
 	defer clusterListener.Close()
 	errCh := make(chan error, 4)
-	if metricsListener, err := startMetricsServer(config.MetricsBindAddress, sher, legacyMetrics, errCh); err != nil {
+	metricsListener, err := startMetricsServer(config.MetricsBindAddress, sher, legacyMetrics, errCh)
+	if err != nil {
 		return err
-	} else {
-		defer metricsListener.Close()
 	}
+	defer metricsListener.Close()
 	profilingListener, err := startProfilingServer(enableProfiling, profilingBindAddress, errCh)
 	if err != nil {
 		return err
