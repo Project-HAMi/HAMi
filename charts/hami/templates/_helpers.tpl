@@ -354,22 +354,38 @@ token and must contain "cu". Device plugin must advertise the same prefix.
 {{- end -}}
 
 {{/*
-Hygon resource names. Unset values follow resourcePrefix. An explicit value is
-kept so clusters that already customized these names still render.
+Hygon resource names. Unset values follow resourcePrefix. The historical
+defaults hygon.com/hcunum, hcumem, and hcucores are also unset when the prefix
+is not hcu. Any other explicit value is kept.
 */}}
 {{- define "hami-vgpu.hygon.resourceCountName" -}}
 {{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
-{{- .Values.devices.hygon.resourceCountName | default (printf "hygon.com/%snum" $prefix) -}}
+{{- $name := .Values.devices.hygon.resourceCountName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcunum")) -}}
+{{- printf "hygon.com/%snum" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "hami-vgpu.hygon.resourceMemoryName" -}}
 {{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
-{{- .Values.devices.hygon.resourceMemoryName | default (printf "hygon.com/%smem" $prefix) -}}
+{{- $name := .Values.devices.hygon.resourceMemoryName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcumem")) -}}
+{{- printf "hygon.com/%smem" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "hami-vgpu.hygon.resourceCoreName" -}}
 {{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
-{{- .Values.devices.hygon.resourceCoreName | default (printf "hygon.com/%scores" $prefix) -}}
+{{- $name := .Values.devices.hygon.resourceCoreName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcucores")) -}}
+{{- printf "hygon.com/%scores" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "hami-vgpu.validateValues" -}}

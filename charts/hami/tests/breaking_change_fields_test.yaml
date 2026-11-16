@@ -403,6 +403,17 @@ tests:
       path: data["device-config.yaml"]
       pattern: 'hygon:\n  resourceCountName: hygon\.com/dcunum\n  resourceMemoryName: hygon\.com/dcumem\n  resourceCoreName: hygon\.com/dcucores\n'
   template: scheduler/device-configmap.yaml
+- it: ignores historical Hygon hcu resource names when resourcePrefix is dcu
+  set:
+    devices.hygon.resourcePrefix: dcu
+    devices.hygon.resourceCountName: hygon.com/hcunum
+    devices.hygon.resourceMemoryName: hygon.com/hcumem
+    devices.hygon.resourceCoreName: hygon.com/hcucores
+  asserts:
+  - matchRegex:
+      path: data["device-config.yaml"]
+      pattern: 'hygon:\n  resourceCountName: hygon\.com/dcunum\n  resourceMemoryName: hygon\.com/dcumem\n  resourceCoreName: hygon\.com/dcucores\n'
+  template: scheduler/device-configmap.yaml
 - it: renders an explicit Hygon resource name over the derived prefix name
   set:
     devices.hygon.resourcePrefix: dcu

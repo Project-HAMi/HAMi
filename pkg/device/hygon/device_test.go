@@ -1806,12 +1806,17 @@ func TestResourcePrefix(t *testing.T) {
 	assert.ErrorContains(t, err, `"gpu"`)
 	defaultResourcePrefix = prevDefaultPrefix
 
-	mismatch := HygonConfig{ResourcePrefix: "dcu", ResourceCountName: "hygon.com/hcunum"}
-	assert.NilError(t, mismatch.Apply())
-	assert.Equal(t, mismatch.ResourceCountName, "hygon.com/hcunum")
-	assert.Equal(t, mismatch.ResourceMemoryName, "hygon.com/dcumem")
-	assert.Equal(t, mismatch.ResourceCoreName, "hygon.com/dcucores")
-	assert.Equal(t, HygonResourceCount, "hygon.com/hcunum")
+	legacyNames := HygonConfig{
+		ResourcePrefix:     "dcu",
+		ResourceCountName:  "hygon.com/hcunum",
+		ResourceMemoryName: "hygon.com/hcumem",
+		ResourceCoreName:   "hygon.com/hcucores",
+	}
+	assert.NilError(t, legacyNames.Apply())
+	assert.Equal(t, legacyNames.ResourceCountName, "hygon.com/dcunum")
+	assert.Equal(t, legacyNames.ResourceMemoryName, "hygon.com/dcumem")
+	assert.Equal(t, legacyNames.ResourceCoreName, "hygon.com/dcucores")
+	assert.Equal(t, HygonResourceCount, "hygon.com/dcunum")
 	assert.Equal(t, device.InRequestDevices[HygonHCUDevice], "hami.io/dcu-devices-to-allocate")
 
 	defaultResourcePrefix = "dcu"

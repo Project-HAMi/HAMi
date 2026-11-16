@@ -48,6 +48,12 @@ const (
 	NodeLockHCU = "hami.io/mutex.lock"
 
 	defaultHygonResourcePrefix = "hcu"
+
+	// Historical chart defaults. They are not an explicit choice: when
+	// resourcePrefix is not hcu, Apply derives the names from the prefix.
+	legacyHygonResourceCount  = "hygon.com/hcunum"
+	legacyHygonResourceMemory = "hygon.com/hcumem"
+	legacyHygonResourceCores  = "hygon.com/hcucores"
 )
 
 var (
@@ -92,13 +98,14 @@ type HygonConfig struct {
 }
 
 // Apply checks resourcePrefix and derives resource and annotation names from it.
-// An empty prefix uses -hcu-prefix, then "hcu". A non-empty resource name in
-// this config overrides the derived name. --hcu-name, --hcu-memory, and
-// --hcu-cores stay registered so existing command lines still parse; chart
-// deployments already set the YAML names, and the scheduler parses flags
-// through cobra, so those three flags are not a second source of names.
-// The device id stays "HCU"; annotation keys follow the prefix, and the
-// previous hcu/dcu keys remain readable so existing pods stay accounted.
+// An empty prefix uses -hcu-prefix, then "hcu". A resource name overrides the
+// derived name, except the historical defaults hygon.com/hcunum, hcumem, and
+// hcucores, which follow the prefix when it is not hcu. --hcu-name,
+// --hcu-memory, and --hcu-cores stay registered so existing command lines still
+// parse; the scheduler parses flags through cobra, so those three flags are
+// not a second source of names. The device id stays "HCU"; annotation keys
+// follow the prefix, and the previous hcu/dcu keys remain readable so existing
+// pods stay accounted.
 func (c *HygonConfig) Apply() error {
 	prefix := strings.TrimSpace(c.ResourcePrefix)
 	if prefix == "" {
@@ -110,9 +117,9 @@ func (c *HygonConfig) Apply() error {
 	if !validResourcePrefix(prefix) {
 		return fmt.Errorf("hygon resourcePrefix %q must match ^[a-z0-9]+$ and contain \"cu\"", prefix)
 	}
-	count := resolveResourceName(c.ResourceCountName, fmt.Sprintf("hygon.com/%snum", prefix))
-	mem := resolveResourceName(c.ResourceMemoryName, fmt.Sprintf("hygon.com/%smem", prefix))
-	cores := resolveResourceName(c.ResourceCoreName, fmt.Sprintf("hygon.com/%scores", prefix))
+	count := resolveResourceName(c.ResourceCountName, fmt.Sprintf("hygon.com/%snum", prefix), legacyHygonResourceCount)
+	mem := resolveResourceName(c.ResourceMemoryName, fmt.Sprintf("hygon.com/%smem", prefix), legacyHygonResourceMemory)
+	cores := resolveResourceName(c.ResourceCoreName, fmt.Sprintf("hygon.com/%scores", prefix), legacyHygonResourceCores)
 
 	c.ResourcePrefix = prefix
 	c.ResourceCountName = count
@@ -136,12 +143,15 @@ func (c *HygonConfig) Apply() error {
 }
 
 // resolveResourceName uses an explicit config value, otherwise the name derived
-// from resourcePrefix.
-func resolveResourceName(configured, derived string) string {
-	if name := strings.TrimSpace(configured); name != "" {
-		return name
+// from resourcePrefix. legacyDefault is the previous hcu chart default. It is
+// ignored when the derived name is different, so resourcePrefix dcu is not
+// stuck on hygon.com/hcunum.
+func resolveResourceName(configured, derived, legacyDefault string) string {
+	name := strings.TrimSpace(configured)
+	if name == "" || (name == legacyDefault && derived != legacyDefault) {
+		return derived
 	}
-	return derived
+	return name
 }
 
 // IsHygonRequest reports whether requestedType is the stable Hygon device id.
