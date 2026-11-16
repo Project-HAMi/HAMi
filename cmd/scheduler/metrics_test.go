@@ -21,6 +21,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -49,12 +50,17 @@ type fakeMetricsProvider struct {
 	nodeUsage    map[string]*schedulerpkg.NodeUsage
 	quotaManager *device.QuotaManager
 	podManager   *device.PodManager
-	isLeader     bool
+	isLeader     *bool
 	isSynced     bool
+	lastSyncTime int64
 	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
+	if f.isLeader != nil && !*f.isLeader {
+		empty := make(map[string]*schedulerpkg.NodeUsage)
+		return &empty
+	}
 	return &f.nodeUsage
 }
 
@@ -67,11 +73,19 @@ func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 }
 
 func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
-	return leaderelection.NewDummyLeaderManager(f.isLeader)
+	leader := true
+	if f.isLeader != nil {
+		leader = *f.isLeader
+	}
+	return leaderelection.NewDummyLeaderManager(leader)
 }
 
 func (f *fakeMetricsProvider) IsSynced() bool {
 	return f.isSynced
+}
+
+func (f *fakeMetricsProvider) LastSyncSuccessTime() int64 {
+	return f.lastSyncTime
 }
 
 func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
@@ -1017,16 +1031,18 @@ hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpumem"
 // leader and sync state.
 func TestSchedulerStateMetrics(t *testing.T) {
 	tests := []struct {
-		name       string
-		isLeader   bool
-		isSynced   bool
-		wantLeader float64
-		wantSynced float64
+		name         string
+		isLeader     bool
+		isSynced     bool
+		lastSync     int64
+		wantLeader   float64
+		wantSynced   float64
+		wantLastSync int64
 	}{
-		{"leader and synced", true, true, 1, 1},
-		{"leader but not synced", true, false, 1, 0},
-		{"synced but not leader", false, true, 0, 1},
-		{"neither leader nor synced", false, false, 0, 0},
+		{"leader and synced", true, true, 1794012015, 1, 1, 1794012015},
+		{"leader but not synced", true, false, 0, 1, 0, 0},
+		{"synced but not leader", false, true, 1794012015, 0, 1, 0},
+		{"neither leader nor synced", false, false, 0, 0, 0, 0},
 	}
 
 	for _, tc := range tests {
@@ -1036,8 +1052,9 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
 				quotaManager: device.NewQuotaManager(),
 				podManager:   device.NewPodManager(),
-				isLeader:     tc.isLeader,
+				isLeader:     &tc.isLeader,
 				isSynced:     tc.isSynced,
+				lastSyncTime: tc.lastSync,
 			}
 			cc := ClusterManagerCollector{
 				ClusterManager:  c,
@@ -1046,13 +1063,90 @@ func TestSchedulerStateMetrics(t *testing.T) {
 
 			if err := promtestutil.CollectAndCompare(
 				cc,
-				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced)),
+				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced, tc.wantLastSync)),
 				"hami_scheduler_is_leader",
 				"hami_scheduler_cache_synced",
+				"hami_scheduler_last_sync_success_timestamp_seconds",
 			); err != nil {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
 		})
+	}
+}
+
+// When the scheduler is not the leader, cluster usage metrics (node, quota,
+// container, remote GPU) are not exported, only scheduler state and outcome
+// metrics are emitted.
+func TestClusterManagerCollector_NonLeaderSkipsClusterMetrics(t *testing.T) {
+	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
+	isLeader := false
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-1",
+							Totalmem:  8192,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+						},
+					},
+				},
+			},
+		},
+	}
+	qm := device.NewQuotaManager()
+	qm.Quotas["ns"] = &device.DeviceQuota{
+		"hami.io/gpu": &device.Quota{Used: 1, Limit: 1, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "ns") })
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "ns",
+			UID:       k8stypes.UID("uid-1"),
+		},
+	}
+	pm.AddPod(pod, "node-1", device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			device.ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 4096, Usedcores: 50}},
+		},
+	})
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    nodeUsage,
+		quotaManager: qm,
+		podManager:   pm,
+		isLeader:     &isLeader,
+		isSynced:     true,
+	}
+	cc := ClusterManagerCollector{
+		ClusterManager:  c,
+		metricsProvider: provider,
+	}
+
+	// Verify scheduler state metric reports non-leader.
+	if err := promtestutil.CollectAndCompare(
+		cc,
+		strings.NewReader(wantStr(0, 1, 0)),
+		"hami_scheduler_is_leader",
+		"hami_scheduler_cache_synced",
+	); err != nil {
+		t.Fatalf("unexpected state metrics: %v", err)
+	}
+
+	// Verify cluster usage metrics are not exported.
+	ch := make(chan prometheus.Metric, 50)
+	cc.Collect(ch)
+	close(ch)
+	for m := range ch {
+		desc := m.Desc().String()
+		if strings.Contains(desc, "hami_node_") || strings.Contains(desc, "hami_resource_quota_") ||
+			strings.Contains(desc, "hami_vgpu_") || strings.Contains(desc, "hami_remote_gpu_") {
+			t.Errorf("unexpected metric collected on follower: %s", desc)
+		}
 	}
 }
 
@@ -1125,10 +1219,11 @@ func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
 	}
 }
 
-// wantStr builds the expected Prometheus text for the two scheduler state
-// metrics given the expected gauge values (0.0 or 1.0).
-func wantStr(leaderVal, syncedVal float64) string {
-	return strings.Join([]string{
+// wantStr builds the expected Prometheus text for the scheduler state metrics
+// given the expected gauge values (0.0 or 1.0) and the last sync time, which is
+// left out when it is 0.
+func wantStr(leaderVal, syncedVal float64, lastSync int64) string {
+	want := strings.Join([]string{
 		`# HELP hami_scheduler_cache_synced 1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.`,
 		`# TYPE hami_scheduler_cache_synced gauge`,
 		strings.Join([]string{`hami_scheduler_cache_synced`, formatFloat(syncedVal)}, " "),
@@ -1137,6 +1232,15 @@ func wantStr(leaderVal, syncedVal float64) string {
 		strings.Join([]string{`hami_scheduler_is_leader`, formatFloat(leaderVal)}, " "),
 		"",
 	}, "\n")
+	if lastSync > 0 {
+		want += strings.Join([]string{
+			`# HELP hami_scheduler_last_sync_success_timestamp_seconds Timestamp of the last successful sync of the scheduler's internal node/device cache.`,
+			`# TYPE hami_scheduler_last_sync_success_timestamp_seconds gauge`,
+			strings.Join([]string{`hami_scheduler_last_sync_success_timestamp_seconds`, strconv.FormatInt(lastSync, 10)}, " "),
+			"",
+		}, "\n")
+	}
+	return want
 }
 
 func formatFloat(v float64) string {

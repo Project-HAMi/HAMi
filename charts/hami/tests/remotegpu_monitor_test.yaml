@@ -1,0 +1,54 @@
+suite: Remote GPU monitor deployment
+templates:
+  - device-plugin/daemonsetlupine.yaml
+  - device-plugin/daemonsetnvidia.yaml
+  - scheduler/configmap.yaml
+  - scheduler/device-configmap.yaml
+set:
+  devices.remotegpu.enabled: true
+tests:
+  - it: omits the remote monitor sidecar by default
+    template: device-plugin/daemonsetlupine.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: lupine-server
+      - notExists:
+          path: spec.template.spec.containers[1]
+  - it: gives the monitor its own token and a memory limit
+    template: device-plugin/daemonsetlupine.yaml
+    set:
+      devices.remotegpu.monitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts
+      - equal:
+          path: spec.template.spec.containers[1].volumeMounts[0].mountPath
+          value: /var/run/secrets/kubernetes.io/serviceaccount
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: remote-monitor-kube-api
+      - equal:
+          path: spec.template.spec.containers[1].resources.requests.cpu
+          value: 50m
+      - equal:
+          path: spec.template.spec.containers[1].resources.requests.memory
+          value: 64Mi
+      - equal:
+          path: spec.template.spec.containers[1].resources.limits.memory
+          value: 256Mi
+  - it: keeps the device plugin pod when the remote monitor is enabled
+    template: device-plugin/daemonsetnvidia.yaml
+    set:
+      devices.remotegpu.monitor.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity
+  - it: keeps vGPUmonitor on lupine nodes when the remote monitor is disabled
+    template: device-plugin/daemonsetnvidia.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity

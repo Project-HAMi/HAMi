@@ -594,7 +594,8 @@ func TestMutateAdmission_ReplacesLiteralServerEnv(t *testing.T) {
 			assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.annotations['"+LupineServerAnno+"']")
 		case lupineWorkloadIDEnv:
 			workload++
-			assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.uid")
+			assert.Equal(t, env.Value, "$(HAMI_REMOTE_POD_UID)/"+ctr.Name)
+			assert.Assert(t, env.ValueFrom == nil)
 		}
 	}
 	assert.Equal(t, server, 1, "must replace, not duplicate")
@@ -887,4 +888,45 @@ func TestFit_CountsOnlyCardsThatMeetTheRequest(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, request(2, 2000), &corev1.Pod{}, nil, nil)
 	assert.Equal(t, fit, false, "only one card is big enough")
 	assert.Assert(t, reason != "")
+}
+
+func TestMutateAdmission_RejectsUserWorkloadIdentity(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	ctr := &corev1.Container{Name: "worker", Env: []corev1.EnvVar{{Name: lupineWorkloadIDEnv, Value: "user-value"}, {Name: remotePodUIDEnv, Value: "user-uid"}}, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+	pod := &corev1.Pod{}
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.ErrorContains(t, err, lupineWorkloadIDEnv)
+	assert.Equal(t, ctr.Env[0].Value, "user-value")
+	assert.Equal(t, pod.Labels[RemoteGPUPodLabel], "")
+}
+
+// Reinvocation keeps a single ordered pair, and each container gets its own identity.
+func TestMutateAdmissionWorkloadIdentity(t *testing.T) {
+	dev := InitRemoteGPUDevice(testConfig())
+	for _, name := range []string{"worker", "sidecar"} {
+		ctr := &corev1.Container{Name: name, Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(RemoteGPUResourceCount): resource.MustParse("1")}}}
+		pod := &corev1.Pod{}
+		for range 2 {
+			_, err := dev.MutateAdmission(ctr, pod)
+			assert.NilError(t, err)
+		}
+		assert.Equal(t, pod.Labels[RemoteGPUPodLabel], "true")
+		var uidIndex, workloadIndex int
+		var uidCount, workloadCount int
+		for i, env := range ctr.Env {
+			switch env.Name {
+			case remotePodUIDEnv:
+				uidIndex = i
+				uidCount++
+				assert.Equal(t, env.ValueFrom.FieldRef.FieldPath, "metadata.uid")
+			case lupineWorkloadIDEnv:
+				workloadIndex = i
+				workloadCount++
+				assert.Equal(t, env.Value, "$("+remotePodUIDEnv+")/"+name)
+			}
+		}
+		assert.Equal(t, uidCount, 1)
+		assert.Equal(t, workloadCount, 1)
+		assert.Assert(t, uidIndex < workloadIndex)
+	}
 }

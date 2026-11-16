@@ -265,6 +265,9 @@ func schedulerOwnedAnnotationKeys() []string {
 			keys = append(keys, key)
 		}
 	}
+	for _, aliases := range device.PodDeviceAnnoAliases {
+		keys = append(keys, aliases...)
+	}
 	return keys
 }
 

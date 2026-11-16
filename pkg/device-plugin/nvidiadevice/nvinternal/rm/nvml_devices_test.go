@@ -311,11 +311,40 @@ func TestNvmlMigDevice_GetComputeCapability(t *testing.T) {
 }
 
 func TestNvmlMigDevice_GetPaths(t *testing.T) {
+	giCapPath := nvidiaCapabilitiesPath + "/gpu0/mig/gi0/access"
+	ciCapPath := nvidiaCapabilitiesPath + "/gpu0/mig/gi0/ci0/access"
+	migDevice := func() nvml.Device {
+		return &mock.Device{
+			GetGpuInstanceIdFunc: func() (int, nvml.Return) {
+				return 0, nvml.SUCCESS
+			},
+			GetComputeInstanceIdFunc: func() (int, nvml.Return) {
+				return 0, nvml.SUCCESS
+			},
+			GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+				return &mock.Device{
+					GetMinorNumberFunc: func() (int, nvml.Return) {
+						return 0, nvml.SUCCESS
+					},
+				}, nvml.SUCCESS
+			},
+		}
+	}
+
 	testCases := []struct {
 		description string
 		nvmlDevice  nvml.Device
+		capPaths    map[string]string
+		capErr      error
+		want        []string
 		errContains string
 	}{
+		{
+			description: "fails to read MIG capability device paths",
+			nvmlDevice:  migDevice(),
+			capErr:      fmt.Errorf("boom"),
+			errContains: "error getting MIG capability device paths",
+		},
 		{
 			description: "fails to get GPU instance ID",
 			nvmlDevice: &mock.Device{
@@ -373,31 +402,46 @@ func TestNvmlMigDevice_GetPaths(t *testing.T) {
 		},
 		{
 			description: "missing MIG capability device paths (no MIG hardware present)",
-			nvmlDevice: &mock.Device{
-				GetGpuInstanceIdFunc: func() (int, nvml.Return) {
-					return 0, nvml.SUCCESS
-				},
-				GetComputeInstanceIdFunc: func() (int, nvml.Return) {
-					return 0, nvml.SUCCESS
-				},
-				GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
-					return &mock.Device{
-						GetMinorNumberFunc: func() (int, nvml.Return) {
-							return 0, nvml.SUCCESS
-						},
-					}, nvml.SUCCESS
-				},
+			nvmlDevice:  migDevice(),
+			errContains: "missing MIG GPU instance capability path: " + giCapPath,
+		},
+		{
+			description: "missing MIG compute instance capability path",
+			nvmlDevice:  migDevice(),
+			capPaths:    map[string]string{giCapPath: "/dev/nvidia-caps/nvidia-cap3"},
+			errContains: "missing MIG compute instance capability path: " + ciCapPath,
+		},
+		{
+			description: "returns parent and capability device paths",
+			nvmlDevice:  migDevice(),
+			capPaths: map[string]string{
+				giCapPath: "/dev/nvidia-caps/nvidia-cap3",
+				ciCapPath: "/dev/nvidia-caps/nvidia-cap4",
 			},
-			errContains: "missing MIG GPU instance capability path",
+			want: []string{"/dev/nvidia0", "/dev/nvidia-caps/nvidia-cap3", "/dev/nvidia-caps/nvidia-cap4"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
+			// Do not read the host's MIG minors file: a machine with an NVIDIA
+			// driver loaded lists gi/ci capability minors even without MIG
+			// enabled, which would make these cases depend on the host.
+			orig := getMigCapabilityDevicePaths
+			t.Cleanup(func() { getMigCapabilityDevicePaths = orig })
+			getMigCapabilityDevicePaths = func() (map[string]string, error) {
+				return tc.capPaths, tc.capErr
+			}
+
 			device := nvmlMigDevice{Device: tc.nvmlDevice}
 			paths, err := device.GetPaths()
-			require.Nil(t, paths)
-			require.ErrorContains(t, err, tc.errContains)
+			if tc.errContains != "" {
+				require.Nil(t, paths)
+				require.ErrorContains(t, err, tc.errContains)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, paths)
 		})
 	}
 }

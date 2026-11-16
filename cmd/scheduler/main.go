@@ -96,8 +96,9 @@ func init() {
 	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
-	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+	rootCmd.AddCommand(version.VersionCmd)
+	rootCmd.AddCommand(newValidateCommand())
 }
 
 // profilingMux keeps diagnostic handlers off the cluster and extender routers.
@@ -115,9 +116,7 @@ func listenProfiling(enabled bool, address string) (net.Listener, error) {
 	if !enabled {
 		return nil, nil
 	}
-	if !isLoopbackAddr(address) {
-		klog.Warningf("--profiling-bind-address=%s is not a loopback address: pprof authenticates no caller and exposes process diagnostics", address)
-	}
+	warnProfilingAddress(address)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on the profiling address %s: %w", address, err)
@@ -146,7 +145,7 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 // and blocks until a supervised server reports an error. All acquired
 // listeners and scheduler resources are released before it returns.
 func start() error {
-	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
+	if err := validateSchedulerOptions(); err != nil {
 		return err
 	}
 
@@ -170,18 +169,6 @@ func start() error {
 		return fmt.Errorf("empty hostname returned")
 	}
 
-	// Refuse to start with an unusable /refit identity: empty namespace or
-	// service-account means every TokenReview will fail, but silently – the
-	// scheduler would appear healthy while all refit calls are rejected.
-	if config.DevicePluginNamespace == "" || config.DevicePluginServiceAccount == "" {
-		return fmt.Errorf(
-			"--device-plugin-namespace and --device-plugin-service-account must both be set; "+
-				"they identify the ServiceAccount whose token is accepted on the /refit endpoint "+
-				"(see issue #2878). Got namespace=%q service-account=%q",
-			config.DevicePluginNamespace, config.DevicePluginServiceAccount,
-		)
-	}
-
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
 	err = sher.Start()
@@ -192,10 +179,7 @@ func start() error {
 
 	router := clusterRouter(sher)
 
-	if !isLoopbackAddr(config.ExtenderBind) {
-		klog.Warningf("--extender-bind=%s is not a loopback address: /filter and /bind authenticate no caller, "+
-			"so anyone able to reach it can drop a pod's device reservation or have its annotations patched", config.ExtenderBind)
-	}
+	warnExtenderAddress(config.ExtenderBind)
 
 	var tlsCfg *tls.Config
 	if len(tlsCertFile) > 0 && len(tlsKeyFile) > 0 {

@@ -120,7 +120,7 @@ func TestAWSNeuronWholeDeviceNodeQuota(t *testing.T) {
 				t.Fatalf("placement fit = %t, want %t (reason: %s)", result.score != nil, tc.fit, result.reason)
 			}
 			if tc.fit {
-				got := neuronCorePeak(pod, result.score.Devices[awsneuron.AWSNeuronDevice])
+				got := neuronReservedCores(pod, result.score.Devices[awsneuron.AWSNeuronDevice])
 				if got != tc.limit {
 					t.Fatalf("allocated cores = %d, want %d", got, tc.limit)
 				}

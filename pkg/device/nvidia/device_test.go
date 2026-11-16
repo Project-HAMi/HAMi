@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -3918,4 +3919,304 @@ func TestMemoryPercentage_InvalidRequestBehindValidLimit(t *testing.T) {
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.Assert(t, err != nil)
 	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}
+
+func TestFit_TopologyWithNumaBindingSucceedsAcrossBoundaries(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// Multi-NUMA node: NUMA 0 has 1 available GPU, NUMA 1 has 2 available GPUs.
+	// When iterated in reverse (dev-3, dev-2, dev-1, dev-0), candidates in NUMA 1
+	// must not be discarded when transitioning to NUMA 0 in topology mode.
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 10, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0}, // Unavailable
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-3", Index: 3, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 50, "dev-3": 50}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 50, "dev-3": 50}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-1": 50, "dev-3": 100}}},
+				{ID: "dev-3", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-1": 50, "dev-2": 100}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-2"])
+	assert.Assert(t, uuids["dev-3"])
+}
+
+func TestFit_TopologyWithNumaBindingPicksBestNumaNode(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// NUMA 0 has dev-0, dev-1 (pair score 100)
+	// NUMA 1 has dev-2, dev-3 (pair score 600 - NVLink)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-3", Index: 3, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-3": 600}}},
+				{ID: "dev-3", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-2": 600}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-2"])
+	assert.Assert(t, uuids["dev-3"])
+}
+
+func TestFit_TopologyWithNumaBindingRejectsSplitCandidates(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// 2 devices on different NUMA nodes (dev-0 on NUMA 0, dev-1 on NUMA 1)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, _, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, "NumaNotFit"), "expected NumaNotFit in reason: %s", reason)
+}
+
+// TestFit_TopologyWithNumaBindingInsufficientCandidatesExcludesNumaNotFit tests that
+// when the total candidate count is below the request, AllocatedCardsInsufficientRequest
+// is reported rather than NumaNotFit.
+func TestFit_TopologyWithNumaBindingInsufficientCandidatesExcludesNumaNotFit(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// Only 1 eligible device on the node, but request requires 2 devices.
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0"},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, _, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, !strings.Contains(reason, "NumaNotFit"), "reason should not contain NumaNotFit when candidates are insufficient: %s", reason)
+	assert.Assert(t, strings.Contains(reason, common.AllocatedCardsInsufficientRequest), "expected AllocatedCardsInsufficientRequest in reason: %s", reason)
+}
+
+// TestFit_TopologyWithNumaBindingSingleGPU verifies that a single GPU request with
+// NUMA binding and topology policy selects the card with the lowest connectivity score.
+func TestFit_TopologyWithNumaBindingSingleGPU(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	// NUMA 0 has dev-0 (lowest connectivity score 100).
+	// NUMA 1 has dev-1 and dev-2 (score 600 - NVLink).
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 50, "dev-2": 50}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-2": 600}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 50, "dev-1": 600}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true, "fit should succeed: %s", reason)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-0")
+}
+
+// TestFit_TopologyWithNumaBindingTightQuota verifies that under tight quota limits,
+// candidate discovery across NUMA domains succeeds and allocates a valid NUMA-local pair.
+func TestFit_TopologyWithNumaBindingTightQuota(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	nv := InitNvidiaDevice(config)
+	device.DevicesMap = make(map[string]device.Devices)
+	device.DevicesMap[NvidiaGPUDevice] = nv
+
+	qm := device.NewQuotaManager()
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tight-quota",
+			Namespace: "tight-quota-ns",
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.nvidia.com/gpumem"): resource.MustParse("200"),
+			},
+		},
+	}
+	qm.AddQuota(quota)
+	defer qm.DelQuota(quota)
+
+	// dev-3 (NUMA 1, healthy), dev-2 (NUMA 1, unhealthy) -> NUMA 1 has only 1 candidate.
+	// dev-1 and dev-0 (NUMA 0, healthy) -> NUMA 0 has 2 candidates.
+	// Traversal is reverse: dev-3, dev-2, dev-1, dev-0.
+	// Tight quota allows exactly 200 memory (2 cards @ 100).
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: false, Numa: 1},
+		{ID: "dev-3", Index: 3, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100}}},
+				{ID: "dev-2"},
+				{ID: "dev-3"},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "tight-quota-ns",
+			Annotations: map[string]string{
+				NumaBind:                             "true",
+				util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+			},
+		},
+	}
+	fit, result, reason := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true, "fit should succeed under tight quota: %s", reason)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-0"])
+	assert.Assert(t, uuids["dev-1"])
+}
+
+// TestFit_TopologyWithNumaBindingMIGSameCardFallback verifies that when a physical
+// MIG GPU on NUMA 0 has multiple free instances but only one physical card,
+// per-NUMA deduplication preserves same-card instances so the request succeeds.
+func TestFit_TopologyWithNumaBindingMIGSameCardFallback(t *testing.T) {
+	nv := migTopologyDevice()
+	// dev-0 is on NUMA 0, dev-1 is on NUMA 1.
+	devices := migTopologyDevices("dev-0", "dev-1")
+	devices[0].Numa = 0
+	devices[1].Numa = 1
+	nodeInfo := migTopologyNodeInfo("dev-0", "dev-1")
+
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 10240, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := migTopologyPod()
+	pod.Annotations[NumaBind] = "true"
+
+	fit, result, msg := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true, "fit should succeed: %s", msg)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	assert.Equal(t, len(distinctUUIDs(result[NvidiaGPUDevice])), 1,
+		"the only card on NUMA 0 must supply both instances")
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-0")
+	assert.Equal(t, result[NvidiaGPUDevice][1].UUID, "dev-0")
 }
