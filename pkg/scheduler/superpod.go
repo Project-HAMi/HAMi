@@ -17,7 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,9 +25,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -339,19 +337,16 @@ func singleSuperpodPodRequest(pod *corev1.Pod) (int64, error) {
 // resolveTaskIDSuperpodTotal lists every ReplicaSet labeled with the given
 // taskid and returns the aggregate total device slots (singlePodRequest *
 // Replicas summed across all matching ReplicaSets).
-func resolveTaskIDSuperpodTotal(clientset kubernetes.Interface, namespace, taskID string) (int64, error) {
-	if clientset == nil || strings.TrimSpace(taskID) == "" {
+func resolveTaskIDSuperpodTotal(replicaSetLister appslisters.ReplicaSetLister, namespace, taskID string) (int64, error) {
+	if replicaSetLister == nil || strings.TrimSpace(taskID) == "" {
 		return 0, nil
 	}
-	replicaSets, err := clientset.AppsV1().ReplicaSets(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", util.TaskIDLabel, taskID),
-	})
+	replicaSets, err := replicaSetLister.ReplicaSets(namespace).List(labels.Set{util.TaskIDLabel: taskID}.AsSelector())
 	if err != nil {
 		return 0, err
 	}
 	var total int64
-	for i := range replicaSets.Items {
-		rs := &replicaSets.Items[i]
+	for _, rs := range replicaSets {
 		if rs.Spec.Replicas == nil || *rs.Spec.Replicas <= 0 {
 			continue
 		}
@@ -374,7 +369,7 @@ func resolveTaskIDSuperpodTotal(clientset kubernetes.Interface, namespace, taskI
 // owning controller (singlePodRequest * Replicas/Parallelism) and true when
 // such an owner is resolvable. A missing or zero count yields (0, false).
 func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error) {
-	if len(task.OwnerReferences) == 0 || s.kubeClient == nil {
+	if len(task.OwnerReferences) == 0 {
 		return 0, false, nil
 	}
 	owner := task.OwnerReferences[0]
@@ -382,7 +377,10 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 		"ownerKind", owner.Kind, "ownerName", owner.Name)
 	switch owner.Kind {
 	case "ReplicaSet":
-		rs, err := s.kubeClient.AppsV1().ReplicaSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{})
+		if s.replicaSetLister == nil {
+			return 0, false, nil
+		}
+		rs, err := s.replicaSetLister.ReplicaSets(task.Namespace).Get(owner.Name)
 		if err != nil && !apierrors.IsNotFound(err) {
 			klog.V(4).ErrorS(err, "Superpod total request: failed to get owner",
 				"ownerKind", owner.Kind, "ownerName", owner.Name)
@@ -396,7 +394,10 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return request * int64(*rs.Spec.Replicas), true, nil
 		}
 	case "StatefulSet":
-		sts, err := s.kubeClient.AppsV1().StatefulSets(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{})
+		if s.statefulSetLister == nil {
+			return 0, false, nil
+		}
+		sts, err := s.statefulSetLister.StatefulSets(task.Namespace).Get(owner.Name)
 		if err != nil && !apierrors.IsNotFound(err) {
 			klog.V(4).ErrorS(err, "Superpod total request: failed to get owner",
 				"ownerKind", owner.Kind, "ownerName", owner.Name)
@@ -410,7 +411,10 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return request * int64(*sts.Spec.Replicas), true, nil
 		}
 	case "Job":
-		job, err := s.kubeClient.BatchV1().Jobs(task.Namespace).Get(context.TODO(), owner.Name, metav1.GetOptions{})
+		if s.jobLister == nil {
+			return 0, false, nil
+		}
+		job, err := s.jobLister.Jobs(task.Namespace).Get(owner.Name)
 		if err != nil && !apierrors.IsNotFound(err) {
 			klog.V(4).ErrorS(err, "Superpod total request: failed to get owner",
 				"ownerKind", owner.Kind, "ownerName", owner.Name)
@@ -453,8 +457,8 @@ func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) 
 		}
 	}
 	// Priority 2: same-taskid ReplicaSets.
-	if taskid := task.Labels[util.TaskIDLabel]; taskid != "" && s.kubeClient != nil {
-		if total, resolveErr := resolveTaskIDSuperpodTotal(s.kubeClient, task.Namespace, taskid); resolveErr == nil && total > 0 {
+	if taskid := task.Labels[util.TaskIDLabel]; taskid != "" && s.replicaSetLister != nil {
+		if total, resolveErr := resolveTaskIDSuperpodTotal(s.replicaSetLister, task.Namespace, taskid); resolveErr == nil && total > 0 {
 			klog.V(4).InfoS("Superpod total request resolved from task's ReplicaSets",
 				"taskid", taskid, "totalRequest", total)
 			return total, nil

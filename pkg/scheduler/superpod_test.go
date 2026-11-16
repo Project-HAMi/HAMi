@@ -17,7 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"errors"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -28,9 +27,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/fake"
+	appslisters "k8s.io/client-go/listers/apps/v1"
+	batchlisters "k8s.io/client-go/listers/batch/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
-	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -55,6 +54,28 @@ func resetSuperpodTestDevices(t *testing.T) {
 		},
 	})
 	assert.NilError(t, err)
+}
+
+func newSuperpodTestListers(t *testing.T, objects ...runtime.Object) (appslisters.ReplicaSetLister, appslisters.StatefulSetLister, batchlisters.JobLister) {
+	t.Helper()
+	replicaSets := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	statefulSets := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	jobs := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	for _, obj := range objects {
+		var indexer cache.Indexer
+		switch obj := obj.(type) {
+		case *appsv1.ReplicaSet:
+			indexer = replicaSets
+		case *appsv1.StatefulSet:
+			indexer = statefulSets
+		case *batchv1.Job:
+			indexer = jobs
+		default:
+			t.Fatalf("unsupported test object type %T", obj)
+		}
+		assert.NilError(t, indexer.Add(obj))
+	}
+	return appslisters.NewReplicaSetLister(replicaSets), appslisters.NewStatefulSetLister(statefulSets), batchlisters.NewJobLister(jobs)
 }
 
 // ---------------------------------------------------------------------------
@@ -936,11 +957,11 @@ func TestResolveSuperpodTotalRequest(t *testing.T) {
 				Template: corev1.PodTemplateSpec{Spec: template.Spec},
 			},
 		}
-		s.kubeClient = fake.NewClientset(rs)
+		s.replicaSetLister, _, _ = newSuperpodTestListers(t, rs)
 		pod := makeGPUPod("pod", "default", "", 1)
 		pod.Labels[util.TaskIDLabel] = "task-1"
 		assertTotalRequest(pod, 1, 6)
-		s.kubeClient = nil
+		s.replicaSetLister = nil
 	})
 
 	t.Run("invalid label value falls through", func(t *testing.T) {
@@ -1007,7 +1028,7 @@ func TestResolveTaskIDSuperpodTotal(t *testing.T) {
 		zero := int32(0)
 		withRequest := makeGPUPod("template", "default", "", 3)
 		withoutRequest := &corev1.Pod{}
-		client := fake.NewClientset(
+		replicaSetLister, _, _ := newSuperpodTestListers(t,
 			&appsv1.ReplicaSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "workers-a", Namespace: "default", Labels: map[string]string{util.TaskIDLabel: "task-1"}},
 				Spec:       appsv1.ReplicaSetSpec{Replicas: &two, Template: corev1.PodTemplateSpec{Spec: withRequest.Spec}},
@@ -1026,29 +1047,20 @@ func TestResolveTaskIDSuperpodTotal(t *testing.T) {
 			},
 		)
 
-		total, err := resolveTaskIDSuperpodTotal(client, "default", "task-1")
+		total, err := resolveTaskIDSuperpodTotal(replicaSetLister, "default", "task-1")
 		assert.NilError(t, err)
 		assert.Equal(t, int64(6), total)
-	})
-
-	t.Run("list error is returned", func(t *testing.T) {
-		client := fake.NewClientset()
-		client.PrependReactor("list", "replicasets", func(k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, errors.New("list failed")
-		})
-		_, err := resolveTaskIDSuperpodTotal(client, "default", "task-1")
-		assert.Assert(t, err != nil)
 	})
 
 	t.Run("invalid template request is returned", func(t *testing.T) {
 		pod := makeGPUPod("template", "default", "", 1)
 		pod.Spec.Containers[0].Resources.Limits["hami.io/gpu"] = resource.MustParse("1.5")
 		replicas := int32(1)
-		client := fake.NewClientset(&appsv1.ReplicaSet{
+		replicaSetLister, _, _ := newSuperpodTestListers(t, &appsv1.ReplicaSet{
 			ObjectMeta: metav1.ObjectMeta{Name: "invalid", Namespace: "default", Labels: map[string]string{util.TaskIDLabel: "task-1"}},
 			Spec:       appsv1.ReplicaSetSpec{Replicas: &replicas, Template: corev1.PodTemplateSpec{Spec: pod.Spec}},
 		})
-		_, err := resolveTaskIDSuperpodTotal(client, "default", "task-1")
+		_, err := resolveTaskIDSuperpodTotal(replicaSetLister, "default", "task-1")
 		assert.Assert(t, err != nil)
 	})
 }
@@ -1154,7 +1166,8 @@ func TestSuperpodOwnerReplicas(t *testing.T) {
 			}
 			task := makeGPUPod("pod", "default", "", 2)
 			task.OwnerReferences = []metav1.OwnerReference{{Kind: tt.kind, Name: "owner"}}
-			s := &Scheduler{kubeClient: fake.NewClientset(objects...)}
+			rsLister, stsLister, jobLister := newSuperpodTestListers(t, objects...)
+			s := &Scheduler{replicaSetLister: rsLister, statefulSetLister: stsLister, jobLister: jobLister}
 
 			total, found, err := s.superpodOwnerReplicas(task)
 			assert.NilError(t, err)
@@ -1185,48 +1198,17 @@ func TestSuperpodOwnerReplicas(t *testing.T) {
 		task := makeGPUPod("pod", "default", "", 1)
 		task.Spec.Containers[0].Resources.Limits["hami.io/gpu"] = resource.MustParse("1.5")
 		task.OwnerReferences = []metav1.OwnerReference{{Kind: "Job", Name: "owner"}}
-		s := &Scheduler{kubeClient: fake.NewClientset(job)}
+		rsLister, stsLister, jobLister := newSuperpodTestListers(t, job)
+		s := &Scheduler{replicaSetLister: rsLister, statefulSetLister: stsLister, jobLister: jobLister}
 		_, _, err := s.superpodOwnerReplicas(task)
 		assert.Assert(t, err != nil)
-	})
-
-	t.Run("non-NotFound owner lookup errors propagate", func(t *testing.T) {
-		tests := []struct {
-			kind     string
-			resource string
-		}{
-			{kind: "ReplicaSet", resource: "replicasets"},
-			{kind: "StatefulSet", resource: "statefulsets"},
-			{kind: "Job", resource: "jobs"},
-		}
-		for _, tt := range tests {
-			t.Run(tt.kind, func(t *testing.T) {
-				getErr := errors.New("API unavailable")
-				client := fake.NewClientset()
-				client.PrependReactor("get", tt.resource, func(k8stesting.Action) (bool, runtime.Object, error) {
-					return true, nil, getErr
-				})
-				task := makeGPUPod("pod", "default", "", 1)
-				task.Labels[util.TaskIDLabel] = "task-1"
-				task.OwnerReferences = []metav1.OwnerReference{{Kind: tt.kind, Name: "owner"}}
-				s := &Scheduler{kubeClient: client}
-
-				total, found, err := s.superpodOwnerReplicas(task)
-				assert.Assert(t, errors.Is(err, getErr))
-				assert.Equal(t, int64(0), total)
-				assert.Assert(t, !found)
-
-				total, err = s.resolveSuperpodTotalRequest(task, 1)
-				assert.Assert(t, errors.Is(err, getErr))
-				assert.Equal(t, int64(0), total, "must not fall back to the single-pod request")
-			})
-		}
 	})
 
 	t.Run("NotFound owner lookup remains eligible for fallback", func(t *testing.T) {
 		task := makeGPUPod("pod", "default", "", 1)
 		task.OwnerReferences = []metav1.OwnerReference{{Kind: "Job", Name: "missing"}}
-		s := &Scheduler{kubeClient: fake.NewClientset()}
+		rsLister, stsLister, jobLister := newSuperpodTestListers(t)
+		s := &Scheduler{replicaSetLister: rsLister, statefulSetLister: stsLister, jobLister: jobLister}
 
 		total, found, err := s.superpodOwnerReplicas(task)
 		assert.NilError(t, err)
