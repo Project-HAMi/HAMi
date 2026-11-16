@@ -26,7 +26,7 @@ func matchesOperatingMode(requested, mode string) bool {
 
 // MPSV3SMCountAnnotation selects real static SM partitions. All GPU containers
 // in the Pod use the same SM count; absence selects percentage provisioning.
-const MPSV3SMCountAnnotation = "nvidia.com/mps-sm-count"
+const MPSV3SMCountAnnotation = "hami.io/mps-sm-count"
 const MPSV3GeometryKey = "mpsV3Geometry"
 const MPSV3ModeKey = "mpsV3ComputeMode"
 const MPSV3GPUSetKey = "mpsV3GPUSet"
@@ -148,6 +148,9 @@ type MPSV3Geometry struct {
 }
 
 func MPSV3RequestedSMs(annotations map[string]string) (int64, error) {
+	if _, legacy := annotations["nvidia.com/mps-sm-count"]; legacy {
+		return 0, fmt.Errorf("use %s instead of nvidia.com/mps-sm-count", MPSV3SMCountAnnotation)
+	}
 	raw, ok := annotations[MPSV3SMCountAnnotation]
 	if !ok {
 		return 0, nil

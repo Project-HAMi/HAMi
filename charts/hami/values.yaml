@@ -445,7 +445,7 @@ devicePlugin:
   # kubelet/CRI support for CDI devices.
   deviceListStrategy: "envvar"
   # -- Node-local MPS v3 service. Select operatingmode: mps-v3 in nodeConfiguration.
-  # Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver r620 or later, and cgroup v2.
+  # Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver branch r620, and cgroup v2.
   mpsV3:
     enabled: false
     # -- Persistent host path, mounted at the same path inside the plugin.

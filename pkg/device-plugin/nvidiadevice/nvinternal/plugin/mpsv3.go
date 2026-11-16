@@ -1159,8 +1159,8 @@ func (plugin *NvidiaDevicePlugin) startMPSV3() error {
 	}
 	major, _, _ := strings.Cut(driver, ".")
 	version, err := strconv.Atoi(major)
-	if err != nil || version < 620 {
-		return fmt.Errorf("mps-v3 requires NVIDIA driver r620 or later, got %q", driver)
+	if err != nil || version != 620 {
+		return fmt.Errorf("mps-v3 requires NVIDIA driver branch r620, got %q", driver)
 	}
 	var config nvidia.MPSV3NodeConfig
 	if plugin.schedulerConfig.MPSV3 != nil {
