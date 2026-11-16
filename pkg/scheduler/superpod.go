@@ -169,7 +169,10 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 			}
 		}
 		if ctx.totalRequest > 0 {
-			ctx.superpodCapacities = s.collectSuperpodCapacities(candidateSuperpods)
+			ctx.superpodCapacities, err = s.collectSuperpodCapacities(candidateSuperpods, task)
+			if err != nil {
+				return fmt.Errorf("failed to collect superpod capacities: %w", err)
+			}
 		}
 		klog.V(4).InfoS("Superpod capacity filter",
 			"taskid", ctx.TaskID,
@@ -497,21 +500,19 @@ func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) 
 }
 
 // collectSuperpodCapacities computes the aggregate usable device capacity per
-// requested superpod from a full node snapshot. A full snapshot (not just the
-// candidate set) is used so allocations on the superpod's other nodes are
-// counted as consumed. Only healthy devices are counted. The returned map is
-// always non-nil.
-func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}) map[string]int64 {
+// requested superpod from a full node snapshot, then reserves the outstanding
+// requests of other tasks already anchored there. Allocations recorded in the
+// snapshot are excluded from those outstanding requests.
+func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, currentTask *corev1.Pod) (map[string]int64, error) {
 	capacities := make(map[string]int64, len(spids))
 	if len(spids) == 0 {
-		return capacities
+		return capacities, nil
 	}
 	// getNodesUsage with a nil node list returns the full snapshot; the pod
 	// argument only drives the scoring policy, so an empty task is safe.
 	_, overall, _, err := s.getNodesUsage(nil, &corev1.Pod{})
 	if err != nil {
-		klog.ErrorS(err, "Superpod capacity collection failed to collect node usage")
-		return capacities
+		return nil, fmt.Errorf("failed to collect node usage: %w", err)
 	}
 	for _, usage := range *overall {
 		if usage == nil || usage.Node == nil || usage.Node.Spec.Unschedulable {
@@ -523,10 +524,164 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}) map[str
 		}
 		capacities[spid] += nodeUsableSlots(usage)
 	}
+	reservations, err := s.collectAnchoredTaskReservations(spids, *overall, currentTask)
+	if err != nil {
+		return nil, err
+	}
+	for spid, reserved := range reservations {
+		capacities[spid] -= reserved
+		if capacities[spid] < 0 {
+			capacities[spid] = 0
+		}
+	}
 	klog.V(4).InfoS("Superpod capacities computed",
 		"superpods", len(capacities),
-		"capacities", capacities)
-	return capacities
+		"capacities", capacities,
+		"reservations", reservations)
+	return capacities, nil
+}
+
+type superpodTaskKey struct {
+	namespace string
+	taskID    string
+}
+
+// collectAnchoredTaskReservations returns the remaining task demand to reserve
+// in each requested superpod. When a task is anchored to multiple superpods,
+// its outstanding demand is reserved in each one so a new task cannot consume
+// capacity that the anchored task may still need.
+func (s *Scheduler) collectAnchoredTaskReservations(spids map[string]struct{}, overall map[string]*NodeUsage, currentTask *corev1.Pod) (map[string]int64, error) {
+	reservations := make(map[string]int64, len(spids))
+	if s.podLister == nil {
+		return nil, fmt.Errorf("pod lister is unavailable")
+	}
+	podInfos := s.podManager.ListPodsInfo()
+	pods, err := s.podLister.List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods for anchored task reservations: %w", err)
+	}
+
+	taskPods := make(map[superpodTaskKey]map[string]*corev1.Pod)
+	addTaskPod := func(pod *corev1.Pod) {
+		if pod == nil || util.IsPodInTerminatedState(pod) || util.IsPodTerminating(pod) {
+			return
+		}
+		taskID := pod.Labels[util.TaskIDLabel]
+		if taskID == "" {
+			return
+		}
+		key := superpodTaskKey{namespace: pod.Namespace, taskID: taskID}
+		if taskPods[key] == nil {
+			taskPods[key] = make(map[string]*corev1.Pod)
+		}
+		taskPods[key][pod.Namespace+"/"+pod.Name] = pod
+	}
+	for _, pod := range pods {
+		addTaskPod(pod)
+	}
+	// A recently scheduled pod can already be in PodManager before the pod
+	// informer reflects its assignment or labels.
+	for _, podInfo := range podInfos {
+		if podInfo != nil {
+			addTaskPod(podInfo.Pod)
+		}
+	}
+
+	anchoredSuperpods := make(map[superpodTaskKey]map[string]struct{})
+	for key, group := range taskPods {
+		if currentTask != nil &&
+			key.namespace == currentTask.Namespace &&
+			key.taskID == currentTask.Labels[util.TaskIDLabel] {
+			continue
+		}
+		for _, pod := range group {
+			nodeName := ""
+			if podInfo, ok := s.podManager.GetPod(pod); ok {
+				nodeName = podInfo.NodeID
+			}
+			if nodeName == "" && pod.Annotations != nil {
+				nodeName = pod.Annotations[util.AssignedNodeAnnotations]
+			}
+			if nodeName == "" {
+				nodeName = pod.Spec.NodeName
+			}
+			usage := overall[nodeName]
+			if usage == nil || usage.Node == nil {
+				continue
+			}
+			spid := usage.Node.Labels[util.SuperPodIDLabel]
+			if _, requested := spids[spid]; !requested {
+				continue
+			}
+			if anchoredSuperpods[key] == nil {
+				anchoredSuperpods[key] = make(map[string]struct{})
+			}
+			anchoredSuperpods[key][spid] = struct{}{}
+		}
+	}
+
+	accountedByTask := make(map[superpodTaskKey]int64)
+	for _, usage := range overall {
+		if usage == nil {
+			continue
+		}
+		for _, nodeDevice := range usage.Devices.DeviceLists {
+			if nodeDevice == nil || nodeDevice.Device == nil {
+				continue
+			}
+			seenPods := make(map[string]struct{})
+			for _, podInfo := range nodeDevice.Device.PodInfos {
+				if podInfo == nil || podInfo.Pod == nil {
+					continue
+				}
+				podKey := podInfo.Namespace + "/" + podInfo.Name
+				if _, seen := seenPods[podKey]; seen {
+					continue
+				}
+				seenPods[podKey] = struct{}{}
+				key := superpodTaskKey{
+					namespace: podInfo.Namespace,
+					taskID:    podInfo.Labels[util.TaskIDLabel],
+				}
+				if key.taskID == "" || len(anchoredSuperpods[key]) == 0 {
+					continue
+				}
+				for _, containers := range podInfo.Devices {
+					for _, devices := range containers {
+						for _, allocated := range devices {
+							if allocated.UUID == nodeDevice.Device.ID {
+								accountedByTask[key] += max(allocated.Slots, 1)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for key, superpods := range anchoredSuperpods {
+		var representative *corev1.Pod
+		for _, pod := range taskPods[key] {
+			representative = pod
+			break
+		}
+		singleRequest, err := singleSuperpodPodRequest(representative)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate request for anchored task %q in namespace %q: %w", key.taskID, key.namespace, err)
+		}
+		totalRequest, err := s.resolveSuperpodTotalRequest(representative, singleRequest)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve total request for anchored task %q in namespace %q: %w", key.taskID, key.namespace, err)
+		}
+		remaining := totalRequest - accountedByTask[key]
+		if remaining <= 0 {
+			continue
+		}
+		for spid := range superpods {
+			reservations[spid] += remaining
+		}
+	}
+	return reservations, nil
 }
 
 // superpodRackBoost is the score bonus same-rack nodes receive. It is

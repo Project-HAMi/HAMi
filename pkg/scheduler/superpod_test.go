@@ -191,6 +191,7 @@ func newSuperpodTestScheduler() *Scheduler {
 	return &Scheduler{
 		nodeManager: newNodeManager(),
 		podManager:  device.NewPodManager(),
+		podLister:   listerscorev1.NewPodLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})),
 	}
 }
 
@@ -1458,13 +1459,56 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		cordoned.Node.Spec.Unschedulable = true
 		s.addNode("n-sp1-cordoned", cordoned)
 
-		capacities := s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}})
+		capacities, err := s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}}, nil)
 
+		assert.NilError(t, err)
 		assert.Equal(t, int64(6), capacities["sp-1"])
 	})
 
+	t.Run("remaining demand of an anchored task is reserved", func(t *testing.T) {
+		s := newSuperpodTestScheduler()
+		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 10)
+
+		anchored := makeGPUPod("anchored", "default", "task-anchored", 1)
+		anchored.Labels[util.TaskIDLabel] = "task-anchored"
+		anchored.Labels[util.SuperpodTotalRequestLabel] = "4"
+		anchored.Spec.NodeName = "n-sp1"
+		scheduling := makeGPUPod("scheduling", "default", "task-new", 1)
+		scheduling.Labels[util.TaskIDLabel] = "task-new"
+		scheduling.Labels[util.SuperpodTotalRequestLabel] = "6"
+		scheduling.Spec.NodeName = "n-sp1"
+		s.podLister = newTestPodLister(t, anchored, scheduling)
+		assert.Assert(t, s.podManager.AddPod(anchored, "n-sp1", device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+				device.ContainerDevices{{UUID: "n-sp1-gpu0", Type: nvidia.NvidiaGPUDevice}},
+			},
+		}))
+
+		ctx := &superpodContext{
+			TaskID:         "task-new",
+			Superpods:      map[string]struct{}{},
+			PreferredRacks: map[string]struct{}{},
+			RackSlotCounts: make(map[string]map[string]int64),
+		}
+		nodes := map[string]*NodeUsage{
+			"n-sp1": makeNodeUsageWithPhysicalCount("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 10, 0),
+		}
+		failed := map[string]string{}
+
+		err := s.applySuperpodFilter(ctx, scheduling, &nodes, failed)
+
+		assert.NilError(t, err)
+		// The snapshot has 8 usable devices. One of the anchored task's four
+		// requested devices is already allocated, so its remaining three are
+		// reserved and only five are available to the new task.
+		assert.Equal(t, int64(5), ctx.superpodCapacities["sp-1"])
+		assert.Assert(t, nodes["n-sp1"] == nil, "new task must not consume capacity reserved for the anchored task")
+		assert.Equal(t, common.SuperpodInsufficientCapacity, failed["n-sp1"])
+	})
+
 	t.Run("empty superpod set returns an empty capacity map", func(t *testing.T) {
-		capacities := newSuperpodTestScheduler().collectSuperpodCapacities(nil)
+		capacities, err := newSuperpodTestScheduler().collectSuperpodCapacities(nil, nil)
+		assert.NilError(t, err)
 		assert.Assert(t, capacities != nil)
 		assert.Equal(t, 0, len(capacities))
 	})
