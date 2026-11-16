@@ -2954,6 +2954,60 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="de
 	}
 }
 
+func Test_allocationDuration(t *testing.T) {
+	now := time.Unix(1716199327, 500_000_000)
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		want        float64
+		wantOK      bool
+	}{
+		{name: "valid bind-time", annotations: map[string]string{util.BindTimeAnnotations: "1716199325"}, want: 2.5, wantOK: true},
+		{name: "missing bind-time"},
+		{name: "malformed bind-time", annotations: map[string]string{util.BindTimeAnnotations: "2024-01-01T00:00:00Z"}},
+		{name: "bind-time in the future", annotations: map[string]string{util.BindTimeAnnotations: "1716199330"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: test.annotations}}
+			got, ok := allocationDuration(pod, now)
+			require.Equal(t, test.wantOK, ok)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
+	bindTime := fmt.Sprint(time.Now().Add(-15 * time.Second).Unix())
+	tests := []struct {
+		name        string
+		newPhase    string
+		annotations map[string]string
+		want        int
+	}{
+		{name: "success with bind-time", newPhase: util.DeviceBindSuccess, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 1},
+		{name: "success without bind-time", newPhase: util.DeviceBindSuccess, want: 0},
+		{name: "failed with bind-time", newPhase: util.DeviceBindFailed, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+			oldPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-duration", Name: "pod-duration", Namespace: "allocate-metrics",
+				Annotations: map[string]string{util.DeviceBindPhase: util.DeviceBindAllocating},
+			}}
+			newPod := oldPod.DeepCopy()
+			newPod.Annotations = map[string]string{util.DeviceBindPhase: test.newPhase}
+			maps.Copy(newPod.Annotations, test.annotations)
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.Equal(t, test.want, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_duration_seconds"))
+		})
+	}
+}
+
 func Test_getNodesUsage_WithInitContainers(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{

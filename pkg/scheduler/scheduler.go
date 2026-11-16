@@ -450,10 +450,28 @@ func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
 	}
 	switch newPod.Annotations[util.DeviceBindPhase] {
 	case util.DeviceBindSuccess:
-		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+		deviceType := s.podAllocationType(newPod)
+		s.GetAllocationMetrics().ObserveAllocation("allocate", deviceType)
+		if d, ok := allocationDuration(newPod, time.Now()); ok {
+			s.GetAllocationMetrics().ObserveAllocationDuration(deviceType, d)
+		}
 	case util.DeviceBindFailed:
 		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
 	}
+}
+
+// allocationDuration returns the seconds from the pod's bind-time to now.
+// It reports false when bind-time is missing, malformed, or in the future.
+func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
+	bindTime, err := strconv.ParseInt(pod.Annotations[util.BindTimeAnnotations], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	d := now.Sub(time.Unix(bindTime, 0)).Seconds()
+	if d < 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
