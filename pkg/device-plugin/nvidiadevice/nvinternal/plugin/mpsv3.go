@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -236,23 +235,7 @@ func (m *mpsV3Manager) recover(ctx context.Context, live map[string]bool) error 
 		}
 	}
 	if _, err := m.run(ctx, "compute-policy", "get", "timeslice"); err != nil {
-		// A CLI error alone cannot distinguish a missing daemon from a
-		// protocol mismatch or a temporarily unresponsive daemon.
-		listening, socketErr := m.daemonListening(ctx)
-		if listening || socketErr != nil {
-			return fmt.Errorf("cannot query r620 MPS daemon: %w", errors.Join(err, socketErr))
-		}
-		for _, a := range m.allocations {
-			if live[a.PodUID] {
-				return fmt.Errorf("MPS daemon lost with live allocations; restart affected workloads: %w", err)
-			}
-		}
-		if _, err := m.run(ctx, "-d", "-m"); err != nil {
-			return err
-		}
-	}
-	if err := m.waitForDaemon(ctx); err != nil {
-		return err
+		return fmt.Errorf("cannot connect to externally managed r620 MPS daemon at %s: %w", filepath.Join(m.root, "pipe"), err)
 	}
 	names, err := m.serverNames(ctx)
 	if err != nil {
@@ -293,37 +276,6 @@ func (m *mpsV3Manager) recover(ctx context.Context, live map[string]bool) error 
 		}
 	}
 	return m.configureComputePolicy(ctx)
-}
-
-func (m *mpsV3Manager) waitForDaemon(ctx context.Context) error {
-	return m.wait(ctx, func() error {
-		_, err := m.run(ctx, "compute-policy", "get", "timeslice")
-		return err
-	})
-}
-
-func (m *mpsV3Manager) daemonListening(ctx context.Context) (bool, error) {
-	socket := filepath.Join(m.root, "pipe", "control")
-	info, err := os.Lstat(socket)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return false, fmt.Errorf("unexpected file at MPS daemon socket %s", socket)
-	}
-	dialer := net.Dialer{Timeout: time.Second}
-	conn, err := dialer.DialContext(ctx, "unix", socket)
-	if errors.Is(err, unix.ECONNREFUSED) || os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	_ = conn.Close()
-	return true, nil
 }
 
 func (m *mpsV3Manager) wait(ctx context.Context, check func() error) error {
@@ -593,11 +545,7 @@ func (m *mpsV3Manager) configureComputePolicy(ctx context.Context) error {
 		case "unset":
 		case "1", "2":
 			if m.policy.TimesliceYieldLevel == nil {
-				// r620 only accepts 1 or 2 in set. Restart the drained
-				// daemon to restore the default yield behavior.
-				if err := m.restartDrainedDaemon(ctx); err != nil {
-					return err
-				}
+				return fmt.Errorf("MPS yield level is %s; drain the node and restart the external daemon to restore the default", yield)
 			}
 		default:
 			return fmt.Errorf("unexpected r620 compute policy yield level %q", yield)
@@ -611,29 +559,6 @@ func (m *mpsV3Manager) configureComputePolicy(ctx context.Context) error {
 		}
 	}
 	return m.checkComputePolicy(ctx)
-}
-
-func (m *mpsV3Manager) restartDrainedDaemon(ctx context.Context) error {
-	if _, err := m.run(ctx, "-q"); err != nil {
-		return err
-	}
-	if err := m.wait(ctx, func() error {
-		listening, err := m.daemonListening(ctx)
-		if listening {
-			return fmt.Errorf("waiting for drained MPS daemon to exit")
-		}
-		return err
-	}); err != nil {
-		return err
-	}
-	if _, err := m.run(ctx, "-d", "-m"); err != nil {
-		return err
-	}
-	if err := m.waitForDaemon(ctx); err != nil {
-		return err
-	}
-	_, err := m.run(ctx, "context-share", "set", "default_socket=off")
-	return err
 }
 
 func (m *mpsV3Manager) desiredTimeslice() string {

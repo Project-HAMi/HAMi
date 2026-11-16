@@ -65,16 +65,6 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 		if f.fail != "" && strings.Contains(call, f.fail) {
 			return "", fmt.Errorf("injected failure: %s", call)
 		}
-		if args[0] == "-q" {
-			if len(f.servers) != 0 {
-				return "", fmt.Errorf("servers exist")
-			}
-			f.timeslice, f.yield = "default", "unset"
-			return "", nil
-		}
-		if args[0] == "-d" {
-			return "", nil
-		}
 		flag := func(name string) string {
 			for _, arg := range args {
 				if strings.HasPrefix(arg, "--"+name+"=") {
@@ -532,6 +522,8 @@ func TestMPSV3ServerTimesliceRecovery(t *testing.T) {
 	require.Contains(t, f.servers, b.Server)
 	require.NoError(t, recovered.release(ctx, b.Namespace))
 	recovered.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3NamespaceCap}
+	require.ErrorContains(t, recovered.configureComputePolicy(ctx), "restart the external daemon")
+	f.yield = "unset" // The node operator restarted the daemon.
 	require.NoError(t, recovered.configureComputePolicy(ctx))
 	require.Equal(t, "default", f.timeslice)
 	require.Equal(t, "unset", f.yield)
@@ -600,25 +592,11 @@ func TestMPSV3UnknownInventoryPreservesAllocation(t *testing.T) {
 	require.FileExists(t, m.cdiPath(a.Namespace))
 }
 
-func TestMPSV3DaemonLeavesSocketOnExit(t *testing.T) {
-	m, _ := testMPSV3(t)
-	ctx := context.Background()
-	dir := filepath.Join(m.root, "pipe")
-	require.NoError(t, os.Mkdir(dir, 0755))
-	socket := filepath.Join(dir, "control")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
-	require.NoError(t, err)
-	listener.SetUnlinkOnClose(false)
-	defer listener.Close()
-	listening, err := m.daemonListening(ctx)
-	require.NoError(t, err)
-	require.True(t, listening)
-	require.NoError(t, listener.Close())
-	_, err = os.Lstat(socket)
-	require.NoError(t, err)
-	listening, err = m.daemonListening(ctx)
-	require.NoError(t, err)
-	require.False(t, listening)
+func TestMPSV3RecoverRequiresExternalDaemon(t *testing.T) {
+	m, f := testMPSV3(t)
+	f.fail = "compute-policy get"
+	require.ErrorContains(t, m.recover(context.Background(), nil), "externally managed r620 MPS daemon")
+	require.Equal(t, []string{"compute-policy get timeslice"}, f.calls)
 }
 
 func TestMPSV3GeometryDriftRollsBack(t *testing.T) {
