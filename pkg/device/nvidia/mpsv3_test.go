@@ -207,3 +207,24 @@ func TestMPSV3RejectsPartialOverlapInEitherOrder(t *testing.T) {
 	require.False(t, mpsV3FitsPreviousSets(previous, a.UUID, 2, device.ContainerDevices{c}))
 	require.True(t, mpsV3FitsPreviousSets(previous, b.UUID, 2, device.ContainerDevices{a}))
 }
+
+func TestMPSV3SMRemainderCanOnlyBeClaimedOnce(t *testing.T) {
+	request := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3SMCountAnnotation: "12"}}}
+	previous := request.DeepCopy()
+	dev := &device.DeviceUsage{ID: "GPU-a", Mode: MpsV3Mode, CustomInfo: map[string]any{
+		MPSV3GeometryKey: MPSV3Geometry{SMs: 188, Chunk: 8},
+	}}
+	set := device.PodSingleDevice{{{UUID: dev.ID}}}
+	prior := device.PodDevices{NvidiaGPUDevice: set}
+
+	_, ok := mpsV3Fits(request, dev, 1, nil, 0, &prior)
+	require.False(t, ok, "an earlier container in the Pod already claims the remainder")
+	dev.PodInfos = []*device.PodInfo{{Pod: previous, Devices: prior}}
+	_, ok = mpsV3Fits(request, dev, 1, nil, 0, nil)
+	require.False(t, ok, "an existing Pod already claims the remainder")
+
+	previous.Annotations[MPSV3SMCountAnnotation] = "16"
+	charge, ok := mpsV3Fits(request, dev, 1, nil, 0, nil)
+	require.True(t, ok, "the existing partition uses whole chunks")
+	require.EqualValues(t, 7, charge)
+}

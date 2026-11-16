@@ -738,3 +738,56 @@ func TestMPSV3ReplicaHealth(t *testing.T) {
 		require.Equal(t, kubeletdevicepluginv1beta1.Unhealthy, d.Health)
 	}
 }
+
+func TestMPSV3ReconcileRetainsCompletedInitUntilPodTerminates(t *testing.T) {
+	m, f := testMPSV3(t)
+	plugin := newTestPlugin(t)
+	plugin.mpsV3, plugin.runCtx = m, context.Background()
+	a := testMPSAllocation(t, 2)
+	_, err := m.ensure(plugin.runCtx, a)
+	require.NoError(t, err)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "test-pod"},
+		Spec:       corev1.PodSpec{InitContainers: []corev1.Container{{Name: a.Container}}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{
+			Name: a.Container, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		}}},
+	}
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil }
+
+	plugin.reconcileMPSV3()
+	require.Contains(t, f.namespaces, a.Namespace)
+	require.FileExists(t, m.cdiPath(a.Namespace))
+
+	pod.Status.Phase = corev1.PodSucceeded
+	plugin.reconcileMPSV3()
+	require.Empty(t, f.namespaces)
+	require.Empty(t, f.partitions)
+	require.NoFileExists(t, m.cdiPath(a.Namespace))
+}
+
+func TestMPSV3RollbackRetriesForLivePodAfterInventoryFailure(t *testing.T) {
+	m, f := testMPSV3(t)
+	plugin := newTestPlugin(t)
+	plugin.mpsV3, plugin.runCtx = m, context.Background()
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "test-pod"}}}, nil
+	}
+	a := testMPSAllocation(t, 2)
+	_, err := m.ensure(plugin.runCtx, a)
+	require.NoError(t, err)
+
+	f.fail = "server list"
+	require.Error(t, m.release(plugin.runCtx, a.Namespace))
+	require.NoError(t, m.load())
+	require.Contains(t, m.allocations, a.Namespace)
+	require.False(t, m.allocations[a.Namespace].Prepared)
+	require.Contains(t, f.namespaces, a.Namespace)
+
+	f.fail = ""
+	plugin.reconcileMPSV3()
+	require.Empty(t, m.allocations)
+	require.Empty(t, f.namespaces)
+	require.Empty(t, f.partitions)
+	require.NoFileExists(t, m.cdiPath(a.Namespace))
+}
