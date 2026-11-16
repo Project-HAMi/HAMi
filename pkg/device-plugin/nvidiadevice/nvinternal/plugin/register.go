@@ -206,7 +206,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 			Health:  health,
 		}
 		if plugin.mpsV3 != nil {
-			info.Health = info.Health && plugin.mpsV3.healthy.Load()
+			info.Health = info.Health && plugin.mpsV3.gpuHealthy(UUID)
 			info.CustomInfo = plugin.mpsV3.deviceInfo(UUID)
 		}
 		if isMigMode {

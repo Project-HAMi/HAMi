@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
@@ -58,16 +59,19 @@ type mpsV3Allocation struct {
 }
 
 type mpsV3Manager struct {
-	policy      nvidia.MPSV3NodeConfig
-	mu          sync.Mutex
-	root        string
-	binary      string
-	cdiRoot     string
-	lock        *os.File
-	run         func(context.Context, ...string) (string, error)
-	allocations map[string]mpsV3Allocation
-	geometry    map[string]nvidia.MPSV3Geometry
-	healthy     atomic.Bool
+	policy           nvidia.MPSV3NodeConfig
+	mu               sync.Mutex
+	root             string
+	binary           string
+	cdiRoot          string
+	lock             *os.File
+	run              func(context.Context, ...string) (string, error)
+	allocations      map[string]mpsV3Allocation
+	geometry         map[string]nvidia.MPSV3Geometry
+	healthy          atomic.Bool
+	incompatibleGPUs map[string]bool
+	unhealthyGPUs    atomic.Pointer[map[string]bool]
+	generation       uint64 // Protected by mu. Changes before allocation mutations.
 }
 
 func newMPSV3Manager() *mpsV3Manager {
@@ -190,7 +194,7 @@ func (m *mpsV3Manager) close() {
 		m.lock = nil
 	}
 }
-func (m *mpsV3Manager) start(ctx context.Context, live map[string]bool, gpus []string) (resultErr error) {
+func (m *mpsV3Manager) start(ctx context.Context, live map[string]bool) (resultErr error) {
 	if !filepath.IsAbs(m.root) || filepath.Clean(m.root) != m.root || m.root == "/" {
 		return fmt.Errorf("MPS root must be an absolute clean dedicated host path")
 	}
@@ -220,11 +224,6 @@ func (m *mpsV3Manager) start(ctx context.Context, live map[string]bool, gpus []s
 	}
 	if err = m.recover(ctx, live); err != nil {
 		return err
-	}
-	if m.policy.ComputeMode == nvidia.MPSV3ServerTimeslice && len(m.allocations) == 0 {
-		if err = m.probeTimeslice(ctx, gpus); err != nil {
-			return fmt.Errorf("validate concurrent MPS timeslice servers: %w", err)
-		}
 	}
 	m.healthy.Store(true)
 	return nil
@@ -327,58 +326,6 @@ func (m *mpsV3Manager) daemonListening(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// Probe only a drained daemon. Persist the server identities for cleanup if
-// startup is interrupted between creating the two servers.
-func (m *mpsV3Manager) probeTimeslice(ctx context.Context, gpus []string) (resultErr error) {
-	if len(gpus) == 0 {
-		return fmt.Errorf("no physical GPUs to probe")
-	}
-	gpus = slices.Clone(gpus)
-	slices.Sort(gpus)
-	var keys []string
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		for _, key := range keys {
-			resultErr = errors.Join(resultErr, m.release(cleanup, key))
-		}
-	}()
-	for _, name := range []string{"first", "second"} {
-		a := mpsV3Allocation{
-			Version: mpsV3StateVersion, ComputeMode: nvidia.MPSV3ServerTimeslice, PodUID: "timeslice-probe",
-			Container: name, GPUs: gpus, Memory: 1, Percent: 100,
-		}
-		a.Server = a.serverName()
-		a.Namespace = mpsV3Name("ns", a.PodUID+"/"+a.Container)
-		m.allocations[a.Namespace] = a
-		if err := m.save(); err != nil {
-			delete(m.allocations, a.Namespace)
-			return err
-		}
-		keys = append(keys, a.Namespace)
-		if err := m.createServer(ctx, a); err != nil {
-			return err
-		}
-		// Readiness plus a write and readback verifies support on this GPU set.
-		if _, err := m.run(ctx, "server", "set", a.Server, "--timeslice-pct=100"); err != nil {
-			return err
-		}
-	}
-	for _, key := range keys {
-		a := m.allocations[key]
-		if err := m.checkServer(ctx, a); err != nil {
-			return err
-		}
-		weight, err := m.run(ctx, "server", "get", a.Server, "timeslice-pct")
-		if err != nil {
-			return err
-		}
-		if weight != "100" {
-			return fmt.Errorf("MPS server %s returned timeslice %q, expected 100", a.Server, weight)
-		}
-	}
-	return nil
-}
 func (m *mpsV3Manager) wait(ctx context.Context, check func() error) error {
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
@@ -485,8 +432,10 @@ func sameMPSRequest(a, b mpsV3Allocation) bool {
 func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.healthy.Load() {
-		return false, fmt.Errorf("MPS v3 is unhealthy")
+	for _, gpu := range a.GPUs {
+		if !m.gpuHealthy(gpu) {
+			return false, fmt.Errorf("MPS v3 is unhealthy on %s", gpu)
+		}
 	}
 	if a.ComputeMode != m.policy.ComputeMode {
 		return false, fmt.Errorf("Pod MPS mode %q does not match node mode %q", a.ComputeMode, m.policy.ComputeMode)
@@ -569,6 +518,7 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 	}
 	// Persist intent before any external mutation. Rollback derives all resource
 	// names from this record, including partitions created just before a crash.
+	m.generation++
 	m.allocations[a.Namespace] = a
 	if err := m.save(); err != nil {
 		delete(m.allocations, a.Namespace)
@@ -576,6 +526,11 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 	}
 	if !exists {
 		if err := m.createServer(ctx, a); err != nil {
+			return true, err
+		}
+	}
+	if a.SMCount > 0 {
+		if err := m.checkGeometry(ctx, a); err != nil {
 			return true, err
 		}
 	}
@@ -865,6 +820,33 @@ func (m *mpsV3Manager) partition(ctx context.Context, a mpsV3Allocation, gpu str
 	return found, nil
 }
 
+// The device inventory reports physical SMs and static partition chunks.
+func (m *mpsV3Manager) checkGeometry(ctx context.Context, a mpsV3Allocation) error {
+	out, err := m.run(ctx, "device", "list", "--server="+a.Server, "--format=csv,noheader")
+	if err != nil {
+		return err
+	}
+	rows, err := mpsV3CSV(out)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(a.GPUs))
+	for _, row := range rows {
+		if len(row) != 8 || row[1] != a.Server || !slices.Contains(a.GPUs, row[3]) || seen[row[3]] {
+			return fmt.Errorf("unexpected r620 device inventory row %q", row)
+		}
+		geometry := m.geometry[row[3]]
+		if geometry.Chunk <= 0 || row[5] != strconv.FormatInt(geometry.SMs, 10) || row[6] != strconv.FormatInt(geometry.SMs/geometry.Chunk, 10) {
+			return fmt.Errorf("MPS driver SM geometry differs from scheduler geometry on %s: %s SMs, %s chunks", row[3], row[5], row[6])
+		}
+		seen[row[3]] = true
+	}
+	if len(seen) != len(a.GPUs) {
+		return fmt.Errorf("incomplete MPS device inventory for %s", a.Server)
+	}
+	return nil
+}
+
 func (m *mpsV3Manager) checkPartitions(ctx context.Context, a mpsV3Allocation) error {
 	out, err := m.run(ctx, "namespace", "get", a.Namespace, a.Server, "sm-partitions")
 	if err != nil {
@@ -916,6 +898,7 @@ func (m *mpsV3Manager) release(ctx context.Context, key string) error {
 	if !ok {
 		return nil
 	}
+	m.generation++
 	exists, err := m.serverExists(ctx, a.Server)
 	if err != nil {
 		return err
@@ -1209,7 +1192,28 @@ func (plugin *NvidiaDevicePlugin) startMPSV3() error {
 			live[string(pod.UID)] = true
 		}
 	}
-	return plugin.mpsV3.start(plugin.operationContext(), live, ids)
+	if policy.ComputeMode == nvidia.MPSV3ServerTimeslice {
+		plugin.mpsV3.incompatibleGPUs = incompatibleMPSV3TimesliceGPUs(plugin.migMgr.nvmllib, ids)
+	}
+	return plugin.mpsV3.start(plugin.operationContext(), live)
+}
+
+func incompatibleMPSV3TimesliceGPUs(library nvml.Interface, ids []string) map[string]bool {
+	incompatible := make(map[string]bool)
+	for _, id := range ids {
+		gpu, ret := library.DeviceGetHandleByUUID(id)
+		if ret != nvml.SUCCESS {
+			klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(ret)), "Cannot query MPS timeslice GPU", "gpu", id)
+			incompatible[id] = true
+			continue
+		}
+		mode, ret := gpu.GetComputeMode()
+		if ret != nvml.SUCCESS || mode != nvml.COMPUTEMODE_DEFAULT {
+			klog.InfoS("MPS server-timeslice requires DEFAULT compute mode", "gpu", id, "mode", mode, "nvmlStatus", nvml.ErrorString(ret))
+			incompatible[id] = true
+		}
+	}
+	return incompatible
 }
 
 func (plugin *NvidiaDevicePlugin) runMPSV3Reconciler() {
@@ -1221,49 +1225,84 @@ func (plugin *NvidiaDevicePlugin) runMPSV3Reconciler() {
 			return
 		case <-timer.C:
 		}
-		m := plugin.mpsV3
-		plugin.applyMutex.Lock()
-		pods, listErr := plugin.listLiveNodePods()
-		if listErr == nil {
-			live := make(map[string]*corev1.Pod)
-			for _, pod := range pods {
-				if pod != nil && !util.IsPodInTerminatedState(pod) {
-					live[string(pod.UID)] = pod
-				}
-			}
-			m.mu.Lock()
-			var stale []string
-			for key, a := range m.allocations {
-				pod := live[a.PodUID]
-				if !a.Prepared || pod == nil || finishedMPSInitContainer(pod, a.Container) {
-					stale = append(stale, key)
-				}
-			}
-			m.mu.Unlock()
-			for _, key := range stale {
-				if err := m.release(plugin.runCtx, key); err != nil {
-					klog.ErrorS(err, "release stale MPS namespace", "namespace", key)
-				}
-			}
-		}
-		err := m.checkComputePolicy(plugin.runCtx)
-		m.mu.Lock()
-		if err == nil {
-			for _, a := range m.allocations {
-				if !a.Prepared {
-					continue
-				}
-				if err = m.check(plugin.runCtx, a); err != nil {
-					break
-				}
-			}
-		}
-		m.mu.Unlock()
-		m.healthy.Store(err == nil)
-		if err != nil {
-			klog.ErrorS(err, "MPS v3 health check failed")
-		}
+		plugin.reconcileMPSV3()
+	}
+}
 
+func (m *mpsV3Manager) gpuHealthy(gpu string) bool {
+	unhealthy := m.unhealthyGPUs.Load()
+	return m.healthy.Load() && !m.incompatibleGPUs[gpu] && (unhealthy == nil || !(*unhealthy)[gpu])
+}
+
+func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
+	m := plugin.mpsV3
+	if !m.mu.TryLock() {
+		return
+	}
+	snapshot := maps.Clone(m.allocations)
+	generation := m.generation
+	m.mu.Unlock()
+
+	// Read-only checks must not hold either allocation lock.
+	err := m.checkComputePolicy(plugin.runCtx)
+	unhealthy := make(map[string]bool)
+	if err != nil {
+		klog.ErrorS(err, "MPS v3 daemon health check failed")
+	} else {
+		for _, a := range snapshot {
+			if !a.Prepared {
+				continue
+			}
+			if checkErr := m.check(plugin.runCtx, a); checkErr != nil {
+				klog.ErrorS(checkErr, "MPS v3 allocation health check failed", "namespace", a.Namespace)
+				for _, gpu := range a.GPUs {
+					unhealthy[gpu] = true
+				}
+			}
+		}
+	}
+	m.mu.Lock()
+	if generation == m.generation {
+		m.unhealthyGPUs.Store(&unhealthy)
+	}
+	m.healthy.Store(err == nil)
+	m.mu.Unlock()
+	if err != nil {
+		return
+	}
+
+	pods, listErr := plugin.listLiveNodePods()
+	if listErr != nil {
+		return
+	}
+	live := make(map[string]*corev1.Pod, len(pods))
+	for _, pod := range pods {
+		if pod != nil && !util.IsPodInTerminatedState(pod) {
+			live[string(pod.UID)] = pod
+		}
+	}
+	for key, a := range snapshot {
+		pod := live[a.PodUID]
+		if a.Prepared && pod != nil && !finishedMPSInitContainer(pod, a.Container) {
+			continue
+		}
+		if !plugin.applyMutex.TryLock() {
+			return
+		}
+		m.mu.Lock()
+		current, exists := m.allocations[key]
+		same := generation == m.generation && exists && reflect.DeepEqual(current, a)
+		m.mu.Unlock()
+		if same {
+			ctx, cancel := context.WithTimeout(plugin.runCtx, 5*time.Second)
+			if err := m.release(ctx, key); err != nil {
+				klog.ErrorS(err, "release stale MPS namespace", "namespace", key)
+			}
+			cancel()
+			m.mu.Lock()
+			generation = m.generation
+			m.mu.Unlock()
+		}
 		plugin.applyMutex.Unlock()
 	}
 }

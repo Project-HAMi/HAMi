@@ -98,6 +98,13 @@ func testMPSV3(t *testing.T) (*mpsV3Manager, *fakeMPSV3) {
 			return "", nil
 		case "context-share set":
 			return "", nil
+		case "device list":
+			server := flag("server")
+			var rows []string
+			for i, gpu := range strings.Split(f.servers[server], ",") {
+				rows = append(rows, fmt.Sprintf("%d,%s,0000:03.00.00,%s,NVIDIA A10,72,36,", i, server, gpu))
+			}
+			return strings.Join(rows, "\n"), nil
 		case "server list":
 			if f.serverCSV != "" {
 				return f.serverCSV, nil
@@ -540,21 +547,6 @@ func TestMPSV3ServerTimesliceRecovery(t *testing.T) {
 	require.Equal(t, "unset", f.yield)
 }
 
-func TestMPSV3TimesliceCapabilityProbe(t *testing.T) {
-	m, f := testMPSV3(t)
-	ctx := context.Background()
-	m.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3ServerTimeslice, Timeslice: "short"}
-	require.NoError(t, m.configureComputePolicy(ctx))
-	require.NoError(t, m.probeTimeslice(ctx, []string{"GPU-b", "GPU-a"}))
-	require.Empty(t, m.allocations)
-	require.Empty(t, f.servers)
-	second := mpsV3Allocation{PodUID: "timeslice-probe", Container: "second", ComputeMode: nvidia.MPSV3ServerTimeslice, GPUs: []string{"GPU-a"}}
-	f.fail = "server create " + second.serverName()
-	require.ErrorContains(t, m.probeTimeslice(ctx, []string{"GPU-a"}), "injected failure")
-	require.Empty(t, m.allocations)
-	require.Empty(t, f.servers)
-}
-
 func TestMPSV3RejectsLiveLegacyState(t *testing.T) {
 	m, f := testMPSV3(t)
 	a := testMPSAllocation(t, 0)
@@ -637,4 +629,73 @@ func TestMPSV3DaemonLeavesSocketOnExit(t *testing.T) {
 	listening, err = m.daemonListening(ctx)
 	require.NoError(t, err)
 	require.False(t, listening)
+}
+
+func TestMPSV3GeometryDriftRollsBack(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 8)
+	run := m.run
+	m.run = func(ctx context.Context, args ...string) (string, error) {
+		if args[0] == "device" {
+			return fmt.Sprintf("0,%s,0000:03.00.00,GPU-a,NVIDIA A10,72,9,", a.Server), nil
+		}
+		return run(ctx, args...)
+	}
+	created, err := m.ensure(ctx, a)
+	require.True(t, created)
+	require.ErrorContains(t, err, "SM geometry differs")
+	require.Empty(t, f.partitions)
+	require.NoFileExists(t, m.cdiPath(a.Namespace))
+	require.NoError(t, m.release(ctx, a.Namespace))
+	require.Empty(t, f.servers)
+}
+
+func TestMPSV3HealthCheckDoesNotHoldAllocationLocks(t *testing.T) {
+	m, _ := testMPSV3(t)
+	plugin := newTestPlugin(t)
+	plugin.mpsV3 = m
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	plugin.runCtx = ctx
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	entered, done := make(chan struct{}), make(chan struct{})
+	m.run = func(ctx context.Context, args ...string) (string, error) {
+		close(entered)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	go func() {
+		defer close(done)
+		plugin.reconcileMPSV3()
+	}()
+	<-entered
+	require.True(t, plugin.applyMutex.TryLock())
+	plugin.applyMutex.Unlock()
+	require.True(t, m.mu.TryLock())
+	m.mu.Unlock()
+	cancel()
+	<-done
+	require.False(t, m.gpuHealthy("GPU-a"))
+}
+
+func TestMPSV3AllocationHealthIsScopedToGPU(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 0)
+	_, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+	plugin := newTestPlugin(t)
+	plugin.mpsV3, plugin.runCtx = m, ctx
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) {
+		return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "test-pod"}}}, nil
+	}
+
+	f.fail = "namespace get " + a.Namespace
+	plugin.reconcileMPSV3()
+	require.False(t, m.gpuHealthy("GPU-a"))
+	require.True(t, m.gpuHealthy("GPU-b"))
+	f.fail = ""
+	plugin.reconcileMPSV3()
+	require.True(t, m.gpuHealthy("GPU-a"))
 }

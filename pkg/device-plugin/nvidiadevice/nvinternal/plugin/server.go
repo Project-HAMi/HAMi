@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path"
@@ -1164,7 +1165,20 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
-	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	lastHealth := make(map[string]string)
+	send := func(onlyChanged bool) error {
+		devices := plugin.apiDevices()
+		health := make(map[string]string, len(devices))
+		for _, d := range devices {
+			health[d.ID] = d.Health
+		}
+		if onlyChanged && maps.Equal(lastHealth, health) {
+			return nil
+		}
+		lastHealth = health
+		return s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: devices})
+	}
+	err := send(false)
 	if err != nil {
 		klog.Errorf("Failed to send ListAndWatch response: %v", err)
 		return err
@@ -1181,14 +1195,14 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 		case <-plugin.stop:
 			return nil
 		case <-mpsTick:
-			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+			if err := send(true); err != nil {
 				return err
 			}
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+			if err := send(false); err != nil {
 				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
 				return nil
 			}
@@ -1934,9 +1948,11 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
 	}
 	devices := plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
-	if plugin.mpsV3 != nil && !plugin.mpsV3.healthy.Load() {
+	if plugin.mpsV3 != nil {
 		for _, d := range devices {
-			d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			if !plugin.mpsV3.gpuHealthy(rm.AnnotatedID(d.ID).GetID()) {
+				d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			}
 		}
 	}
 	return devices
