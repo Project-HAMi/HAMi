@@ -92,20 +92,41 @@ func nodeSortKeyChain(policy string) []util.SchedulerPolicyName {
 	return chain
 }
 
+// primaryNodeSortKey returns the first recognized node sort key without
+// allocating. Filtering policies such as superpod are skipped.
+func primaryNodeSortKey(policy string) util.SchedulerPolicyName {
+	for len(policy) > 0 {
+		part := policy
+		if comma := strings.IndexByte(policy, ','); comma >= 0 {
+			part = policy[:comma]
+			policy = policy[comma+1:]
+		} else {
+			policy = ""
+		}
+
+		switch strings.TrimSpace(part) {
+		case util.NodeSchedulerPolicyBinpack.String():
+			return util.NodeSchedulerPolicyBinpack
+		case util.NodeSchedulerPolicySpread.String():
+			return util.NodeSchedulerPolicySpread
+		}
+	}
+	return ""
+}
+
 // NodePolicyUsesSpread reports whether spread is the primary node sort key.
 func NodePolicyUsesSpread(policy string) bool {
-	chain := nodeSortKeyChain(policy)
-	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread
+	return primaryNodeSortKey(policy) == util.NodeSchedulerPolicySpread
 }
 
 // nodeScorePolicy returns the primary node sort key for device scorers.
 // Filtering policies such as superpod are not device scoring strategies.
 func nodeScorePolicy(policy string) string {
-	chain := nodeSortKeyChain(policy)
-	if len(chain) == 0 {
+	key := primaryNodeSortKey(policy)
+	if key == "" {
 		return util.NodeSchedulerPolicyBinpack.String()
 	}
-	return chain[0].String()
+	return key.String()
 }
 
 // lessByChain compares nodes i and j by the ordered sort-key chain parsed
