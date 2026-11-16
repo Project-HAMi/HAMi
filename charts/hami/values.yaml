@@ -676,6 +676,13 @@ devices:
     enabled: true
     # devices.biren.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.biren.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
+  tecorigin:
+    # -- Resource name for Tecorigin GPU core requests. A request of N reserves N cores; the vendor device plugin advertises the node's total core count under this name. Must match the device plugin and Pod resources.
+    resourceCountName: "tecorigin.com/gpucore"
+    # -- Add Tecorigin resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
+    enabled: true
+    # devices.tecorigin.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.tecorigin.enabled` is true. Standard names are added automatically from the resource fields.
+    customresources: []
   # Most devices.nvidia values are written to the generated device-config.yaml that
   # the scheduler and the device plugin read. When device-config.content is set, it
   # replaces that file and those values no longer reach either component.
