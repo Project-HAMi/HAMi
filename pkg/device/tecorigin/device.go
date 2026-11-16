@@ -40,11 +40,11 @@ limitations under the License.
 package tecorigin
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/bits"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -265,47 +265,16 @@ func coreIDsForTroubleshooting(n corev1.Node) map[string][]int64 {
 	if !ok || strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	out := make(map[string][]int64)
-	body := strings.Trim(strings.TrimSpace(raw), "{}")
-	flush := func(pair string) {
-		kv := strings.SplitN(pair, ":", 2)
-		if len(kv) != 2 {
-			return
-		}
-		uuid := strings.Trim(strings.TrimSpace(kv[0]), `"`)
-		list := strings.Trim(strings.TrimSpace(kv[1]), "[]")
-		if uuid == "" || list == "" {
-			return
-		}
-		var ids []int64
-		for s := range strings.SplitSeq(list, ",") {
-			if v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
-				ids = append(ids, v)
-			}
-		}
-		if len(ids) > 0 {
-			out[uuid] = ids
-		}
+
+	out := map[string][]int64{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		// Troubleshooting data must never block scheduling, so a malformed
+		// annotation is logged and ignored instead of failing the node.
+		klog.V(4).InfoS("ignore malformed tecorigin core id annotation",
+			"node", n.Name, "annotation", TecoCoreIDsAnnos, "err", err)
+		return nil
 	}
-	// Split on commas outside the per-card id lists, so
-	// {"a":[0,1],"b":[2]} yields two pairs rather than three fragments.
-	depth, start := 0, 0
-	for i := range len(body) {
-		switch body[i] {
-		case '[', '{':
-			depth++
-		case ']', '}':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				flush(body[start:i])
-				start = i + 1
-			}
-		}
-	}
-	flush(body[start:])
+
 	if len(out) == 0 {
 		return nil
 	}

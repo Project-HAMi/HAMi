@@ -50,6 +50,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -1205,6 +1206,52 @@ func Test_register_RemovesObsoleteHandshake(t *testing.T) {
 		_, ok := got.Annotations[key]
 		require.False(t, ok, "annotation %s should have been removed", key)
 	}
+}
+
+func Test_register_RegistersTecoriginNode(t *testing.T) {
+	// Regression test: the tecorigin backend used to report "no update needed"
+	// for every healthy node, so register() skipped addNode and Filter answered
+	// "node unregistered" for every pod requesting tecorigin.com/gpucore.
+	previousDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = previousDevices })
+	device.DevicesMap = map[string]device.Devices{
+		tecorigin.TecoDevice: tecorigin.InitTecoDevice(tecorigin.TecoConfig{ResourceCountName: "tecorigin.com/gpucore"}),
+	}
+
+	client.KubeClient = fake.NewClientset()
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+
+	// The node annotation is HAMi's node-device CSV; register() must read it and
+	// put the node in the cache, otherwise Filter reports "node unregistered".
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "teco-register-node",
+			Annotations: map[string]string{
+				"hami.io/node-tecorigin-register": "SN123432552,4,15296,15,Tecorigin,0,true,0,hami-core:",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				"tecorigin.com/gpucore": resource.MustParse("4"),
+			},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	s.register(labels.Everything())
+
+	got, err := s.GetNode("teco-register-node")
+	require.NoError(t, err, "node must be in the scheduler cache, otherwise Filter reports node unregistered")
+	require.Contains(t, got.Devices, tecorigin.TecoCommonWord)
+	require.Len(t, got.Devices[tecorigin.TecoCommonWord], 1)
+	require.Equal(t, "SN123432552", got.Devices[tecorigin.TecoCommonWord][0].ID)
+	require.Equal(t, int64(0b1111), got.Devices[tecorigin.TecoCommonWord][0].Devcore)
 }
 
 func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
