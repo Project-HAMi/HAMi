@@ -27,11 +27,11 @@ When adding a new third-party package, maintainers should:
 2. **Conduct Research:** Review the package’s maintenance status and reputation within the community.
 3. **Select Version:** Opt for the latest stable version that meets the project’s requirements.
 4. **Pin the Version:** Explicitly pin the dependency to the chosen version within the repository.
-5. **Update Documentation:** Revise the project documentation to include details about the new dependency.
+5. **Explain the Change:** State in the pull request why the package is needed.
 
 ## Automation
 
-- Dependabot opens daily update PRs for Go modules, the Dockerfiles under `docker/` and GitHub Actions.
+- Dependabot opens daily update PRs for Go modules, the Dockerfiles under `docker/` and GitHub Actions, and weekly ones for the HAMi-core submodule (`libvgpu`) and the `benchmarks/ai-benchmark` images.
 - The `GOLANG_IMAGE` and `NVIDIA_IMAGE` pins in `version.mk` (read by the image workflows and mirrored in the Dockerfiles), the `go` line in `go.mod` and the tool versions in the workflows are updated by hand.
 - A nightly Trivy scan checks the built images, and CodeQL and OpenSSF Scorecard run in CI. Findings are tracked under Security and quality.
 
@@ -45,7 +45,7 @@ Compliance with this policy is monitored by the HAMi maintainers. All dependency
 
 ## Exceptions
 
-Exceptions to this policy may be granted by the HAMi project lead on a case-by-case basis. Any exceptions must be documented with a clear rationale.
+Exceptions to this policy may be granted by the HAMi maintainers on a case-by-case basis. Any exceptions must be documented with a clear rationale.
 
 ## Credits
 
