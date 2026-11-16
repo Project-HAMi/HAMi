@@ -60,8 +60,9 @@ const (
 )
 
 type driverAdmissionWaiter struct {
-	granted chan struct{}
-	state   driverAdmissionWaiterState
+	granted  chan struct{}
+	state    driverAdmissionWaiterState
+	borrowed bool
 }
 
 type driverAdmissionController struct {
@@ -70,6 +71,7 @@ type driverAdmissionController struct {
 	activeForward        int
 	releaseActive        bool
 	retainPriorityGrants int
+	borrowedForward      int
 	queues               [driverAdmissionPriorityCount][]*driverAdmissionWaiter
 	closed               bool
 }
@@ -94,14 +96,16 @@ func admissionPriority(command uint16) (driverAdmissionPriority, bool) {
 	}
 }
 
+// acquire waits for a permit. borrowed reports that a release got a forward
+// permit; pass it back to release.
 func (controller *driverAdmissionController) acquire(
 	priority driverAdmissionPriority, connectionDone <-chan struct{},
-	shutdown <-chan struct{}) bool {
+	shutdown <-chan struct{}) (granted bool, borrowed bool) {
 	waiter := &driverAdmissionWaiter{granted: make(chan struct{})}
 	controller.mutex.Lock()
 	if controller.closed {
 		controller.mutex.Unlock()
-		return false
+		return false, false
 	}
 	controller.queues[priority] = append(controller.queues[priority], waiter)
 	controller.grantLocked()
@@ -109,12 +113,19 @@ func (controller *driverAdmissionController) acquire(
 
 	select {
 	case <-waiter.granted:
-		return true
+		granted = true
 	case <-connectionDone:
-		return controller.cancelOrObserveGrant(waiter)
+		granted = controller.cancelOrObserveGrant(waiter)
 	case <-shutdown:
-		return controller.cancelOrObserveGrant(waiter)
+		granted = controller.cancelOrObserveGrant(waiter)
 	}
+	if !granted {
+		return false, false
+	}
+	controller.mutex.Lock()
+	borrowed = waiter.borrowed
+	controller.mutex.Unlock()
+	return true, borrowed
 }
 
 func (controller *driverAdmissionController) cancelOrObserveGrant(
@@ -130,9 +141,12 @@ func (controller *driverAdmissionController) cancelOrObserveGrant(
 }
 
 func (controller *driverAdmissionController) release(
-	priority driverAdmissionPriority) {
+	priority driverAdmissionPriority, borrowed bool) {
 	controller.mutex.Lock()
-	if priority == driverAdmissionRelease {
+	if borrowed {
+		controller.borrowedForward--
+		controller.activeForward--
+	} else if priority == driverAdmissionRelease {
 		controller.releaseActive = false
 	} else if controller.activeForward > 0 {
 		controller.activeForward--
@@ -169,7 +183,7 @@ func (controller *driverAdmissionController) grantLocked() {
 	for controller.activeForward < controller.forwardPermits {
 		priority, ok := controller.nextForwardPriorityLocked()
 		if !ok {
-			return
+			break
 		}
 		waiter, _ := controller.dequeueLocked(priority)
 		waiter.state = driverAdmissionGranted
@@ -179,6 +193,26 @@ func (controller *driverAdmissionController) grantLocked() {
 		} else if priority == driverAdmissionInit {
 			controller.retainPriorityGrants = 0
 		}
+		close(waiter.granted)
+	}
+	controller.borrowForReleaseLocked()
+}
+
+// borrowForReleaseLocked lets waiting releases use idle forward permits. It
+// runs after the forward grants, so an idle forward permit here means no init
+// or retain waits. One forward permit is never borrowed, so a release that
+// hangs cannot block every init and retain.
+func (controller *driverAdmissionController) borrowForReleaseLocked() {
+	for controller.activeForward < controller.forwardPermits &&
+		controller.borrowedForward < controller.forwardPermits-1 {
+		waiter, ok := controller.dequeueLocked(driverAdmissionRelease)
+		if !ok {
+			return
+		}
+		waiter.state = driverAdmissionGranted
+		waiter.borrowed = true
+		controller.activeForward++
+		controller.borrowedForward++
 		close(waiter.granted)
 	}
 }
@@ -598,10 +632,11 @@ func (broker *Broker) handleDriverAdmission(connection *net.UnixConn,
 		}
 	}()
 
-	if !broker.admission.acquire(priority, connectionDone, broker.shutdown) {
+	admitted, borrowed := broker.admission.acquire(priority, connectionDone, broker.shutdown)
+	if !admitted {
 		return
 	}
-	defer broker.admission.release(priority)
+	defer broker.admission.release(priority, borrowed)
 
 	if err := connection.SetWriteDeadline(
 		time.Now().Add(transactionTimeout)); err != nil {

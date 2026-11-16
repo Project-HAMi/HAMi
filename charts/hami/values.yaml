@@ -498,9 +498,11 @@ devicePlugin:
     # `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`.
     # See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker).
     enabled: false
-    # -- Maximum concurrent CUDA driver lifecycle calls, including one release-only slot. Use `0` to
-    # disable or `2` through `64` to enable. Requires a HAMi-core build with driver admission support;
-    # older libraries ignore `LIBVGPU_DRIVER_ADMISSION`. Changing the value needs a drain of GPU
+    # -- Maximum concurrent CUDA driver lifecycle calls, including one release-only slot. A release
+    # can also use an idle init or retain slot when no init or retain waits, but one of those slots
+    # is never lent to releases. Use `0` to disable or `2` through `64` to enable. Requires a
+    # HAMi-core build with driver admission support; older libraries ignore
+    # `LIBVGPU_DRIVER_ADMISSION`. Changing the value needs a drain of GPU
     # workloads, because running pods keep the admission flag they received at allocation.
     # Admission limits concurrency; it is not a security boundary. Every GPU container on the node
     # can reach the broker socket, and a lease lasts until its client closes the connection, the

@@ -623,14 +623,14 @@ func TestDriverAdmissionCancelsQueuedWaiter(t *testing.T) {
 	controller := newDriverAdmissionController(2)
 	shutdown := make(chan struct{})
 	idle := make(chan struct{})
-	if !controller.acquire(driverAdmissionRetain, idle, shutdown) {
+	if !acquireGranted(controller, driverAdmissionRetain, idle, shutdown) {
 		t.Fatal("initial admission was not granted")
 	}
 
 	connectionDone := make(chan struct{})
 	result := make(chan bool, 1)
 	go func() {
-		result <- controller.acquire(driverAdmissionInit, connectionDone,
+		result <- acquireGranted(controller, driverAdmissionInit, connectionDone,
 			shutdown)
 	}()
 	deadline := time.Now().Add(time.Second)
@@ -660,8 +660,8 @@ func TestDriverAdmissionCancelsQueuedWaiter(t *testing.T) {
 		t.Fatalf("active admissions=%d, want 1", got)
 	}
 
-	controller.release(driverAdmissionRetain)
-	if !controller.acquire(driverAdmissionInit, idle, shutdown) {
+	controller.release(driverAdmissionRetain, false)
+	if !acquireGranted(controller, driverAdmissionInit, idle, shutdown) {
 		t.Fatal("admission after cancellation was not granted")
 	}
 }
@@ -670,7 +670,7 @@ func TestDriverAdmissionPrioritizesLifecycleCompletion(t *testing.T) {
 	controller := newDriverAdmissionController(2)
 	connectionDone := make(chan struct{})
 	shutdown := make(chan struct{})
-	if !controller.acquire(driverAdmissionRetain, connectionDone, shutdown) {
+	if !acquireGranted(controller, driverAdmissionRetain, connectionDone, shutdown) {
 		t.Fatal("initial admission was not granted")
 	}
 
@@ -685,12 +685,12 @@ func TestDriverAdmissionPrioritizesLifecycleCompletion(t *testing.T) {
 	} {
 		priority := priority
 		go func() {
-			if !controller.acquire(priority, connectionDone, shutdown) {
+			if !acquireGranted(controller, priority, connectionDone, shutdown) {
 				return
 			}
 			order <- priority
 			<-releaseGates[priority]
-			controller.release(priority)
+			controller.release(priority, false)
 		}()
 	}
 
@@ -709,14 +709,14 @@ func TestDriverAdmissionPrioritizesLifecycleCompletion(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	if !controller.acquire(driverAdmissionRelease, connectionDone, shutdown) {
+	if !acquireGranted(controller, driverAdmissionRelease, connectionDone, shutdown) {
 		t.Fatal("reserved release admission was not granted")
 	}
 	if got := controller.activeCount(); got != 2 {
 		t.Fatalf("active admissions=%d, want 2", got)
 	}
-	controller.release(driverAdmissionRelease)
-	controller.release(driverAdmissionRetain)
+	controller.release(driverAdmissionRelease, false)
+	controller.release(driverAdmissionRetain, false)
 	for _, expected := range []driverAdmissionPriority{
 		driverAdmissionRetain,
 		driverAdmissionInit,
