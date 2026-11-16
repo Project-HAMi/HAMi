@@ -97,6 +97,16 @@ func nodePolicyUsesSpread(policy string) bool {
 	return len(chain) > 0 && chain[0] == util.NodeSchedulerPolicySpread
 }
 
+// nodeScorePolicy returns the primary node sort key for device scorers.
+// Filtering policies such as superpod are not device scoring strategies.
+func nodeScorePolicy(policy string) string {
+	chain := nodeSortKeyChain(policy)
+	if len(chain) == 0 {
+		return util.NodeSchedulerPolicyBinpack.String()
+	}
+	return chain[0].String()
+}
+
 // lessByChain compares nodes i and j by the ordered sort-key chain parsed
 // from l.Policy, falling back to binpack (today's default node policy)
 // when the comma list names no recognized sort key (e.g. "superpod").
@@ -135,6 +145,7 @@ type policyNeutralScorer interface {
 
 func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string) {
 	devScore := float32(0)
+	scorePolicy := nodeScorePolicy(policy)
 	for idx, val := range ns.Devices {
 		dev, ok := device.GetDevices()[idx]
 		if !ok || dev == nil {
@@ -142,7 +153,7 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 			continue
 		}
 
-		score := dev.ScoreNode(ns.Node, val, previous, policy)
+		score := dev.ScoreNode(ns.Node, val, previous, scorePolicy)
 
 		// Backends implementing policyNeutralScorer return policy-independent
 		// "higher is better" scores. For Spread (which selects the lowest

@@ -138,6 +138,56 @@ func TestNodePolicyUsesSpread(t *testing.T) {
 	}
 }
 
+func TestNodeScorePolicy(t *testing.T) {
+	tests := []struct {
+		policy string
+		want   string
+	}{
+		{policy: "binpack", want: "binpack"},
+		{policy: "spread", want: "spread"},
+		{policy: "superpod,spread", want: "spread"},
+		{policy: "spread,superpod,binpack", want: "spread"},
+		{policy: "superpod,binpack", want: "binpack"},
+		{policy: "superpod", want: "binpack"},
+		{policy: "", want: "binpack"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.policy, func(t *testing.T) {
+			if got := nodeScorePolicy(tt.policy); got != tt.want {
+				t.Errorf("nodeScorePolicy(%q) = %q, want %q", tt.policy, got, tt.want)
+			}
+		})
+	}
+}
+
+type policyRecordingDevice struct {
+	device.Devices
+	gotPolicy string
+}
+
+func (d *policyRecordingDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, policy string) float32 {
+	d.gotPolicy = policy
+	return 0
+}
+
+func TestOverrideScorePassesPrimarySortKeyToDevice(t *testing.T) {
+	originalDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = originalDevices })
+	scorer := &policyRecordingDevice{}
+	device.DevicesMap = map[string]device.Devices{"test": scorer}
+
+	ns := &NodeScore{
+		Node:    &corev1.Node{},
+		Devices: device.PodDevices{"test": device.PodSingleDevice{}},
+	}
+	ns.OverrideScore(nil, "superpod,spread")
+
+	if scorer.gotPolicy != "spread" {
+		t.Fatalf("ScoreNode received policy %q, want %q", scorer.gotPolicy, "spread")
+	}
+}
+
 func TestLess(t *testing.T) {
 	tests := []struct {
 		name          string
