@@ -514,7 +514,7 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}) map[str
 		return capacities
 	}
 	for _, usage := range *overall {
-		if usage == nil || usage.Node == nil {
+		if usage == nil || usage.Node == nil || usage.Node.Spec.Unschedulable {
 			continue
 		}
 		spid := usage.Node.Labels[util.SuperPodIDLabel]

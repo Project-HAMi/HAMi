@@ -1449,6 +1449,20 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		assert.Equal(t, 0, len(failed))
 	})
 
+	t.Run("cordoned nodes do not contribute capacity", func(t *testing.T) {
+		s := newSuperpodTestScheduler()
+		s.registerSuperpodNode("n-sp1-available", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
+		s.registerSuperpodNode("n-sp1-cordoned", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
+		cordoned, err := s.GetNode("n-sp1-cordoned")
+		assert.NilError(t, err)
+		cordoned.Node.Spec.Unschedulable = true
+		s.addNode("n-sp1-cordoned", cordoned)
+
+		capacities := s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}})
+
+		assert.Equal(t, int64(6), capacities["sp-1"])
+	})
+
 	t.Run("empty superpod set returns an empty capacity map", func(t *testing.T) {
 		capacities := newSuperpodTestScheduler().collectSuperpodCapacities(nil)
 		assert.Assert(t, capacities != nil)
