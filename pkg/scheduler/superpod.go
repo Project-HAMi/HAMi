@@ -601,7 +601,7 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 		return baseScore
 	}
 	rackSlots := rackSlotsMap[rack]
-	if rackSlots <= ctx.podRequest {
+	if rackSlots < ctx.podRequest {
 		// A rack whose remaining slots cannot fit even one more pod offers no
 		// room for convergence.
 		klog.V(5).InfoS("Superpod rack boost skipped: rack has insufficient remaining slots",

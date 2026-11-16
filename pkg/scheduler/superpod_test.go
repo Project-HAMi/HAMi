@@ -884,6 +884,18 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		assert.Equal(t, float32(5.0), score)
 	})
 
+	t.Run("first pod rack with exactly enough slots gets boost", func(t *testing.T) {
+		ctx := &superpodContext{
+			podRequest: 2,
+			RackSlotCounts: map[string]map[string]int64{
+				"sp-1": {"rack-A": 2, "rack-B": 4},
+			},
+		}
+		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
+		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicyBinpack.String())
+		assert.Equal(t, float32(5.0+superpodRackBoost/2), score)
+	})
+
 	t.Run("first pod no rack counts for superpod returns base", func(t *testing.T) {
 		ctx := &superpodContext{
 			TaskAnchored:   false,
