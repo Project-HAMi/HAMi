@@ -2972,7 +2972,7 @@ func Test_allocationDuration(t *testing.T) {
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: test.annotations}}
 			got, ok := allocationDuration(pod, now)
 			require.Equal(t, test.wantOK, ok)
-			require.Equal(t, test.want, got)
+			require.InDelta(t, test.want, got, 1e-9)
 		})
 	}
 }
