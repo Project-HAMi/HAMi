@@ -164,6 +164,12 @@ These are the primary metrics if `--legacy-metrics=false`:
 - `hami_scheduler_cache_synced`
 - `hami_scheduler_last_sync_success_timestamp_seconds`
 
+**Scheduler allocation outcomes**
+- `hami_scheduler_allocations_total`
+- `hami_scheduler_allocation_failures_total`
+- `hami_scheduler_bind_rollbacks_total`
+- `hami_scheduler_allocation_duration_seconds`
+
 **Build metadata**
 - `hami_build_info`
 
