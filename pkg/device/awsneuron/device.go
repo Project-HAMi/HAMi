@@ -464,9 +464,15 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		k.Nums = deviceCount
 	}
 	if k.Nums > 1 {
+		uuidMismatches := 0
 		candidates := make([]*device.DeviceUsage, len(devices))
 		for i, candidate := range devices {
 			copy := candidate.DeepCopy()
+			if !device.CheckUUID(pod.GetAnnotations(), copy.ID, AWSNeuronUseUUID, AWSNeuronNoUseUUID, neuron.CommonWord()) {
+				uuidMismatches++
+				copy.Health = false
+				klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", copy.ID)
+			}
 			requiredCores := k.Coresreq
 			if remainingCores > 0 {
 				requiredCores = min(remainingCores, countMaskAvailable(copy.Totalcore))
@@ -482,6 +488,9 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		if len(alloc) == 0 {
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", k.Nums, "numa")
+			if uuidMismatches > 0 {
+				reason[common.CardUUIDMismatch] += uuidMismatches
+			}
 			return false, tmpDevs, common.GenReason(reason, len(devices))
 		}
 		for _, dev := range alloc {

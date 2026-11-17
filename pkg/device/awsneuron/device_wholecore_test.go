@@ -18,6 +18,7 @@ package awsneuron
 
 import (
 	"maps"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -26,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -331,4 +333,100 @@ func Test_PatchAnnotations_EmitsAllInferentia1CoreIndexes(t *testing.T) {
 		}}},
 	})
 	assert.Equal(t, annotations[AWSNeuronAssignedIndex], "4,5,6,7")
+}
+
+func Test_Fit_MultiDeviceAllocationRespectsUUIDConstraints(t *testing.T) {
+	tests := []struct {
+		name         string
+		annotations  map[string]string
+		wantFit      bool
+		wantUUIDs    []string
+		wantExcluded string
+		wantReasons  []string
+	}{
+		{
+			name: "respects UUID inclusion",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-2,node1-AWSNeuron-3",
+			},
+			wantFit:   true,
+			wantUUIDs: []string{"node1-AWSNeuron-2", "node1-AWSNeuron-3"},
+		},
+		{
+			name: "respects UUID exclusion",
+			annotations: map[string]string{
+				AWSNeuronNoUseUUID: "node1-AWSNeuron-0",
+			},
+			wantFit:      true,
+			wantExcluded: "node1-AWSNeuron-0",
+		},
+		{
+			name: "fails when insufficient matching UUIDs",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-0",
+			},
+			wantFit:     false,
+			wantReasons: []string{common.CardUUIDMismatch, common.NumaNotFit},
+		},
+		{
+			name: "fails when included devices are non-contiguous",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-0,node1-AWSNeuron-2",
+			},
+			wantFit:     false,
+			wantReasons: []string{common.CardUUIDMismatch, common.NumaNotFit},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := newNeuronBackend()
+			registered, err := dev.GetNodeDevices(newNeuronNode("node1", "inf1.6xlarge", 4, 16))
+			assert.NilError(t, err)
+
+			usages := make([]*device.DeviceUsage, len(registered))
+			for i, info := range registered {
+				usages[i] = &device.DeviceUsage{
+					ID: info.ID, Index: info.Index, Count: info.Count,
+					Totalcore: info.Devcore, Type: info.Type, Health: true,
+					CustomInfo: maps.Clone(info.CustomInfo),
+				}
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "pod-uuid-test",
+					Annotations: tt.annotations,
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"aws.amazon.com/neuron": resource.MustParse("2"),
+					}},
+				}}},
+			}
+			req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+			assert.NilError(t, err)
+
+			fit, allocations, reason := dev.Fit(usages, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, tt.wantFit, reason)
+			if tt.wantFit {
+				allocatedDevs := allocations[AWSNeuronDevice]
+				assert.Equal(t, len(allocatedDevs), 2)
+				if len(tt.wantUUIDs) > 0 {
+					for i, want := range tt.wantUUIDs {
+						assert.Equal(t, allocatedDevs[i].UUID, want)
+					}
+				}
+				if tt.wantExcluded != "" {
+					for _, allocated := range allocatedDevs {
+						assert.Assert(t, allocated.UUID != tt.wantExcluded, "excluded device was allocated")
+					}
+				}
+			} else {
+				for _, r := range tt.wantReasons {
+					assert.Assert(t, strings.Contains(reason, r), "expected %s in reason: %s", r, reason)
+				}
+			}
+		})
+	}
 }
