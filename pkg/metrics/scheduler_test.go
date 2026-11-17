@@ -61,6 +61,7 @@ func TestSchedulerFailureReasons(t *testing.T) {
 		FailureReasonInternal,
 		FailureReasonConflict,
 		FailureReasonDevicePlugin,
+		FailureReasonTimeout,
 	} {
 		m.ObserveAllocationFailure("filter", "NVIDIA", reason)
 	}
@@ -77,6 +78,7 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="in
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lock",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lookup",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no_fit",phase="filter"} 1
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="timeout",phase="filter"} 1
 `)
 	if err := promtestutil.CollectAndCompare(m, want, "hami_scheduler_allocation_failures_total"); err != nil {
 		t.Fatalf("unexpected failure reasons:\n%s", err)
