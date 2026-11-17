@@ -332,7 +332,8 @@ devicePlugin:
       # -- Run the monitor liveness and readiness probes. Disable to debug inside the container.
       enabled: true
     # -- Monitor Pod informer resync interval and grace period for releasing mappings of missing Pods.
-    # Does not control directory GC or Prometheus scrape frequency.
+    # Does not control directory GC or Prometheus scrape frequency. Must be positive; zero, negative
+    # or invalid values fall back to `5m`.
     resyncInterval: "5m"
     # -- Disable the HAMi-core hook for whole-GPU containers when memory and core scaling are both 1;
     # the monitor reads their metrics from NVML instead. Whole-GPU means a non-MIG device with full
@@ -498,6 +499,23 @@ devicePlugin:
     # `hostPID=true`; mounts the broker socket directory at `/var/run/hami/hostpid`.
     # See [Host PID broker](https://project-hami.io/docs/next/developers/hostpid-broker).
     enabled: false
+    # -- Maximum concurrent CUDA driver lifecycle calls, including one release-only slot. A release
+    # can also use an idle init or retain slot when no init or retain waits, but one of those slots
+    # is never lent to releases. Use `0` to disable or `2` through `64` to enable. Requires a
+    # HAMi-core build with driver admission support; older libraries ignore
+    # `LIBVGPU_DRIVER_ADMISSION`. Changing the value needs a drain of GPU
+    # workloads, because running pods keep the admission flag they received at allocation.
+    # Admission limits concurrency; it is not a security boundary. Every GPU container on the node
+    # can reach the broker socket, and a lease lasts until its client closes the connection, the
+    # broker stops, or `driverAdmissionMaxHoldSeconds` passes. Enable admission only when the GPU
+    # workloads on a node are mutually trusted. With `2` there is one forward slot, so a single
+    # workload can hold it and block driver init and retain for every other workload on the node
+    # for up to `driverAdmissionMaxHoldSeconds` per lease.
+    driverAdmissionPermits: 0
+    # -- Maximum time in seconds that one CUDA driver admission lease holds its slot. When it passes,
+    # the broker frees the slot and logs a warning; the client and its driver call continue. Use `1`
+    # through `3600`. Set it above the slowest expected `cuInit` or primary context retain on the node.
+    driverAdmissionMaxHoldSeconds: 60
   # -- Use the host network for NVIDIA device plugin Pods. When enabled, the chart sets `dnsPolicy:
   # ClusterFirstWithHostNet` so the scheduler Service remains resolvable.
   hostNetwork: false
@@ -562,14 +580,13 @@ devices:
     # -- Non-negative integer multiplier for explicit HCU memory requests in MiB and their ResourceQuota limits. For example, `1024` makes a memory request of `4` mean 4 GiB.
     # `0` and `1` leave requests unscaled.
     memoryFactor: 1
-    # -- Resource name for non-negative integer vHCU counts. Required for HCU memory or core requests; `0` requests no device. Must match the vendor device plugin.
+    # -- Single resource prefix shared with the Hygon device plugin. Default `hcu`. Set `dcu` when upgrading a cluster whose device plugin still reports DCU resources.
+    # One prefix only: lowercase letters and digits, and the value must contain `cu`. The chart derives `hygon.com/<prefix>num`, `hygon.com/<prefix>mem`, and `hygon.com/<prefix>cores` when the resource names are unset. The previous defaults `hygon.com/hcunum`, `hygon.com/hcumem`, and `hygon.com/hcucores` are ignored when `resourcePrefix` is not `hcu`. Set `resourceCountName`, `resourceMemoryName`, or `resourceCoreName` to keep a custom name.
+    # `hygon.com/<prefix>num` is the non-negative integer vHCU count and is required for memory or core requests; `0` requests no device.
+    # `hygon.com/<prefix>mem` is memory on each vHCU in integer MiB, scaled by `memoryFactor` when that is greater than 1. Omission or `0` requests the selected device's full memory.
+    # `hygon.com/<prefix>cores` is compute percentage (integer, 0-100). Omission or `0` reserves no compute. An explicit `100` requests the card exclusively.
     # See [HCU workload examples](https://project-hami.io/docs/next/userguide/hygon-device/examples/allocate-core-and-memory).
-    resourceCountName: "hygon.com/hcunum"
-    # -- Resource name for the memory requested on each vHCU, in integer MiB units, scaled by `devices.hygon.memoryFactor` when it is greater than 1.
-    # Omission or `0` requests the selected HCU's full memory.
-    resourceMemoryName: "hygon.com/hcumem"
-    # -- Resource name for each vHCU's requested compute percentage (integer, 0-100; 40 means 40%). Omission or `0` reserves no compute. An explicit `100` requests the card exclusively.
-    resourceCoreName: "hygon.com/hcucores"
+    resourcePrefix: "hcu"
   cambricon:
     # -- Resource name for the number of MLUs a container requests; it must match the Cambricon device plugin.
     # A zero count requests no device; HAMi reads memory and core requests only for a positive count.
@@ -675,6 +692,13 @@ devices:
     # -- Add Biren resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
     enabled: true
     # devices.biren.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.biren.enabled` is true. Standard names are added automatically from the resource fields.
+    customresources: []
+  tecorigin:
+    # -- Resource name for Tecorigin GPU core requests. A request of N reserves N cores; the vendor device plugin advertises the node's total core count under this name. Must match the device plugin and Pod resources.
+    resourceCountName: "tecorigin.com/gpucore"
+    # -- Add Tecorigin resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. The vendor device plugin must be installed separately.
+    enabled: true
+    # devices.tecorigin.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.tecorigin.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
   # Most devices.nvidia values are written to the generated device-config.yaml that
   # the scheduler and the device plugin read. When device-config.content is set, it
@@ -1029,7 +1053,7 @@ devices:
           memory: 32768
           aiCore: 10
           aiCPU: 3
-    # Ascend950DT 9582 whole-card configuration; see ../../docs/ascend/950dt-sku-reference.md for other SKU estimates.
+    # Ascend950DT 9582 whole-card configuration; see https://project-hami.io/docs/next/userguide/ascend-device/examples/950dt-sku-reference for other SKU estimates.
     - chipName: Ascend950DT
       commonWord: Ascend950DT
       resourceName: huawei.com/Ascend950DT

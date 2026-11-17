@@ -41,6 +41,7 @@ const (
 	FailureReasonBind            SchedulerFailureReason = "bind"
 	FailureReasonInternal        SchedulerFailureReason = "internal"
 	FailureReasonConflict        SchedulerFailureReason = "conflict"
+	FailureReasonDevicePlugin    SchedulerFailureReason = "device_plugin"
 )
 
 // newSchedulerCounter creates an outcome counter with the shared label contract.

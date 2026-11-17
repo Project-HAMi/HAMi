@@ -430,7 +430,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 **Bug fixes**
 - Skip memory alignment to vNPU templates in HAMi-core mode for Ascend
 
-## Unreleased
+## v2.11.0 - 2026-11-04
 
 **Breaking changes**
 - Vendor settings in the Helm chart moved to `devices.<vendor>`. The previous root-level fields are no longer read, and the chart lists the replacement path for each one
@@ -455,6 +455,16 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Add a redacted HAMi diagnostic bundle collector
 - Remote client: add `nvidia-smi` support
 - Hygon: share the HCU core when a pod requests no cores, like NVIDIA (DTK v26.10+)
+- Add a host PID broker to the device plugin for HAMi-core
+- Detect `nvidiaDriverRoot` automatically in the device plugin
+- Add pod and container level `hami.io/overwrite-env` annotations
+- Validate device resource names and defaults at scheduler startup
+- Honor preferred nodeAffinity in node scoring
+- Add `hami_scheduler_is_leader` and `hami_scheduler_cache_synced` metrics
+- Add GPU temperature, power and ECC error metrics and `hami_host_gpu_unknown_process_count` to vGPUmonitor
+- Mthreads: support the MTT S5000 with a configurable memory size per card
+- AWS Neuron: support all four NeuronCores on Inferentia1 devices
+- Ascend: add whole-card scheduling for Ascend950DT 9582
 
 **Deprecations**
 - `hami_container_device_memory_bytes` is deprecated in v2.11.0 and removed in v2.12.0, use `hami_vgpu_memory_used_bytes`
@@ -469,4 +479,33 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Mark every replica and MIG slice of a GPU unhealthy on an XID error in the device plugin
 - Requeue remote-gpu pods that wait for a Lupine fleet change
 - Resolve dynamic MIG identities and watch profiling fields in the monitor
+- AMD: select quota-feasible GPU combinations in topology scheduling
+
+## Unreleased
+
+**Breaking changes**
+- The admission webhook rejects new pods that request HAMi devices when `hami.io/gpu-scheduler-policy` or `hami.io/node-scheduler-policy` has an unrecognized value. Previously the value was ignored and the default policy was used. Running pods are not affected
+
+**New features**
+- Add support for Tecorigin GPUs through the `tecorigin.com/gpucore` resource. The Tecorigin device plugin is installed separately
+- Add remoteGPUmonitor, a Lupine server sidecar that exports HAMi container metrics for remote GPUs
+- Add `scheduler validate device-config <path>` and `scheduler validate scheduler-config` to check configuration offline
+- Hygon: add `devices.hygon.resourcePrefix` (default `hcu`). Set it to `dcu` to keep clusters on the old DCU resource names schedulable
+- Iluvatar: recognize MR-V100A and MR-V50A devices
+- Add the `hami_scheduler_last_sync_success_timestamp_seconds` metric
+- Count bind, device plugin allocation and NUMA refit outcomes in `hami_scheduler_allocations_total` and `hami_scheduler_allocation_failures_total`
+
+**Bug fixes**
+- Clear the scheduler sync state and node usage metrics when leadership is lost
+- Update standby scheduler replicas after a NUMA refit
+- Update the cached pod after a NUMA refit, so later refits of the same pod no longer fail with a conflict
+- Keep candidate GPUs from every NUMA node when the topology-aware policy and NUMA binding are combined
+- Refresh the cached node when `hami.io/device-cordon` changes
+- Release the RemoteGPU reservation when the filter annotation patch fails
+- Replace failed or outdated RemoteGPU session relays
+- Hygon: enforce ResourceQuota for whole-card memory requests
+- Cambricon: keep the node lock when a pod that requests no MLU fails to bind
+- AWS Neuron: keep NeuronCore reservations across init and application containers
+- Fall back to the default `deviceSplitCount` when it is unset instead of crashing the device plugin
+- Fall back to the default 5m `HAMI_RESYNC_INTERVAL` when it is zero or negative
 

@@ -4,12 +4,12 @@ run_scheduler.sh
 device_plugin.sh
 libvgpu/build
 updateso.sh
-libvgpu.so
+/libvgpu.so
 .idea
 .vscode
 vendor
-license
-vgpuvalidator
+/license
+/vgpuvalidator
 _output/
 coverage.out
 .DS_Store

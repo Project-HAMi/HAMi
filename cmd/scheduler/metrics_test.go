@@ -17,9 +17,15 @@ limitations under the License.
 package main
 
 import (
+	"errors"
 	"maps"
+	"net"
+	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
@@ -27,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -35,6 +42,7 @@ import (
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	clientpkg "github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
 
@@ -42,12 +50,17 @@ type fakeMetricsProvider struct {
 	nodeUsage    map[string]*schedulerpkg.NodeUsage
 	quotaManager *device.QuotaManager
 	podManager   *device.PodManager
-	isLeader     bool
+	isLeader     *bool
 	isSynced     bool
+	lastSyncTime int64
 	outcome      *versionmetrics.SchedulerOutcomeMetrics
 }
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
+	if f.isLeader != nil && !*f.isLeader {
+		empty := make(map[string]*schedulerpkg.NodeUsage)
+		return &empty
+	}
 	return &f.nodeUsage
 }
 
@@ -60,15 +73,251 @@ func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 }
 
 func (f *fakeMetricsProvider) GetLeaderManager() leaderelection.LeaderManager {
-	return leaderelection.NewDummyLeaderManager(f.isLeader)
+	leader := true
+	if f.isLeader != nil {
+		leader = *f.isLeader
+	}
+	return leaderelection.NewDummyLeaderManager(leader)
 }
 
 func (f *fakeMetricsProvider) IsSynced() bool {
 	return f.isSynced
 }
 
+func (f *fakeMetricsProvider) LastSyncSuccessTime() int64 {
+	return f.lastSyncTime
+}
+
 func (f *fakeMetricsProvider) GetAllocationMetrics() *versionmetrics.SchedulerOutcomeMetrics {
 	return f.outcome
+}
+
+// TestStartMetricsServerBindFailure verifies that the metrics helper reports a
+// bind error synchronously and never starts a serving goroutine.
+func TestStartMetricsServerBindFailure(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	errCh := make(chan error, 1)
+	listener, err := startMetricsServer(occupied.Addr().String(), nil, false, errCh)
+	if listener != nil {
+		listener.Close()
+		t.Fatal("metrics unexpectedly bound an occupied port")
+	}
+	var networkError *net.OpError
+	if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "metrics address") {
+		t.Fatalf("expected synchronous metrics listener failure, got %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("no metrics server should have started, got async error %v", err)
+	default:
+	}
+}
+
+// TestStartMetricsServer verifies that the metrics endpoint remains available
+// and that a serving failure reaches the scheduler's supervision channel.
+func TestStartMetricsServer(t *testing.T) {
+	provider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: device.NewQuotaManager(),
+		podManager:   device.NewPodManager(),
+	}
+	errCh := make(chan error, 1)
+	listener, err := startMetricsServer("127.0.0.1:0", provider, false, errCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://" + listener.Addr().String() + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, net.ErrClosed) || !strings.Contains(err.Error(), "metrics server error") {
+			t.Fatalf("expected supervised listener error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("metrics server did not return its listener failure")
+	}
+}
+
+// TestStartMetricsLifecycle exercises the real scheduler startup path with a
+// fake Kubernetes client. It covers both metrics bind rollback and listener
+// cleanup after a supervised server failure.
+func TestStartMetricsLifecycle(t *testing.T) {
+	previousInitGlobalClient := initGlobalClient
+	previousInitDevices := initDevices
+	previousListenTCP := listenTCP
+	previousKubeClient := clientpkg.KubeClient
+	previousScheduler := sher
+	previousExtenderBind := config.ExtenderBind
+	previousHTTPBind := config.HTTPBind
+	previousMetricsBindAddress := config.MetricsBindAddress
+	previousDevicePluginNamespace := config.DevicePluginNamespace
+	previousDevicePluginServiceAccount := config.DevicePluginServiceAccount
+	previousLeaderElect := config.LeaderElect
+	previousHostName := config.HostName
+	previousNodeAffinityScoreWeight := config.NodeAffinityScoreWeight
+	previousEnableProfiling := enableProfiling
+	previousTLSCertFile := tlsCertFile
+	previousTLSKeyFile := tlsKeyFile
+	t.Cleanup(func() {
+		initGlobalClient = previousInitGlobalClient
+		initDevices = previousInitDevices
+		listenTCP = previousListenTCP
+		clientpkg.KubeClient = previousKubeClient
+		sher = previousScheduler
+		config.ExtenderBind = previousExtenderBind
+		config.HTTPBind = previousHTTPBind
+		config.MetricsBindAddress = previousMetricsBindAddress
+		config.DevicePluginNamespace = previousDevicePluginNamespace
+		config.DevicePluginServiceAccount = previousDevicePluginServiceAccount
+		config.LeaderElect = previousLeaderElect
+		config.HostName = previousHostName
+		config.NodeAffinityScoreWeight = previousNodeAffinityScoreWeight
+		enableProfiling = previousEnableProfiling
+		tlsCertFile = previousTLSCertFile
+		tlsKeyFile = previousTLSKeyFile
+	})
+
+	initGlobalClient = func(...clientpkg.Option) {}
+	initDevices = func() {}
+	config.ExtenderBind = "127.0.0.1:0"
+	config.HTTPBind = "127.0.0.1:0"
+	config.DevicePluginNamespace = "test"
+	config.DevicePluginServiceAccount = "test"
+	config.LeaderElect = false
+	config.NodeAffinityScoreWeight = 0
+	enableProfiling = false
+	tlsCertFile = ""
+	tlsKeyFile = ""
+
+	t.Run("metrics bind failure releases earlier listeners", func(t *testing.T) {
+		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+		occupied, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer occupied.Close()
+		config.MetricsBindAddress = occupied.Addr().String()
+
+		var acquired []net.Listener
+		t.Cleanup(func() {
+			for _, listener := range acquired {
+				listener.Close()
+			}
+		})
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				acquired = append(acquired, listener)
+			}
+			return listener, err
+		}
+
+		err = start()
+		var networkError *net.OpError
+		if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "metrics address") {
+			t.Fatalf("expected startup to return the metrics bind error, got %v", err)
+		}
+		if len(acquired) != 2 {
+			t.Fatalf("startup acquired %d listeners before metrics failed, want 2", len(acquired))
+		}
+		for _, listener := range acquired {
+			rebound, bindErr := net.Listen("tcp", listener.Addr().String())
+			if bindErr != nil {
+				t.Errorf("listener %s was not released: %v", listener.Addr(), bindErr)
+				continue
+			}
+			rebound.Close()
+		}
+	})
+
+	t.Run("supervised server failure releases all listeners", func(t *testing.T) {
+		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+		config.MetricsBindAddress = "127.0.0.1:0"
+		var (
+			listenersMu sync.Mutex
+			listeners   []net.Listener
+			stopping    bool
+		)
+		acquired := make(chan net.Listener, 3)
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				listenersMu.Lock()
+				listeners = append(listeners, listener)
+				closeImmediately := stopping
+				listenersMu.Unlock()
+				if closeImmediately {
+					listener.Close()
+				}
+				acquired <- listener
+			}
+			return listener, err
+		}
+
+		result := make(chan error, 1)
+		done := make(chan struct{})
+		t.Cleanup(func() {
+			listenersMu.Lock()
+			stopping = true
+			acquiredListeners := append([]net.Listener(nil), listeners...)
+			listenersMu.Unlock()
+			for _, listener := range acquiredListeners {
+				listener.Close()
+			}
+			<-done
+		})
+		go func() {
+			result <- start()
+			close(done)
+		}()
+
+		startedListeners := make([]net.Listener, 0, cap(acquired))
+		for len(startedListeners) < cap(acquired) {
+			select {
+			case listener := <-acquired:
+				startedListeners = append(startedListeners, listener)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("startup acquired %d listeners, want 3", len(startedListeners))
+			}
+		}
+		if err := startedListeners[0].Close(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-result:
+			if !errors.Is(err, net.ErrClosed) || !strings.Contains(err.Error(), "extender server error") {
+				t.Fatalf("expected supervised extender error, got %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("startup did not return the supervised server error")
+		}
+		for _, listener := range startedListeners {
+			rebound, err := net.Listen("tcp", listener.Addr().String())
+			if err != nil {
+				t.Errorf("listener %s was not released: %v", listener.Addr(), err)
+				continue
+			}
+			rebound.Close()
+		}
+	})
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
@@ -782,16 +1031,18 @@ hami_resource_quota_limit{namespace="team-scaled",quota_name="nvidia.com/gpumem"
 // leader and sync state.
 func TestSchedulerStateMetrics(t *testing.T) {
 	tests := []struct {
-		name       string
-		isLeader   bool
-		isSynced   bool
-		wantLeader float64
-		wantSynced float64
+		name         string
+		isLeader     bool
+		isSynced     bool
+		lastSync     int64
+		wantLeader   float64
+		wantSynced   float64
+		wantLastSync int64
 	}{
-		{"leader and synced", true, true, 1, 1},
-		{"leader but not synced", true, false, 1, 0},
-		{"synced but not leader", false, true, 0, 1},
-		{"neither leader nor synced", false, false, 0, 0},
+		{"leader and synced", true, true, 1794012015, 1, 1, 1794012015},
+		{"leader but not synced", true, false, 0, 1, 0, 0},
+		{"synced but not leader", false, true, 1794012015, 0, 1, 0},
+		{"neither leader nor synced", false, false, 0, 0, 0, 0},
 	}
 
 	for _, tc := range tests {
@@ -801,8 +1052,9 @@ func TestSchedulerStateMetrics(t *testing.T) {
 				nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
 				quotaManager: device.NewQuotaManager(),
 				podManager:   device.NewPodManager(),
-				isLeader:     tc.isLeader,
+				isLeader:     &tc.isLeader,
 				isSynced:     tc.isSynced,
+				lastSyncTime: tc.lastSync,
 			}
 			cc := ClusterManagerCollector{
 				ClusterManager:  c,
@@ -811,13 +1063,90 @@ func TestSchedulerStateMetrics(t *testing.T) {
 
 			if err := promtestutil.CollectAndCompare(
 				cc,
-				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced)),
+				strings.NewReader(wantStr(tc.wantLeader, tc.wantSynced, tc.wantLastSync)),
 				"hami_scheduler_is_leader",
 				"hami_scheduler_cache_synced",
+				"hami_scheduler_last_sync_success_timestamp_seconds",
 			); err != nil {
 				t.Errorf("case %q: unexpected metrics:\n%s", tc.name, err)
 			}
 		})
+	}
+}
+
+// When the scheduler is not the leader, cluster usage metrics (node, quota,
+// container, remote GPU) are not exported, only scheduler state and outcome
+// metrics are emitted.
+func TestClusterManagerCollector_NonLeaderSkipsClusterMetrics(t *testing.T) {
+	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
+	isLeader := false
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-1",
+							Totalmem:  8192,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+						},
+					},
+				},
+			},
+		},
+	}
+	qm := device.NewQuotaManager()
+	qm.Quotas["ns"] = &device.DeviceQuota{
+		"hami.io/gpu": &device.Quota{Used: 1, Limit: 1, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "ns") })
+	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "ns",
+			UID:       k8stypes.UID("uid-1"),
+		},
+	}
+	pm.AddPod(pod, "node-1", device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			device.ContainerDevices{{UUID: "GPU-1", Type: "NVIDIA", Usedmem: 4096, Usedcores: 50}},
+		},
+	})
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    nodeUsage,
+		quotaManager: qm,
+		podManager:   pm,
+		isLeader:     &isLeader,
+		isSynced:     true,
+	}
+	cc := ClusterManagerCollector{
+		ClusterManager:  c,
+		metricsProvider: provider,
+	}
+
+	// Verify scheduler state metric reports non-leader.
+	if err := promtestutil.CollectAndCompare(
+		cc,
+		strings.NewReader(wantStr(0, 1, 0)),
+		"hami_scheduler_is_leader",
+		"hami_scheduler_cache_synced",
+	); err != nil {
+		t.Fatalf("unexpected state metrics: %v", err)
+	}
+
+	// Verify cluster usage metrics are not exported.
+	ch := make(chan prometheus.Metric, 50)
+	cc.Collect(ch)
+	close(ch)
+	for m := range ch {
+		desc := m.Desc().String()
+		if strings.Contains(desc, "hami_node_") || strings.Contains(desc, "hami_resource_quota_") ||
+			strings.Contains(desc, "hami_vgpu_") || strings.Contains(desc, "hami_remote_gpu_") {
+			t.Errorf("unexpected metric collected on follower: %s", desc)
+		}
 	}
 }
 
@@ -890,10 +1219,11 @@ func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
 	}
 }
 
-// wantStr builds the expected Prometheus text for the two scheduler state
-// metrics given the expected gauge values (0.0 or 1.0).
-func wantStr(leaderVal, syncedVal float64) string {
-	return strings.Join([]string{
+// wantStr builds the expected Prometheus text for the scheduler state metrics
+// given the expected gauge values (0.0 or 1.0) and the last sync time, which is
+// left out when it is 0.
+func wantStr(leaderVal, syncedVal float64, lastSync int64) string {
+	want := strings.Join([]string{
 		`# HELP hami_scheduler_cache_synced 1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.`,
 		`# TYPE hami_scheduler_cache_synced gauge`,
 		strings.Join([]string{`hami_scheduler_cache_synced`, formatFloat(syncedVal)}, " "),
@@ -902,6 +1232,15 @@ func wantStr(leaderVal, syncedVal float64) string {
 		strings.Join([]string{`hami_scheduler_is_leader`, formatFloat(leaderVal)}, " "),
 		"",
 	}, "\n")
+	if lastSync > 0 {
+		want += strings.Join([]string{
+			`# HELP hami_scheduler_last_sync_success_timestamp_seconds Timestamp of the last successful sync of the scheduler's internal node/device cache.`,
+			`# TYPE hami_scheduler_last_sync_success_timestamp_seconds gauge`,
+			strings.Join([]string{`hami_scheduler_last_sync_success_timestamp_seconds`, strconv.FormatInt(lastSync, 10)}, " "),
+			"",
+		}, "\n")
+	}
+	return want
 }
 
 func formatFloat(v float64) string {

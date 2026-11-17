@@ -117,9 +117,13 @@ func (d nvmlMigDevice) GetComputeCapability() (string, error) {
 	return nvmlDevice{parent}.GetComputeCapability()
 }
 
+// getMigCapabilityDevicePaths reads the MIG capability minors from the host.
+// Tests replace it so they do not depend on the host's NVIDIA driver.
+var getMigCapabilityDevicePaths = mig.GetMigCapabilityDevicePaths
+
 // GetPaths returns the paths for a MIG device
 func (d nvmlMigDevice) GetPaths() ([]string, error) {
-	capDevicePaths, err := mig.GetMigCapabilityDevicePaths()
+	capDevicePaths, err := getMigCapabilityDevicePaths()
 	if err != nil {
 		return nil, fmt.Errorf("error getting MIG capability device paths: %v", err)
 	}
@@ -151,7 +155,7 @@ func (d nvmlMigDevice) GetPaths() ([]string, error) {
 
 	ciCapPath := fmt.Sprintf(nvidiaCapabilitiesPath+"/gpu%d/mig/gi%d/ci%d/access", minor, gi, ci)
 	if _, exists := capDevicePaths[ciCapPath]; !exists {
-		return nil, fmt.Errorf("missing MIG GPU instance capability path: %v", giCapPath)
+		return nil, fmt.Errorf("missing MIG compute instance capability path: %v", ciCapPath)
 	}
 
 	devicePaths := []string{

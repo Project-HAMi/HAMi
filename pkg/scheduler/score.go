@@ -29,6 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -44,7 +45,12 @@ func viewStatus(usage NodeUsage) {
 
 // deviceTypeMatches preserves HAMi's case-insensitive substring matching for
 // mapping a registered request type to the corresponding node devices.
+// Hygon keeps the request type "HCU" so existing allocation records stay on
+// that device id. Prefixed models match the configured prefix.
 func deviceTypeMatches(availableType, requestedType string) bool {
+	if hygon.IsHygonRequest(requestedType) {
+		return hygon.ModelMatchesPrefix(availableType)
+	}
 	return strings.Contains(strings.ToLower(availableType), strings.ToLower(requestedType))
 }
 
@@ -373,25 +379,20 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 	return "", true
 }
 
-// neuronCorePeak counts actual allocated cores after Fit has resolved the
-// node's geometry. Init containers use the same peak/sidecar rule as admission.
-func neuronCorePeak(pod *corev1.Pod, allocations device.PodSingleDevice) int64 {
-	var sidecars, initPeak, app int64
-	for i, containerDevices := range allocations {
-		var cores int64
+// neuronReservedCores counts the core identities reserved after Fit resolves
+// the node's geometry, using the same accounting as the pod and quota caches.
+func neuronReservedCores(pod *corev1.Pod, allocations device.PodSingleDevice) int64 {
+	if len(allocations) == 0 {
+		return 0
+	}
+	reserved := device.CollapseInitContainerUsage(pod, device.PodDevices{awsneuron.AWSNeuronDevice: allocations})
+	var cores int64
+	for _, containerDevices := range reserved[awsneuron.AWSNeuronDevice] {
 		for _, allocation := range containerDevices {
 			cores += int64(bits.OnesCount32(uint32(allocation.Usedcores)))
 		}
-		if i >= len(pod.Spec.InitContainers) {
-			app += cores
-		} else if util.IsSidecarContainer(&pod.Spec.InitContainers[i]) {
-			sidecars += cores
-			initPeak = max(initPeak, sidecars)
-		} else {
-			initPeak = max(initPeak, sidecars+cores)
-		}
 	}
-	return max(initPeak, sidecars+app)
+	return cores
 }
 
 // currentNode returns the informer's copy of the node, whose labels track
@@ -459,7 +460,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
-	if cores := neuronCorePeak(task, score.Devices[awsneuron.AWSNeuronDevice]); cores > 0 &&
+	if cores := neuronReservedCores(task, score.Devices[awsneuron.AWSNeuronDevice]); cores > 0 &&
 		!s.quotaManager.FitQuota(task.Namespace, 0, cores, awsneuron.AWSNeuronDevice) {
 		return nodeScoreResult{reason: "AWS NeuronCore quota exceeded"}
 	}

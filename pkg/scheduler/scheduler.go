@@ -34,6 +34,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -95,11 +96,21 @@ type Scheduler struct {
 	lock   sync.RWMutex
 	synced atomic.Bool
 
+	lastSyncSuccessTime atomic.Int64
+
 	// allocLock serializes reservation mutations between Filter, the NUMA
 	// refit (RefitNumaAllocation), pod adds/updates that release init-container
 	// usage, and removals of tracked pods, so these paths cannot observe or
 	// produce half-applied accounting.
 	allocLock sync.Mutex
+
+	// refitWrites keeps the last NUMA refit this replica made for each pod,
+	// until the informer shows a newer state. Guarded by allocLock.
+	refitWrites map[k8stypes.UID]refitWrite
+
+	// filterWrites keeps the allocation the last Filter on this replica wrote
+	// to each pod, until the informer shows it. Guarded by allocLock.
+	filterWrites map[k8stypes.UID]filterWrite
 
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
 	allocationMetricsOnce sync.Once
@@ -129,14 +140,19 @@ func NewScheduler() *Scheduler {
 				default:
 				}
 			},
-			OnStoppedLeading: func() {
-				s.synced.Store(false)
-			},
+			OnStoppedLeading: s.onStoppedLeading,
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) onStoppedLeading() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.overviewstatus = make(map[string]*NodeUsage)
+	s.synced.Store(false)
 }
 
 func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
@@ -303,6 +319,9 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !ok {
 		return
 	}
+	if oldPod, ok := oldObj.(*corev1.Pod); ok {
+		s.observeAllocateResult(oldPod, newPod)
+	}
 
 	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
 
@@ -343,8 +362,177 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	s.podManager.UpdatePod(newPod)
+	if s.syncNodeLocked(newPod, pi, assignedNodeName) {
+		return
+	}
 
-	s.releaseCompletedInitContainersLocked(newPod, pi, nil)
+	rawDevices, current := s.syncAllocationLocked(oldObj, newPod, pi)
+	if !current {
+		return
+	}
+
+	s.releaseCompletedInitContainersLocked(newPod, pi, rawDevices)
+}
+
+// filterWriteSettle is how long the replica that ran a Filter skips updates
+// that do not show its patch yet.
+const filterWriteSettle = time.Minute
+
+// filterWrite is what a Filter on this replica wrote to a pod: the node, the
+// time and the devices, and when.
+type filterWrite struct {
+	annotations map[string]string
+	at          time.Time
+}
+
+// shownBy reports whether pod carries the write.
+func (w filterWrite) shownBy(pod *corev1.Pod) bool {
+	for key, value := range w.annotations {
+		if pod.Annotations[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// recordFilterWrite remembers what a Filter wrote until the informer shows
+// it. See syncNodeLocked. Callers hold allocLock.
+func (s *Scheduler) recordFilterWrite(uid k8stypes.UID, patch map[string]string) {
+	written := map[string]string{
+		util.AssignedNodeAnnotations: patch[util.AssignedNodeAnnotations],
+		util.AssignedTimeAnnotations: patch[util.AssignedTimeAnnotations],
+	}
+	for _, key := range device.SupportDevices {
+		if value, ok := patch[key]; ok {
+			written[key] = value
+		}
+	}
+	if s.filterWrites == nil {
+		s.filterWrites = make(map[k8stypes.UID]filterWrite)
+	}
+	s.filterWrites[uid] = filterWrite{annotations: written, at: time.Now()}
+}
+
+// syncNodeLocked follows a pod that a Filter moved to another node after a
+// failed bind (#3435). A replica that did not run the Filter, like a standby,
+// drops the old allocation and adds the pod again from its annotations, as a
+// restart does. The replica that ran the Filter has already updated its
+// cache, so it skips older updates until its patch shows up, for up to a
+// minute.
+//
+// It reports whether the update is fully handled. Callers hold allocLock.
+func (s *Scheduler) syncNodeLocked(pod *corev1.Pod, pi *device.PodInfo, nodeName string) bool {
+	moved := pi.NodeID != nodeName
+	if write, pending := s.filterWrites[pod.UID]; pending {
+		shown := write.shownBy(pod)
+		if !shown && time.Since(write.at) < filterWriteSettle {
+			return true
+		}
+		delete(s.filterWrites, pod.UID)
+		// A minute without the patch means another replica wrote the pod
+		// since, so follow the pod.
+		moved = moved || !shown
+	}
+	if !moved {
+		return false
+	}
+	if old, ok := s.podManager.TakeAndDeletePod(pod); ok {
+		s.quotaManager.RmUsage(pod, old.Devices)
+	}
+	delete(s.refitWrites, pod.UID)
+	klog.InfoS("Pod allocation moved, adding the pod again from annotations",
+		"pod", klog.KObj(pod), "oldNode", pi.NodeID, "newNode", nodeName)
+	s.onAddPodLocked(pod, nodeName)
+	return true
+}
+
+// allocationRewritten reports whether an update changed a pod's device
+// allocation on the same node, as a NUMA refit does. The first assignment
+// and a removed allocation don't count.
+func allocationRewritten(oldPod, newPod *corev1.Pod) bool {
+	if oldPod.Annotations[util.AssignedNodeAnnotations] != newPod.Annotations[util.AssignedNodeAnnotations] {
+		return false
+	}
+	for _, key := range device.SupportDevices {
+		before, after := oldPod.Annotations[key], newPod.Annotations[key]
+		if before != "" && after != "" && before != after {
+			return true
+		}
+	}
+	return false
+}
+
+// syncAllocationLocked updates a tracked pod's devices and quota when an
+// update changes its allocation, for example after a NUMA refit on another
+// replica (#3366).
+//
+// The replica that did the refit has already updated its cache. Updates that
+// still show the old devices are older than the refit, so for up to a minute
+// they are skipped, also for the init release.
+//
+// It returns the decoded allocation (nil if not needed), and false if the
+// update must be skipped. Callers hold allocLock.
+func (s *Scheduler) syncAllocationLocked(oldObj any, newPod *corev1.Pod, pi *device.PodInfo) (device.PodDevices, bool) {
+	oldPod, _ := oldObj.(*corev1.Pod)
+	rewritten := oldPod != nil && allocationRewritten(oldPod, newPod)
+	write, pending := s.refitWrites[newPod.UID]
+	if !rewritten && !pending {
+		return nil, true
+	}
+
+	rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
+	if err != nil {
+		// Report it only on the update that changed the allocation.
+		if rewritten {
+			if newPod.Spec.NodeName != "" {
+				s.recordAllocationDecodeFailureEvent(newPod, newPod.Spec.NodeName, err)
+			}
+			klog.ErrorS(err, "failed to decode updated pod devices, keeping the cached allocation", "pod", klog.KObj(newPod))
+		}
+		return nil, false
+	}
+	if pending {
+		if write.predates(rawDevices) {
+			// The refit's own update arrives within seconds. An update that
+			// still shows the old devices after a minute means another
+			// replica moved the container back, so follow it.
+			if time.Since(write.at) < refitWriteSettle {
+				return nil, false
+			}
+			rewritten = true
+		}
+		delete(s.refitWrites, newPod.UID)
+	}
+	if !rewritten {
+		return rawDevices, true
+	}
+
+	effective := effectivePodDeviceUsage(newPod, rawDevices, pi.InitContainerResourceReleased)
+	if oldDevices, ok := s.podManager.ReplacePodDevices(newPod, effective); ok {
+		s.quotaManager.ReplaceUsage(newPod, oldDevices, effective)
+		klog.InfoS("Pod allocation rewritten, rebuilt devices from annotations",
+			"pod", klog.KObj(newPod),
+			"oldDevices", oldDevices,
+			"newDevices", effective,
+		)
+	}
+	return rawDevices, true
+}
+
+// observeAllocateResult counts the device plugin result once, when bind-phase leaves allocating.
+func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
+	if oldPod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+		return
+	}
+	if !s.leaderManager.IsLeader() {
+		return
+	}
+	switch newPod.Annotations[util.DeviceBindPhase] {
+	case util.DeviceBindSuccess:
+		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+	case util.DeviceBindFailed:
+		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
+	}
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
@@ -424,6 +612,8 @@ func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
 	defer s.allocLock.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
+		delete(s.refitWrites, pod.UID)
+		delete(s.filterWrites, pod.UID)
 	}
 }
 
@@ -741,6 +931,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		cancel()
 	}
 
+	s.lastSyncSuccessTime.Store(time.Now().Unix())
 	s.synced.Store(true)
 }
 
@@ -830,12 +1021,19 @@ func (s *Scheduler) updateSchedulerLabel() {
 // It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
 // without contending on the scheduler's write lock during cache refreshes.
 func (s *Scheduler) IsSynced() bool {
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		return false
+	}
 	return s.synced.Load()
+}
+
+func (s *Scheduler) LastSyncSuccessTime() int64 {
+	return s.lastSyncSuccessTime.Load()
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		return s.synced.Load(), nil
+		return s.IsSynced(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
@@ -849,6 +1047,11 @@ func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
+	if s.leaderManager != nil && !s.leaderManager.IsLeader() {
+		empty := make(map[string]*NodeUsage)
+		return &empty
+	}
 
 	snapshot := make(map[string]*NodeUsage, len(s.overviewstatus))
 	for nodeID, usage := range s.overviewstatus {
@@ -1281,7 +1484,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	var res *extenderv1.ExtenderBindingResult
 
 	binding := &corev1.Binding{
-		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
+		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, Namespace: args.PodNamespace, UID: args.PodUID},
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 
@@ -1368,6 +1571,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(err)
 	}
 
+	s.GetAllocationMetrics().ObserveAllocation("bind", s.podAllocationType(current))
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
@@ -1476,6 +1680,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
+		delete(s.refitWrites, pod.UID)
+		delete(s.filterWrites, pod.UID)
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
 	if err != nil {
@@ -1540,8 +1746,12 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 				s.quotaManager.RmUsage(pod, effectiveDevices)
 			}
 			s.podManager.DelPod(pod)
+			if hasRGPU {
+				_ = rgpu.ReleaseNodeLock(nil, pod)
+			}
 			return nil, err
 		}
+		s.recordFilterWrite(pod.UID, annotations)
 	}
 
 	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))

@@ -18,11 +18,10 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math"
+	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,6 +52,8 @@ type schedulerMetricsProvider interface {
 	// IsSynced reports whether the scheduler's internal cache has completed at
 	// least one successful sync and is ready to serve scheduling requests.
 	IsSynced() bool
+	// LastSyncSuccessTime returns the Unix time of the last successful sync, or 0 if there is none.
+	LastSyncSuccessTime() int64
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -128,6 +129,13 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect creates constant metrics for each host on the fly based on the returned data.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
+	cc.collectSchedulerStateMetrics(ch)
+	cc.collectSchedulerOutcomeMetrics(ch)
+
+	if lm := cc.metricsProvider.GetLeaderManager(); lm != nil && !lm.IsLeader() {
+		return
+	}
+
 	legacy := cc.ClusterManager.LegacyMetrics
 	// A single snapshot is shared by the node- and container-level collectors so
 	// they observe a consistent cluster state within one scrape.
@@ -140,8 +148,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectQuotaMetrics(ch, legacy)
 	cc.collectContainerMetrics(ch, deviceMetaByUUID, legacy)
 	cc.collectRemoteGPUMetrics(ch)
-	cc.collectSchedulerStateMetrics(ch)
-	cc.collectSchedulerOutcomeMetrics(ch)
 }
 
 // remoteGPUPool reads the lupine fleet when the remote-gpu backend is
@@ -503,9 +509,17 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 	}
 }
 
+var lastSyncSuccessDesc = prometheus.NewDesc(
+	"hami_scheduler_last_sync_success_timestamp_seconds",
+	"Timestamp of the last successful sync of the scheduler's internal node/device cache.",
+	nil, nil,
+)
+
 // collectSchedulerStateMetrics emits hami_scheduler_is_leader and
 // hami_scheduler_cache_synced as gauges (0 or 1) every scrape. These allow
 // operators to alert on leader-loss or cache-desync without log-scraping.
+// hami_scheduler_last_sync_success_timestamp_seconds shows the sync loop
+// liveness of the leader; it is emitted only after the first sync.
 func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometheus.Metric) {
 	isLeaderDesc := prometheus.NewDesc(
 		"hami_scheduler_is_leader",
@@ -518,8 +532,9 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 		nil, nil,
 	)
 
+	isLeader := cc.metricsProvider.GetLeaderManager().IsLeader()
 	isLeaderVal := 0.0
-	if cc.metricsProvider.GetLeaderManager().IsLeader() {
+	if isLeader {
 		isLeaderVal = 1.0
 	}
 	isSyncedVal := 0.0
@@ -532,6 +547,11 @@ func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometh
 	}
 	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
 		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
+	}
+	if lastSyncSuccess := cc.metricsProvider.LastSyncSuccessTime(); isLeader && lastSyncSuccess > 0 {
+		if err := sendMetric(ch, lastSyncSuccessDesc, prometheus.GaugeValue, float64(lastSyncSuccess)); err != nil {
+			klog.V(4).Infof("Failed to send hami_scheduler_last_sync_success_timestamp_seconds metric: %v", err)
+		}
 	}
 }
 
@@ -558,7 +578,23 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 	return c
 }
 
-func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
+// startMetricsServer binds the metrics address before serving so startup
+// failures are synchronous. Runtime serving errors are reported to errCh.
+func startMetricsServer(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool, errCh chan<- error) (net.Listener, error) {
+	listener, err := listenTCP("tcp", bindAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on the metrics address %s: %w", bindAddress, err)
+	}
+	klog.InfoS("Metrics listener initialized", "address", listener.Addr())
+	go func() {
+		errCh <- fmt.Errorf("metrics server error: %w", initMetrics(listener, metricsProvider, legacyMetrics))
+	}()
+	return listener, nil
+}
+
+// initMetrics registers the scheduler collectors and serves them on listener
+// until the HTTP server returns an error. The caller owns the listener.
+func initMetrics(listener net.Listener, metricsProvider schedulerMetricsProvider, legacyMetrics bool) error {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
@@ -567,13 +603,7 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	server := &http.Server{
-		Addr:              bindAddress,
-		Handler:           mux,
-		ReadHeaderTimeout: 15 * time.Second,
-		ReadTimeout:       60 * time.Second,
-	}
-	log.Fatal(server.ListenAndServe())
+	return serve(listener, mux, nil)
 }
 
 func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {

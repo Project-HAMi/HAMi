@@ -31,6 +31,42 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
+func TestInitContainerCoreMaskAccounting(t *testing.T) {
+	oldDevices, oldSupport := device.DevicesMap, maps.Clone(device.SupportDevices)
+	t.Cleanup(func() { device.DevicesMap, device.SupportDevices = oldDevices, oldSupport })
+	device.DevicesMap = map[string]device.Devices{AWSNeuronDevice: InitAWSNeuronDevice(AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron", ResourceCoreName: "aws.amazon.com/neuroncore",
+	})}
+	always := corev1.ContainerRestartPolicyAlways
+	for _, tc := range []struct {
+		name             string
+		init             []corev1.Container
+		masks            []int64
+		reserved, steady int64
+	}{
+		{name: "disjoint init and app", init: []corev1.Container{{}}, masks: []int64{0b1100, 0b0001}, reserved: 0b1101, steady: 0b0001},
+		{name: "overlapping init and app", init: []corev1.Container{{}}, masks: []int64{0b0011, 0b0001}, reserved: 0b0011, steady: 0b0001},
+		{name: "sequential inits reuse cores", init: []corev1.Container{{}, {}}, masks: []int64{0b0011, 0b0011, 0b0001}, reserved: 0b0011, steady: 0b0001},
+		{name: "sidecar before init", init: []corev1.Container{{RestartPolicy: &always}, {}}, masks: []int64{0b0001, 0b1100, 0b0010}, reserved: 0b1111, steady: 0b0011},
+		{name: "sidecar after init reuses core", init: []corev1.Container{{}, {RestartPolicy: &always}}, masks: []int64{0b0011, 0b0001, 0b0010}, reserved: 0b0011, steady: 0b0011},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: tc.init, Containers: []corev1.Container{{}}}}
+			rows := make(device.PodSingleDevice, len(tc.masks))
+			for i, mask := range tc.masks {
+				rows[i] = device.ContainerDevices{{UUID: "neuron-0", Type: AWSNeuronDevice, Usedcores: mask}}
+			}
+			raw := device.PodDevices{AWSNeuronDevice: rows}
+			original := raw.DeepCopy()
+			collapsed := device.CollapseInitContainerUsage(pod, raw)[AWSNeuronDevice]
+			assert.Equal(t, collapsed[0][0].Usedcores, tc.reserved)
+			steady := device.SteadyStateDeviceUsage(pod, raw)[AWSNeuronDevice]
+			assert.Equal(t, steady[0][0].Usedcores, tc.steady)
+			assert.DeepEqual(t, raw, original)
+		})
+	}
+}
+
 // A whole-device request must reserve every core exposed by the selected
 // device, so no core request can share it afterwards.
 
@@ -297,6 +333,102 @@ func Test_PatchAnnotations_EmitsAllInferentia1CoreIndexes(t *testing.T) {
 		}}},
 	})
 	assert.Equal(t, annotations[AWSNeuronAssignedIndex], "4,5,6,7")
+}
+
+func Test_Fit_MultiDeviceAllocationRespectsUUIDConstraints(t *testing.T) {
+	tests := []struct {
+		name         string
+		annotations  map[string]string
+		wantFit      bool
+		wantUUIDs    []string
+		wantExcluded string
+		wantReasons  []string
+	}{
+		{
+			name: "respects UUID inclusion",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-2,node1-AWSNeuron-3",
+			},
+			wantFit:   true,
+			wantUUIDs: []string{"node1-AWSNeuron-2", "node1-AWSNeuron-3"},
+		},
+		{
+			name: "respects UUID exclusion",
+			annotations: map[string]string{
+				AWSNeuronNoUseUUID: "node1-AWSNeuron-0",
+			},
+			wantFit:      true,
+			wantExcluded: "node1-AWSNeuron-0",
+		},
+		{
+			name: "fails when insufficient matching UUIDs",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-0",
+			},
+			wantFit:     false,
+			wantReasons: []string{common.CardUUIDMismatch, common.NumaNotFit},
+		},
+		{
+			name: "fails when included devices are non-contiguous",
+			annotations: map[string]string{
+				AWSNeuronUseUUID: "node1-AWSNeuron-0,node1-AWSNeuron-2",
+			},
+			wantFit:     false,
+			wantReasons: []string{common.CardUUIDMismatch, common.NumaNotFit},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := newNeuronBackend()
+			registered, err := dev.GetNodeDevices(newNeuronNode("node1", "inf1.6xlarge", 4, 16))
+			assert.NilError(t, err)
+
+			usages := make([]*device.DeviceUsage, len(registered))
+			for i, info := range registered {
+				usages[i] = &device.DeviceUsage{
+					ID: info.ID, Index: info.Index, Count: info.Count,
+					Totalcore: info.Devcore, Type: info.Type, Health: true,
+					CustomInfo: maps.Clone(info.CustomInfo),
+				}
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "pod-uuid-test",
+					Annotations: tt.annotations,
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"aws.amazon.com/neuron": resource.MustParse("2"),
+					}},
+				}}},
+			}
+			req, err := dev.GenerateResourceRequests(&pod.Spec.Containers[0])
+			assert.NilError(t, err)
+
+			fit, allocations, reason := dev.Fit(usages, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, tt.wantFit, reason)
+			if tt.wantFit {
+				allocatedDevs := allocations[AWSNeuronDevice]
+				assert.Equal(t, len(allocatedDevs), 2)
+				if len(tt.wantUUIDs) > 0 {
+					for i, want := range tt.wantUUIDs {
+						assert.Equal(t, allocatedDevs[i].UUID, want)
+					}
+				}
+				if tt.wantExcluded != "" {
+					for _, allocated := range allocatedDevs {
+						assert.Assert(t, allocated.UUID != tt.wantExcluded, "excluded device was allocated")
+					}
+				}
+			} else {
+				for _, r := range tt.wantReasons {
+					assert.Assert(t, strings.Contains(reason, r), "expected %s in reason: %s", r, reason)
+				}
+			}
+		})
+	}
 }
 
 type deviceUsageState struct {
