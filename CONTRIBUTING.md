@@ -16,6 +16,7 @@ Welcome to HAMi!
     - [File an Issue](#file-an-issue)
 - [Contributor Workflow](#contributor-workflow)
   - [Creating Pull Requests](#creating-pull-requests)
+  - [Documentation Changes](#documentation-changes)
   - [Issue and PR Lifecycle](#issue-and-pr-lifecycle)
   - [Code Review](#code-review)
 
@@ -63,8 +64,8 @@ determine how much scrutiny to apply to the contribution.
 In a perfect world, AI assistance would produce equal or higher quality
 work than any human. That isn't the world we live in today, and in many cases
 AI-generated code can contain subtle bugs or not adhere to project-specific
-best practices. I say this despite being a fan of and using them successfully
-myself (with heavy supervision)!
+best practices. This is not a judgment of the tools themselves; many of us use
+them successfully, with heavy supervision.
 
 When using AI assistance, we expect contributors to understand the code
 that is produced and be able to answer critical questions about it. It
@@ -92,6 +93,9 @@ The following rules are enforced on all contributions.
 # Getting started
 
 - Fork the repository on GitHub
+- Clone your fork with `git clone --recurse-submodules`. HAMi-core lives in the `libvgpu` submodule and is needed to build the image; in an existing clone, run `git submodule update --init`
+- Install the Go version named in `go.mod`
+- Build the binaries with `make build` and run the unit tests with `make test`
 - Make your changes in your forked repository
 - Submit a Pull Request (PR)
 
@@ -120,7 +124,7 @@ labels for issues that should not require deep knowledge of the system.
 We can help new contributors who wish to work on such issues.
 
 Another good way to contribute is to find documentation improvements, such as fixing missing or broken links.
-Please see [Contributing](#contributing) below for the workflow.
+Please see [Contributor Workflow](#contributor-workflow) below for the workflow.
 
 #### Work on an issue
 
@@ -176,6 +180,12 @@ informational because shared runners are too noisy for timing gates. When a chan
 performance and you want numbers to quote, raise the benchmark time with `BENCHTIME=1s make bench`.
 Changing that policy is an intentional baseline update and requires rationale in the PR for
 maintainer approval.
+
+## Documentation Changes
+
+User documentation lives in the [HAMi website repository](https://github.com/Project-HAMi/website). For installation, upgrades, configuration, device behavior, operations and troubleshooting, update the relevant website guide in a PR there, and link it from the HAMi PR. Design documents go to `docs/developers/` in the website repository.
+
+Keep `README.md`, `README_cn.md` and `README_ja.md` to the project overview and links. For Chart values, edit the descriptions in `charts/hami/values.yaml` and regenerate `charts/hami/README.md` as described above.
 
 ## Issue and PR Lifecycle
 
