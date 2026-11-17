@@ -12,7 +12,8 @@ ifeq ($(strip $(GOPROXY)),)
 GOPROXY := $(shell go env GOPROXY 2>/dev/null)
 endif
 # Quoted: Go accepts `|` between proxies, which the shell reads as a pipe.
-GOPROXY_BUILD_ARG = $(if $(GOPROXY),--build-arg GOPROXY='$(GOPROXY)')
+# $(value) keeps a `$` in an exported value, such as in proxy credentials.
+GOPROXY_BUILD_ARG = $(if $(GOPROXY),--build-arg GOPROXY='$(value GOPROXY)')
 
 ifndef GITHUB_ACTIONS
 	REVISION?=$(shell git rev-parse --short HEAD)
