@@ -205,9 +205,13 @@ func deviceTypeForRequests(requests device.PodDeviceRequests) string {
 
 // deviceTypeForPodDevices returns the single allocated device type, or a
 // bounded fallback when the allocation contains zero or multiple types.
+// Types with only empty rows are Filter padding and are skipped.
 func deviceTypeForPodDevices(devices device.PodDevices) string {
 	types := make(map[string]struct{})
-	for deviceType := range devices {
+	for deviceType, rows := range devices {
+		if !slices.ContainsFunc(rows, func(row device.ContainerDevices) bool { return len(row) > 0 }) {
+			continue
+		}
 		types[deviceType] = struct{}{}
 	}
 	if len(types) == 0 {
