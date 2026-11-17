@@ -94,7 +94,7 @@ func newMPSV3Manager() *mpsV3Manager {
 		for _, key := range []string{"CUDA_MPS_PROTOCOL_VERSION", "CUDA_MPS_PIPE_DIRECTORY", "CUDA_MPS_LOG_DIRECTORY", "CUDA_VISIBLE_DEVICES", "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE", "CUDA_MPS_SM_PARTITION", "CUDA_MPS_PINNED_DEVICE_MEM_LIMIT"} {
 			env = slices.DeleteFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") })
 		}
-		cmd.Env = append(env, "CUDA_MPS_PROTOCOL_VERSION=3", "CUDA_MPS_PIPE_DIRECTORY="+filepath.Join(m.root, "pipe"), "CUDA_MPS_LOG_DIRECTORY="+filepath.Join(m.root, "log"))
+		cmd.Env = append(env, "CUDA_MPS_PROTOCOL_VERSION=3", "CUDA_MPS_PIPE_DIRECTORY="+filepath.Join(m.root, "pipe"))
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("MPS v3 %v: %w: %s", args, err, strings.TrimSpace(string(out)))
@@ -197,10 +197,7 @@ func (m *mpsV3Manager) start(ctx context.Context, live map[string]bool) (resultE
 	if !filepath.IsAbs(m.root) || filepath.Clean(m.root) != m.root || m.root == "/" {
 		return fmt.Errorf("MPS root must be an absolute clean dedicated host path")
 	}
-	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err != nil {
-		return fmt.Errorf("mps-v3 requires cgroup v2: %w", err)
-	}
-	for _, p := range []string{m.root, filepath.Join(m.root, "pipe"), filepath.Join(m.root, "log"), m.cdiRoot} {
+	for _, p := range []string{m.root, m.cdiRoot} {
 		if err := os.MkdirAll(p, 0755); err != nil {
 			return err
 		}
@@ -1054,9 +1051,6 @@ func (plugin *NvidiaDevicePlugin) allocateMPSV3(ctx context.Context, pod *corev1
 func (plugin *NvidiaDevicePlugin) startMPSV3() error {
 	if os.Getenv("HAMI_MPS_V3_ENABLED") != "true" {
 		return fmt.Errorf("mps-v3 requires devicePlugin.mpsV3.enabled and its host mounts")
-	}
-	if _, err := os.Stat("/proc/1/root/sys/fs/cgroup/cgroup.controllers"); err != nil {
-		return fmt.Errorf("mps-v3 requires hostPID and host cgroup v2: %w", err)
 	}
 	if !plugin.deviceListStrategies.AnyCDIEnabled() || !plugin.deviceListStrategies.AllCDIEnabled() {
 		return fmt.Errorf("mps-v3 requires exclusively CDI device-list strategies")

@@ -2,9 +2,6 @@
 {{- if not (regexMatch "^cdi-(cri|annotations)(,cdi-(cri|annotations))*$" .Values.devicePlugin.deviceListStrategy) }}
 {{- fail "devicePlugin.mpsV3 requires exclusively cdi-cri or cdi-annotations deviceListStrategy" }}
 {{- end }}
-{{- if not .Values.devicePlugin.hostPID }}
-{{- fail "devicePlugin.mpsV3 requires devicePlugin.hostPID" }}
-{{- end }}
 {{- if or (not (hasPrefix "/" .Values.devicePlugin.mpsV3.root)) (eq .Values.devicePlugin.mpsV3.root "/") }}
 {{- fail "devicePlugin.mpsV3.root must be an absolute dedicated host directory" }}
 {{- end }}
@@ -244,9 +241,6 @@ spec:
             {{- if .Values.devicePlugin.mpsV3.enabled }}
             - name: mps-v3-state
               mountPath: {{ .Values.devicePlugin.mpsV3.root | quote }}
-            - name: mps-v3-cgroup
-              mountPath: /sys/fs/cgroup
-              readOnly: true
             {{- end }}
             {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
             - name: nvidia-validations
@@ -437,10 +431,6 @@ spec:
           hostPath:
             path: {{ .Values.devicePlugin.mpsV3.root | quote }}
             type: DirectoryOrCreate
-        - name: mps-v3-cgroup
-          hostPath:
-            path: /sys/fs/cgroup
-            type: Directory
         {{- end }}
         - name: usrbin
           hostPath:
