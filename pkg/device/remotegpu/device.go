@@ -588,7 +588,7 @@ func (dev *RemoteGPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 		// the first refusal stands rather than becoming a refusal with nothing
 		// to say: the pod cannot be placed either way, and kube-scheduler
 		// still needs a reason for it.
-		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers)); len(intact) > 0 {
+		if intact := dev.pool.matchingServers(selector, dev.serversStillWhole(byServer, servers, dev.pool.deviceHealth())); len(intact) > 0 {
 			fit, tmpDevs, reason = dev.tryFit(byServer, intact, request, requirements, pod, committed)
 		}
 	}
@@ -738,16 +738,15 @@ func committedAllocation(allocated *device.PodDevices) (string, map[string]struc
 	return server, committed
 }
 
-// serversStillWhole drops the servers the forced refresh changed under us.
+// serversStillWhole drops servers whose current inventory differs from usage.
 //
-// The refresh clears the bookings that made tryFit refuse, but it can also
+// A refresh can clear the bookings that made tryFit refuse, but it can also
 // remove a server or one of its cards. Retrying with the pre-refresh view
 // would then read a card the fleet no longer has as merely unbooked, and
 // PatchAnnotations would find no endpoint for the server naming it. A server
 // is handed out whole, so one that lost a card is no longer the thing the
 // candidate described either.
-func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string) []string {
-	live := dev.pool.deviceIDs()
+func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.DeviceUsage, servers []string, live map[string]bool) []string {
 	liveCards := map[string]int{}
 	for id := range live {
 		liveCards[serverOf(id)]++
@@ -784,6 +783,14 @@ func (dev *RemoteGPUDevices) serversStillWhole(byServer map[string][]*device.Dev
 func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, servers []string, request device.ContainerDeviceRequest, requirements []device.ContainerDeviceRequest, pod *corev1.Pod, committed map[string]struct{}) (bool, map[string]device.ContainerDevices, map[string]int) {
 	tmpDevs := map[string]device.ContainerDevices{}
 	reason := map[string]int{}
+	// Usage may predate a pool refresh, including the forced refresh in Fit.
+	// Missing cards and failed reservation reads must not be treated as free
+	// devices just because the caller's cached usage still reports them healthy.
+	health, reserved := dev.pool.allocationSnapshot()
+	whole := map[string]bool{}
+	for _, server := range dev.serversStillWhole(byServer, servers, health) {
+		whole[server] = true
+	}
 
 	// A server is taken whole or not at all. Pointing a client at one exposes
 	// every GPU that server owns, and nothing on the wire narrows that down, so
@@ -797,21 +804,27 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 	}
 	candidates := make([]candidate, 0, len(servers))
 	for _, server := range servers {
+		if !whole[server] {
+			reason[common.CardNotHealth] += len(byServer[server])
+			continue
+		}
+		if reserved[server] {
+			reason[common.ExclusiveDeviceAllocateConflict] += len(byServer[server])
+			continue
+		}
 		c := candidate{server: server}
 		taken := false
 		for _, d := range byServer[server] {
 			_, ownedByPod := committed[d.ID]
+			currentHealth, known := health[d.ID]
 			switch {
-			case !d.Health:
+			case !d.Health || !known || !currentHealth:
 				// An unhealthy card is still visible to whoever holds the
 				// server, but it is not one this request can count on.
 				reason[common.CardNotHealth]++
-			case (d.Used > 0 && !ownedByPod) || dev.pool.reserved(d.ID):
+			case d.Used > 0 && !ownedByPod:
 				// Used covers pods already booked on this client node, except
 				// cards this pod committed while fitting an earlier container.
-				// Reserved covers pods booked on any other client node, which
-				// the scheduler's per-node usage view cannot see, and clients
-				// the server itself reports.
 				reason[common.ExclusiveDeviceAllocateConflict]++
 				taken = true
 			default:
