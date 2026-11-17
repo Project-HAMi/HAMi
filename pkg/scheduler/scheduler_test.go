@@ -3018,6 +3018,186 @@ func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
 	}
 }
 
+func Test_observeAllocateTimeouts(t *testing.T) {
+	now := time.Unix(1716199327, 0)
+	pastTimeout := fmt.Sprint(now.Add(-nodelockutil.NodeLockTimeout - time.Second).Unix())
+	atTimeout := fmt.Sprint(now.Add(-nodelockutil.NodeLockTimeout).Unix())
+	tests := []struct {
+		name      string
+		podPhase  corev1.PodPhase
+		bindPhase string
+		bindTime  string
+		isLeader  bool
+		want      string
+	}{
+		{
+			name: "stuck past the timeout", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: true,
+			want: `
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="timeout",phase="allocate"} 1
+`,
+		},
+		{name: "at the timeout", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: atTimeout, isLeader: true},
+		{name: "no longer pending", podPhase: corev1.PodRunning, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: true},
+		{name: "already success", podPhase: corev1.PodPending, bindPhase: util.DeviceBindSuccess, bindTime: pastTimeout, isLeader: true},
+		{name: "missing bind-time", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, isLeader: true},
+		{name: "not leader", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
+					Annotations: map[string]string{util.DeviceBindPhase: test.bindPhase},
+				},
+				Status: corev1.PodStatus{Phase: test.podPhase},
+			}
+			if test.bindTime != "" {
+				pod.Annotations[util.BindTimeAnnotations] = test.bindTime
+			}
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(test.isLeader)
+			informerFactory := informers.NewSharedInformerFactoryWithOptions(fake.NewClientset(), time.Hour)
+			s.podLister = informerFactory.Core().V1().Pods().Lister()
+			require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod))
+			s.podManager.AddPod(pod, "node1", device.PodDevices{
+				nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+			})
+
+			s.observeAllocateTimeouts(now)
+
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
+				"hami_scheduler_allocation_failures_total"))
+		})
+	}
+}
+
+func Test_observeAllocateTimeouts_CountsEachBindOnce(t *testing.T) {
+	now := time.Unix(1716199327, 0)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
+			Annotations: map[string]string{
+				util.DeviceBindPhase:     util.DeviceBindAllocating,
+				util.BindTimeAnnotations: fmt.Sprint(now.Add(-nodelockutil.NodeLockTimeout - time.Second).Unix()),
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	s := NewScheduler()
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fake.NewClientset(), time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	indexer := informerFactory.Core().V1().Pods().Informer().GetIndexer()
+	require.NoError(t, indexer.Add(pod))
+	requireTimeouts := func(n int) {
+		t.Helper()
+		want := fmt.Sprintf(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="timeout",phase="allocate"} %d
+`, n)
+		require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(want),
+			"hami_scheduler_allocation_failures_total"))
+	}
+
+	s.observeAllocateTimeouts(now)
+	requireTimeouts(1)
+
+	// The next scan sees the same bind.
+	s.observeAllocateTimeouts(now.Add(15 * time.Second))
+	requireTimeouts(1)
+
+	// A new bind gets a new bind-time and can time out again.
+	rebound := pod.DeepCopy()
+	rebound.Annotations[util.BindTimeAnnotations] = fmt.Sprint(now.Unix())
+	require.NoError(t, indexer.Update(rebound))
+	s.observeAllocateTimeouts(now.Add(nodelockutil.NodeLockTimeout + time.Second))
+	requireTimeouts(2)
+}
+
+func Test_onUpdatePod_SkipsResultAfterTimeout(t *testing.T) {
+	timedOutBind := fmt.Sprint(time.Now().Add(-nodelockutil.NodeLockTimeout - time.Minute).Unix())
+	newBind := fmt.Sprint(time.Now().Add(-15 * time.Second).Unix())
+	tests := []struct {
+		name         string
+		newPhase     string
+		bindTime     string
+		want         string
+		wantDuration int
+	}{
+		{name: "success after timeout", newPhase: util.DeviceBindSuccess, bindTime: timedOutBind},
+		{name: "failed after timeout", newPhase: util.DeviceBindFailed, bindTime: timedOutBind},
+		{
+			name: "success of a new bind", newPhase: util.DeviceBindSuccess, bindTime: newBind, wantDuration: 1,
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="allocate"} 1
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+			timedOut := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-late", Name: "pod-late", Namespace: "allocate-metrics",
+				Annotations: map[string]string{
+					util.DeviceBindPhase:     util.DeviceBindAllocating,
+					util.BindTimeAnnotations: timedOutBind,
+				},
+			}}
+			require.True(t, s.markAllocateTimeout(timedOut))
+			oldPod := timedOut.DeepCopy()
+			oldPod.Annotations[util.BindTimeAnnotations] = test.bindTime
+			s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+				nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+			})
+			newPod := oldPod.DeepCopy()
+			newPod.Annotations[util.DeviceBindPhase] = test.newPhase
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
+				"hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
+			require.Equal(t, test.wantDuration, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_duration_seconds"))
+			require.Empty(t, s.timedOutPods)
+		})
+	}
+}
+
+func Test_onDelPod_ClearsAllocateTimeout(t *testing.T) {
+	timedOut := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		UID: "uid-deleted", Name: "pod-deleted", Namespace: "allocate-metrics",
+		Annotations: map[string]string{
+			util.DeviceBindPhase:     util.DeviceBindAllocating,
+			util.BindTimeAnnotations: "1716199327",
+		},
+	}}
+	tests := []struct {
+		name string
+		obj  any
+	}{
+		{name: "pod", obj: timedOut},
+		{name: "tombstone with incomplete pod", obj: cache.DeletedFinalStateUnknown{
+			Key: "allocate-metrics/pod-deleted",
+			Obj: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-deleted", Name: "pod-deleted", Namespace: "allocate-metrics"}},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			require.True(t, s.markAllocateTimeout(timedOut))
+
+			s.onDelPod(test.obj)
+
+			require.Empty(t, s.timedOutPods)
+		})
+	}
+}
+
 func Test_getNodesUsage_WithInitContainers(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
