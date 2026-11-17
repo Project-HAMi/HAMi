@@ -209,9 +209,13 @@ func deviceTypeForRequests(requests device.PodDeviceRequests) string {
 
 // deviceTypeForPodDevices returns the single allocated device type, or a
 // bounded fallback when the allocation contains zero or multiple types.
+// Types with only empty rows are Filter padding and are skipped.
 func deviceTypeForPodDevices(devices device.PodDevices) string {
 	types := make(map[string]struct{})
-	for deviceType := range devices {
+	for deviceType, rows := range devices {
+		if !slices.ContainsFunc(rows, func(row device.ContainerDevices) bool { return len(row) > 0 }) {
+			continue
+		}
 		types[deviceType] = struct{}{}
 	}
 	if len(types) == 0 {
@@ -529,10 +533,28 @@ func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
 	}
 	switch newPod.Annotations[util.DeviceBindPhase] {
 	case util.DeviceBindSuccess:
-		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+		deviceType := s.podAllocationType(newPod)
+		s.GetAllocationMetrics().ObserveAllocation("allocate", deviceType)
+		if d, ok := allocationDuration(newPod, time.Now()); ok {
+			s.GetAllocationMetrics().ObserveAllocationDuration(deviceType, d)
+		}
 	case util.DeviceBindFailed:
 		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
 	}
+}
+
+// allocationDuration returns the seconds from the pod's bind-time to now.
+// It reports false when bind-time is missing, malformed, or in the future.
+func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
+	bindTime, err := strconv.ParseInt(pod.Annotations[util.BindTimeAnnotations], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	d := now.Sub(time.Unix(bindTime, 0)).Seconds()
+	if d < 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
