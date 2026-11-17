@@ -26,10 +26,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestPrepareHostPIDLockParent(t *testing.T) {
-	directory := filepath.Join(t.TempDir(), "vgpulock")
+	// t.TempDir follows the umask, so a group-writable umask such as 002 would
+	// make the parent fail the sticky check. Create it with a fixed mode.
+	parent := filepath.Join(t.TempDir(), "parent")
+	directory := filepath.Join(parent, "vgpulock")
 
 	require.Equal(t, uint32(0), hostPIDLockTrustedOwner)
-	require.NoError(t, os.MkdirAll(directory, 0o700))
+	require.NoError(t, os.Mkdir(parent, 0o700))
+	require.NoError(t, os.Mkdir(directory, 0o700))
 	require.NoError(t, prepareHostPIDLockParent(directory,
 		uint32(os.Geteuid())))
 
