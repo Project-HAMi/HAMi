@@ -800,12 +800,9 @@ func (dev *RemoteGPUDevices) tryFit(byServer map[string][]*device.DeviceUsage, s
 				// An unhealthy card is still visible to whoever holds the
 				// server, but it is not one this request can count on.
 				reason[common.CardNotHealth]++
-			case (d.Used > 0 && !ownedByPod) || dev.pool.reserved(d.ID):
+			case d.Used > 0 && !ownedByPod:
 				// Used covers pods already booked on this client node, except
 				// cards this pod committed while fitting an earlier container.
-				// Reserved covers pods booked on any other client node, which
-				// the scheduler's per-node usage view cannot see, and clients
-				// the server itself reports.
 				reason[common.ExclusiveDeviceAllocateConflict]++
 				taken = true
 			default:
