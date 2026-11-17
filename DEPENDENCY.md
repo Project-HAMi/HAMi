@@ -31,7 +31,7 @@ When adding a new third-party package, maintainers should:
 
 ## Automation
 
-- Dependabot opens daily update PRs for Go modules, the Dockerfiles under `docker/` and GitHub Actions, and weekly ones for the HAMi-core submodule (`libvgpu`) and the `benchmarks/ai-benchmark` images.
+- Dependabot opens daily update PRs for Go modules, the HAMi-core submodule (`libvgpu`), the Dockerfiles under `docker/` and GitHub Actions, and weekly ones for the `benchmarks/ai-benchmark` images.
 - The `GOLANG_IMAGE` and `NVIDIA_IMAGE` pins in `version.mk` (read by the image workflows and mirrored in the Dockerfiles), the `go` line in `go.mod` and the tool versions in the workflows are updated by hand.
 - A nightly Trivy scan checks the built images, and CodeQL and OpenSSF Scorecard run in CI. Findings are tracked under Security and quality.
 
