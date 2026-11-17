@@ -44,10 +44,6 @@ dockerwithlib:
 tidy:
 	$(GO) mod tidy
 
-proto:
-	$(GO) install github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
-	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
-
 build: $(CMDS) $(DEVICES)
 
 $(CMDS):
@@ -60,7 +56,7 @@ clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build docker clean test $(CMDS)
+.PHONY: all build docker dockerwithlib tidy clean test lint $(CMDS) $(DEVICES)
 
 test:
 	mkdir -p ./_output/coverage/
