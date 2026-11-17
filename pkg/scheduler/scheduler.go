@@ -112,6 +112,11 @@ type Scheduler struct {
 	// to each pod, until the informer shows it. Guarded by allocLock.
 	filterWrites map[k8stypes.UID]filterWrite
 
+	// timedOutPods keeps the bind-time of each pod counted as an allocate
+	// timeout, so a bind is counted once. Guarded by timeoutLock.
+	timeoutLock  sync.Mutex
+	timedOutPods map[k8stypes.UID]string
+
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
 	allocationMetricsOnce sync.Once
 }
@@ -555,6 +560,60 @@ func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
 		return 0, false
 	}
 	return d, true
+}
+
+// markAllocateTimeout records the pod's current bind as timed out. It reports
+// false when this bind was already counted.
+func (s *Scheduler) markAllocateTimeout(pod *corev1.Pod) bool {
+	bindTime := pod.Annotations[util.BindTimeAnnotations]
+	s.timeoutLock.Lock()
+	defer s.timeoutLock.Unlock()
+	if s.timedOutPods[pod.UID] == bindTime {
+		return false
+	}
+	if s.timedOutPods == nil {
+		s.timedOutPods = make(map[k8stypes.UID]string)
+	}
+	s.timedOutPods[pod.UID] = bindTime
+	return true
+}
+
+// clearAllocateTimeout forgets the pod's timed-out bind. It reports true when
+// the pod's current bind was already counted as a timeout.
+func (s *Scheduler) clearAllocateTimeout(pod *corev1.Pod) bool {
+	s.timeoutLock.Lock()
+	defer s.timeoutLock.Unlock()
+	bindTime, ok := s.timedOutPods[pod.UID]
+	if !ok {
+		return false
+	}
+	delete(s.timedOutPods, pod.UID)
+	return bindTime == pod.Annotations[util.BindTimeAnnotations]
+}
+
+// observeAllocateTimeouts counts pods that stay pending and allocating longer
+// than the node lock timeout. Each bind is counted once.
+func (s *Scheduler) observeAllocateTimeouts(now time.Time) {
+	if !s.leaderManager.IsLeader() {
+		return
+	}
+	pods, err := s.podLister.List(labels.NewSelector())
+	if err != nil {
+		klog.ErrorS(err, "Failed to list pods for allocate timeouts")
+		return
+	}
+	for _, pod := range pods {
+		if pod.Status.Phase != corev1.PodPending || pod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+			continue
+		}
+		d, ok := allocationDuration(pod, now)
+		if !ok || d <= nodelockutil.NodeLockTimeout.Seconds() {
+			continue
+		}
+		if s.markAllocateTimeout(pod) {
+			s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(pod), metrics.FailureReasonTimeout)
+		}
+	}
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
