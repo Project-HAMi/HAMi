@@ -536,6 +536,10 @@ func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
 	if !s.leaderManager.IsLeader() {
 		return
 	}
+	if s.clearAllocateTimeout(newPod) {
+		klog.InfoS("Allocate result after timeout was not counted", "pod", klog.KObj(newPod), "bindPhase", newPod.Annotations[util.DeviceBindPhase])
+		return
+	}
 	switch newPod.Annotations[util.DeviceBindPhase] {
 	case util.DeviceBindSuccess:
 		deviceType := s.podAllocationType(newPod)
@@ -677,6 +681,7 @@ func (s *Scheduler) onDelPod(obj any) {
 
 	// Delete notifications can contain incomplete Pod objects. The cached
 	// allocation, keyed by the immutable UID, is the cleanup source of truth.
+	s.clearAllocateTimeout(pod)
 	s.removePodAllocation(pod)
 }
 
@@ -901,6 +906,23 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			continue
 		}
 		s.register(labelSelector)
+	}
+}
+
+// WatchAllocateTimeouts checks for allocate timeouts every 15 seconds until Stop.
+func (s *Scheduler) WatchAllocateTimeouts() {
+	ticker := time.NewTicker(time.Second * 15)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+		case <-s.stopCh:
+			return
+		}
+		if atomic.LoadUint32(&s.started) == 0 {
+			continue
+		}
+		s.observeAllocateTimeouts(time.Now())
 	}
 }
 
