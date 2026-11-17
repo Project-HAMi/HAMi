@@ -29,6 +29,7 @@ import (
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -2997,6 +2998,10 @@ func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
 				UID: "uid-duration", Name: "pod-duration", Namespace: "allocate-metrics",
 				Annotations: map[string]string{util.DeviceBindPhase: util.DeviceBindAllocating},
 			}}
+			s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+				nvidia.NvidiaGPUDevice:         device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+				"NVIDIA-NVIDIA A100-SXM4-40GB": device.PodSingleDevice{{}},
+			})
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations = map[string]string{util.DeviceBindPhase: test.newPhase}
 			maps.Copy(newPod.Annotations, test.annotations)
@@ -3004,6 +3009,11 @@ func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
 			s.onUpdatePod(oldPod, newPod)
 
 			require.Equal(t, test.want, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_duration_seconds"))
+			if test.want > 0 {
+				out, err := promtestutil.CollectAndFormat(s.GetAllocationMetrics(), expfmt.TypeTextPlain, "hami_scheduler_allocation_duration_seconds")
+				require.NoError(t, err)
+				require.Contains(t, string(out), `hami_scheduler_allocation_duration_seconds_count{device_type="NVIDIA"} 1`)
+			}
 		})
 	}
 }
