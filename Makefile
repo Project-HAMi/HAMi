@@ -8,8 +8,11 @@ HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
 # In mainland China, where proxy.golang.org is blocked, set a mirror once with
 # `go env -w GOPROXY=https://goproxy.cn,direct`. Without Go on the host nothing
 # is passed, and each Dockerfile keeps its own default.
-GOPROXY ?= $(shell go env GOPROXY 2>/dev/null)
-GOPROXY_BUILD_ARG = $(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY))
+ifeq ($(strip $(GOPROXY)),)
+GOPROXY := $(shell go env GOPROXY 2>/dev/null)
+endif
+# Quoted: Go accepts `|` between proxies, which the shell reads as a pipe.
+GOPROXY_BUILD_ARG = $(if $(GOPROXY),--build-arg GOPROXY='$(GOPROXY)')
 
 ifndef GITHUB_ACTIONS
 	REVISION?=$(shell git rev-parse --short HEAD)
