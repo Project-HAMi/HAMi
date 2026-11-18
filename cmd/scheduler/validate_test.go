@@ -38,7 +38,7 @@ func TestValidateDeviceConfig(t *testing.T) {
 	tests := []struct {
 		name, config, wantError, wantOutput string
 		args                                []string
-		missing                             bool
+		missing, wantUsage                  bool
 	}{
 		{name: "valid defaults", config: valid},
 		{name: "malformed YAML", config: "nvidia: [", wantError: "yaml:"},
@@ -51,9 +51,9 @@ func TestValidateDeviceConfig(t *testing.T) {
 		{name: "duplicate resource", config: "amd:\n  resourceCountName: shared.com/gpu\nbiren:\n  resourceCountName: shared.com/gpu\n", wantError: "both claim resource"},
 		{name: "warning stays nonfatal", config: "nvidia:\n  resourceCountName: invalid resource name\n", wantOutput: "not a valid Kubernetes qualified name"},
 		{name: "missing file", missing: true, wantError: "load device config"},
-		{name: "missing argument", args: []string{"validate", "device-config"}, wantError: "accepts 1 arg(s), received 0"},
-		{name: "extra argument", args: []string{"validate", "device-config", "one.yaml", "two.yaml"}, wantError: "accepts 1 arg(s), received 2"},
-		{name: "unknown config type", args: []string{"validate", "unknown-config", "one.yaml"}, wantError: "unknown command"},
+		{name: "missing argument", args: []string{"validate", "device-config"}, wantError: "accepts 1 arg(s), received 0", wantUsage: true},
+		{name: "extra argument", args: []string{"validate", "device-config", "one.yaml", "two.yaml"}, wantError: "accepts 1 arg(s), received 2", wantUsage: true},
+		{name: "unknown config type", args: []string{"validate", "unknown-config", "one.yaml"}, wantError: "unknown command", wantUsage: true},
 		{name: "inherited vendor flag", config: "vnpus:\n  configs:\n  - commonWord: AscendA\n    resourceName: shared.com/npu\n  - commonWord: AscendB\n    resourceName: shared.com/npu\n", args: []string{"validate", "device-config", "<path>", "--enable-ascend"}, wantError: "both claim resource"},
 		{name: "root help", args: []string{"--help"}, wantOutput: "validate"},
 		{name: "parent without a subcommand", args: []string{"validate"}, wantOutput: "device-config"},
@@ -101,6 +101,10 @@ func TestValidateDeviceConfig(t *testing.T) {
 				}
 				if strings.Contains(string(output), "passed startup validation") {
 					t.Fatalf("failed validation reported success:\n%s", output)
+				}
+				// Only a bad command line needs the usage text.
+				if got := strings.Contains(string(output), "Usage:"); got != tt.wantUsage {
+					t.Fatalf("usage printed = %v, want %v:\n%s", got, tt.wantUsage, output)
 				}
 				return
 			}
