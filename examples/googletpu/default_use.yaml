@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tpu-pod
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+    cloud.google.com/gke-tpu-topology: 2x2
+  containers:
+    - name: tpu-pod
+      image: us-docker.pkg.dev/cloud-tpu-images/jax-ai-image/tpu:latest
+      command: ["python", "-c", "import jax; print('TPU cores:', jax.device_count())"]
+      resources:
+        limits:
+          # A TPU request must equal the number of chips on the node: 4 on ct5lp-hightpu-4t.
+          google.com/tpu: 4

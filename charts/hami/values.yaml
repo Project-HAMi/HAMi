@@ -700,6 +700,13 @@ devices:
     enabled: true
     # devices.tecorigin.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.tecorigin.enabled` is true. Standard names are added automatically from the resource fields.
     customresources: []
+  googletpu:
+    # -- Resource name for Google TPU chip counts on GKE. A request must equal the number of chips on the node. Must match the resource GKE advertises and Pod resources.
+    resourceCountName: "google.com/tpu"
+    # -- Add Google TPU resource names to the bundled kube-scheduler's extender configuration. Setting `false` retains the device configuration. GKE advertises the resource on TPU nodes; no HAMi device plugin is needed.
+    enabled: true
+    # devices.googletpu.customresources -- Additional resource-name strings managed by the scheduler extender when `devices.googletpu.enabled` is true. Standard names are added automatically from the resource fields.
+    customresources: []
   # Most devices.nvidia values are written to the generated device-config.yaml that
   # the scheduler and the device plugin read. When device-config.content is set, it
   # replaces that file and those values no longer reach either component.

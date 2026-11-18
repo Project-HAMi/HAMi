@@ -306,6 +306,13 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
+{{/* Google TPU resources */}}
+{{- if .Values.devices.googletpu.enabled -}}
+{{- $standardResources := list .Values.devices.googletpu.resourceCountName -}}
+{{- range (concat $standardResources (.Values.devices.googletpu.customresources | default (list)) | uniq) -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
 {{/* AMD resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.amd.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
 {{- range .Values.devices.amd.customresources -}}
