@@ -448,7 +448,7 @@ devicePlugin:
   # Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver branch r620, and cgroup v2.
   mpsV3:
     enabled: false
-    # -- Persistent host path, mounted at the same path inside the plugin.
+    # -- Node-local host path mounted at the same path inside the plugin. State survives plugin Pod restarts.
     root: /var/run/hami/mps-v3
     # -- MPS control binary inside the device-plugin container (PATH lookup if bare).
     binary: nvidia-cuda-mps-control

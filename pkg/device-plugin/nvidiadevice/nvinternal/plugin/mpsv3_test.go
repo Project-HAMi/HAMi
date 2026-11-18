@@ -587,9 +587,12 @@ func TestMPSV3UnknownInventoryPreservesAllocation(t *testing.T) {
 	require.NoError(t, err)
 	f.serverCSV = a.Server + ",0,123,Ready"
 	require.ErrorContains(t, m.release(ctx, a.Namespace), "unexpected r620")
-	require.False(t, m.allocations[a.Namespace].Prepared)
+	require.True(t, m.allocations[a.Namespace].Prepared)
+	require.True(t, m.allocations[a.Namespace].CleanupPending)
 	require.Contains(t, f.namespaces, a.Namespace)
 	require.FileExists(t, m.cdiPath(a.Namespace))
+	_, err = m.ensure(ctx, a)
+	require.ErrorContains(t, err, "waiting for cleanup")
 }
 
 func TestMPSV3RecoverRequiresExternalDaemon(t *testing.T) {
@@ -644,7 +647,7 @@ func TestMPSV3HealthCheckDoesNotHoldAllocationLocks(t *testing.T) {
 	m.mu.Unlock()
 	cancel()
 	<-done
-	require.False(t, m.gpuHealthy("GPU-a"))
+	require.True(t, m.gpuHealthy("GPU-a"))
 }
 
 func TestMPSV3AllocationHealthIsScopedToGPU(t *testing.T) {
@@ -759,7 +762,8 @@ func TestMPSV3RollbackRetriesForLivePodAfterInventoryFailure(t *testing.T) {
 	require.Error(t, m.release(plugin.runCtx, a.Namespace))
 	require.NoError(t, m.load())
 	require.Contains(t, m.allocations, a.Namespace)
-	require.False(t, m.allocations[a.Namespace].Prepared)
+	require.True(t, m.allocations[a.Namespace].Prepared)
+	require.True(t, m.allocations[a.Namespace].CleanupPending)
 	require.Contains(t, f.namespaces, a.Namespace)
 
 	f.fail = ""
@@ -768,4 +772,50 @@ func TestMPSV3RollbackRetriesForLivePodAfterInventoryFailure(t *testing.T) {
 	require.Empty(t, f.namespaces)
 	require.Empty(t, f.partitions)
 	require.NoFileExists(t, m.cdiPath(a.Namespace))
+}
+
+func TestMPSV3RecoveryIsolatesAllocationFailure(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 0)
+	_, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+
+	f.fail = "namespace get " + a.Namespace
+	require.NoError(t, m.recover(ctx, map[string]bool{a.PodUID: true}))
+	require.False(t, m.gpuHealthy("GPU-a"))
+	require.True(t, m.gpuHealthy("GPU-b"))
+	require.True(t, m.allocations[a.Namespace].Prepared)
+}
+
+func TestMPSV3HealthQueryThresholdAndCachedPods(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	a := testMPSAllocation(t, 0)
+	_, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+
+	plugin := newTestPlugin(t)
+	plugin.mpsV3, plugin.runCtx = m, ctx
+	pods := []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "test-pod"}}}
+	plugin.listNodePods = func() ([]*corev1.Pod, error) { return pods, nil }
+	queries := 0
+	plugin.listLiveNodePods = func() ([]*corev1.Pod, error) { queries++; return pods, nil }
+
+	f.fail = "compute-policy get"
+	for range 2 {
+		plugin.reconcileMPSV3()
+		require.True(t, m.gpuHealthy("GPU-a"))
+	}
+	plugin.reconcileMPSV3()
+	require.False(t, m.gpuHealthy("GPU-a"))
+
+	f.fail = ""
+	plugin.reconcileMPSV3()
+	require.True(t, m.gpuHealthy("GPU-a"))
+	require.Zero(t, queries)
+	plugin.listNodePods = func() ([]*corev1.Pod, error) { return nil, nil }
+	plugin.reconcileMPSV3()
+	require.Equal(t, 1, queries)
+	require.Contains(t, m.allocations, a.Namespace)
 }

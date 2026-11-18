@@ -43,18 +43,19 @@ const (
 )
 
 type mpsV3Allocation struct {
-	Version     int                  `json:"version,omitempty"`
-	ComputeMode string               `json:"computeMode,omitempty"`
-	SMPolicy    nvidia.MPSV3SMPolicy `json:"smPolicy,omitzero"`
-	PodUID      string               `json:"podUID"`
-	Container   string               `json:"container"`
-	GPUs        []string             `json:"gpus"`
-	Memory      int64                `json:"memoryMiB"`
-	Percent     int64                `json:"percent"`
-	SMCount     int64                `json:"smCount,omitempty"`
-	Prepared    bool                 `json:"prepared"`
-	Server      string               `json:"server"`
-	Namespace   string               `json:"namespace"`
+	Version        int                  `json:"version,omitempty"`
+	ComputeMode    string               `json:"computeMode,omitempty"`
+	SMPolicy       nvidia.MPSV3SMPolicy `json:"smPolicy,omitzero"`
+	PodUID         string               `json:"podUID"`
+	Container      string               `json:"container"`
+	GPUs           []string             `json:"gpus"`
+	Memory         int64                `json:"memoryMiB"`
+	Percent        int64                `json:"percent"`
+	SMCount        int64                `json:"smCount,omitempty"`
+	Prepared       bool                 `json:"prepared"`
+	CleanupPending bool                 `json:"cleanupPending,omitempty"`
+	Server         string               `json:"server"`
+	Namespace      string               `json:"namespace"`
 }
 
 type mpsV3Manager struct {
@@ -71,6 +72,7 @@ type mpsV3Manager struct {
 	incompatibleGPUs map[string]bool
 	unhealthyGPUs    atomic.Pointer[map[string]bool]
 	generation       uint64 // Protected by mu. Changes before allocation mutations.
+	policyFailures   int    // Protected by mu.
 }
 
 func newMPSV3Manager() *mpsV3Manager {
@@ -258,21 +260,26 @@ func (m *mpsV3Manager) recover(ctx context.Context, live map[string]bool) error 
 	if _, err = m.run(ctx, "context-share", "set", "default_socket=off"); err != nil {
 		return err
 	}
+	unhealthy := make(map[string]bool)
 	for key, a := range m.allocations {
-		if !live[a.PodUID] || !a.Prepared {
-			if err = m.release(ctx, key); err != nil {
-				return fmt.Errorf("recover incomplete MPS allocation: %w", err)
+		var allocationErr error
+		if !live[a.PodUID] || !a.Prepared || a.CleanupPending {
+			allocationErr = m.release(ctx, key)
+		} else if allocationErr = m.check(ctx, a); allocationErr == nil {
+			allocationErr = m.publish(a)
+		}
+		if allocationErr != nil {
+			klog.ErrorS(allocationErr, "Failed to recover MPS allocation", "namespace", key)
+			for _, gpu := range a.GPUs {
+				unhealthy[gpu] = true
 			}
-			continue
-		}
-		if err = m.check(ctx, a); err != nil {
-			return fmt.Errorf("recover MPS allocation: %w", err)
-		}
-		if err = m.publish(a); err != nil {
-			return err
 		}
 	}
-	return m.configureComputePolicy(ctx)
+	if err := m.configureComputePolicy(ctx); err != nil {
+		return err
+	}
+	m.unhealthyGPUs.Store(&unhealthy)
+	return nil
 }
 
 func (m *mpsV3Manager) wait(ctx context.Context, check func() error) error {
@@ -376,6 +383,8 @@ func (m *mpsV3Manager) check(ctx context.Context, a mpsV3Allocation) error {
 func sameMPSRequest(a, b mpsV3Allocation) bool {
 	a.Prepared = false
 	b.Prepared = false
+	a.CleanupPending = false
+	b.CleanupPending = false
 	return reflect.DeepEqual(a, b)
 }
 func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, error) {
@@ -393,7 +402,7 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 		if !sameMPSRequest(old, a) {
 			return false, fmt.Errorf("MPS allocation identity reused with different limits")
 		}
-		if !old.Prepared {
+		if !old.Prepared || old.CleanupPending {
 			return false, fmt.Errorf("previous MPS allocation is incomplete; waiting for cleanup")
 		}
 		if err := m.check(ctx, old); err != nil {
@@ -565,10 +574,12 @@ func (m *mpsV3Manager) desiredTimeslice() string {
 	return "default"
 }
 
+var errMPSPolicyQuery = errors.New("MPS compute policy query failed")
+
 func (m *mpsV3Manager) checkComputePolicy(ctx context.Context) error {
 	timeslice, err := m.run(ctx, "compute-policy", "get", "timeslice")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errMPSPolicyQuery, err)
 	}
 	wantTimeslice := m.desiredTimeslice()
 	if timeslice != wantTimeslice {
@@ -576,7 +587,7 @@ func (m *mpsV3Manager) checkComputePolicy(ctx context.Context) error {
 	}
 	yield, err := m.run(ctx, "compute-policy", "get", "timeslice-yield-level")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errMPSPolicyQuery, err)
 	}
 	wantYield := "unset"
 	if m.policy.TimesliceYieldLevel != nil {
@@ -821,6 +832,34 @@ func (m *mpsV3Manager) release(ctx context.Context, key string) error {
 		return nil
 	}
 	m.generation++
+	if !a.CleanupPending {
+		pending := a
+		pending.CleanupPending = true
+		m.allocations[key] = pending
+		if err := m.save(); err != nil {
+			m.allocations[key] = a
+			return err
+		}
+		a = pending
+	}
+	exists, err := m.serverExists(ctx, a.Server)
+	if err != nil {
+		return err
+	}
+	var names []string
+	if exists {
+		// Namespace deletion is non-forced. The daemon protects live clients,
+		// and removing the namespace releases its partition references.
+		names, err = m.namespaceNames(ctx, a.Server)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(names, a.Namespace) {
+			if _, err = m.run(ctx, "namespace", "delete", a.Namespace, "--server="+a.Server); err != nil {
+				return err
+			}
+		}
+	}
 	if a.Prepared {
 		a.Prepared = false
 		m.allocations[key] = a
@@ -830,22 +869,7 @@ func (m *mpsV3Manager) release(ctx context.Context, key string) error {
 			return err
 		}
 	}
-	exists, err := m.serverExists(ctx, a.Server)
-	if err != nil {
-		return err
-	}
 	if exists {
-		// Namespace deletion is non-forced. The daemon protects live clients,
-		// and removing the namespace releases its partition references.
-		names, err := m.namespaceNames(ctx, a.Server)
-		if err != nil {
-			return err
-		}
-		if slices.Contains(names, a.Namespace) {
-			if _, err = m.run(ctx, "namespace", "delete", a.Namespace, "--server="+a.Server); err != nil {
-				return err
-			}
-		}
 		if a.SMCount > 0 {
 			for _, gpu := range a.GPUs {
 				part, err := m.partition(ctx, a, gpu)
@@ -906,7 +930,7 @@ func (m *mpsV3Manager) allocationEnvs(a mpsV3Allocation) map[string]string {
 	env := map[string]string{"NVIDIA_GPU_MEMORY_REQUEST": strconv.FormatInt(a.Memory, 10), "NVIDIA_GPU_MEMORY_LIMIT": strconv.FormatInt(a.Memory, 10), "CUDA_MPS_PIPE_DIRECTORY": mpsV3ContainerPipe}
 	return env
 }
-func (m *mpsV3Manager) publish(a mpsV3Allocation) error {
+func (m *mpsV3Manager) cdiSpec(a mpsV3Allocation) ([]byte, error) {
 	env := m.allocationEnvs(a)
 	var edits []string
 	for key, val := range env {
@@ -923,7 +947,11 @@ func (m *mpsV3Manager) publish(a mpsV3Allocation) error {
 			}},
 		}}},
 	}
-	data, err := json.Marshal(spec)
+	return json.Marshal(spec)
+}
+
+func (m *mpsV3Manager) publish(a mpsV3Allocation) error {
+	data, err := m.cdiSpec(a)
 	if err != nil {
 		return err
 	}
@@ -937,6 +965,24 @@ func (m *mpsV3Manager) publish(a mpsV3Allocation) error {
 	}
 	return atomicMPSFile(m.cdiPath(a.Namespace), data, 0644)
 }
+func (m *mpsV3Manager) checkPublishedAllocation(ctx context.Context, a mpsV3Allocation) error {
+	if err := m.check(ctx, a); err != nil {
+		return err
+	}
+	expected, err := m.cdiSpec(a)
+	if err != nil {
+		return err
+	}
+	actual, err := os.ReadFile(m.cdiPath(a.Namespace))
+	if err != nil {
+		return err
+	}
+	if string(actual) != string(expected) {
+		return fmt.Errorf("MPS CDI allocation %s differs from persisted state", a.Namespace)
+	}
+	return nil
+}
+
 func (m *mpsV3Manager) deviceInfo(gpu string) map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1169,10 +1215,16 @@ func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
 		klog.ErrorS(err, "MPS v3 daemon health check failed")
 	} else {
 		for _, a := range snapshot {
+			if a.CleanupPending {
+				for _, gpu := range a.GPUs {
+					unhealthy[gpu] = true
+				}
+				continue
+			}
 			if !a.Prepared {
 				continue
 			}
-			if checkErr := m.check(plugin.runCtx, a); checkErr != nil {
+			if checkErr := m.checkPublishedAllocation(plugin.runCtx, a); checkErr != nil {
 				klog.ErrorS(checkErr, "MPS v3 allocation health check failed", "namespace", a.Namespace)
 				for _, gpu := range a.GPUs {
 					unhealthy[gpu] = true
@@ -1181,28 +1233,41 @@ func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
 		}
 	}
 	m.mu.Lock()
-	if generation == m.generation {
-		m.unhealthyGPUs.Store(&unhealthy)
+	if err == nil {
+		m.policyFailures = 0
+		m.healthy.Store(true)
+		if generation == m.generation {
+			m.unhealthyGPUs.Store(&unhealthy)
+		}
+	} else {
+		m.policyFailures++
+		if !errors.Is(err, errMPSPolicyQuery) || m.policyFailures >= 3 {
+			m.healthy.Store(false)
+		}
 	}
-	m.healthy.Store(err == nil)
 	m.mu.Unlock()
 	if err != nil {
 		return
 	}
 
-	pods, listErr := plugin.listLiveNodePods()
-	if listErr != nil {
-		return
+	cachedPods, cacheErr := plugin.listNodePodSnapshot()
+	cached := liveMPSV3PodUIDs(cachedPods)
+	needsConfirmation := false
+	for _, a := range snapshot {
+		if a.Prepared && !a.CleanupPending && (cacheErr != nil || !cached[a.PodUID]) {
+			needsConfirmation = true
+			break
+		}
 	}
-	live := make(map[string]*corev1.Pod, len(pods))
-	for _, pod := range pods {
-		if pod != nil && !util.IsPodInTerminatedState(pod) {
-			live[string(pod.UID)] = pod
+	var confirmed map[string]bool
+	if needsConfirmation {
+		pods, err := plugin.listLiveNodePodSnapshot()
+		if err == nil {
+			confirmed = liveMPSV3PodUIDs(pods)
 		}
 	}
 	for key, a := range snapshot {
-		pod := live[a.PodUID]
-		if a.Prepared && pod != nil {
+		if a.Prepared && !a.CleanupPending && (cached[a.PodUID] || confirmed == nil || confirmed[a.PodUID]) {
 			continue
 		}
 		if !plugin.applyMutex.TryLock() {
@@ -1236,4 +1301,14 @@ func (plugin *NvidiaDevicePlugin) rollbackMPSV3(keys []string) {
 			klog.ErrorS(err, "rollback MPS allocation", "namespace", key)
 		}
 	}
+}
+
+func liveMPSV3PodUIDs(pods []*corev1.Pod) map[string]bool {
+	live := make(map[string]bool, len(pods))
+	for _, pod := range pods {
+		if pod != nil && !util.IsPodInTerminatedState(pod) {
+			live[string(pod.UID)] = true
+		}
+	}
+	return live
 }
