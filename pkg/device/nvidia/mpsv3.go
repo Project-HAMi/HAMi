@@ -201,14 +201,8 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 		_, optedIn := pod.Annotations[MPSV3ComputeModeAnnotation]
 		return cores, sms == 0 && !optedIn
 	}
-	nodeStrategy, _ := dev.CustomInfo[MPSV3ComputeModeKey].(string)
-	if nodeStrategy == "" {
-		if smPolicy.Elastic() {
-			return 0, false
-		}
-		nodeStrategy = MPSV3NamespaceCap
-	}
-	if strategy != nodeStrategy {
+	nodeStrategy, ok := dev.CustomInfo[MPSV3ComputeModeKey].(string)
+	if !ok || strategy != nodeStrategy {
 		return 0, false
 	}
 	wanted := "percentage"
