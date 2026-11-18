@@ -39,7 +39,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-scheduler v0.37.2
 	k8s.io/kubelet v0.37.2
-	sigs.k8s.io/controller-runtime v0.25.2
+	sigs.k8s.io/controller-runtime v0.25.3
 	tags.cncf.io/container-device-interface v1.1.2
 	tags.cncf.io/container-device-interface/specs-go v1.1.1
 )
