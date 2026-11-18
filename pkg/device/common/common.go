@@ -52,6 +52,7 @@ const (
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
 	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"
 	NodeInsufficientDevice            = "NodeInsufficientDevice"
+	NodeRequiresAllDevices            = "NodeRequiresAllDevices"
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"
 	NodeFitPod                        = "NodeFitPod"
