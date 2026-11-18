@@ -257,7 +257,7 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 }
 
 // collectRackSlotCounts accumulates, per superpod, the total remaining device
-// slots each rack holds, for first-pod rack preference. Only nodes that can
+// shares each rack holds, for first-pod rack preference. Only nodes that can
 // hold the current pod's single-pod request contribute their nodeUsableSlots.
 // podRequest is passed in to avoid recomputing.
 func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) {
@@ -295,9 +295,7 @@ func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod
 		"rackNodeCounts", ctx.RackSlotCounts)
 }
 
-// nodeUsableSlots returns the number of healthy physical devices with
-// remaining allocatable capacity. Count and Used describe virtual shares, so
-// they determine whether a physical device is exhausted but not its capacity.
+// nodeUsableSlots returns the total remaining shares on healthy devices.
 func nodeUsableSlots(node *NodeUsage) int64 {
 	if node == nil {
 		return 0
@@ -307,8 +305,9 @@ func nodeUsableSlots(node *NodeUsage) int64 {
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
 			continue
 		}
-		if ds.Device.Count > ds.Device.Used {
-			total++
+		remaining := ds.Device.Count - ds.Device.Used
+		if remaining > 0 {
+			total += remaining
 		}
 	}
 	return total

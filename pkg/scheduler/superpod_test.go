@@ -353,7 +353,7 @@ func TestNodeUsableSlots(t *testing.T) {
 		assert.Equal(t, int64(0), nodeUsableSlots(node))
 	})
 
-	t.Run("single physical device with virtual shares", func(t *testing.T) {
+	t.Run("counts all remaining shares on a device", func(t *testing.T) {
 		node := &NodeUsage{
 			Node: &corev1.Node{},
 			Devices: policy.DeviceUsageList{
@@ -362,7 +362,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(1), nodeUsableSlots(node))
+		assert.Equal(t, int64(7), nodeUsableSlots(node))
 	})
 
 	t.Run("fully consumed physical device excluded", func(t *testing.T) {
@@ -380,7 +380,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(1), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node))
 	})
 
 	t.Run("exhausted physical device excluded", func(t *testing.T) {
@@ -393,12 +393,12 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(1), nodeUsableSlots(node))
+		assert.Equal(t, int64(7), nodeUsableSlots(node))
 	})
 
-	t.Run("multiple physical devices count once each", func(t *testing.T) {
+	t.Run("sums remaining shares across physical devices", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 3, 10, 4)
-		assert.Equal(t, int64(3), nodeUsableSlots(node))
+		assert.Equal(t, int64(18), nodeUsableSlots(node))
 	})
 
 	t.Run("nil device entries skipped", func(t *testing.T) {
@@ -411,7 +411,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(1), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node))
 	})
 
 	t.Run("nil device list entries skipped", func(t *testing.T) {
@@ -424,7 +424,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(1), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node))
 	})
 }
 
@@ -726,11 +726,10 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
 
-		// rack-A in sp-1: n1(2 physical GPUs) + n2(2 physical GPUs) = 4
-		assert.Equal(t, int64(4), ctx.RackSlotCounts["sp-1"]["rack-A"])
-		// rack-B in sp-1 and rack-A in sp-2 each have one physical GPU.
-		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-1"]["rack-B"])
-		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-2"]["rack-A"])
+		// Each physical GPU advertises 10 shares.
+		assert.Equal(t, int64(40), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-B"])
+		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-2"]["rack-A"])
 	})
 
 	t.Run("skips nodes without superpod or rack label", func(t *testing.T) {
@@ -750,15 +749,15 @@ func TestCollectRackSlotCounts(t *testing.T) {
 	t.Run("skips nodes with insufficient single-pod capacity", func(t *testing.T) {
 		ctx.RackSlotCounts = make(map[string]map[string]int64)
 		nodes := map[string]*NodeUsage{
-			"n1": makeNodeUsageWithPhysicalCount("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 4, 10, 0),
-			"n2": makeNodeUsageWithPhysicalCount("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 10, 0),
+			"n1": makeNodeUsageWithPhysicalCount("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 4, 1, 0),
+			"n2": makeNodeUsageWithPhysicalCount("n2", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}, 10, 1, 0),
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		// podRequest=8 physical devices: n1 has 4 (skipped), n2 has 10
+		// podRequest=8 shares: n1 has 4 shares (skipped), n2 has 10 shares.
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 8)
 
-		// Only n2 contributes: 10 physical devices
+		// Only n2 contributes: 10 remaining shares.
 		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -771,7 +770,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 0)
 
-		// A physical device with no virtual capacity contributes no usable slot.
+		// A physical device with no virtual capacity contributes no usable shares.
 		assert.Equal(t, int64(0), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -785,8 +784,8 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
 
-		// Only n1 contributes: one physical device.
-		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		// Only n1 contributes: 10 remaining shares.
+		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 }
 
@@ -1400,14 +1399,14 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 			PreferredRacks: map[string]struct{}{},
 			RackSlotCounts: make(map[string]map[string]int64),
 		}
-		// The task declares 10 GPUs in total via the explicit label, and a
-		// single pod requests 1 GPU. No kubeClient and no owner refs are
+		// The task declares 60 GPU shares in total via the explicit label,
+		// and a single pod requests 1 GPU share. No kubeClient and no owner refs are
 		// needed because the label takes the highest priority.
 		pod := makeGPUPod("pod", "default", "task-1", 1)
-		pod.Labels[util.SuperpodTotalRequestLabel] = "10"
+		pod.Labels[util.SuperpodTotalRequestLabel] = "60"
 
-		// sp-1: one node with 5 usable slots → capacity 5 < 10, rejected.
-		// sp-2: two nodes with 10 usable slots each → capacity 20 ≥ 10, kept.
+		// sp-1: 5 devices x 10 shares → capacity 50 < 60, rejected.
+		// sp-2: 20 devices x 10 shares → capacity 200 ≥ 60, kept.
 		// plain node: no superpod label, rejected (superpod-aware scheduling
 		// only considers superpod nodes).
 		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 5, 10)
@@ -1448,11 +1447,11 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 			RackSlotCounts: make(map[string]map[string]int64),
 		}
 		pod := makeGPUPod("pod", "default", "task-1", 1)
-		pod.Labels[util.SuperpodTotalRequestLabel] = "12"
+		pod.Labels[util.SuperpodTotalRequestLabel] = "120"
 
 		// sp-1's capacity is spread across two nodes: only one of them is in
 		// the candidate set. The full snapshot must still see both, so sp-1
-		// has capacity 6+6=12 ≥ 12 and its candidate node survives.
+		// has capacity 6*10 + 6*10 = 120 shares and its candidate node survives.
 		s.registerSuperpodNode("n-sp1a", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
 		s.registerSuperpodNode("n-sp1b", map[string]string{util.SuperPodIDLabel: "sp-1"}, 6, 10)
 
@@ -1481,12 +1480,12 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		capacities, err := s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}}, nil)
 
 		assert.NilError(t, err)
-		assert.Equal(t, int64(6), capacities["sp-1"])
+		assert.Equal(t, int64(60), capacities["sp-1"])
 	})
 
 	t.Run("remaining demand of an anchored task is reserved", func(t *testing.T) {
 		s := newSuperpodTestScheduler()
-		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 10)
+		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 1)
 
 		anchored := makeGPUPod("anchored", "default", "task-anchored", 1)
 		anchored.Labels[util.TaskIDLabel] = "task-anchored"
@@ -1510,17 +1509,17 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 			RackSlotCounts: make(map[string]map[string]int64),
 		}
 		nodes := map[string]*NodeUsage{
-			"n-sp1": makeNodeUsageWithPhysicalCount("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 10, 0),
+			"n-sp1": makeNodeUsageWithPhysicalCount("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 1, 0),
 		}
 		failed := map[string]string{}
 
 		err := s.applySuperpodFilter(ctx, scheduling, &nodes, failed)
 
 		assert.NilError(t, err)
-		// The snapshot has 8 usable devices. One of the anchored task's four
-		// requested devices is already allocated, so its remaining three are
-		// reserved and only five are available to the new task.
-		assert.Equal(t, int64(5), ctx.superpodCapacities["sp-1"])
+		// The snapshot has 7 shares remaining after the anchored pod's
+		// allocation. Its remaining three shares are reserved, leaving four
+		// available to the new task.
+		assert.Equal(t, int64(4), ctx.superpodCapacities["sp-1"])
 		assert.Assert(t, nodes["n-sp1"] == nil, "new task must not consume capacity reserved for the anchored task")
 		assert.Equal(t, common.SuperpodInsufficientCapacity, failed["n-sp1"])
 	})
