@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"sort"
@@ -385,6 +386,14 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	nodedevices = local
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = dev.CommonWord()
+		d := nodedevices[idx]
+		if d.Mode == MpsV3Mode {
+			mode, _ := d.CustomInfo[MPSV3ComputeModeKey].(string)
+			if mode != MPSV3NamespaceCap && mode != MPSV3ServerTimeslice {
+				d.Health = false
+				klog.ErrorS(nil, "MPS v3 GPU registration is missing compute metadata", "gpu", d.ID)
+			}
+		}
 	}
 	pairScores, ok := n.Annotations[RegisterGPUPairScore]
 	if !ok {
@@ -623,7 +632,7 @@ func assertNuma(annos map[string]string) bool {
 func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool) {
 	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
-	if ok && !matchesOperatingMode(mode, d.Mode) {
+	if ok && !MatchesOperatingMode(mode, d.Mode) {
 		typeCheck = false
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
@@ -1028,7 +1037,10 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	if fit || request.Nums < 2 || util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyTopology) {
 		return fit, result, reason
 	}
-	type limits struct{ memory, cores int64 }
+	type limits struct {
+		memory, cores int64
+		set           string
+	}
 	groups := make(map[limits][]*device.DeviceUsage)
 	var order []limits
 	for _, dev := range slices.Backward(devices) {
@@ -1039,7 +1051,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if !ok {
 			continue
 		}
-		key := limits{request.Memreq, cores}
+		set, err := mpsV3ExistingGPUSet(dev, allocated)
+		if err != nil {
+			continue
+		}
+		key := limits{memory: request.Memreq, cores: cores, set: strings.Join(set, ",")}
 		if request.Memreq == 0 && request.MemPercentagereq != 101 {
 			key.memory = dev.Totalmem * request.MemPercentagereq / 100
 		}
@@ -1235,7 +1251,21 @@ func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.Co
 				Usedcores: usedcores,
 			}
 			if dev.Mode == MpsV3Mode {
-				entry.CustomInfo = dev.CustomInfo
+				gpuSet, err := mpsV3ExistingGPUSet(dev, allocated)
+				if err != nil {
+					if !needTopology {
+						k.Nums++
+					}
+					reason[common.CardTypeMismatch]++
+					continue
+				}
+				if len(gpuSet) > 0 {
+					entry.CustomInfo = maps.Clone(dev.CustomInfo)
+					if entry.CustomInfo == nil {
+						entry.CustomInfo = make(map[string]any)
+					}
+					entry.CustomInfo[MPSV3GPUSetKey] = gpuSet
+				}
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], entry)
 		}

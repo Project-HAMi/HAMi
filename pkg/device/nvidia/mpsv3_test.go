@@ -4,6 +4,7 @@ package nvidia
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestMPSV3Geometry(t *testing.T) {
@@ -40,10 +42,10 @@ func TestMPSV3RequestAndMode(t *testing.T) {
 	n, err := MPSV3RequestedSMs(nil)
 	require.NoError(t, err)
 	require.Zero(t, n)
-	require.True(t, matchesOperatingMode("mps-v3", MpsV3Mode))
-	require.False(t, matchesOperatingMode("mps-v3", MpsMode))
-	require.False(t, matchesOperatingMode("mps", MpsV3Mode))
-	require.True(t, matchesOperatingMode("hami-core, mps-v3", MpsV3Mode))
+	require.True(t, MatchesOperatingMode("mps-v3", MpsV3Mode))
+	require.False(t, MatchesOperatingMode("mps-v3", MpsMode))
+	require.False(t, MatchesOperatingMode("mps", MpsV3Mode))
+	require.True(t, MatchesOperatingMode("hami-core, mps-v3", MpsV3Mode))
 }
 func TestMPSV3Scheduling(t *testing.T) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3SMCountAnnotation: "2"}}}
@@ -219,7 +221,7 @@ func TestMPSV3SMRemainderCanOnlyBeClaimedOnce(t *testing.T) {
 
 	_, ok := mpsV3Fits(request, dev, 1, nil, 0, &prior)
 	require.False(t, ok, "an earlier container in the Pod already claims the remainder")
-	dev.PodInfos = []*device.PodInfo{{Pod: previous, Devices: prior}}
+	dev.PodInfos = []*device.PodInfo{{Pod: previous, Devices: prior, RawDevices: prior}}
 	_, ok = mpsV3Fits(request, dev, 1, nil, 0, nil)
 	require.False(t, ok, "an existing Pod already claims the remainder")
 
@@ -227,4 +229,254 @@ func TestMPSV3SMRemainderCanOnlyBeClaimedOnce(t *testing.T) {
 	charge, ok := mpsV3Fits(request, dev, 1, nil, 0, nil)
 	require.True(t, ok, "the existing partition uses whole chunks")
 	require.EqualValues(t, 7, charge)
+}
+
+func TestMPSV3RegistrationPreservesSchedulingMetadata(t *testing.T) {
+	gpu := "GPU-a"
+	nv := &NvidiaGPUDevices{}
+	for _, mode := range []string{MPSV3NamespaceCap, MPSV3ServerTimeslice} {
+		t.Run(mode, func(t *testing.T) {
+			registered := &device.DeviceInfo{
+				ID: gpu, Mode: MpsV3Mode, Health: true,
+				CustomInfo: map[string]any{
+					MPSV3ComputeModeKey: mode, MPSV3GeometryKey: MPSV3Geometry{SMs: 72, Chunk: 2},
+					MPSV3GPUSetKey: []string{gpu},
+				},
+			}
+			data, err := json.Marshal([]*device.DeviceInfo{registered})
+			require.NoError(t, err)
+			node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				RegisterAnnos: string(data),
+			}}}
+			decoded, err := nv.GetNodeDevices(node)
+			require.NoError(t, err)
+			require.Len(t, decoded, 1)
+			require.True(t, decoded[0].Health)
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3ComputeModeAnnotation: mode}}}
+			if mode == MPSV3NamespaceCap {
+				pod.Annotations[MPSV3SMCountAnnotation] = "16"
+			}
+			_, ok := mpsV3Fits(pod, &device.DeviceUsage{ID: gpu, Mode: MpsV3Mode, CustomInfo: decoded[0].CustomInfo}, 1, nil, 0, nil)
+			require.True(t, ok)
+		})
+	}
+}
+
+func TestMPSV3FitRetriesCompatibleExistingGPUSet(t *testing.T) {
+	var devices []*device.DeviceUsage
+	for _, id := range []string{"GPU-b", "GPU-d", "GPU-c", "GPU-a"} {
+		set := []string{"GPU-a", "GPU-b"}
+		if id == "GPU-c" || id == "GPU-d" {
+			set = []string{"GPU-c", "GPU-d"}
+		}
+		d := &device.DeviceUsage{
+			ID: id, Type: "NVIDIA", Mode: MpsV3Mode, Health: true, Count: 10, Totalcore: 100, Totalmem: 24576,
+			CustomInfo: map[string]any{MPSV3GPUSetKey: set},
+		}
+		if id == "GPU-b" {
+			d.Usedcores = 90
+		}
+		devices = append(devices, d)
+	}
+	nv := &NvidiaGPUDevices{}
+	request := device.ContainerDeviceRequest{Nums: 2, Type: NvidiaGPUDevice, Memreq: 1024, Coresreq: 25}
+	ok, chosen, reason := nv.Fit(devices, request, &corev1.Pod{}, &device.NodeInfo{}, nil)
+	require.True(t, ok, reason)
+	require.Len(t, chosen[NvidiaGPUDevice], 2)
+	require.Equal(t, "GPU-c", chosen[NvidiaGPUDevice][0].UUID)
+	require.Equal(t, "GPU-d", chosen[NvidiaGPUDevice][1].UUID)
+}
+
+func TestMPSV3FitsUsesPerContainerSets(t *testing.T) {
+	a, b, c := device.ContainerDevice{UUID: "GPU-a"}, device.ContainerDevice{UUID: "GPU-b"}, device.ContainerDevice{UUID: "GPU-c"}
+	previous := &corev1.Pod{}
+	raw := device.PodDevices{NvidiaGPUDevice: {{a, b}, {c}}}
+	dev := &device.DeviceUsage{
+		ID: b.UUID, Mode: MpsV3Mode,
+		PodInfos: []*device.PodInfo{{
+			Pod: previous, RawDevices: raw, Devices: device.CollapseInitContainerUsage(previous, raw),
+		}},
+	}
+	_, ok := mpsV3Fits(&corev1.Pod{}, dev, 2, device.ContainerDevices{a}, 25, nil)
+	require.True(t, ok)
+	_, ok = mpsV3Fits(&corev1.Pod{}, dev, 2, device.ContainerDevices{c}, 25, nil)
+	require.False(t, ok)
+}
+
+func mpsV3TestGPUs(mode string, ids ...string) []*device.DeviceUsage {
+	devices := make([]*device.DeviceUsage, 0, len(ids))
+	for i, id := range ids {
+		devices = append(devices, &device.DeviceUsage{
+			ID: id, Index: uint(i), Type: NvidiaGPUDevice, Mode: MpsV3Mode,
+			Health: true, Count: 10, Totalcore: 100, Totalmem: 24576,
+			CustomInfo: map[string]any{
+				MPSV3ComputeModeKey: mode,
+				MPSV3GeometryKey:    MPSV3Geometry{SMs: 72, Chunk: 2},
+			},
+		})
+	}
+	return devices
+}
+
+func TestMPSV3MultiGPUQuota(t *testing.T) {
+	for _, mode := range []string{MPSV3NamespaceCap, MPSV3ServerTimeslice} {
+		for _, topology := range []bool{false, true} {
+			for _, tc := range []struct {
+				name         string
+				cores        int64
+				used         int64
+				secondMemory int64
+				want         bool
+			}{
+				{name: "equal limits", cores: 25, used: 75, secondMemory: 24576, want: true},
+				{name: "one card lacks compute", cores: 25, used: 76, secondMemory: 24576},
+				{name: "unequal resolved memory", cores: 25, secondMemory: 49152},
+				{name: "default full compute", secondMemory: 24576, want: true},
+			} {
+				t.Run(fmt.Sprintf("%s/topology=%t/%s", mode, topology, tc.name), func(t *testing.T) {
+					devices := mpsV3TestGPUs(mode, "GPU-a", "GPU-b")
+					devices[1].Totalmem = tc.secondMemory
+					devices[1].Usedcores = tc.used
+					if tc.used > 0 {
+						devices[1].Used = 1
+					}
+					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3ComputeModeAnnotation: mode}}}
+					if topology {
+						pod.Annotations[util.GPUSchedulerPolicyAnnotationKey] = util.GPUSchedulerPolicyTopology.String()
+					}
+					req := device.ContainerDeviceRequest{Nums: 2, Type: NvidiaGPUDevice, MemPercentagereq: 50, Coresreq: tc.cores}
+					ok, result, reason := (&NvidiaGPUDevices{}).Fit(devices, req, pod, &device.NodeInfo{}, nil)
+					require.Equal(t, tc.want, ok, reason)
+					if ok {
+						require.Len(t, result[NvidiaGPUDevice], 2)
+						charge := tc.cores
+						if charge == 0 {
+							charge = 100
+						}
+						for _, selected := range result[NvidiaGPUDevice] {
+							require.EqualValues(t, 12288, selected.Usedmem)
+							require.Equal(t, charge, selected.Usedcores)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestMPSV3TopologyRejectsHigherScoringPartialOverlap(t *testing.T) {
+	for _, mode := range []string{MPSV3NamespaceCap, MPSV3ServerTimeslice} {
+		for _, numa := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/numa=%t", mode, numa), func(t *testing.T) {
+				devices := mpsV3TestGPUs(mode, "GPU-a", "GPU-b", "GPU-c", "GPU-d")
+				for i, d := range devices {
+					set := []string{"GPU-a", "GPU-b"}
+					if i >= 2 {
+						set = []string{"GPU-c", "GPU-d"}
+					}
+					d.CustomInfo[MPSV3GPUSetKey] = set
+				}
+				node := &device.NodeInfo{Devices: map[string][]device.DeviceInfo{NvidiaGPUDevice: {
+					{ID: "GPU-a", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"GPU-b": 10, "GPU-c": 100}}},
+					{ID: "GPU-b", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"GPU-a": 10}}},
+					{ID: "GPU-c", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"GPU-a": 100, "GPU-d": 50}}},
+					{ID: "GPU-d", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"GPU-c": 50}}},
+				}}}
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					MPSV3ComputeModeAnnotation:           mode,
+					util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+				}}}
+				if numa {
+					pod.Annotations[NumaBind] = "true"
+				}
+				req := device.ContainerDeviceRequest{Nums: 2, Type: NvidiaGPUDevice, Memreq: 2048, Coresreq: 25}
+				ok, result, reason := (&NvidiaGPUDevices{}).Fit(devices, req, pod, node, nil)
+				require.True(t, ok, reason)
+				var ids []string
+				for _, selected := range result[NvidiaGPUDevice] {
+					ids = append(ids, selected.UUID)
+				}
+				require.ElementsMatch(t, []string{"GPU-c", "GPU-d"}, ids)
+			})
+		}
+	}
+}
+
+func TestMPSV3MultiGPUStaticSMs(t *testing.T) {
+	for _, topology := range []bool{false, true} {
+		for _, tc := range []struct {
+			name string
+			sms  int64
+			want bool
+		}{
+			{name: "equal geometry", sms: 72, want: true},
+			{name: "different compute charges", sms: 80},
+			{name: "one card too small", sms: 8},
+		} {
+			t.Run(fmt.Sprintf("topology=%t/%s", topology, tc.name), func(t *testing.T) {
+				devices := mpsV3TestGPUs(MPSV3NamespaceCap, "GPU-a", "GPU-b")
+				devices[1].CustomInfo[MPSV3GeometryKey] = MPSV3Geometry{SMs: tc.sms, Chunk: 2}
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3SMCountAnnotation: "16"}}}
+				if topology {
+					pod.Annotations[util.GPUSchedulerPolicyAnnotationKey] = util.GPUSchedulerPolicyTopology.String()
+				}
+				req := device.ContainerDeviceRequest{Nums: 2, Type: NvidiaGPUDevice, Memreq: 2048}
+				ok, result, reason := (&NvidiaGPUDevices{}).Fit(devices, req, pod, &device.NodeInfo{}, nil)
+				require.Equal(t, tc.want, ok, reason)
+				if ok {
+					require.Len(t, result[NvidiaGPUDevice], 2)
+					for _, selected := range result[NvidiaGPUDevice] {
+						require.EqualValues(t, 23, selected.Usedcores)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestMPSV3MultiGPUContainerReservations(t *testing.T) {
+	for _, source := range []string{"tentative", "cache", "annotation"} {
+		for _, tc := range []struct {
+			name string
+			ids  []string
+			nums int64
+			want bool
+		}{
+			{name: "reuse", ids: []string{"GPU-a", "GPU-b"}, nums: 2, want: true},
+			{name: "disjoint", ids: []string{"GPU-d", "GPU-e"}, nums: 2, want: true},
+			{name: "partial overlap", ids: []string{"GPU-b", "GPU-d"}, nums: 2},
+			{name: "subset", ids: []string{"GPU-a"}, nums: 1},
+			{name: "superset", ids: []string{"GPU-a", "GPU-b", "GPU-d"}, nums: 3},
+		} {
+			t.Run(source+"/"+tc.name, func(t *testing.T) {
+				devices := mpsV3TestGPUs(MPSV3NamespaceCap, tc.ids...)
+				// Two prior containers must remain separate sets, including
+				// when only the persisted annotation is available.
+				raw := device.PodDevices{NvidiaGPUDevice: {
+					{{UUID: "GPU-a", Type: NvidiaGPUDevice}, {UUID: "GPU-b", Type: NvidiaGPUDevice}},
+					{{UUID: "GPU-c", Type: NvidiaGPUDevice}},
+				}}
+				var allocated *device.PodDevices
+				if source == "tentative" {
+					allocated = &raw
+				} else {
+					previous := &device.PodInfo{Pod: &corev1.Pod{}}
+					if source == "cache" {
+						previous.RawDevices = raw
+					} else {
+						previous.Annotations = device.EncodePodDevices(map[string]string{NvidiaGPUDevice: AllocatedDevicesAnnotation}, raw)
+					}
+					for _, d := range devices {
+						d.PodInfos = []*device.PodInfo{previous}
+					}
+				}
+				req := device.ContainerDeviceRequest{Nums: tc.nums, Type: NvidiaGPUDevice, Memreq: 2048, Coresreq: 25}
+				ok, result, reason := (&NvidiaGPUDevices{}).Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+				require.Equal(t, tc.want, ok, reason)
+				if ok {
+					require.Len(t, result[NvidiaGPUDevice], int(tc.nums))
+				}
+			})
+		}
+	}
 }

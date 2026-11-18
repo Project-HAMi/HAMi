@@ -63,7 +63,7 @@ func isMIGRequest(request device.ContainerDeviceRequest, devices []*device.Devic
 		return false
 	}
 	if pod != nil {
-		if mode, ok := pod.GetAnnotations()[nvidia.AllocateMode]; ok && !strings.Contains(mode, nvidia.MigMode) {
+		if mode, ok := pod.GetAnnotations()[nvidia.AllocateMode]; ok && !nvidia.MatchesOperatingMode(mode, nvidia.MigMode) {
 			return false
 		}
 	}

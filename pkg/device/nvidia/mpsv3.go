@@ -14,8 +14,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
-// Modes are comma-separated tokens. In particular, mps must not match mps-v3.
-func matchesOperatingMode(requested, mode string) bool {
+// MatchesOperatingMode checks comma-separated mode tokens for an exact match.
+func MatchesOperatingMode(requested, mode string) bool {
 	for token := range strings.SplitSeq(requested, ",") {
 		if strings.TrimSpace(token) == mode {
 			return true
@@ -229,7 +229,8 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 		if err != nil || strategy != otherStrategy || (sms > 0) != (other > 0) {
 			return 0, false
 		}
-		if !mpsV3FitsPreviousSets(p.Devices[NvidiaGPUDevice], dev.ID, count, selected) {
+		sets, err := mpsV3PodGPUSet(p)
+		if err != nil || !mpsV3FitsPreviousSets(sets, dev.ID, count, selected) {
 			return 0, false
 		}
 	}
@@ -243,13 +244,14 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 		}
 		_, remainder, _ := g.Partition(sms)
 		if remainder {
-			if allocated != nil && mpsV3HasRemainder((*allocated)[NvidiaGPUDevice], dev.ID) {
+			if allocated != nil && mpsV3GPUSetsContain((*allocated)[NvidiaGPUDevice], dev.ID) {
 				return 0, false
 			}
 			for _, p := range dev.PodInfos {
 				otherSMs, _ := MPSV3RequestedSMs(p.Annotations)
 				_, otherRemainder, _ := g.Partition(otherSMs)
-				if otherRemainder && mpsV3HasRemainder(p.Devices[NvidiaGPUDevice], dev.ID) {
+				sets, err := mpsV3PodGPUSet(p)
+				if err != nil || (otherRemainder && mpsV3GPUSetsContain(sets, dev.ID)) {
 					return 0, false
 				}
 			}
@@ -308,11 +310,58 @@ func mpsV3FitsPreviousSets(previous device.PodSingleDevice, id string, count int
 	return true
 }
 
-func mpsV3HasRemainder(previous device.PodSingleDevice, id string) bool {
+func mpsV3GPUSetsContain(previous device.PodSingleDevice, id string) bool {
 	for _, set := range previous {
 		if slices.ContainsFunc(set, func(d device.ContainerDevice) bool { return d.UUID == id }) {
 			return true
 		}
 	}
 	return false
+}
+
+func mpsV3PodGPUSet(pod *device.PodInfo) (device.PodSingleDevice, error) {
+	if sets, ok := pod.RawDevices[NvidiaGPUDevice]; ok {
+		return sets, nil
+	}
+	data, err := device.DecodePodDevices(map[string]string{NvidiaGPUDevice: AllocatedDevicesAnnotation}, pod.Annotations)
+	return data[NvidiaGPUDevice], err
+}
+
+func mpsV3ExistingGPUSet(dev *device.DeviceUsage, allocated *device.PodDevices) ([]string, error) {
+	if raw, ok := dev.CustomInfo[MPSV3GPUSetKey]; ok {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		if err := json.Unmarshal(data, &ids); err != nil {
+			return nil, err
+		}
+		slices.Sort(ids)
+		return ids, nil
+	}
+	groups := make([]device.PodSingleDevice, 0, len(dev.PodInfos)+1)
+	if allocated != nil {
+		groups = append(groups, (*allocated)[NvidiaGPUDevice])
+	}
+	for _, p := range dev.PodInfos {
+		sets, err := mpsV3PodGPUSet(p)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, sets)
+	}
+	for _, sets := range groups {
+		for _, set := range sets {
+			if slices.ContainsFunc(set, func(d device.ContainerDevice) bool { return d.UUID == dev.ID }) {
+				ids := make([]string, 0, len(set))
+				for _, d := range set {
+					ids = append(ids, d.UUID)
+				}
+				slices.Sort(ids)
+				return ids, nil
+			}
+		}
+	}
+	return nil, nil
 }

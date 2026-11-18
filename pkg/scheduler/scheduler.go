@@ -288,7 +288,7 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 
 	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 
-	if s.podManager.AddPod(pod, assignedNodeName, effectiveDevices) {
+	if s.podManager.AddPodWithRawDevices(pod, assignedNodeName, effectiveDevices, rawDevices) {
 		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
 	// Initial informer sync can replay a pod after its init containers have
@@ -1483,7 +1483,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	rawDevices := m.Devices
 	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
 	if args.Nodes == nil {
-		added := s.podManager.AddPod(pod, m.NodeID, effectiveDevices)
+		added := s.podManager.AddPodWithRawDevices(pod, m.NodeID, effectiveDevices, rawDevices)
 		if added {
 			s.quotaManager.AddUsage(pod, effectiveDevices) // use collapsed
 		}
