@@ -163,8 +163,9 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 			return fmt.Errorf("failed to resolve superpod total request for pod %s: %w", task.Name, err)
 		}
 		candidateSuperpods := make(map[string]struct{})
-		for _, node := range *nodes {
-			if spid, ok := node.Node.Labels[util.SuperPodIDLabel]; ok && spid != "" {
+		for nodeID, usage := range *nodes {
+			node := s.currentNode(nodeID, usage.Node)
+			if spid, ok := node.Labels[util.SuperPodIDLabel]; ok && spid != "" {
 				candidateSuperpods[spid] = struct{}{}
 			}
 		}
@@ -213,8 +214,9 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 // Returns the number of nodes rejected.
 func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, failedNodes map[string]string) int {
 	rejected := 0
-	for nodeID, node := range *nodes {
-		spid, ok := node.Node.Labels[util.SuperPodIDLabel]
+	for nodeID, usage := range *nodes {
+		node := s.currentNode(nodeID, usage.Node)
+		spid, ok := node.Labels[util.SuperPodIDLabel]
 		if !ok || spid == "" {
 			failedNodes[nodeID] = common.SuperpodNodeOutside
 			klog.V(5).InfoS(common.SuperpodNodeOutside,
@@ -259,19 +261,20 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 // hold the current pod's single-pod request contribute their nodeUsableSlots.
 // podRequest is passed in to avoid recomputing.
 func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) {
-	for nodeID, node := range *nodes {
-		if node == nil || node.Node == nil {
+	for nodeID, usage := range *nodes {
+		if usage == nil || usage.Node == nil {
 			continue
 		}
-		spid, ok := node.Node.Labels[util.SuperPodIDLabel]
+		node := s.currentNode(nodeID, usage.Node)
+		spid, ok := node.Labels[util.SuperPodIDLabel]
 		if !ok || spid == "" {
 			continue
 		}
-		rack, ok := node.Node.Labels[util.RackIDLabel]
+		rack, ok := node.Labels[util.RackIDLabel]
 		if !ok || rack == "" {
 			continue
 		}
-		slots := nodeUsableSlots(node)
+		slots := nodeUsableSlots(usage)
 		if podRequest > 0 && slots < podRequest {
 			klog.V(5).InfoS("Superpod rack count: node skipped, insufficient single-pod capacity",
 				"node", nodeID,
@@ -514,11 +517,12 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect node usage: %w", err)
 	}
-	for _, usage := range *overall {
+	for nodeID, usage := range *overall {
 		if usage == nil || usage.Node == nil || usage.Node.Spec.Unschedulable {
 			continue
 		}
-		spid := usage.Node.Labels[util.SuperPodIDLabel]
+		node := s.currentNode(nodeID, usage.Node)
+		spid := node.Labels[util.SuperPodIDLabel]
 		if _, wanted := spids[spid]; !wanted {
 			continue
 		}
@@ -609,7 +613,8 @@ func (s *Scheduler) collectAnchoredTaskReservations(spids map[string]struct{}, o
 			if usage == nil || usage.Node == nil {
 				continue
 			}
-			spid := usage.Node.Labels[util.SuperPodIDLabel]
+			node := s.currentNode(nodeName, usage.Node)
+			spid := node.Labels[util.SuperPodIDLabel]
 			if _, requested := spids[spid]; !requested {
 				continue
 			}

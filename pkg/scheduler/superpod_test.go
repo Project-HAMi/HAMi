@@ -560,6 +560,25 @@ func TestRejectNodesBySuperpod(t *testing.T) {
 	task := makeGPUPod("task-pod", "default", "task-1", 1)
 	ctx := &superpodContext{TaskID: "task-1"}
 
+	t.Run("reads current superpod label when cached node is stale", func(t *testing.T) {
+		nodes := map[string]*NodeUsage{
+			"node-sp1": makeNodeUsage("node-sp1", nil, 10, 0),
+		}
+		failed := map[string]string{}
+		ctx.Superpods = map[string]struct{}{"sp-1": {}}
+		ctx.TaskAnchored = true
+		s := &Scheduler{
+			nodeLister: newTestNodeLister(t,
+				makeNodeWithLabels("node-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}),
+			),
+		}
+
+		rejected := s.rejectNodesBySuperpod(ctx, task, &nodes, failed)
+
+		assert.Equal(t, 0, rejected)
+		assert.Assert(t, nodes["node-sp1"] != nil)
+	})
+
 	t.Run("anchored rejects nodes without superpod label", func(t *testing.T) {
 		nodes := map[string]*NodeUsage{
 			"node-plain": makeNodeUsage("node-plain", map[string]string{}, 10, 0),
