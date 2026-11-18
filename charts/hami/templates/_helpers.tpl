@@ -130,7 +130,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   Per-component image tag takes precedence over global.imageTag (trimmed non-empty imageRoot.tag wins).
 */}}
 {{- define "hami.imageTagOrGlobal" -}}
-{{- .imageRoot.tag | default (and .global .global.imageTag) | default "" | toString | trim -}}
+{{- $tag := .imageRoot.tag | default "" | toString | trim -}}
+{{- $tag | default (and .global .global.imageTag) | default "" | toString | trim -}}
 {{- end -}}
 
 {{- define "hami.image" -}}

@@ -1,0 +1,98 @@
+suite: Image tag fallback
+templates:
+  - scheduler/deployment.yaml
+  - scheduler/configmap.yaml
+  - scheduler/device-configmap.yaml
+  - device-plugin/daemonsetnvidia.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 31
+set:
+  global.imageTag: v9.9.9
+tests:
+  - it: uses the global tag for empty component tags
+    set:
+      scheduler.extender.image.tag: ""
+      devicePlugin.image.tag: ""
+      devicePlugin.monitor.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: scheduler/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: device-plugin/daemonsetnvidia.yaml
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: device-plugin/daemonsetnvidia.yaml
+  - it: uses the global tag for a whitespace-only extender tag
+    set:
+      scheduler.extender.image.tag: "   "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: scheduler/deployment.yaml
+  - it: uses the global tag for a whitespace-only device plugin tag
+    set:
+      devicePlugin.image.tag: "   "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: device-plugin/daemonsetnvidia.yaml
+  - it: uses the global tag for a whitespace-only monitor tag
+    set:
+      devicePlugin.monitor.image.tag: "   "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: device-plugin/daemonsetnvidia.yaml
+  - it: treats mixed whitespace as an empty component tag
+    set:
+      scheduler.extender.image.tag: " \t\n "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v9.9.9
+        template: scheduler/deployment.yaml
+  - it: preserves explicit component tags and trims their surrounding whitespace
+    set:
+      scheduler.extender.image.tag: v1.2.3
+      devicePlugin.image.tag: "  v2.3.4  "
+      devicePlugin.monitor.image.tag: "\tv3.4.5\n"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v1.2.3
+        template: scheduler/deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/projecthami/hami:v2.3.4
+        template: device-plugin/daemonsetnvidia.yaml
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v3.4.5
+        template: device-plugin/daemonsetnvidia.yaml
+  - it: preserves a component tag and digest
+    set:
+      scheduler.extender.image.tag: "  v1.2.3@sha256:1111111111111111111111111111111111111111111111111111111111111111  "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: docker.io/projecthami/hami:v1.2.3@sha256:1111111111111111111111111111111111111111111111111111111111111111
+        template: scheduler/deployment.yaml
+  - it: mirrors the image after falling back to the trimmed global tag
+    set:
+      global.imageSource: cn
+      global.imageTag: "  v9.9.9  "
+      scheduler.extender.image.tag: "   "
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: m.daocloud.io/docker.io/projecthami/hami:v9.9.9
+        template: scheduler/deployment.yaml
