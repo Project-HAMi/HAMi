@@ -42,6 +42,9 @@ func newValidateCommand() *cobra.Command {
 			"Existing warning-only conditions do not cause validation to fail.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The command line parsed, so an error from here on is about the
+			// input. Print it without the usage text.
+			cmd.SilenceUsage = true
 			path := args[0]
 			cfg, err := config.LoadConfig(path)
 			if err != nil {
@@ -69,6 +72,8 @@ func newSchedulerConfigCommand() *cobra.Command {
 		Example: "  scheduler validate scheduler-config --device-plugin-namespace=kube-system --device-plugin-service-account=hami-device-plugin",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// As for device-config: past parsing, skip the usage text.
+			cmd.SilenceUsage = true
 			if err := validateSchedulerOptions(); err != nil {
 				return err
 			}

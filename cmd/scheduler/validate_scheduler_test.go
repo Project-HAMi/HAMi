@@ -36,9 +36,9 @@ import (
 func TestValidateSchedulerConfig(t *testing.T) {
 	identity := []string{"--device-plugin-namespace=kube-system", "--device-plugin-service-account=hami-device-plugin"}
 	tests := []struct {
-		name, wantError, wantOutput                string
-		args                                       []string
-		noIdentity, help, beforeCommand, busyPorts bool
+		name, wantError, wantOutput                           string
+		args                                                  []string
+		noIdentity, help, beforeCommand, busyPorts, wantUsage bool
 	}{
 		{name: "valid options"},
 		{name: "finite bonus", args: []string{"--node-affinity-score-weight=2.5"}},
@@ -51,9 +51,9 @@ func TestValidateSchedulerConfig(t *testing.T) {
 		{name: "negative bonus", args: []string{"--node-affinity-score-weight=-1"}, wantError: "must be a finite number >= 0"},
 		{name: "NaN bonus", args: []string{"--node-affinity-score-weight=NaN"}, wantError: "must be a finite number >= 0"},
 		{name: "infinite bonus", args: []string{"--node-affinity-score-weight=+Inf"}, wantError: "must be a finite number >= 0"},
-		{name: "invalid flag value", args: []string{"--node-lock-timeout=invalid"}, wantError: "invalid argument"},
-		{name: "unknown option", args: []string{"--unknown-option=true"}, wantError: "unknown flag"},
-		{name: "unexpected path", args: []string{"config.yaml"}, wantError: "unknown command"},
+		{name: "invalid flag value", args: []string{"--node-lock-timeout=invalid"}, wantError: "invalid argument", wantUsage: true},
+		{name: "unknown option", args: []string{"--unknown-option=true"}, wantError: "unknown flag", wantUsage: true},
+		{name: "unexpected path", args: []string{"config.yaml"}, wantError: "unknown command", wantUsage: true},
 		{name: "remote extender warning", args: []string{"--extender-bind=0.0.0.0:9444"}, wantOutput: "--extender-bind=0.0.0.0:9444 is not a loopback address"},
 		{name: "enabled profiling warning", args: []string{"--profiling", "--profiling-bind-address=0.0.0.0:6060"}, wantOutput: "--profiling-bind-address=0.0.0.0:6060 is not a loopback address"},
 		{name: "disabled profiling", args: []string{"--profiling=false", "--profiling-bind-address=0.0.0.0:6060"}},
@@ -101,6 +101,10 @@ func TestValidateSchedulerConfig(t *testing.T) {
 				}
 				if strings.Contains(string(output), "passed offline startup validation") {
 					t.Fatalf("failed validation reported success:\n%s", output)
+				}
+				// Only a bad command line needs the usage text.
+				if got := strings.Contains(string(output), "Usage:"); got != tt.wantUsage {
+					t.Fatalf("usage printed = %v, want %v:\n%s", got, tt.wantUsage, output)
 				}
 				return
 			}
