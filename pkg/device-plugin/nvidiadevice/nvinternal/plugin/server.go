@@ -1432,10 +1432,22 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			plugin.rollbackMPSV3(mpsRollback)
 		}
 	}()
+	nodename := os.Getenv(util.NodeNameEnvName)
+
+	klog.InfoS("Allocate", "request", reqs)
+	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
+	current, err := getPendingPod(ctx, nodename)
+	if err != nil {
+		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
+		return &responses, err
+	}
+	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+
 	if plugin.operatingMode == nvidia.MigMode && plugin.migMgr != nil {
 		// Adopt existing instances before recording the rollback baseline;
 		// a later allocation failure must never release recovered workloads.
 		if err := plugin.prepareMigAllocationsLocked(); err != nil {
+			PodAllocationFailed(nodename, current, NodeLockNvidia)
 			return nil, fmt.Errorf("recover MIG allocations before allocation: %w", err)
 		}
 		plugin.migMgr.mu.Lock()
@@ -1472,20 +1484,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}()
 	}
 
-	klog.InfoS("Allocate", "request", reqs)
-	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
-	nodename := os.Getenv(util.NodeNameEnvName)
-	current, err := getPendingPod(ctx, nodename)
-	if err != nil {
-		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
-		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
-	}
-	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
-
 	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, current)
 	if err != nil {
 		PodAllocationFailed(nodename, current, NodeLockNvidia)
-		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+		return &responses, err
 	}
 
 	for idx, req := range reqs.ContainerRequests {

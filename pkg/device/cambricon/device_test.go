@@ -955,6 +955,65 @@ func Test_ReleaseNodeLock(t *testing.T) {
 	client.KubeClient = clientset
 	ctx := context.Background()
 
+	InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+	mluPod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "mlu",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("1"),
+					},
+				},
+			}},
+		},
+	}
+	gpuPod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "gpu",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("1"),
+					},
+				},
+			}},
+		},
+	}
+
+	t.Run("pod without MLU request keeps the lock", func(t *testing.T) {
+		lockTime := time.Now().Format(time.RFC3339)
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node-rel-other",
+				Annotations: map[string]string{DsmluLockTime: lockTime},
+			},
+		}
+		if _, err := clientset.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+		defer clientset.CoreV1().Nodes().Delete(ctx, node.Name, metav1.DeleteOptions{})
+
+		dev := CambriconDevices{}
+		for _, p := range []*corev1.Pod{gpuPod, {}, nil} {
+			if err := dev.ReleaseNodeLock(node, p); err != nil {
+				t.Fatalf("ReleaseNodeLock() unexpected error: %v", err)
+			}
+		}
+
+		fetched, err := clientset.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch node: %v", err)
+		}
+		if fetched.Annotations[DsmluLockTime] != lockTime {
+			t.Errorf("lock annotation = %q, want %q", fetched.Annotations[DsmluLockTime], lockTime)
+		}
+	})
+
 	tests := []struct {
 		name              string
 		nodeName          string
@@ -1030,7 +1089,7 @@ func Test_ReleaseNodeLock(t *testing.T) {
 			}
 
 			dev := CambriconDevices{}
-			err := dev.ReleaseNodeLock(callerNode, &corev1.Pod{})
+			err := dev.ReleaseNodeLock(callerNode, mluPod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReleaseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1078,7 +1137,7 @@ func Test_ReleaseNodeLock(t *testing.T) {
 		})
 
 		dev := CambriconDevices{}
-		err = dev.ReleaseNodeLock(node, &corev1.Pod{})
+		err = dev.ReleaseNodeLock(node, mluPod)
 		if err != nil {
 			t.Errorf("ReleaseNodeLock() unexpected error: %v", err)
 		}
@@ -1129,7 +1188,7 @@ func Test_ReleaseNodeLock(t *testing.T) {
 		})
 
 		dev := CambriconDevices{}
-		err = dev.ReleaseNodeLock(node, &corev1.Pod{})
+		err = dev.ReleaseNodeLock(node, mluPod)
 		if err != nil {
 			t.Errorf("ReleaseNodeLock() unexpected error: %v", err)
 		}
@@ -1166,7 +1225,7 @@ func Test_ReleaseNodeLock(t *testing.T) {
 		})
 
 		dev := CambriconDevices{}
-		err = dev.ReleaseNodeLock(node, &corev1.Pod{})
+		err = dev.ReleaseNodeLock(node, mluPod)
 		if err == nil {
 			t.Error("ReleaseNodeLock() expected error but got nil")
 		}

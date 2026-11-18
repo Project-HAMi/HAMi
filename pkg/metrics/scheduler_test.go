@@ -60,6 +60,7 @@ func TestSchedulerFailureReasons(t *testing.T) {
 		FailureReasonBind,
 		FailureReasonInternal,
 		FailureReasonConflict,
+		FailureReasonDevicePlugin,
 	} {
 		m.ObserveAllocationFailure("filter", "NVIDIA", reason)
 	}
@@ -70,6 +71,7 @@ func TestSchedulerFailureReasons(t *testing.T) {
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="annotation_patch",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="bind",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="conflict",phase="filter"} 1
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="device_plugin",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="identity",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="internal",phase="filter"} 1
 hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="lock",phase="filter"} 1
@@ -78,5 +80,37 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="no
 `)
 	if err := promtestutil.CollectAndCompare(m, want, "hami_scheduler_allocation_failures_total"); err != nil {
 		t.Fatalf("unexpected failure reasons:\n%s", err)
+	}
+}
+
+func TestSchedulerAllocationDuration(t *testing.T) {
+	m := NewSchedulerOutcomeMetrics()
+	m.ObserveAllocationDuration("NVIDIA", 2.5)
+
+	want := strings.NewReader(`
+# HELP hami_scheduler_allocation_duration_seconds HAMi device allocation duration from bind to success.
+# TYPE hami_scheduler_allocation_duration_seconds histogram
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="1"} 0
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="2"} 0
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="3"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="4"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="5"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="6"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="8"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="10"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="20"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="30"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="45"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="60"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="120"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="180"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="240"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="300"} 1
+hami_scheduler_allocation_duration_seconds_bucket{device_type="NVIDIA",le="+Inf"} 1
+hami_scheduler_allocation_duration_seconds_sum{device_type="NVIDIA"} 2.5
+hami_scheduler_allocation_duration_seconds_count{device_type="NVIDIA"} 1
+`)
+	if err := promtestutil.CollectAndCompare(m, want, "hami_scheduler_allocation_duration_seconds"); err != nil {
+		t.Fatalf("unexpected allocation duration:\n%s", err)
 	}
 }

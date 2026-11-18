@@ -239,10 +239,10 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" .Values.devices.nvidia.resourcePriorityName "ignoredByScheduler" true) -}}
 {{/* MLU resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.cambricon.resourceCountName "ignoredByScheduler" true) -}}
-{{/* HCU resources */}}
-{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCountName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceMemoryName "ignoredByScheduler" true) -}}
-{{- $resources = append $resources (dict "name" .Values.devices.hygon.resourceCoreName "ignoredByScheduler" true) -}}
+{{/* HCU resources. Explicit names override the names derived from resourcePrefix. */}}
+{{- $resources = append $resources (dict "name" (include "hami-vgpu.hygon.resourceCountName" .) "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" (include "hami-vgpu.hygon.resourceMemoryName" .) "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" (include "hami-vgpu.hygon.resourceCoreName" .) "ignoredByScheduler" true) -}}
 {{/* Metax resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.metax.resourceCountName "ignoredByScheduler" true) -}}
 {{- $resources = append $resources (dict "name" .Values.devices.metax.resourceVCountName "ignoredByScheduler" true) -}}
@@ -298,6 +298,13 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
+{{/* Tecorigin resources */}}
+{{- if .Values.devices.tecorigin.enabled -}}
+{{- $standardResources := list .Values.devices.tecorigin.resourceCountName -}}
+{{- range (concat $standardResources (.Values.devices.tecorigin.customresources | default (list)) | uniq) -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
 {{/* AMD resources */}}
 {{- $resources = append $resources (dict "name" .Values.devices.amd.resourceMemoryPercentageName "ignoredByScheduler" true) -}}
 {{- range .Values.devices.amd.customresources -}}
@@ -339,6 +346,53 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
   {{- fail (printf "devices.ascend.hamiVnpuMode must be template, hami-core (or hamiCore), or enpu, got %q" $ascend.hamiVnpuMode) -}}
 {{- end -}}
 {{- $mode -}}
+{{- end -}}
+
+{{/*
+hygon resource prefix. Empty means hcu. The value is one lowercase alphanumeric
+token and must contain "cu". Device plugin must advertise the same prefix.
+*/}}
+{{- define "hami-vgpu.hygon.prefix" -}}
+{{- $prefix := .Values.devices.hygon.resourcePrefix | default "hcu" | toString | trim -}}
+{{- if or (not (regexMatch "^[a-z0-9]+$" $prefix)) (not (contains "cu" $prefix)) -}}
+{{- fail (printf "devices.hygon.resourcePrefix %q must match ^[a-z0-9]+$ and contain \"cu\"" $prefix) -}}
+{{- end -}}
+{{- $prefix -}}
+{{- end -}}
+
+{{/*
+Hygon resource names. Unset values follow resourcePrefix. The historical
+defaults hygon.com/hcunum, hcumem, and hcucores are also unset when the prefix
+is not hcu. Any other explicit value is kept.
+*/}}
+{{- define "hami-vgpu.hygon.resourceCountName" -}}
+{{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
+{{- $name := .Values.devices.hygon.resourceCountName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcunum")) -}}
+{{- printf "hygon.com/%snum" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "hami-vgpu.hygon.resourceMemoryName" -}}
+{{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
+{{- $name := .Values.devices.hygon.resourceMemoryName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcumem")) -}}
+{{- printf "hygon.com/%smem" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "hami-vgpu.hygon.resourceCoreName" -}}
+{{- $prefix := include "hami-vgpu.hygon.prefix" . -}}
+{{- $name := .Values.devices.hygon.resourceCoreName | default "" | toString | trim -}}
+{{- if or (eq $name "") (and (ne $prefix "hcu") (eq $name "hygon.com/hcucores")) -}}
+{{- printf "hygon.com/%scores" $prefix -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "hami-vgpu.validateValues" -}}
@@ -406,4 +460,17 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
   {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
 {{- end -}}
+{{- $permits := .Values.devicePlugin.hostPIDBroker.driverAdmissionPermits -}}
+{{- $permitsInteger := int64 $permits -}}
+{{- if or (ne (toString $permitsInteger) (toString $permits))
+  (not (or (eq $permitsInteger 0) (and (ge $permitsInteger 2) (le $permitsInteger 64)))) -}}
+  {{- fail "devicePlugin.hostPIDBroker.driverAdmissionPermits must be 0 or an integer from 2 through 64" -}}
+{{- end -}}
+{{- $maxHold := .Values.devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds -}}
+{{- $maxHoldInteger := int64 $maxHold -}}
+{{- if or (ne (toString $maxHoldInteger) (toString $maxHold))
+  (lt $maxHoldInteger 1) (gt $maxHoldInteger 3600) -}}
+  {{- fail "devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600" -}}
+{{- end -}}
+{{- $_ := include "hami-vgpu.hygon.prefix" . -}}
 {{- end -}}

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -50,9 +51,11 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
@@ -1174,7 +1177,7 @@ func Test_register_RemovesObsoleteHandshake(t *testing.T) {
 	})
 	device.DevicesMap = map[string]device.Devices{
 		nvidia.NvidiaGPUDevice: nvidia.InitNvidiaDevice(nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}),
-		hygon.HygonHCUDevice:   hygon.InitHCUDevice(hygon.HygonConfig{ResourceCountName: "hygon.com/dcunum"}),
+		hygon.HygonHCUDevice:   hygon.InitHCUDevice(hygon.HygonConfig{ResourcePrefix: "hcu"}),
 	}
 
 	client.KubeClient = fake.NewClientset()
@@ -1205,6 +1208,52 @@ func Test_register_RemovesObsoleteHandshake(t *testing.T) {
 		_, ok := got.Annotations[key]
 		require.False(t, ok, "annotation %s should have been removed", key)
 	}
+}
+
+func Test_register_RegistersTecoriginNode(t *testing.T) {
+	// Regression test: the tecorigin backend used to report "no update needed"
+	// for every healthy node, so register() skipped addNode and Filter answered
+	// "node unregistered" for every pod requesting tecorigin.com/gpucore.
+	previousDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = previousDevices })
+	device.DevicesMap = map[string]device.Devices{
+		tecorigin.TecoDevice: tecorigin.InitTecoDevice(tecorigin.TecoConfig{ResourceCountName: "tecorigin.com/gpucore"}),
+	}
+
+	client.KubeClient = fake.NewClientset()
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+
+	// The node annotation is HAMi's node-device CSV; register() must read it and
+	// put the node in the cache, otherwise Filter reports "node unregistered".
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "teco-register-node",
+			Annotations: map[string]string{
+				"hami.io/node-tecorigin-register": "SN123432552,4,15296,15,Tecorigin,0,true,0,hami-core:",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				"tecorigin.com/gpucore": resource.MustParse("4"),
+			},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	s.register(labels.Everything())
+
+	got, err := s.GetNode("teco-register-node")
+	require.NoError(t, err, "node must be in the scheduler cache, otherwise Filter reports node unregistered")
+	require.Contains(t, got.Devices, tecorigin.TecoCommonWord)
+	require.Len(t, got.Devices[tecorigin.TecoCommonWord], 1)
+	require.Equal(t, "SN123432552", got.Devices[tecorigin.TecoCommonWord][0].ID)
+	require.Equal(t, int64(0b1111), got.Devices[tecorigin.TecoCommonWord][0].Devcore)
 }
 
 func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
@@ -2831,6 +2880,144 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 	assert.Equal(t, int64(5), coresQuota.Used)
 }
 
+func Test_onUpdatePod_CountsAllocateResult(t *testing.T) {
+	podWithPhase := func(phase string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-allocate", Name: "pod-allocate", Namespace: "allocate-metrics",
+				Annotations: map[string]string{util.DeviceBindPhase: phase},
+			},
+		}
+	}
+	tests := []struct {
+		name      string
+		oldPhase  string
+		newPhase  string
+		isLeader  bool
+		notCached bool
+		newStatus corev1.PodPhase
+		want      string
+	}{
+		{
+			name: "allocating to success", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: true,
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phase="allocate"} 1
+`,
+		},
+		{
+			name: "allocating to failed", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindFailed, isLeader: true,
+			want: `
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="device_plugin",phase="allocate"} 1
+`,
+		},
+		{name: "already success", oldPhase: util.DeviceBindSuccess, newPhase: util.DeviceBindSuccess, isLeader: true},
+		{name: "still allocating", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindAllocating, isLeader: true},
+		{name: "not leader", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: false},
+		{
+			name: "pod not cached", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindSuccess, isLeader: true, notCached: true,
+			want: `
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="unknown",failure_reason="none",phase="allocate"} 1
+`,
+		},
+		{
+			name: "failed in the same update as pod failure", oldPhase: util.DeviceBindAllocating, newPhase: util.DeviceBindFailed, isLeader: true, newStatus: corev1.PodFailed,
+			want: `
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="device_plugin",phase="allocate"} 1
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(test.isLeader)
+			oldPod := podWithPhase(test.oldPhase)
+			if !test.notCached {
+				s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+					nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+				})
+			}
+			newPod := podWithPhase(test.newPhase)
+			newPod.Status.Phase = test.newStatus
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
+				"hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
+		})
+	}
+}
+
+func Test_allocationDuration(t *testing.T) {
+	now := time.Unix(1716199327, 500_000_000)
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		want        float64
+		wantOK      bool
+	}{
+		{name: "valid bind-time", annotations: map[string]string{util.BindTimeAnnotations: "1716199325"}, want: 2.5, wantOK: true},
+		{name: "missing bind-time"},
+		{name: "malformed bind-time", annotations: map[string]string{util.BindTimeAnnotations: "2024-01-01T00:00:00Z"}},
+		{name: "bind-time in the future", annotations: map[string]string{util.BindTimeAnnotations: "1716199330"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: test.annotations}}
+			got, ok := allocationDuration(pod, now)
+			require.Equal(t, test.wantOK, ok)
+			require.InDelta(t, test.want, got, 1e-9)
+		})
+	}
+}
+
+func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
+	bindTime := fmt.Sprint(time.Now().Add(-15 * time.Second).Unix())
+	tests := []struct {
+		name        string
+		newPhase    string
+		annotations map[string]string
+		want        int
+	}{
+		{name: "success with bind-time", newPhase: util.DeviceBindSuccess, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 1},
+		{name: "success without bind-time", newPhase: util.DeviceBindSuccess, want: 0},
+		{name: "failed with bind-time", newPhase: util.DeviceBindFailed, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+			oldPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-duration", Name: "pod-duration", Namespace: "allocate-metrics",
+				Annotations: map[string]string{util.DeviceBindPhase: util.DeviceBindAllocating},
+			}}
+			s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+				nvidia.NvidiaGPUDevice:         device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+				"NVIDIA-NVIDIA A100-SXM4-40GB": device.PodSingleDevice{{}},
+			})
+			newPod := oldPod.DeepCopy()
+			newPod.Annotations = map[string]string{util.DeviceBindPhase: test.newPhase}
+			maps.Copy(newPod.Annotations, test.annotations)
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.Equal(t, test.want, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_duration_seconds"))
+			if test.want > 0 {
+				out, err := promtestutil.CollectAndFormat(s.GetAllocationMetrics(), expfmt.TypeTextPlain, "hami_scheduler_allocation_duration_seconds")
+				require.NoError(t, err)
+				require.Contains(t, string(out), `hami_scheduler_allocation_duration_seconds_count{device_type="NVIDIA"} 1`)
+			}
+		})
+	}
+}
+
 func Test_getNodesUsage_WithInitContainers(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
@@ -3122,6 +3309,26 @@ hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="l
 # TYPE hami_scheduler_bind_rollbacks_total counter
 hami_scheduler_bind_rollbacks_total{device_type="unknown",failure_reason="lock",phase="bind"} 1
 `), "hami_scheduler_allocation_failures_total", "hami_scheduler_bind_rollbacks_total"))
+}
+
+func Test_Bind_SuccessCountsAllocation(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-bind-ok", Namespace: "default", UID: types.UID("uid-bind-ok"),
+		},
+	}
+	mock := &bindLockMockDevice{}
+	s, args, cleanup := setupBindLockRetryTest(t, 5*time.Second, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="unknown",failure_reason="none",phase="bind"} 1
+`), "hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
 }
 
 func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
@@ -3476,6 +3683,44 @@ func TestSchedulerIsSynced(t *testing.T) {
 	s.synced.Store(true)
 
 	assert.Equal(t, true, s.IsSynced())
+}
+
+// failingNodeLister is a NodeLister whose List always fails, used to exercise
+// the list-error branch of register.
+type failingNodeLister struct{ err error }
+
+func (l failingNodeLister) List(labels.Selector) ([]*corev1.Node, error) { return nil, l.err }
+func (l failingNodeLister) Get(string) (*corev1.Node, error)             { return nil, l.err }
+
+// Test_register_LastSyncSuccessTime verifies that a successful sync records the
+// time and a failed sync keeps the previous value.
+func Test_register_LastSyncSuccessTime(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{}
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	assert.Equal(t, int64(0), s.LastSyncSuccessTime())
+
+	before := time.Now().Unix()
+	s.register(labels.Everything())
+	assert.Assert(t, s.LastSyncSuccessTime() >= before)
+
+	s.lastSyncSuccessTime.Store(1)
+	s.nodeLister = failingNodeLister{err: errors.New("list failed")}
+	s.register(labels.Everything())
+	assert.Equal(t, int64(1), s.LastSyncSuccessTime())
 }
 
 // Test_register_OverviewIncludesCachedNodesOutsideSelector covers a cached node

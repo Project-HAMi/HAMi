@@ -9,13 +9,13 @@ HAMi (Heterogeneous AI Computing Virtualization Middleware) is a CNCF incubating
 ## Build Commands
 
 ```bash
-make build              # Build all binaries (scheduler, vGPUmonitor, nvidia-device-plugin) to bin/
+make build              # Build all binaries (scheduler, vGPUmonitor, remoteGPUmonitor, nvidia-device-plugin) to bin/
 make docker             # Build Docker image
 make tidy               # Run go mod tidy
 make test               # Run unit tests with coverage (output in _output/coverage/)
 make lint               # Run golangci-lint (version pinned in hack/verify-staticcheck.sh)
 make verify             # Run all verification checks (lint, license, import aliases, RBAC permissions)
-make bench              # Run the benchmarks (CI only checks that they still execute)
+make bench              # Run the benchmarks (CI gates B/op and allocs/op per hack/bench-policy.tsv)
 make verify_chart       # Lint and render the chart, run Trivy, check chart and app versions
 make update-helm-chart-docs   # Regenerate the values table in charts/hami/README.md (needs helm-docs)
 make verify-helm-chart-docs   # Check that generated table is current
@@ -31,23 +31,28 @@ go test ./pkg/device/nvidia/... -run TestName -short --race -count=1
 
 ### Binary targets (from version.mk)
 
-- `scheduler` — the scheduler extender
-- `vGPUmonitor` — in-container GPU monitoring daemon
-- `nvidia` — builds as `nvidia-device-plugin` (device plugin for NVIDIA GPUs)
+- `scheduler`: the scheduler extender
+- `vGPUmonitor`: node-level GPU monitor, runs in the NVIDIA device plugin DaemonSet
+- `remoteGPUmonitor`: metrics sidecar of the Lupine server for remote GPUs
+- `nvidia`: builds as `nvidia-device-plugin` (device plugin for NVIDIA GPUs)
 
 ## Architecture
 
-### Three Main Components
+### Main Components
 
-1. **Scheduler Extender** (`cmd/scheduler/`) — HTTP server that extends kube-scheduler with device-aware filter/score/bind logic. Entry point calls `config.InitDevices()` to register all device backends.
+1. **Scheduler Extender** (`cmd/scheduler/`): HTTP server that extends kube-scheduler with device-aware filter/score/bind logic. Entry point calls `config.InitDevices()` to register all device backends.
 
-2. **Device Plugin** (`cmd/device-plugin/nvidia/`) — Implements the Kubernetes device plugin API for NVIDIA GPUs. Registers vGPU resources with the kubelet.
+2. **Device Plugin** (`cmd/device-plugin/nvidia/`): Implements the Kubernetes device plugin API for NVIDIA GPUs. Registers vGPU resources with the kubelet.
 
-3. **vGPU Monitor** (`cmd/vGPUmonitor/`) — Runs as a DaemonSet, monitors GPU usage per container, exposes Prometheus metrics, and enforces resource limits.
+3. **vGPU Monitor** (`cmd/vGPUmonitor/`): Runs as a container in the NVIDIA device plugin DaemonSet. Reads the HAMi-core shared memory of each container, exposes Prometheus metrics, and writes priority feedback back to HAMi-core.
+
+4. **Remote GPU Monitor** (`cmd/remoteGPUmonitor/`): Sidecar of the Lupine server. Turns Lupine metrics into HAMi container metrics for pods that use remote GPUs.
+
+The memory and core limits inside a container are enforced by HAMi-core (`libvgpu.so`, the `libvgpu` submodule), which the device plugin injects into the container.
 
 ### Core Package Layout
 
-- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`, `biren/`, `remotegpu/`) is a concrete implementation.
+- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`, `biren/`, `tecorigin/`, `remotegpu/`) is a concrete implementation.
 
 - **`pkg/scheduler/`** — Scheduler extender logic: node filtering, scoring, webhook handling. `config/config.go` contains `InitDevicesWithConfig()` which registers all device backends into `device.DevicesMap`.
 
@@ -59,7 +64,7 @@ go test ./pkg/device/nvidia/... -run TestName -short --race -count=1
 
 ### Key Data Flow
 
-Pod submission → MutatingWebhook (injects scheduler name + annotations) → Scheduler extender filter/score (calls `Devices.Fit()` and `Devices.ScoreNode()`) → Bind (writes device allocation to pod annotations) → Device plugin `Allocate()` (reads annotations, sets container env vars) → vGPUmonitor enforces limits inside container.
+Pod submission → MutatingWebhook (injects scheduler name + annotations) → Scheduler extender filter/score (calls `Devices.Fit()` and `Devices.ScoreNode()`) → Bind (writes device allocation to pod annotations) → Device plugin `Allocate()` (reads annotations, sets container env vars, mounts HAMi-core) → HAMi-core enforces limits inside the container, and vGPUmonitor exports its usage.
 
 ### Device Registration Pattern
 
@@ -73,6 +78,7 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 - golangci-lint with config in `.golangci.yaml` (version pinned in `hack/verify-staticcheck.sh`)
 - `goimports` with local prefix `github.com/Project-HAMi/HAMi`
 - Unit tests with race detector
+- Benchmarks: PR results are compared with the base by `benchstat`, and only the B/op and allocs/op thresholds in `hack/bench-policy.tsv` fail the job
 - DCO: every commit needs a `Signed-off-by` trailer (`git commit -s`)
 - Chart docs: the generated values table in `charts/hami/README.md` must match `charts/hami/values.yaml` (`make verify-helm-chart-docs`)
 - Nightly Trivy scan of the built images, plus CodeQL and OpenSSF Scorecard

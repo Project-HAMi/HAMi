@@ -1,5 +1,5 @@
-ARG GOLANG_IMAGE=golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
-ARG NVIDIA_IMAGE=nvidia/cuda:13.4.3-cudnn-devel-ubi8@sha256:53d7fab8667b6524238d2ff5b03b4be788e7afd7c00e5cd15cc2af8f911d8010
+ARG GOLANG_IMAGE=golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+ARG NVIDIA_IMAGE=nvidia/cuda:13.5.0-cudnn-devel-ubi8@sha256:25ec0bcb3b5bfaf567a105e07268ef685ef81e0a02c79142f4fea3e32d11a7f3
 
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
@@ -23,7 +23,7 @@ RUN bash ./build.sh
 # -proprietary package provides libdcgmmoduleprofiling.so.4, which DCGM needs to
 # serve DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO for MIG instances; the monitor dlopens
 # both at runtime.
-FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS dcgm
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS dcgm
 ARG DCGM_DEB=v4.7.0-2
 ARG DCGM_AMD64_SHA256=175b7166b86f01afb240a87224aed8aad8ab7bac9f425e655e9be4f5b83ec478
 ARG DCGM_ARM64_SHA256=eb54d0a43294831ff36fb7c5aeb2d947899062be6391696a16edca9b05031b9d
@@ -58,7 +58,7 @@ RUN set -eux; \
       dpkg-deb -x "/tmp/$pkg" /out; \
     done
 
-FROM nvidia/cuda:13.4.3-base-ubuntu22.04@sha256:7416c5229cb6c5b2e7cd7a5930ec97db03f3e064d56b8abacf525f6b4da0b271
+FROM nvidia/cuda:13.5.0-base-ubuntu22.04@sha256:4df174aaa911425cc8ab5beb6f897dfeafa92f03884c25176db134743f6e3736
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod1
+spec:
+  restartPolicy: OnFailure
+  containers:
+    - image: ubuntu:22.04
+      name: pod1
+      command: ["sleep"]
+      args: ["infinity"]
+      resources:
+        limits:
+          # tecorigin.com/gpucore is a core count: 1 reserves one core of a Tecorigin card.
+          tecorigin.com/gpucore: 1

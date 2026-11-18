@@ -23,13 +23,6 @@ import (
 	"time"
 )
 
-func clearFile(t *testing.T, path string) {
-	err := os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("Failed to remove file: %v", err)
-	}
-}
-
 func TestWatchLockFile(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -88,40 +81,33 @@ func TestWatchLockFile(t *testing.T) {
 }
 
 func TestCreateAndRemoveMigApplyLock(t *testing.T) {
+	// Use a private path instead of MigApplyLockFile, so the test neither
+	// leaves /tmp/hami behind nor depends on who created it.
+	lockFile := filepath.Join(t.TempDir(), "hami", "hami-mig-apply.lock")
 
 	t.Run("CreateLock", func(t *testing.T) {
-		err := CreateMigApplyLockDir()
-		if err != nil {
-			t.Errorf("CreateMigApplyLockDir failed: %v", err)
+		if err := createMigApplyLockDir(lockFile); err != nil {
+			t.Fatalf("createMigApplyLockDir failed: %v", err)
 		}
-		err = CreateMigApplyLock()
-		if err != nil {
-			t.Errorf("CreateMigApplyLock failed: %v", err)
+		if err := createMigApplyLock(lockFile); err != nil {
+			t.Fatalf("createMigApplyLock failed: %v", err)
 		}
-
-		if _, err = os.Stat(MigApplyLockFile); os.IsNotExist(err) {
+		if !isMigApplyLockExist(lockFile) {
 			t.Error("Lock file was not created")
 		}
 	})
 
 	t.Run("RemoveLock", func(t *testing.T) {
-		defer clearFile(t, filepath.Dir(MigApplyLockFile))
-		err := CreateMigApplyLockDir()
-		if err != nil {
-			t.Errorf("CreateMigApplyLockDir failed: %v", err)
+		if err := createMigApplyLockDir(lockFile); err != nil {
+			t.Fatalf("createMigApplyLockDir failed: %v", err)
 		}
-		f, err := os.Create(MigApplyLockFile)
-		if err != nil {
-			t.Fatalf("Create file failed: %v", err)
+		if err := createMigApplyLock(lockFile); err != nil {
+			t.Fatalf("createMigApplyLock failed: %v", err)
 		}
-		f.Close()
-
-		err = RemoveMigApplyLock()
-		if err != nil {
-			t.Errorf("RemoveMigApplyLock failed: %v", err)
+		if err := removeMigApplyLock(lockFile); err != nil {
+			t.Errorf("removeMigApplyLock failed: %v", err)
 		}
-
-		if _, err := os.Stat(MigApplyLockFile); !os.IsNotExist(err) {
+		if isMigApplyLockExist(lockFile) {
 			t.Error("Lock file was not removed")
 		}
 	})

@@ -150,6 +150,9 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	if !device.PodRequiresDevice(dev, p) {
+		return nil
+	}
 	ctx := context.Background()
 	nodeName := n.Name
 

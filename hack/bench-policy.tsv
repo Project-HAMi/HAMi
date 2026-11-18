@@ -23,4 +23,7 @@
 ^BenchmarkScoreNodeOccupied/ 5 0
 ^BenchmarkGetNodesUsage/ 5 0
 ^BenchmarkListPodsInfo/ 5 0
-^BenchmarkCollect/ 5 0
+# BenchmarkCollect allocates 20k to 1.1M times per operation, and its allocs/op
+# median moves by one between runs of the same code. 0.01% allows that and
+# still fails on one extra allocation per node, GPU or pod.
+^BenchmarkCollect/ 5 0.01
