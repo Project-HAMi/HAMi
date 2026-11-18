@@ -19,6 +19,7 @@ package googletpu
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -41,6 +42,16 @@ func container(limits, requests corev1.ResourceList) *corev1.Container {
 		Name:      "app",
 		Resources: corev1.ResourceRequirements{Limits: limits, Requests: requests},
 	}
+}
+
+// podRequesting returns a pod with one container per given chip count.
+func podRequesting(chipsPerContainer ...int64) *corev1.Pod {
+	pod := &corev1.Pod{}
+	for _, chips := range chipsPerContainer {
+		limits := corev1.ResourceList{tpuResource: *resource.NewQuantity(chips, resource.DecimalSI)}
+		pod.Spec.Containers = append(pod.Spec.Containers, *container(limits, nil))
+	}
+	return pod
 }
 
 func tpuNode(name string, capacity, allocatable int64, labels map[string]string) *corev1.Node {
@@ -224,77 +235,111 @@ func TestCheckHealth(t *testing.T) {
 
 func TestFit(t *testing.T) {
 	dev := newBackend()
+	taken, unhealthy := freeChips(4), freeChips(4)
+	for i := range 4 {
+		taken[i].Used = 1
+		unhealthy[i].Health = false
+	}
+	halfTaken := freeChips(4)
+	halfTaken[0].Used, halfTaken[1].Used = 1, 1
+	reversed := freeChips(4)
+	slices.Reverse(reversed)
+
 	tests := []struct {
-		name       string
-		devices    func() []*device.DeviceUsage
+		name    string
+		devices []*device.DeviceUsage
+		// A nil pod stands for a caller that only knows the container request.
+		pod        *corev1.Pod
 		request    int64
-		wantFit    bool
+		wantChips  []int
 		wantReason map[string]int
 	}{
 		{
-			name:    "whole free node",
-			devices: func() []*device.DeviceUsage { return freeChips(4) },
-			request: 4,
-			wantFit: true,
+			name:      "whole free node",
+			devices:   freeChips(4),
+			request:   4,
+			wantChips: []int{0, 1, 2, 3},
 		},
 		{
 			name:       "fewer chips than the node has",
-			devices:    func() []*device.DeviceUsage { return freeChips(4) },
+			devices:    freeChips(4),
 			request:    2,
 			wantReason: map[string]int{common.NodeRequiresAllDevices: 2},
 		},
 		{
 			name:       "more chips than the node has",
-			devices:    func() []*device.DeviceUsage { return freeChips(4) },
+			devices:    freeChips(4),
 			request:    8,
 			wantReason: map[string]int{common.NodeRequiresAllDevices: 8},
 		},
 		{
-			name: "node already taken",
-			devices: func() []*device.DeviceUsage {
-				chips := freeChips(4)
-				for _, chip := range chips {
-					chip.Used = 1
-				}
-				return chips
-			},
+			name:       "node already taken",
+			devices:    taken,
 			request:    4,
 			wantReason: map[string]int{common.CardTimeSlicingExhausted: 4},
 		},
 		{
-			name: "unhealthy node",
-			devices: func() []*device.DeviceUsage {
-				chips := freeChips(4)
-				for _, chip := range chips {
-					chip.Health = false
-				}
-				return chips
-			},
+			name:       "unhealthy node",
+			devices:    unhealthy,
 			request:    4,
 			wantReason: map[string]int{common.CardNotHealth: 4},
+		},
+		{
+			name:      "one container takes the node",
+			devices:   freeChips(4),
+			pod:       podRequesting(4),
+			request:   4,
+			wantChips: []int{0, 1, 2, 3},
+		},
+		{
+			name:      "first of two containers that divide the node",
+			devices:   reversed,
+			pod:       podRequesting(2, 2),
+			request:   2,
+			wantChips: []int{0, 1},
+		},
+		{
+			name:      "second of two containers that divide the node",
+			devices:   halfTaken,
+			pod:       podRequesting(2, 2),
+			request:   2,
+			wantChips: []int{2, 3},
+		},
+		{
+			name:       "containers ask for less than the node has",
+			devices:    freeChips(4),
+			pod:        podRequesting(2, 1),
+			request:    2,
+			wantReason: map[string]int{common.NodeRequiresAllDevices: 3},
+		},
+		{
+			name:       "containers ask for more than the node has",
+			devices:    freeChips(4),
+			pod:        podRequesting(4, 4),
+			request:    4,
+			wantReason: map[string]int{common.NodeRequiresAllDevices: 8},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			devices := test.devices()
 			request := device.ContainerDeviceRequest{Nums: test.request, Type: GoogleTPUDevice}
-			// A nil pod must not panic: Fit only uses it for logging.
-			fit, got, reason := dev.Fit(devices, request, nil, nil, nil)
-			assert.Equal(t, fit, test.wantFit)
-			if !test.wantFit {
+			fit, got, reason := dev.Fit(test.devices, request, test.pod, nil, nil)
+			assert.Equal(t, fit, test.wantChips != nil)
+			if !fit {
 				assert.Equal(t, len(got), 0)
 				assert.DeepEqual(t, common.ParseReason(reason), test.wantReason)
 				return
 			}
 			assert.Equal(t, reason, "")
-			assert.Equal(t, len(got[GoogleTPUDevice]), len(devices))
-			for i, chip := range got[GoogleTPUDevice] {
-				assert.DeepEqual(t, chip, device.ContainerDevice{
+			want := make(device.ContainerDevices, 0, len(test.wantChips))
+			for _, i := range test.wantChips {
+				want = append(want, device.ContainerDevice{
 					Idx:  i,
-					UUID: devices[i].ID,
+					UUID: fmt.Sprintf("node-%s-%d", GoogleTPUDevice, i),
 					Type: GoogleTPUDevice,
 				})
 			}
+			assert.DeepEqual(t, got[GoogleTPUDevice], want)
 		})
 	}
 }

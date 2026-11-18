@@ -13,5 +13,5 @@ spec:
       command: ["python", "-c", "import jax; print('TPU cores:', jax.device_count())"]
       resources:
         limits:
-          # A TPU request must equal the number of chips on the node: 4 on ct5lp-hightpu-4t.
+          # The Pod must request every chip of the node: 4 on ct5lp-hightpu-4t.
           google.com/tpu: 4

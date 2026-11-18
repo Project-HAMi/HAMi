@@ -17,7 +17,9 @@ limitations under the License.
 package googletpu
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -39,8 +41,8 @@ type GoogleTPUConfig struct {
 }
 
 // GoogleTPUDevices schedules Google TPU nodes on GKE. GKE advertises the chips
-// of a node as an extended resource and attaches them to the container that
-// requests them. This backend only decides which node a pod goes to and keeps
+// of a node as an extended resource and attaches them to the containers that
+// request them. This backend only decides which node a pod goes to and keeps
 // count of the chips in use.
 type GoogleTPUDevices struct {
 	resourceCountName string
@@ -160,25 +162,49 @@ func (dev *GoogleTPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-// Fit allocates every chip of the node or none. GKE requires a container that
-// requests TPUs to take all the chips of its node and cannot serve a request
-// for only some of them.
+// podChips returns the number of chips the containers of a pod request together.
+func (dev *GoogleTPUDevices) podChips(pod *corev1.Pod) int64 {
+	if pod == nil {
+		return 0
+	}
+	var chips int64
+	for i := range pod.Spec.Containers {
+		// The scheduler rejects a pod with an invalid request before Fit runs.
+		request, _ := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+		chips += request.Nums
+	}
+	return chips
+}
+
+// Fit gives the chips of a node to one pod. GKE cannot serve a pod that takes
+// only some of the chips of its node. On Ironwood the containers of a pod can
+// divide the chips between them, so the rule is checked for the pod and each
+// container gets the chips it asked for.
 func (dev *GoogleTPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.V(4).InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
 	tmpDevs := make(map[string]device.ContainerDevices)
-	if int(request.Nums) != len(devices) {
-		klog.V(5).InfoS(common.NodeRequiresAllDevices, "pod", klog.KObj(pod), "request", request.Nums, "node chips", len(devices))
-		return false, tmpDevs, common.GenReason(map[string]int{common.NodeRequiresAllDevices: int(request.Nums)}, len(devices))
+	// podChips leaves out init containers, so an init container is checked on
+	// its own request.
+	wanted := max(request.Nums, dev.podChips(pod))
+	if int(wanted) != len(devices) {
+		klog.V(5).InfoS(common.NodeRequiresAllDevices, "pod", klog.KObj(pod), "request", wanted, "node chips", len(devices))
+		return false, tmpDevs, common.GenReason(map[string]int{common.NodeRequiresAllDevices: int(wanted)}, len(devices))
 	}
+	// Take the chips by index, so that a container gets the same chips in
+	// whatever order the scheduler passes them.
+	ordered := slices.Clone(devices)
+	slices.SortFunc(ordered, func(a, b *device.DeviceUsage) int {
+		return cmp.Compare(a.Index, b.Index)
+	})
 	reason := make(map[string]int)
-	chips := make(device.ContainerDevices, 0, len(devices))
-	for _, d := range devices {
+	chips := make(device.ContainerDevices, 0, request.Nums)
+	for _, d := range ordered {
 		switch {
 		case !d.Health:
 			reason[common.CardNotHealth]++
 		case d.Used >= d.Count:
 			reason[common.CardTimeSlicingExhausted]++
-		default:
+		case len(chips) < int(request.Nums):
 			chips = append(chips, device.ContainerDevice{
 				Idx:  int(d.Index),
 				UUID: d.ID,
@@ -186,7 +212,7 @@ func (dev *GoogleTPUDevices) Fit(devices []*device.DeviceUsage, request device.C
 			})
 		}
 	}
-	if len(reason) > 0 {
+	if len(chips) < int(request.Nums) {
 		klog.V(5).InfoS("TPU node is not free", "pod", klog.KObj(pod), "reason", reason)
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}

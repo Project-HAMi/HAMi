@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"maps"
 	"testing"
 	"time"
@@ -40,9 +41,9 @@ import (
 
 func tpuPod(name string, chipsPerContainer ...int64) *corev1.Pod {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: name, UID: types.UID(name + "-uid")}}
-	for _, chips := range chipsPerContainer {
+	for i, chips := range chipsPerContainer {
 		pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-			Name: "app",
+			Name: fmt.Sprintf("app-%d", i),
 			Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{"google.com/tpu": *resource.NewQuantity(chips, resource.DecimalSI)},
 			},
@@ -52,7 +53,7 @@ func tpuPod(name string, chipsPerContainer ...int64) *corev1.Pod {
 }
 
 // A TPU node is read from its capacity and labels, with no register
-// annotation, and is given to one container as a whole.
+// annotation, and its chips go to one pod as a whole.
 func TestFilter_GoogleTPUWholeNode(t *testing.T) {
 	oldDevices, oldClient, oldSupport := device.DevicesMap, client.KubeClient, maps.Clone(device.SupportDevices)
 	t.Cleanup(func() {
@@ -62,58 +63,77 @@ func TestFilter_GoogleTPUWholeNode(t *testing.T) {
 		googletpu.GoogleTPUDevice: googletpu.InitGoogleTPUDevice(googletpu.GoogleTPUConfig{ResourceCountName: "google.com/tpu"}),
 	}
 
-	partial := tpuPod("partial", 2)
-	twoContainers := tpuPod("two-containers", 4, 4)
-	first := tpuPod("first", 4)
-	second := tpuPod("second", 4)
-	s := schedulerWithPods(t, partial, twoContainers, first, second)
-	s.eventRecorder = record.NewFakeRecorder(100)
-	client.KubeClient = s.kubeClient
+	for _, test := range []struct {
+		name string
+		// chips is what each container of the pod that takes the node requests.
+		chips []int64
+	}{
+		{name: "one container takes the node", chips: []int64{4}},
+		{name: "two containers divide the node", chips: []int64{2, 2}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			partial := tpuPod("partial", 2)
+			tooMany := tpuPod("too-many", 4, 4)
+			taker := tpuPod("taker", test.chips...)
+			second := tpuPod("second", 4)
+			s := schedulerWithPods(t, partial, tooMany, taker, second)
+			s.eventRecorder = record.NewFakeRecorder(100)
+			client.KubeClient = s.kubeClient
 
-	chips := corev1.ResourceList{"google.com/tpu": resource.MustParse("4")}
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "tpu-node",
-			Labels: map[string]string{googletpu.AcceleratorLabel: "tpu-v5-lite-podslice"},
-		},
-		Status: corev1.NodeStatus{Capacity: chips, Allocatable: chips},
+			chips := corev1.ResourceList{"google.com/tpu": resource.MustParse("4")}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "tpu-node",
+					Labels: map[string]string{googletpu.AcceleratorLabel: "tpu7x"},
+				},
+				Status: corev1.NodeStatus{Capacity: chips, Allocatable: chips},
+			}
+			t.Cleanup(func() { device.ForgetRegisteredDevices(googletpu.GoogleTPUDevice, node.Name) })
+			nodeInformers := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour)
+			assert.NilError(t, nodeInformers.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+			s.nodeLister = nodeInformers.Core().V1().Nodes().Lister()
+
+			s.register(labels.Everything())
+			registered, err := s.GetNode(node.Name)
+			assert.NilError(t, err, "an unregistered node makes Filter answer node unregistered")
+			assert.Equal(t, len(registered.Devices[googletpu.GoogleTPUCommonWord]), 4)
+
+			nodeNames := []string{node.Name}
+			filter := func(pod *corev1.Pod) *extenderv1.ExtenderFilterResult {
+				t.Helper()
+				result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+				assert.NilError(t, err)
+				assert.Equal(t, result.Error, "")
+				return result
+			}
+			assertRejected := func(pod *corev1.Pod, reason string, count int) {
+				t.Helper()
+				result := filter(pod)
+				assert.Assert(t, result.NodeNames == nil || len(*result.NodeNames) == 0, "pod %s was given %v", pod.Name, result.NodeNames)
+				assert.Equal(t, common.ParseReason(result.FailedNodes[node.Name])[reason], count, "result %+v", result)
+			}
+
+			assertRejected(partial, common.NodeRequiresAllDevices, 2)
+			assertRejected(tooMany, common.NodeRequiresAllDevices, 8)
+
+			result := filter(taker)
+			assert.DeepEqual(t, result.NodeNames, &nodeNames)
+			stored, err := s.kubeClient.CoreV1().Pods(taker.Namespace).Get(t.Context(), taker.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			assert.Equal(t, stored.Annotations[util.AssignedNodeAnnotations], node.Name)
+			allocated, err := device.DecodePodDevices(device.SupportDevices, stored.Annotations)
+			assert.NilError(t, err)
+			held := map[string]bool{}
+			for i, want := range test.chips {
+				row := allocated[googletpu.GoogleTPUDevice][i]
+				assert.Equal(t, int64(len(row)), want, "container %d", i)
+				for _, chip := range row {
+					held[chip.UUID] = true
+				}
+			}
+			assert.Equal(t, len(held), 4, "the containers must hold different chips: %v", allocated)
+
+			assertRejected(second, common.CardTimeSlicingExhausted, 4)
+		})
 	}
-	t.Cleanup(func() { device.ForgetRegisteredDevices(googletpu.GoogleTPUDevice, node.Name) })
-	nodeInformers := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour)
-	assert.NilError(t, nodeInformers.Core().V1().Nodes().Informer().GetIndexer().Add(node))
-	s.nodeLister = nodeInformers.Core().V1().Nodes().Lister()
-
-	s.register(labels.Everything())
-	registered, err := s.GetNode(node.Name)
-	assert.NilError(t, err, "an unregistered node makes Filter answer node unregistered")
-	assert.Equal(t, len(registered.Devices[googletpu.GoogleTPUCommonWord]), 4)
-
-	nodeNames := []string{node.Name}
-	filter := func(pod *corev1.Pod) *extenderv1.ExtenderFilterResult {
-		t.Helper()
-		result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
-		assert.NilError(t, err)
-		assert.Equal(t, result.Error, "")
-		return result
-	}
-	assertRejected := func(pod *corev1.Pod, reason string, count int) {
-		t.Helper()
-		result := filter(pod)
-		assert.Assert(t, result.NodeNames == nil || len(*result.NodeNames) == 0, "pod %s was given %v", pod.Name, result.NodeNames)
-		assert.Equal(t, common.ParseReason(result.FailedNodes[node.Name])[reason], count, "result %+v", result)
-	}
-
-	assertRejected(partial, common.NodeRequiresAllDevices, 2)
-	assertRejected(twoContainers, common.CardTimeSlicingExhausted, 4)
-
-	result := filter(first)
-	assert.DeepEqual(t, result.NodeNames, &nodeNames)
-	stored, err := s.kubeClient.CoreV1().Pods(first.Namespace).Get(t.Context(), first.Name, metav1.GetOptions{})
-	assert.NilError(t, err)
-	assert.Equal(t, stored.Annotations[util.AssignedNodeAnnotations], node.Name)
-	allocated, err := device.DecodePodDevices(device.SupportDevices, stored.Annotations)
-	assert.NilError(t, err)
-	assert.Equal(t, len(allocated[googletpu.GoogleTPUDevice][0]), 4)
-
-	assertRejected(second, common.CardTimeSlicingExhausted, 4)
 }
