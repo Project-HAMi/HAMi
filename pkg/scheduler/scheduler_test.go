@@ -3105,6 +3105,12 @@ hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="t
 	s.observeAllocateTimeouts(now)
 	requireTimeouts(1)
 
+	// An update that keeps the pod allocating, like an eviction, keeps the mark.
+	evicted := pod.DeepCopy()
+	evicted.Status.Conditions = []corev1.PodCondition{{Type: corev1.DisruptionTarget, Status: corev1.ConditionTrue}}
+	require.NoError(t, indexer.Update(evicted))
+	s.onUpdatePod(pod, evicted)
+
 	// The next scan sees the same bind.
 	s.observeAllocateTimeouts(now.Add(15 * time.Second))
 	requireTimeouts(1)
@@ -3115,6 +3121,41 @@ hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="t
 	require.NoError(t, indexer.Update(rebound))
 	s.observeAllocateTimeouts(now.Add(nodelockutil.NodeLockTimeout + time.Second))
 	requireTimeouts(2)
+}
+
+func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
+	listed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
+		Annotations: map[string]string{
+			util.DeviceBindPhase:     util.DeviceBindAllocating,
+			util.BindTimeAnnotations: "1716199327",
+		},
+	}}
+	succeeded := listed.DeepCopy()
+	succeeded.Annotations[util.DeviceBindPhase] = util.DeviceBindSuccess
+	tests := []struct {
+		name   string
+		cached *corev1.Pod
+		want   bool
+	}{
+		{name: "still allocating", cached: listed, want: true},
+		{name: "already succeeded", cached: succeeded, want: false},
+		{name: "deleted", cached: nil, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			informerFactory := informers.NewSharedInformerFactoryWithOptions(fake.NewClientset(), time.Hour)
+			s.podLister = informerFactory.Core().V1().Pods().Lister()
+			if test.cached != nil {
+				require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(test.cached))
+			}
+
+			require.Equal(t, test.want, s.markAllocateTimeout(listed))
+			_, marked := s.timedOutPods[listed.UID]
+			require.Equal(t, test.want, marked)
+		})
+	}
 }
 
 func Test_onUpdatePod_SkipsResultAfterTimeout(t *testing.T) {
@@ -3149,7 +3190,7 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 					util.BindTimeAnnotations: timedOutBind,
 				},
 			}}
-			require.True(t, s.markAllocateTimeout(timedOut))
+			s.timedOutPods = map[types.UID]string{timedOut.UID: timedOutBind}
 			oldPod := timedOut.DeepCopy()
 			oldPod.Annotations[util.BindTimeAnnotations] = test.bindTime
 			s.podManager.AddPod(oldPod, "node1", device.PodDevices{
@@ -3189,7 +3230,7 @@ func Test_onDelPod_ClearsAllocateTimeout(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			s := NewScheduler()
-			require.True(t, s.markAllocateTimeout(timedOut))
+			s.timedOutPods = map[types.UID]string{timedOut.UID: "1716199327"}
 
 			s.onDelPod(test.obj)
 

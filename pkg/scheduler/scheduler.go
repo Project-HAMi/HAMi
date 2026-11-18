@@ -530,7 +530,8 @@ func (s *Scheduler) syncAllocationLocked(oldObj any, newPod *corev1.Pod, pi *dev
 
 // observeAllocateResult counts the device plugin result once, when bind-phase leaves allocating.
 func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
-	if oldPod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+	if oldPod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating ||
+		newPod.Annotations[util.DeviceBindPhase] == util.DeviceBindAllocating {
 		return
 	}
 	if !s.leaderManager.IsLeader() {
@@ -567,12 +568,18 @@ func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
 }
 
 // markAllocateTimeout records the pod's current bind as timed out. It reports
-// false when this bind was already counted.
+// false when this bind was already counted or has already left allocating.
 func (s *Scheduler) markAllocateTimeout(pod *corev1.Pod) bool {
 	bindTime := pod.Annotations[util.BindTimeAnnotations]
 	s.timeoutLock.Lock()
 	defer s.timeoutLock.Unlock()
 	if s.timedOutPods[pod.UID] == bindTime {
+		return false
+	}
+	cur, err := s.podLister.Pods(pod.Namespace).Get(pod.Name)
+	if err != nil || cur.UID != pod.UID ||
+		cur.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating ||
+		cur.Annotations[util.BindTimeAnnotations] != bindTime {
 		return false
 	}
 	if s.timedOutPods == nil {
