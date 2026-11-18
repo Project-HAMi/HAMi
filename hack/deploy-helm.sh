@@ -76,7 +76,8 @@ elif [ "${E2E_TYPE}" == "local" ]; then
   fi
 
   # Detect the kube-scheduler version from the live cluster.
-  KUBE_SCHEDULER_TAG=$(kubectl version -o json 2>/dev/null | jq --raw-output '.serverVersion.gitVersion')
+  KUBE_SCHEDULER_TAG=$(kubectl --kubeconfig "${KUBE_CONF}" version -o json 2>/dev/null \
+    | jq --raw-output '.serverVersion.gitVersion')
   if [ -z "${KUBE_SCHEDULER_TAG}" ]; then
     echo "Error: Could not detect Kubernetes server version."
     exit 1
