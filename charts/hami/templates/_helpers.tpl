@@ -306,11 +306,13 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
-{{/* Google TPU resources */}}
+{{/* Google TPU resources. GKE publishes the real chip count of a node, so
+     kube-scheduler keeps its node-fit check for them. That check also counts
+     the Pods another scheduler placed, which the extender does not see. */}}
 {{- if .Values.devices.googletpu.enabled -}}
 {{- $standardResources := list .Values.devices.googletpu.resourceCountName -}}
 {{- range (concat $standardResources (.Values.devices.googletpu.customresources | default (list)) | uniq) -}}
-{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" false) -}}
 {{- end -}}
 {{- end -}}
 {{/* AMD resources */}}

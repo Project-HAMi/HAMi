@@ -1,0 +1,31 @@
+suite: Google TPU extender resources
+templates:
+  - scheduler/configmap.yaml
+tests:
+  - it: leaves the node capacity check for TPU chips to kube-scheduler
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*- ignoredByScheduler: false\n\s+name: google\.com/tpu\s*$'
+  - it: treats a renamed resource and custom resources the same way
+    set:
+      devices.googletpu.resourceCountName: example.com/tpu
+      devices.googletpu.customresources:
+        - example.com/tpu-extra
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*- ignoredByScheduler: false\n\s+name: example\.com/tpu\s*$'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*- ignoredByScheduler: false\n\s+name: example\.com/tpu-extra\s*$'
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'google\.com/tpu'
+  - it: leaves the resource out of the extender when disabled
+    set:
+      devices.googletpu.enabled: false
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'google\.com/tpu'
