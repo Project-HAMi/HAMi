@@ -538,7 +538,8 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 
 			default:
 				if superpodCtx != nil {
-					result.score.Score = applySuperpodRackBoost(superpodCtx, node.Node, nodeID, result.score.Score, userNodePolicy)
+					currentNode := s.currentNode(nodeID, node.Node)
+					result.score.Score = applySuperpodRackBoost(superpodCtx, currentNode, nodeID, result.score.Score, userNodePolicy)
 				}
 				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, result.score)
