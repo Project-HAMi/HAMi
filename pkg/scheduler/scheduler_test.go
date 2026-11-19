@@ -50,6 +50,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/tecorigin"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -4249,4 +4250,82 @@ func Test_buildNodeUsage_LeavesPodInfosNil(t *testing.T) {
 	usage := buildNodeUsage(testNodeInfo("node1", 1), nil)
 	assert.Equal(t, len(usage.Devices.DeviceLists), 1)
 	assert.Assert(t, usage.Devices.DeviceLists[0].Device.PodInfos == nil)
+}
+
+// mthreadsQuotaMiB reports MemoryFactor 1 so a ResourceQuota quantity is stored in MiB.
+// The production factor is 512, which would scale a quota of 8191 above one card.
+type mthreadsQuotaMiB struct{ *mthreads.MthreadsDevices }
+
+func (m mthreadsQuotaMiB) GetResourceNames() device.ResourceNames {
+	names := m.MthreadsDevices.GetResourceNames()
+	names.MemoryFactor = 1
+	return names
+}
+
+// TestFilter_MthreadsResourceQuotaWholeCardRequest rejects a whole-card request that admission cannot see.
+func TestFilter_MthreadsResourceQuotaWholeCardRequest(t *testing.T) {
+	oldDevices, oldClient := device.DevicesMap, client.KubeClient
+	oldCount, oldMemory, oldCore := mthreads.MthreadsResourceCount, mthreads.MthreadsResourceMemory, mthreads.MthreadsResourceCores
+	oldRequests, oldSupport, oldHandshake := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices), maps.Clone(util.HandshakeAnnos)
+	t.Cleanup(func() {
+		device.DevicesMap, client.KubeClient = oldDevices, oldClient
+		mthreads.MthreadsResourceCount, mthreads.MthreadsResourceMemory, mthreads.MthreadsResourceCores = oldCount, oldMemory, oldCore
+		device.InRequestDevices, device.SupportDevices, util.HandshakeAnnos = oldRequests, oldSupport, oldHandshake
+	})
+	dev := mthreads.InitMthreadsDevice(mthreads.MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	})
+	device.DevicesMap = map[string]device.Devices{mthreads.MthreadsGPUDevice: mthreadsQuotaMiB{dev}}
+
+	ns := "mthreads-filter-quota"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "whole-card", UID: "whole-card-uid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{"mthreads.com/vgpu": resource.MustParse("1")},
+		}}}},
+	}
+	s := schedulerWithPods(t, pod)
+	s.eventRecorder = record.NewFakeRecorder(100)
+	client.KubeClient = s.kubeClient
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mthreads-memory"},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			"limits.mthreads.com/sgpu-memory": resource.MustParse("8191"),
+		}},
+	}
+	s.quotaManager.AddQuota(quota)
+	t.Cleanup(func() { s.quotaManager.DelQuota(quota) })
+	// Admission sees no resolved memory and allows the request.
+	assert.NilError(t, fitResourceQuota(pod))
+
+	// One card publishes 16 sgpu-core units. 16 memory units times MemoryFactor 512 is 8192 MiB.
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "mthreads-node"},
+		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+			corev1.ResourceName(mthreads.MthreadsResourceCores):  resource.MustParse("16"),
+			corev1.ResourceName(mthreads.MthreadsResourceMemory): resource.MustParse("16"),
+		}},
+	}
+	registered, err := dev.GetNodeDevices(*node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(registered), 1)
+	assert.Equal(t, registered[0].Devmem, int64(8192))
+	s.addNode(node.Name, &device.NodeInfo{ID: node.Name, Node: node,
+		Devices: map[string][]device.DeviceInfo{mthreads.MthreadsGPUDevice: {*registered[0]}},
+	})
+	nodeNames := []string{node.Name}
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+	assert.NilError(t, err)
+	assert.Equal(t, result.Error, "")
+	assert.Assert(t, result.NodeNames == nil || len(*result.NodeNames) == 0, "result %+v", result)
+	assert.Assert(t, common.ParseReason(result.FailedNodes[node.Name])[common.ResourceQuotaNotFit] > 0, "result %+v", result)
+	pi, cached := s.podManager.GetPod(pod)
+	assert.Assert(t, !cached, "rejection left cached reservation: %+v", pi)
+	stored, err := s.kubeClient.CoreV1().Pods(ns).Get(t.Context(), pod.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, stored.Annotations[device.SupportDevices[mthreads.MthreadsGPUDevice]], "")
+	assert.Equal(t, stored.Annotations[device.InRequestDevices[mthreads.MthreadsGPUDevice]], "")
+	assert.Equal(t, stored.Annotations[util.AssignedNodeAnnotations], "")
 }
