@@ -571,8 +571,17 @@ func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
 	return d, true
 }
 
+// waitingForAllocate reports whether the pod is bound to a node and still
+// waits for the device plugin.
+func waitingForAllocate(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodPending &&
+		pod.Spec.NodeName != "" &&
+		pod.Status.StartTime == nil &&
+		pod.Annotations[util.DeviceBindPhase] == util.DeviceBindAllocating
+}
+
 // markAllocateTimeout records the pod's current bind as timed out. It reports
-// false when this bind was already counted or has already left allocating.
+// false when this bind was already counted or no longer waits for the device plugin.
 func (s *Scheduler) markAllocateTimeout(pod *corev1.Pod) bool {
 	bindTime := pod.Annotations[util.BindTimeAnnotations]
 	s.timeoutLock.Lock()
@@ -581,8 +590,7 @@ func (s *Scheduler) markAllocateTimeout(pod *corev1.Pod) bool {
 		return false
 	}
 	cur, err := s.podLister.Pods(pod.Namespace).Get(pod.Name)
-	if err != nil || cur.UID != pod.UID || cur.Status.Phase != corev1.PodPending ||
-		cur.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating ||
+	if err != nil || cur.UID != pod.UID || !waitingForAllocate(cur) ||
 		cur.Annotations[util.BindTimeAnnotations] != bindTime {
 		return false
 	}
@@ -606,7 +614,7 @@ func (s *Scheduler) clearAllocateTimeout(pod *corev1.Pod) bool {
 	return bindTime == pod.Annotations[util.BindTimeAnnotations]
 }
 
-// observeAllocateTimeouts counts pods that stay pending and allocating longer
+// observeAllocateTimeouts counts pods that wait for the device plugin longer
 // than the node lock timeout. Each bind is counted once.
 func (s *Scheduler) observeAllocateTimeouts(now time.Time) {
 	if !s.leaderManager.IsLeader() {
@@ -618,7 +626,7 @@ func (s *Scheduler) observeAllocateTimeouts(now time.Time) {
 		return
 	}
 	for _, pod := range pods {
-		if pod.Status.Phase != corev1.PodPending || pod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating {
+		if !waitingForAllocate(pod) {
 			continue
 		}
 		d, ok := allocationDuration(pod, now)
@@ -920,9 +928,12 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 	}
 }
 
-// WatchAllocateTimeouts checks for allocate timeouts every 15 seconds until Stop.
+// allocateTimeoutInterval is how often the leader checks for allocate timeouts.
+var allocateTimeoutInterval = 15 * time.Second
+
+// WatchAllocateTimeouts checks for allocate timeouts every allocateTimeoutInterval until Stop.
 func (s *Scheduler) WatchAllocateTimeouts() {
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(allocateTimeoutInterval)
 	defer ticker.Stop()
 	for {
 		select {

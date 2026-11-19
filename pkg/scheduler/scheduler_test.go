@@ -3028,6 +3028,8 @@ func Test_observeAllocateTimeouts(t *testing.T) {
 		bindPhase string
 		bindTime  string
 		isLeader  bool
+		unbound   bool
+		started   bool
 		want      string
 	}{
 		{
@@ -3043,6 +3045,8 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="ti
 		{name: "already success", podPhase: corev1.PodPending, bindPhase: util.DeviceBindSuccess, bindTime: pastTimeout, isLeader: true},
 		{name: "missing bind-time", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, isLeader: true},
 		{name: "not leader", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: false},
+		{name: "bind failed, no node", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: true, unbound: true},
+		{name: "started by kubelet", podPhase: corev1.PodPending, bindPhase: util.DeviceBindAllocating, bindTime: pastTimeout, isLeader: true, started: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -3051,10 +3055,17 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="ti
 					UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
 					Annotations: map[string]string{util.DeviceBindPhase: test.bindPhase},
 				},
+				Spec:   corev1.PodSpec{NodeName: "node1"},
 				Status: corev1.PodStatus{Phase: test.podPhase},
 			}
 			if test.bindTime != "" {
 				pod.Annotations[util.BindTimeAnnotations] = test.bindTime
+			}
+			if test.unbound {
+				pod.Spec.NodeName = ""
+			}
+			if test.started {
+				pod.Status.StartTime = &metav1.Time{Time: now}
 			}
 			s := NewScheduler()
 			s.leaderManager = leaderelection.NewDummyLeaderManager(test.isLeader)
@@ -3083,6 +3094,7 @@ func Test_observeAllocateTimeouts_CountsEachBindOnce(t *testing.T) {
 				util.BindTimeAnnotations: fmt.Sprint(now.Add(-nodelockutil.NodeLockTimeout - time.Second).Unix()),
 			},
 		},
+		Spec:   corev1.PodSpec{NodeName: "node1"},
 		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}
 	s := NewScheduler()
@@ -3123,6 +3135,55 @@ hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="t
 	requireTimeouts(2)
 }
 
+func Test_WatchAllocateTimeouts(t *testing.T) {
+	old := allocateTimeoutInterval
+	allocateTimeoutInterval = time.Millisecond
+	t.Cleanup(func() { allocateTimeoutInterval = old })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
+			Annotations: map[string]string{
+				util.DeviceBindPhase:     util.DeviceBindAllocating,
+				util.BindTimeAnnotations: fmt.Sprint(time.Now().Add(-nodelockutil.NodeLockTimeout - time.Minute).Unix()),
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "node1"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	s := NewScheduler()
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fake.NewClientset(), time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod))
+	counted := func() bool {
+		return promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocation_failures_total HAMi device allocation failures.
+# TYPE hami_scheduler_allocation_failures_total counter
+hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="timeout",phase="allocate"} 1
+`), "hami_scheduler_allocation_failures_total") == nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.WatchAllocateTimeouts()
+		close(done)
+	}()
+
+	// Not started yet: ticks are skipped.
+	require.Never(t, counted, 20*time.Millisecond, time.Millisecond)
+
+	atomic.StoreUint32(&s.started, 1)
+	require.Eventually(t, counted, time.Second, time.Millisecond)
+
+	close(s.stopCh)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("WatchAllocateTimeouts did not stop")
+	}
+}
+
 func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
 	listed := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -3132,12 +3193,15 @@ func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
 				util.BindTimeAnnotations: "1716199327",
 			},
 		},
+		Spec:   corev1.PodSpec{NodeName: "node1"},
 		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}
 	succeeded := listed.DeepCopy()
 	succeeded.Annotations[util.DeviceBindPhase] = util.DeviceBindSuccess
 	failed := listed.DeepCopy()
 	failed.Status.Phase = corev1.PodFailed
+	rebound := listed.DeepCopy()
+	rebound.Annotations[util.BindTimeAnnotations] = "1716199400"
 	tests := []struct {
 		name   string
 		cached *corev1.Pod
@@ -3146,6 +3210,7 @@ func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
 		{name: "still allocating", cached: listed, want: true},
 		{name: "already succeeded", cached: succeeded, want: false},
 		{name: "no longer pending", cached: failed, want: false},
+		{name: "re-bound", cached: rebound, want: false},
 		{name: "deleted", cached: nil, want: false},
 	}
 	for _, test := range tests {
