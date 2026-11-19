@@ -2101,3 +2101,49 @@ func TestAnnotationGuardAllowsHAMiAndUnrelatedWrites(t *testing.T) {
 		}
 	})
 }
+
+// A request the guard cannot read is refused, not judged as if it carried no
+// annotations.
+func TestAnnotationGuardRejectsUndecodableRequests(t *testing.T) {
+	guard, err := NewAnnotationGuard()
+	if err != nil {
+		t.Fatalf("failed to create the annotation guard: %v", err)
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to build the scheme: %v", err)
+	}
+	podBytes, err := runtime.Encode(serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion), ignoredGPUPod(nil))
+	if err != nil {
+		t.Fatalf("failed to encode the pod: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		req  admissionv1.AdmissionRequest
+	}{
+		{
+			name: "no object",
+			req:  admissionv1.AdmissionRequest{Operation: admissionv1.Create},
+		},
+		{
+			name: "unreadable old object",
+			req: admissionv1.AdmissionRequest{
+				Operation: admissionv1.Update,
+				Object:    runtime.RawExtension{Raw: podBytes},
+				OldObject: runtime.RawExtension{Raw: []byte("{")},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := guard.Handle(context.Background(), admission.Request{AdmissionRequest: tt.req})
+			if resp.Allowed {
+				t.Fatal("an undecodable request was admitted")
+			}
+			if resp.Result == nil || resp.Result.Code != http.StatusBadRequest {
+				t.Errorf("result %v, want code %d", resp.Result, http.StatusBadRequest)
+			}
+		})
+	}
+}

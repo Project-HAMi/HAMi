@@ -97,6 +97,23 @@ func TestWebHookRoute(t *testing.T) {
 	}
 }
 
+func TestAnnotationGuardRoute(t *testing.T) {
+	handler := AnnotationGuardRoute()
+	if handler == nil {
+		t.Fatal("AnnotationGuardRoute returned nil handler")
+	}
+
+	req := httptest.NewRequest("POST", "/webhook/annotations", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
 func TestReadyzRouteLeader(t *testing.T) {
 	// NewScheduler initializes with DummyLeaderManager(true) by default
 	s := scheduler.NewScheduler()
