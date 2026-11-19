@@ -12,15 +12,7 @@ webhooks:
     - v1
     - v1beta1
     clientConfig:
-      {{- if .Values.scheduler.admissionWebhook.customURL.enabled }}
-      url: https://{{ .Values.scheduler.admissionWebhook.customURL.host}}:{{.Values.scheduler.admissionWebhook.customURL.port}}{{.Values.scheduler.admissionWebhook.customURL.path}}
-      {{- else }}
-      service:
-        name: {{ include "hami-vgpu.scheduler" . }}
-        namespace: {{ include "hami-vgpu.namespace" . }}
-        path: /webhook
-        port: {{ .Values.scheduler.service.httpPort }}
-      {{- end }}
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "") | nindent 6 }}
     failurePolicy: {{ .Values.scheduler.admissionWebhook.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.hami.io
@@ -30,12 +22,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* Known gap, tracked in issue #3041: a namespace carrying this
-             label skips admission entirely, at the API server, before any
-             HAMi code runs. A pod placed there could carry the hami.io/
-             allocation annotations PR #3042 otherwise denies at create time.
-             Restrict who may set this label with policy (OPA/Kyverno,
-             PodSecurity admission) if that matters in your cluster. */}}
+      {{- /* A namespace carrying this label skips this webhook at the API
+             server, before any HAMi code runs. The annotations guard below
+             still covers its pods. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -56,9 +45,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* Same gap as the namespaceSelector note above, at the object
-             level: a pod carrying this label skips admission regardless of
-             its namespace. See issue #3041. */}}
+      {{- /* Same at the object level: a pod carrying this label skips this
+             webhook regardless of its namespace, and the annotations guard
+             below covers it. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -86,4 +75,83 @@ webhooks:
         scope: '*'
     sideEffects: None
     timeoutSeconds: 10
+  {{- /* The hami.io/webhook: ignore label keeps a pod, or every pod in a
+         namespace, away from the webhook above, and whoever creates the pod
+         can set it. The device plugin hands out devices from the
+         scheduler-owned annotations and the scheduler rebuilds its accounting
+         from them, so on those pods they are still kept to HAMi's own writers.
+         These entries mutate nothing and judge only those annotations. HAMi's
+         own pods carry the label, so they fail open: with the scheduler down,
+         Fail would keep the scheduler's own pod from being created. */}}
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "/annotations") | nindent 6 }}
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    name: pods.annotations.vgpu.hami.io
+    objectSelector:
+      matchExpressions:
+      - key: hami.io/webhook
+        operator: In
+        values:
+        - ignore
+    reinvocationPolicy: Never
+    rules:
+      {{- include "hami-vgpu.scheduler.webhook.podRules" . | nindent 6 }}
+    sideEffects: None
+    timeoutSeconds: 10
+  {{- if or (not (hasKey .Values.scheduler.admissionWebhook "manageNamespaceSelector")) .Values.scheduler.admissionWebhook.manageNamespaceSelector }}
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "/annotations") | nindent 6 }}
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    name: namespaces.annotations.vgpu.hami.io
+    namespaceSelector:
+      matchExpressions:
+      - key: hami.io/webhook
+        operator: In
+        values:
+        - ignore
+    {{- /* Pods labeled as well are covered by the entry above. */}}
+    objectSelector:
+      matchExpressions:
+      - key: hami.io/webhook
+        operator: NotIn
+        values:
+        - ignore
+    reinvocationPolicy: Never
+    rules:
+      {{- include "hami-vgpu.scheduler.webhook.podRules" . | nindent 6 }}
+    sideEffects: None
+    timeoutSeconds: 10
+  {{- end }}
 {{- end }}
+
+{{- define "hami-vgpu.scheduler.webhook.clientConfig" -}}
+{{- $root := .root -}}
+{{- if $root.Values.scheduler.admissionWebhook.customURL.enabled -}}
+url: https://{{ $root.Values.scheduler.admissionWebhook.customURL.host }}:{{ $root.Values.scheduler.admissionWebhook.customURL.port }}{{ $root.Values.scheduler.admissionWebhook.customURL.path }}{{ .path }}
+{{- else -}}
+service:
+  name: {{ include "hami-vgpu.scheduler" $root }}
+  namespace: {{ include "hami-vgpu.namespace" $root }}
+  path: /webhook{{ .path }}
+  port: {{ $root.Values.scheduler.service.httpPort }}
+{{- end -}}
+{{- end -}}
+
+{{- define "hami-vgpu.scheduler.webhook.podRules" -}}
+- apiGroups:
+    - ""
+  apiVersions:
+    - v1
+  operations:
+    - CREATE
+    - UPDATE
+  resources:
+    - pods
+  scope: '*'
+{{- end -}}

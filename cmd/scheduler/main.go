@@ -248,12 +248,13 @@ func extenderRouter(s *scheduler.Scheduler) *httprouter.Router {
 }
 
 // clusterRouter serves the endpoints whose callers live outside this pod:
-// /webhook from kube-apiserver, /refit from the device-plugin, and the probes
-// from kubelet.
+// /webhook and /webhook/annotations from kube-apiserver, /refit from the
+// device-plugin, and the probes from kubelet.
 func clusterRouter(s *scheduler.Scheduler) *httprouter.Router {
 	router := httprouter.New()
 	router.POST("/refit", routes.NumaRefit(s))
 	router.POST("/webhook", routes.WebHookRoute())
+	router.POST("/webhook/annotations", routes.AnnotationGuardRoute())
 	router.GET("/healthz", routes.HealthzRoute())
 	router.GET("/readyz", routes.ReadyzRoute(s))
 	return router

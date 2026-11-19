@@ -1,0 +1,85 @@
+suite: Scheduler-owned annotations guard
+templates:
+  - scheduler/webhook.yaml
+tests:
+  - it: guards pods labeled to skip the admission webhook
+    asserts:
+      - equal:
+          path: webhooks[1].name
+          value: pods.annotations.vgpu.hami.io
+      - equal:
+          path: webhooks[1].clientConfig.service.path
+          value: /webhook/annotations
+      - equal:
+          path: webhooks[1].objectSelector.matchExpressions[0]
+          value:
+            key: hami.io/webhook
+            operator: In
+            values:
+              - ignore
+      - equal:
+          path: webhooks[1].failurePolicy
+          value: Ignore
+      - equal:
+          path: webhooks[1].rules[0].operations
+          value:
+            - CREATE
+            - UPDATE
+
+  - it: guards pods in namespaces labeled to skip the admission webhook
+    asserts:
+      - equal:
+          path: webhooks[2].name
+          value: namespaces.annotations.vgpu.hami.io
+      - equal:
+          path: webhooks[2].namespaceSelector.matchExpressions[0]
+          value:
+            key: hami.io/webhook
+            operator: In
+            values:
+              - ignore
+      - equal:
+          path: webhooks[2].objectSelector.matchExpressions[0]
+          value:
+            key: hami.io/webhook
+            operator: NotIn
+            values:
+              - ignore
+
+  - it: fails open even when the admission webhook fails closed
+    set:
+      scheduler.admissionWebhook.failurePolicy: Fail
+    asserts:
+      - equal:
+          path: webhooks[0].failurePolicy
+          value: Fail
+      - equal:
+          path: webhooks[1].failurePolicy
+          value: Ignore
+      - equal:
+          path: webhooks[2].failurePolicy
+          value: Ignore
+
+  - it: keeps only the pod entry when the namespace selector is not managed
+    set:
+      scheduler.admissionWebhook.manageNamespaceSelector: false
+    asserts:
+      - lengthEqual:
+          path: webhooks
+          count: 2
+      - notExists:
+          path: webhooks[1].namespaceSelector
+
+  - it: appends the guard path to a custom webhook URL
+    set:
+      scheduler.admissionWebhook.customURL.enabled: true
+      scheduler.admissionWebhook.customURL.host: 10.0.0.1
+      scheduler.admissionWebhook.customURL.port: 31998
+      scheduler.admissionWebhook.customURL.path: /webhook
+    asserts:
+      - equal:
+          path: webhooks[0].clientConfig.url
+          value: https://10.0.0.1:31998/webhook
+      - equal:
+          path: webhooks[1].clientConfig.url
+          value: https://10.0.0.1:31998/webhook/annotations

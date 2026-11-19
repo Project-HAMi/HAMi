@@ -167,6 +167,19 @@ func WebHookRoute() httprouter.Handle {
 	}
 }
 
+// AnnotationGuardRoute serves the webhook that guards the scheduler-owned
+// annotations on pods the admission webhook is not called for.
+func AnnotationGuardRoute() httprouter.Handle {
+	h, err := scheduler.NewAnnotationGuard()
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the annotation guard webhook")
+	}
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.V(5).Infof("Handling annotation guard request on %s", r.URL.Path)
+		h.ServeHTTP(w, r)
+	}
+}
+
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.V(5).Infoln("Health check endpoint hit")

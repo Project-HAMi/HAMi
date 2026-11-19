@@ -193,6 +193,13 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 			return admission.Denied(err.Error())
 		}
 	}
+	return judgeSchedulerOwnedUpdate(ctx, req, oldPod, pod)
+}
+
+// judgeSchedulerOwnedUpdate allows an update that leaves the scheduler-owned
+// annotations alone, or that a HAMi component makes to a pod this scheduler
+// places, and denies the rest.
+func judgeSchedulerOwnedUpdate(ctx context.Context, req admission.Request, oldPod, pod *corev1.Pod) admission.Response {
 	annotation, changed := changedSchedulerOwnedAnnotation(oldPod, pod)
 	if !changed {
 		return admission.Allowed("no scheduler-owned annotation changed")
@@ -209,6 +216,48 @@ func (h *webhook) handleUpdate(ctx context.Context, req admission.Request, pod *
 		return denySchedulerOwnedAnnotation(pod, req.UserInfo.Username, annotation)
 	}
 	return admission.Allowed("scheduler-owned annotation changed by a HAMi component")
+}
+
+// annotationGuard judges only the scheduler-owned annotations, for the pods the
+// admission webhook above is not called for. A pod opts out of that webhook
+// with the hami.io/webhook: ignore label, and so does a namespace, and both are
+// in reach of whoever creates the pod. Opting out of HAMi's mutation is what
+// the label is for. Opting out of the guard on these annotations is not: the
+// device plugin hands out devices from whatever they name, and the scheduler
+// rebuilds its accounting from them.
+type annotationGuard struct {
+	decoder admission.Decoder
+}
+
+// NewAnnotationGuard returns the webhook that keeps the scheduler-owned
+// annotations to HAMi's own writers on pods the admission webhook skips.
+func NewAnnotationGuard() (*admission.Webhook, error) {
+	schema := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(schema); err != nil {
+		return nil, err
+	}
+	return &admission.Webhook{Handler: &annotationGuard{decoder: admission.NewDecoder(schema)}}, nil
+}
+
+func (g *annotationGuard) Handle(ctx context.Context, req admission.Request) admission.Response {
+	pod := &corev1.Pod{}
+	if err := g.decoder.Decode(req, pod); err != nil {
+		klog.Errorf("Failed to decode request: %v", err)
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	if req.Operation == admissionv1.Update {
+		oldPod := &corev1.Pod{}
+		if err := g.decoder.DecodeRaw(req.OldObject, oldPod); err != nil {
+			klog.Errorf("Failed to decode old object: %v", err)
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		return judgeSchedulerOwnedUpdate(ctx, req, oldPod, pod)
+	}
+	if annotation, found := schedulerOwnedAnnotation(pod); found {
+		klog.Warningf(template+" - Denying admission as pod presets %s", pod.Namespace, pod.Name, pod.UID, annotation)
+		return admission.Denied(fmt.Sprintf("annotation %s is written by the scheduler and cannot be set when creating a pod", annotation))
+	}
+	return admission.Allowed("no scheduler-owned annotation set")
 }
 
 func remoteGPUSelectorChanged(oldPod, pod *corev1.Pod) bool {
