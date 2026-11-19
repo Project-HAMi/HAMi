@@ -1358,6 +1358,11 @@ func TestSetNodeLockNilPod(t *testing.T) {
 // pod's allocation, and the two pods were served each other's devices.
 var allocating = map[string]string{deviceBindPhaseAnnotation: deviceBindAllocating}
 
+// allocatingOn is what the scheduler leaves on a pod it locked the node for.
+func allocatingOn(node string) map[string]string {
+	return map[string]string{deviceBindPhaseAnnotation: deviceBindAllocating, assignedNodeAnnotation: node}
+}
+
 func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
 	nodeLocks = newNodeLockManager()
 	client.KubeClient = fake.NewClientset()
@@ -1382,7 +1387,8 @@ func TestLockNodeExpiredKeepsLockWhileHolderWaits(t *testing.T) {
 	// The holder is still pending: its Allocate has not run, so it will read
 	// this lock to find out which allocation is its own.
 	if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocating},
+		ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocatingOn(nodeName)},
+		Spec:       corev1.PodSpec{NodeName: nodeName},
 		Status:     corev1.PodStatus{Phase: corev1.PodPending},
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("failed to seed the holder: %v", err)
@@ -1584,6 +1590,60 @@ func TestLockNodeExpiredTakenWhenHolderFinishedAllocating(t *testing.T) {
 	next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
 	if err := LockNode(nodeName, "", next); err != nil {
 		t.Fatalf("the node stayed locked for a holder that finished allocating: %v", err)
+	}
+}
+
+// TestLockNodeExpiredTakenWhenHolderIsNotOnThisNode covers a holder that is
+// still pending and allocating, but not on the locked node. Only an Allocate on
+// that node reads the lock, and its kubelet runs only pods bound there, so a
+// holder that was never bound or was placed elsewhere will never be allocated
+// on it. Keeping the lock for such a holder left the node locked for good.
+func TestLockNodeExpiredTakenWhenHolderIsNotOnThisNode(t *testing.T) {
+	const nodeName = "gpu-node-6"
+	tests := []struct {
+		name     string
+		bound    string
+		assigned string
+	}{
+		{name: "never bound", bound: "", assigned: nodeName},
+		{name: "bound to another node", bound: "gpu-node-7", assigned: "gpu-node-7"},
+		{name: "assigned to another node", bound: nodeName, assigned: "gpu-node-7"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nodeLocks = newNodeLockManager()
+			client.KubeClient = fake.NewClientset()
+
+			originalTimeout := NodeLockTimeout
+			NodeLockTimeout = time.Minute * 2
+			t.Cleanup(func() { NodeLockTimeout = originalTimeout })
+
+			staleLock := time.Now().Add(-time.Hour).Format(time.RFC3339) + NodeLockSep + "default" + NodeLockSep + "holder"
+			if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: staleLock}},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the node: %v", err)
+			}
+			if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: "default", Annotations: allocatingOn(tt.assigned)},
+				Spec:       corev1.PodSpec{NodeName: tt.bound},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			}, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("failed to seed the holder: %v", err)
+			}
+
+			next := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: "default"}}
+			if err := LockNode(nodeName, "", next); err != nil {
+				t.Fatalf("the node stayed locked for a holder that is not on it: %v", err)
+			}
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to read the node back: %v", err)
+			}
+			if !strings.Contains(node.Annotations[NodeLockKey], "next") {
+				t.Fatalf("the lock is %q, want it held by the next pod", node.Annotations[NodeLockKey])
+			}
+		})
 	}
 }
 
