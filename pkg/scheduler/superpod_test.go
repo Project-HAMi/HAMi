@@ -129,11 +129,12 @@ func makeNodeUsage(name string, labels map[string]string, count, used int64) *No
 		Devices: policy.DeviceUsageList{
 			DeviceLists: []*policy.DeviceListsScore{
 				{Device: &device.DeviceUsage{
-					ID:     name + "-gpu0",
-					Type:   nvidia.NvidiaGPUDevice,
-					Count:  count,
-					Used:   used,
-					Health: true,
+					ID:       name + "-gpu0",
+					Type:     nvidia.NvidiaGPUDevice,
+					Count:    count,
+					Used:     used,
+					Totalmem: 8000,
+					Health:   true,
 				}},
 			},
 		},
@@ -144,11 +145,12 @@ func makeNodeUsageWithPhysicalCount(name string, labels map[string]string, physi
 	devices := make([]*device.DeviceUsage, physicalCount)
 	for i := range devices {
 		devices[i] = &device.DeviceUsage{
-			ID:     fmt.Sprintf("%s-gpu%d", name, i),
-			Type:   nvidia.NvidiaGPUDevice,
-			Count:  virtualCount,
-			Used:   used,
-			Health: true,
+			ID:       fmt.Sprintf("%s-gpu%d", name, i),
+			Type:     nvidia.NvidiaGPUDevice,
+			Count:    virtualCount,
+			Used:     used,
+			Totalmem: 8000,
+			Health:   true,
 		}
 	}
 	return makeNodeUsageMultiDevices(name, labels, devices)
@@ -318,6 +320,25 @@ func TestPrepareSuperpodContext(t *testing.T) {
 		assert.DeepEqual(t, ctx.PreferredRacks, map[string]struct{}{"rack-A": {}, "rack-B": {}})
 	})
 
+	t.Run("ignores succeeded and failed task pods when finding anchors", func(t *testing.T) {
+		for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+			t.Run(string(phase), func(t *testing.T) {
+				finished := makeGPUPod("finished", "default", "", 1)
+				finished.Labels[util.TaskIDLabel] = "task-1"
+				finished.Spec.NodeName = "sp-node-2"
+				finished.Status.Phase = phase
+				s.podLister = newTestPodLister(t, task, finished)
+
+				ctx := s.prepareSuperpodContext(task, util.NodeSchedulerPolicySuperpod.String())
+
+				assert.Assert(t, ctx != nil)
+				assert.Assert(t, !ctx.TaskAnchored)
+				assert.Equal(t, 0, len(ctx.Superpods))
+				assert.Equal(t, 0, len(ctx.PreferredRacks))
+			})
+		}
+	})
+
 	t.Run("prefers PodManager reservation before informer assignment", func(t *testing.T) {
 		sibling := makeGPUPod("sibling", "default", "", 1)
 		sibling.Labels[util.TaskIDLabel] = "task-1"
@@ -340,7 +361,7 @@ func TestPrepareSuperpodContext(t *testing.T) {
 
 func TestNodeUsableSlots(t *testing.T) {
 	t.Run("nil node returns 0", func(t *testing.T) {
-		assert.Equal(t, int64(0), nodeUsableSlots(nil))
+		assert.Equal(t, int64(0), nodeUsableSlots(nil, nil))
 	})
 
 	t.Run("no devices returns 0", func(t *testing.T) {
@@ -350,7 +371,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				DeviceLists: []*policy.DeviceListsScore{},
 			},
 		}
-		assert.Equal(t, int64(0), nodeUsableSlots(node))
+		assert.Equal(t, int64(0), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("counts all remaining shares on a device", func(t *testing.T) {
@@ -362,12 +383,12 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(7), nodeUsableSlots(node))
+		assert.Equal(t, int64(7), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("fully consumed physical device excluded", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 10)
-		assert.Equal(t, int64(0), nodeUsableSlots(node))
+		assert.Equal(t, int64(0), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("unhealthy device excluded", func(t *testing.T) {
@@ -380,7 +401,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("exhausted physical device excluded", func(t *testing.T) {
@@ -393,12 +414,12 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(7), nodeUsableSlots(node))
+		assert.Equal(t, int64(7), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("sums remaining shares across physical devices", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 3, 10, 4)
-		assert.Equal(t, int64(18), nodeUsableSlots(node))
+		assert.Equal(t, int64(18), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("nil device entries skipped", func(t *testing.T) {
@@ -411,7 +432,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node, nil))
 	})
 
 	t.Run("nil device list entries skipped", func(t *testing.T) {
@@ -424,7 +445,7 @@ func TestNodeUsableSlots(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, int64(6), nodeUsableSlots(node))
+		assert.Equal(t, int64(6), nodeUsableSlots(node, nil))
 	})
 }
 
@@ -724,7 +745,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
 		// Each physical GPU advertises 10 shares.
 		assert.Equal(t, int64(40), ctx.RackSlotCounts["sp-1"]["rack-A"])
@@ -741,7 +762,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
 		assert.Equal(t, 0, len(ctx.RackSlotCounts))
 	})
@@ -755,9 +776,47 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
 		// podRequest=8 shares: n1 has 4 shares (skipped), n2 has 10 shares.
-		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 8)
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 8))
 
 		// Only n2 contributes: 10 remaining shares.
+		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+	})
+
+	t.Run("counts only devices with enough free memory for the pod", func(t *testing.T) {
+		ctx.RackSlotCounts = make(map[string]map[string]int64)
+		labels := map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}
+		lowMemory := makeNodeUsageWithPhysicalCount("low-memory", labels, 1, 20, 0)
+		lowMemory.Devices.DeviceLists[0].Device.Usedmem = 7500
+		enoughMemory := makeNodeUsageWithPhysicalCount("enough-memory", labels, 1, 10, 0)
+		enoughMemory.Devices.DeviceLists[0].Device.Usedmem = 6000
+		nodes := map[string]*NodeUsage{
+			"low-memory":    lowMemory,
+			"enough-memory": enoughMemory,
+		}
+		task := makeGPUPod("pod", "default", "task-1", 1)
+
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
+
+		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+	})
+
+	t.Run("checks percentage memory requests against each device", func(t *testing.T) {
+		ctx.RackSlotCounts = make(map[string]map[string]int64)
+		labels := map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"}
+		underPercent := makeNodeUsageWithPhysicalCount("under-percent", labels, 1, 20, 0)
+		underPercent.Devices.DeviceLists[0].Device.Usedmem = 2500
+		overPercent := makeNodeUsageWithPhysicalCount("over-percent", labels, 1, 10, 0)
+		overPercent.Devices.DeviceLists[0].Device.Usedmem = 1500
+		nodes := map[string]*NodeUsage{
+			"under-percent": underPercent,
+			"over-percent":  overPercent,
+		}
+		task := makeGPUPod("pod", "default", "task-1", 1)
+		delete(task.Spec.Containers[0].Resources.Limits, "hami.io/gpumem")
+		task.Spec.Containers[0].Resources.Limits["hami.io/gpumem-percentage"] = *resource.NewQuantity(75, resource.BinarySI)
+
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
+
 		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -768,7 +827,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 0)
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 0))
 
 		// A physical device with no virtual capacity contributes no usable shares.
 		assert.Equal(t, int64(0), ctx.RackSlotCounts["sp-1"]["rack-A"])
@@ -782,7 +841,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		}
 		task := makeGPUPod("pod", "default", "task-1", 1)
 
-		(&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1)
+		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
 		// Only n1 contributes: 10 remaining shares.
 		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
