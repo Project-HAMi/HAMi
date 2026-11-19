@@ -40,8 +40,13 @@ tests:
               operator: In
               values:
                 - ignore
-      - notExists:
-          path: webhooks[2].objectSelector
+      - equal:
+          path: webhooks[2].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
 
   - it: guards pods in whitelisted namespaces
     set:
@@ -55,13 +60,17 @@ tests:
       - equal:
           path: webhooks[3].namespaceSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
             - key: kubernetes.io/metadata.name
               operator: In
               values:
                 - kube-system
                 - monitoring
 
-  - it: guards pods and namespaces that miss the configured selectors
+  - it: guards pods and namespaces that miss the configured selectors, one entry per pod
     set:
       scheduler.admissionWebhook.namespaceSelector.matchLabels:
         hami: enabled
@@ -83,6 +92,10 @@ tests:
       - equal:
           path: webhooks[2].objectSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
             - key: gpu
               operator: NotIn
               values:
@@ -90,11 +103,29 @@ tests:
       - equal:
           path: webhooks[3].objectSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
             - key: skip-me
               operator: Exists
       - equal:
           path: webhooks[4].objectSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
+            - key: skip-me
+              operator: DoesNotExist
             - key: team
               operator: NotIn
               values:
@@ -103,6 +134,10 @@ tests:
       - equal:
           path: webhooks[6].namespaceSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
             - key: hami
               operator: NotIn
               values:
@@ -110,8 +145,34 @@ tests:
       - equal:
           path: webhooks[7].namespaceSelector.matchExpressions
           value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: hami
+              operator: In
+              values:
+                - enabled
             - key: tier
               operator: DoesNotExist
+      - equal:
+          path: webhooks[7].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
+            - key: skip-me
+              operator: DoesNotExist
+            - key: team
+              operator: In
+              values:
+                - a
+                - b
 
   - it: fails open even when the admission webhook fails closed
     set:

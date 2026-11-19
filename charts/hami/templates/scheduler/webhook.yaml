@@ -82,11 +82,17 @@ webhooks:
          the scheduler-owned annotations and the scheduler rebuilds its
          accounting from them, so on every pod they are kept to HAMi's own
          writers. One entry per requirement, with the requirement negated,
-         reaches exactly the pods that fail it, so together the entries cover
-         every pod the webhook above skips. They mutate nothing and judge only
-         those annotations. HAMi's own pods carry the label, so they fail
-         open: with the scheduler down, Fail would keep the scheduler's own pod
-         from being created. */}}
+         reaches the pods that fail it, so together the entries cover every
+         pod the webhook above skips. Each entry also keeps the requirements
+         before it, and the namespace entries keep every pod requirement, so a
+         pod reaches only the entry for the first requirement it fails. The
+         API server calls matching webhooks one after another within one
+         request deadline, and a pod that reached one entry per failed
+         requirement would wait out one timeout per entry while the scheduler
+         hangs, and be rejected instead of failing open. They mutate nothing
+         and judge only those annotations. HAMi's own pods carry the label, so
+         they fail open: with the scheduler down, Fail would keep the
+         scheduler's own pod from being created. */}}
   {{- $webhook := .Values.scheduler.admissionWebhook }}
   {{- $skipIgnored := dict "key" "hami.io/webhook" "operator" "NotIn" "values" (list "ignore") }}
   {{- $podRequirements := list $skipIgnored }}
@@ -119,6 +125,9 @@ webhooks:
     name: pods-{{ $i }}.annotations.vgpu.hami.io
     objectSelector:
       matchExpressions:
+      {{- if $i }}
+      {{- toYaml (slice $podRequirements 0 $i) | nindent 6 }}
+      {{- end }}
       {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
     reinvocationPolicy: Never
     rules:
@@ -136,7 +145,13 @@ webhooks:
     name: namespaces-{{ $i }}.annotations.vgpu.hami.io
     namespaceSelector:
       matchExpressions:
+      {{- if $i }}
+      {{- toYaml (slice $namespaceRequirements 0 $i) | nindent 6 }}
+      {{- end }}
       {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
+    objectSelector:
+      matchExpressions:
+      {{- toYaml $podRequirements | nindent 6 }}
     reinvocationPolicy: Never
     rules:
       {{- include "hami-vgpu.scheduler.webhook.podRules" $ | nindent 6 }}
