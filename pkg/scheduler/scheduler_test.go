@@ -3124,15 +3124,20 @@ hami_scheduler_allocation_failures_total{device_type="unknown",failure_reason="t
 }
 
 func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
-	listed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
-		Annotations: map[string]string{
-			util.DeviceBindPhase:     util.DeviceBindAllocating,
-			util.BindTimeAnnotations: "1716199327",
+	listed := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: "uid-timeout", Name: "pod-timeout", Namespace: "allocate-metrics",
+			Annotations: map[string]string{
+				util.DeviceBindPhase:     util.DeviceBindAllocating,
+				util.BindTimeAnnotations: "1716199327",
+			},
 		},
-	}}
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
 	succeeded := listed.DeepCopy()
 	succeeded.Annotations[util.DeviceBindPhase] = util.DeviceBindSuccess
+	failed := listed.DeepCopy()
+	failed.Status.Phase = corev1.PodFailed
 	tests := []struct {
 		name   string
 		cached *corev1.Pod
@@ -3140,6 +3145,7 @@ func Test_markAllocateTimeout_ReadsCurrentPod(t *testing.T) {
 	}{
 		{name: "still allocating", cached: listed, want: true},
 		{name: "already succeeded", cached: succeeded, want: false},
+		{name: "no longer pending", cached: failed, want: false},
 		{name: "deleted", cached: nil, want: false},
 	}
 	for _, test := range tests {
@@ -3165,11 +3171,13 @@ func Test_onUpdatePod_SkipsResultAfterTimeout(t *testing.T) {
 		name         string
 		newPhase     string
 		bindTime     string
+		newUID       types.UID
 		want         string
 		wantDuration int
 	}{
 		{name: "success after timeout", newPhase: util.DeviceBindSuccess, bindTime: timedOutBind},
 		{name: "failed after timeout", newPhase: util.DeviceBindFailed, bindTime: timedOutBind},
+		{name: "replaced by a new pod", newPhase: util.DeviceBindSuccess, bindTime: newBind, newUID: "uid-new"},
 		{
 			name: "success of a new bind", newPhase: util.DeviceBindSuccess, bindTime: newBind, wantDuration: 1,
 			want: `
@@ -3198,6 +3206,9 @@ hami_scheduler_allocations_total{device_type="NVIDIA",failure_reason="none",phas
 			})
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations[util.DeviceBindPhase] = test.newPhase
+			if test.newUID != "" {
+				newPod.UID = test.newUID
+			}
 
 			s.onUpdatePod(oldPod, newPod)
 
