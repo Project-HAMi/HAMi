@@ -1778,7 +1778,7 @@ func TestLoadNodeConfigFailurePreservesRemoteLabel(t *testing.T) {
 func TestApiDevices_NilSplitCount(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{
 		schedulerConfig: nvidia.NvidiaConfig{
-			DeviceSplitCount: nil,
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: nil},
 		},
 	}
 	defer func() {

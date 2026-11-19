@@ -762,8 +762,11 @@ func gpuContainer(limits corev1.ResourceList) *corev1.Container {
 // registered node annotation tells the scheduler about it.
 func cardPlugin(mode string, uuid string, totalMemoryMB uint64, scaling float64) *NvidiaDevicePlugin {
 	return &NvidiaDevicePlugin{
-		operatingMode:   mode,
-		schedulerConfig: nvidia.NvidiaConfig{DeviceMemoryScaling: &scaling},
+		operatingMode: mode,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &scaling,
+			}},
 		rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
 			return rm.Devices{uuid: &rm.Device{TotalMemory: totalMemoryMB * 1024 * 1024}}
 		}},
