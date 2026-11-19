@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -51,7 +52,7 @@ func (l NodeScoreList) Swap(i, j int) {
 }
 
 func (l NodeScoreList) Less(i, j int) bool {
-	if primaryNodeSortKey(l.Policy) == util.NodeSchedulerPolicySpread {
+	if effectiveNodeSortKey(l.Policy) == util.NodeSchedulerPolicySpread {
 		return l.NodeList[i].Score > l.NodeList[j].Score
 	}
 	// default policy is Binpack
@@ -80,19 +81,25 @@ func primaryNodeSortKey(policy string) util.SchedulerPolicyName {
 	return ""
 }
 
+func effectiveNodeSortKey(policy string) util.SchedulerPolicyName {
+	if key := primaryNodeSortKey(policy); key != "" {
+		return key
+	}
+	if key := primaryNodeSortKey(config.NodeSchedulerPolicy); key != "" {
+		return key
+	}
+	return util.NodeSchedulerPolicyBinpack
+}
+
 // NodePolicyUsesSpread reports whether spread is the primary node sort key.
 func NodePolicyUsesSpread(policy string) bool {
-	return primaryNodeSortKey(policy) == util.NodeSchedulerPolicySpread
+	return effectiveNodeSortKey(policy) == util.NodeSchedulerPolicySpread
 }
 
 // nodeScorePolicy returns the primary node sort key for device scorers.
 // Filtering policies such as superpod are not device scoring strategies.
 func nodeScorePolicy(policy string) string {
-	key := primaryNodeSortKey(policy)
-	if key == "" {
-		return util.NodeSchedulerPolicyBinpack.String()
-	}
-	return key.String()
+	return effectiveNodeSortKey(policy).String()
 }
 
 // policyNeutralScorer is an optional interface a device backend may implement to

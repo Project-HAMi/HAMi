@@ -138,6 +138,27 @@ func TestNodePolicyUsesSpread(t *testing.T) {
 	}
 }
 
+func TestNodePolicyFallsBackToConfiguredDefault(t *testing.T) {
+	original := config.NodeSchedulerPolicy
+	t.Cleanup(func() { config.NodeSchedulerPolicy = original })
+	config.NodeSchedulerPolicy = "spread"
+
+	if got := nodeScorePolicy("superpod"); got != "spread" {
+		t.Errorf("nodeScorePolicy(%q) = %q, want %q", "superpod", got, "spread")
+	}
+	if !NodePolicyUsesSpread("superpod") {
+		t.Error("NodePolicyUsesSpread(\"superpod\") = false, want true with configured spread default")
+	}
+
+	list := NodeScoreList{
+		NodeList: []*NodeScore{{Score: 20}, {Score: 10}},
+		Policy:   "superpod",
+	}
+	if !list.Less(0, 1) {
+		t.Error("NodeScoreList.Less should use the configured spread policy")
+	}
+}
+
 func TestNodeScorePolicy(t *testing.T) {
 	tests := []struct {
 		policy string
