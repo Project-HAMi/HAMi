@@ -289,9 +289,10 @@ func TestGetPendingPodIgnoresHandWrittenAnnotations(t *testing.T) {
 }
 
 // TestGetPendingPodRejectsPodTheLockWasNotTakenFor covers a lock that names a
-// pod by namespace and name only. Each case is a pod that carries the name the
-// lock records but is not the pod the scheduler locked this node for, so its
-// allocation must not be served here and its bind phase must not be touched.
+// pod by namespace and name only. The failing cases are pods that carry the
+// name the lock records but are not the pod the scheduler locked this node for,
+// so their allocation must not be served here and their bind phase must not be
+// touched. The passing cases are pods that are.
 func TestGetPendingPodRejectsPodTheLockWasNotTakenFor(t *testing.T) {
 	const node = "gpu-node-1"
 	lockTime := time.Now().Add(-time.Minute)
@@ -360,11 +361,12 @@ func TestGetPendingPodRejectsPodTheLockWasNotTakenFor(t *testing.T) {
 			wantErr: `whose bind phase is ""`,
 		},
 		{
-			name: "pod created after the lock under the same name",
+			// A StatefulSet replacement scheduled to the same node keeps the
+			// lock its predecessor left, with the predecessor's timestamp.
+			name: "pod recreated under the same name after the lock was taken",
 			pod: locked(func(p *corev1.Pod) {
 				p.CreationTimestamp = metav1.NewTime(lockTime.Add(time.Minute))
 			}),
-			wantErr: "before pod default/locked was created",
 		},
 	}
 	for _, tt := range tests {

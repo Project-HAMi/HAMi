@@ -87,20 +87,25 @@ func GetNodeWithContext(ctx context.Context, nodename string) (*corev1.Node, err
 // another (issue #3076).
 //
 // The lock records only a namespace and a name, so the pod it resolves to is
-// checked against what the scheduler left on the pod it locked for: bound to
-// this node, assigned here by the scheduler, still allocating, and already in
-// existence when the lock was taken. A pod failing any of these is not the pod
-// this Allocate is for, and serving it would hand its allocation, and mark its
-// bind phase, from the wrong node.
+// checked against what the scheduler leaves on the pod it locks for: bound to
+// this node, assigned here by the scheduler, and still allocating. A pod
+// failing any of these is not the pod this Allocate is for, and serving it
+// would hand its allocation, and mark its bind phase, from the wrong node.
+//
+// The pod is not compared with the time the lock was taken. A pod recreated
+// under the same name, as a StatefulSet replacement is, finds the lock its
+// predecessor left and keeps it without a new timestamp, and the lock time
+// comes from the scheduler's clock while the creation time comes from the API
+// server's. Either way the pod being allocated would be refused.
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
-	pod, lockTime, err := allocatePodByNode(ctx, node)
+	pod, err := GetAllocatePodByNode(ctx, node)
 	if err != nil {
 		return nil, err
 	}
 	if pod == nil {
 		return nil, fmt.Errorf("no node lock naming a pending pod on node %s", node)
 	}
-	if err := checkPendingPod(pod, node, lockTime); err != nil {
+	if err := checkPendingPod(pod, node); err != nil {
 		return nil, err
 	}
 	return pod, nil
@@ -108,7 +113,7 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 
 // checkPendingPod rejects a pod the node lock names that cannot be the pod
 // the scheduler locked the node for.
-func checkPendingPod(pod *corev1.Pod, node string, lockTime time.Time) error {
+func checkPendingPod(pod *corev1.Pod, node string) error {
 	if pod.Spec.NodeName != node {
 		return fmt.Errorf("node lock on %s names pod %s/%s, which is bound to node %q",
 			node, pod.Namespace, pod.Name, pod.Spec.NodeName)
@@ -121,44 +126,26 @@ func checkPendingPod(pod *corev1.Pod, node string, lockTime time.Time) error {
 		return fmt.Errorf("node lock on %s names pod %s/%s, whose bind phase is %q, not %q",
 			node, pod.Namespace, pod.Name, phase, DeviceBindAllocating)
 	}
-	// The same check nodelock applies before handing an expired lock to
-	// another pod: a pod created after the lock reuses the name of the pod the
-	// lock was taken for, as a StatefulSet replacement does.
-	if pod.CreationTimestamp.After(lockTime) {
-		return fmt.Errorf("node lock on %s was taken at %s, before pod %s/%s was created at %s",
-			node, lockTime.Format(time.RFC3339Nano), pod.Namespace, pod.Name, pod.CreationTimestamp.Format(time.RFC3339))
-	}
 	return nil
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
-	pod, _, err := allocatePodByNode(ctx, nodeName)
-	return pod, err
-}
-
-// allocatePodByNode returns the pod the node lock names and the time the lock
-// was taken.
-func allocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, time.Time, error) {
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
 	if value, ok := node.Annotations[nodelock.NodeLockKey]; ok {
 		klog.V(2).Infof("node annotation key is %s, value is %s ", nodelock.NodeLockKey, value)
-		lockTime, ns, name, err := nodelock.ParseNodeLock(value)
+		_, ns, name, err := nodelock.ParseNodeLock(value)
 		if err != nil {
-			return nil, time.Time{}, err
+			return nil, err
 		}
 		if ns == "" || name == "" {
-			return nil, time.Time{}, nil
+			return nil, nil
 		}
-		pod, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return nil, time.Time{}, err
-		}
-		return pod, lockTime, nil
+		return client.GetClient().CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 	}
-	return nil, time.Time{}, nil
+	return nil, nil
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
