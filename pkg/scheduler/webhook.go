@@ -221,8 +221,9 @@ func judgeSchedulerOwnedUpdate(ctx context.Context, req admission.Request, oldPo
 // annotationGuard judges only the scheduler-owned annotations, for the pods the
 // admission webhook above is not called for. A pod opts out of that webhook
 // with the hami.io/webhook: ignore label, and so does a namespace, and both are
-// in reach of whoever creates the pod. Opting out of HAMi's mutation is what
-// the label is for. Opting out of the guard on these annotations is not: the
+// in reach of whoever creates the pod; pods in namespaces and with labels the
+// configured selectors leave out skip it too. Opting out of HAMi's mutation is
+// what those are for. Opting out of the guard on these annotations is not: the
 // device plugin hands out devices from whatever they name, and the scheduler
 // rebuilds its accounting from them.
 type annotationGuard struct {

@@ -22,9 +22,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* A namespace carrying this label skips this webhook at the API
-             server, before any HAMi code runs. The annotations guard below
-             still covers its pods. */}}
+      {{- /* A namespace failing any requirement here skips this webhook at
+             the API server, before any HAMi code runs. The annotations guard
+             below still covers its pods. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -45,9 +45,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* Same at the object level: a pod carrying this label skips this
-             webhook regardless of its namespace, and the annotations guard
-             below covers it. */}}
+      {{- /* Same at the object level: a pod failing any requirement here
+             skips this webhook regardless of its namespace, and the
+             annotations guard below covers it. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -75,60 +75,91 @@ webhooks:
         scope: '*'
     sideEffects: None
     timeoutSeconds: 10
-  {{- /* The hami.io/webhook: ignore label keeps a pod, or every pod in a
-         namespace, away from the webhook above, and whoever creates the pod
-         can set it. The device plugin hands out devices from the
-         scheduler-owned annotations and the scheduler rebuilds its accounting
-         from them, so on those pods they are still kept to HAMi's own writers.
-         These entries mutate nothing and judge only those annotations. HAMi's
-         own pods carry the label, so they fail open: with the scheduler down,
-         Fail would keep the scheduler's own pod from being created. */}}
+  {{- /* Every requirement in the selectors above lets a pod skip the
+         webhook: the hami.io/webhook: ignore label, which whoever creates the
+         pod can set on it or on its namespace, and the namespaces and labels
+         an administrator leaves out. The device plugin hands out devices from
+         the scheduler-owned annotations and the scheduler rebuilds its
+         accounting from them, so on every pod they are kept to HAMi's own
+         writers. One entry per requirement, with the requirement negated,
+         reaches exactly the pods that fail it, so together the entries cover
+         every pod the webhook above skips. They mutate nothing and judge only
+         those annotations. HAMi's own pods carry the label, so they fail
+         open: with the scheduler down, Fail would keep the scheduler's own pod
+         from being created. */}}
+  {{- $webhook := .Values.scheduler.admissionWebhook }}
+  {{- $skipIgnored := dict "key" "hami.io/webhook" "operator" "NotIn" "values" (list "ignore") }}
+  {{- $podRequirements := list $skipIgnored }}
+  {{- range $key, $value := $webhook.objectSelector.matchLabels }}
+  {{- $podRequirements = append $podRequirements (dict "key" $key "operator" "In" "values" (list (toString $value))) }}
+  {{- end }}
+  {{- range $webhook.objectSelector.matchExpressions }}
+  {{- $podRequirements = append $podRequirements . }}
+  {{- end }}
+  {{- $namespaceRequirements := list }}
+  {{- if or (not (hasKey $webhook "manageNamespaceSelector")) $webhook.manageNamespaceSelector }}
+  {{- $namespaceRequirements = append $namespaceRequirements $skipIgnored }}
+  {{- if $webhook.whitelistNamespaces }}
+  {{- $namespaceRequirements = append $namespaceRequirements (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" $webhook.whitelistNamespaces) }}
+  {{- end }}
+  {{- range $key, $value := $webhook.namespaceSelector.matchLabels }}
+  {{- $namespaceRequirements = append $namespaceRequirements (dict "key" $key "operator" "In" "values" (list (toString $value))) }}
+  {{- end }}
+  {{- range $webhook.namespaceSelector.matchExpressions }}
+  {{- $namespaceRequirements = append $namespaceRequirements . }}
+  {{- end }}
+  {{- end }}
+  {{- range $i, $requirement := $podRequirements }}
   - admissionReviewVersions:
     - v1
     clientConfig:
-      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "/annotations") | nindent 6 }}
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" $ "path" "/annotations") | nindent 6 }}
     failurePolicy: Ignore
     matchPolicy: Equivalent
-    name: pods.annotations.vgpu.hami.io
+    name: pods-{{ $i }}.annotations.vgpu.hami.io
     objectSelector:
       matchExpressions:
-      - key: hami.io/webhook
-        operator: In
-        values:
-        - ignore
+      {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
     reinvocationPolicy: Never
     rules:
-      {{- include "hami-vgpu.scheduler.webhook.podRules" . | nindent 6 }}
+      {{- include "hami-vgpu.scheduler.webhook.podRules" $ | nindent 6 }}
     sideEffects: None
     timeoutSeconds: 10
-  {{- if or (not (hasKey .Values.scheduler.admissionWebhook "manageNamespaceSelector")) .Values.scheduler.admissionWebhook.manageNamespaceSelector }}
+  {{- end }}
+  {{- range $i, $requirement := $namespaceRequirements }}
   - admissionReviewVersions:
     - v1
     clientConfig:
-      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "/annotations") | nindent 6 }}
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" $ "path" "/annotations") | nindent 6 }}
     failurePolicy: Ignore
     matchPolicy: Equivalent
-    name: namespaces.annotations.vgpu.hami.io
+    name: namespaces-{{ $i }}.annotations.vgpu.hami.io
     namespaceSelector:
       matchExpressions:
-      - key: hami.io/webhook
-        operator: In
-        values:
-        - ignore
-    {{- /* Pods labeled as well are covered by the entry above. */}}
-    objectSelector:
-      matchExpressions:
-      - key: hami.io/webhook
-        operator: NotIn
-        values:
-        - ignore
+      {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
     reinvocationPolicy: Never
     rules:
-      {{- include "hami-vgpu.scheduler.webhook.podRules" . | nindent 6 }}
+      {{- include "hami-vgpu.scheduler.webhook.podRules" $ | nindent 6 }}
     sideEffects: None
     timeoutSeconds: 10
   {{- end }}
 {{- end }}
+
+{{- /* A label selector requirement matching exactly the objects the given one
+       does not. */}}
+{{- define "hami-vgpu.scheduler.webhook.negatedRequirement" -}}
+{{- $negated := dict "In" "NotIn" "NotIn" "In" "Exists" "DoesNotExist" "DoesNotExist" "Exists" -}}
+{{- $operator := get $negated (toString .operator) -}}
+{{- if not $operator -}}
+{{- fail (printf "unsupported label selector operator %q" (toString .operator)) -}}
+{{- end -}}
+- key: {{ .key | quote }}
+  operator: {{ $operator }}
+  {{- if or (eq $operator "In") (eq $operator "NotIn") }}
+  values:
+    {{- toYaml .values | nindent 4 }}
+  {{- end }}
+{{- end -}}
 
 {{- define "hami-vgpu.scheduler.webhook.clientConfig" -}}
 {{- $root := .root -}}
