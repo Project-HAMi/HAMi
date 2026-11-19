@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -1944,6 +1945,96 @@ func Test_MutateAdmissionMixedDeliveryCrossList(t *testing.T) {
 			_, err := dev.MutateAdmission(res(tc.limits, tc.requests), &corev1.Pod{})
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("wantErr=%v, got error: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// mthreadsMemFactorOne reports MemoryFactor 1 so a test quota is stored in MiB.
+// The production device factor is 512, which would scale 8191 far above one card.
+type mthreadsMemFactorOne struct{ *MthreadsDevices }
+
+func (m mthreadsMemFactorOne) GetResourceNames() device.ResourceNames {
+	names := m.MthreadsDevices.GetResourceNames()
+	names.MemoryFactor = 1
+	return names
+}
+
+// TestFit_ResourceQuotaWholeCardRequest denies a whole-card request whose resolved memory exceeds the namespace quota.
+func TestFit_ResourceQuotaWholeCardRequest(t *testing.T) {
+	config := MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	}
+	dev := InitMthreadsDevice(config)
+	oldDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevices })
+	device.DevicesMap = map[string]device.Devices{MthreadsGPUDevice: mthreadsMemFactorOne{dev}}
+	qm := device.NewQuotaManager()
+
+	tests := []struct {
+		name     string
+		memreq   int64
+		memPct   int64
+		quota    int64
+		setQuota bool
+		wantFit  bool
+		wantDeny bool
+	}{
+		{name: "whole-card quota 8191", memreq: 0, memPct: 100, quota: 8191, setQuota: true, wantFit: false, wantDeny: true},
+		{name: "whole-card quota 8192", memreq: 0, memPct: 100, quota: 8192, setQuota: true, wantFit: true},
+		{name: "whole-card no quota", memreq: 0, memPct: 100, setQuota: false, wantFit: true},
+		{name: "explicit memory quota 4096", memreq: 4096, memPct: 0, quota: 4096, setQuota: true, wantFit: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := t.Name()
+			var quota *corev1.ResourceQuota
+			if tt.setQuota {
+				quota = &corev1.ResourceQuota{
+					ObjectMeta: metav1.ObjectMeta{Name: "mthreads-quota", Namespace: ns},
+					Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+						corev1.ResourceName("limits." + MthreadsResourceMemory): *resource.NewQuantity(tt.quota, resource.DecimalSI),
+					}},
+				}
+				qm.AddQuota(quota)
+			}
+			// The quota cache is process-wide. Drop this case before the next one runs.
+			t.Cleanup(func() {
+				if quota != nil {
+					qm.DelQuota(quota)
+				}
+				delete(qm.Quotas, ns)
+			})
+
+			devices := []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  8192,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      MthreadsGPUDevice,
+				Health:    true,
+			}}
+			request := device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MthreadsGPUDevice,
+				Memreq:           tt.memreq,
+				MemPercentagereq: tt.memPct,
+				Coresreq:         0,
+			}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "quota-pod", Namespace: ns}}
+			fit, _, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+			if fit != tt.wantFit {
+				t.Errorf("Fit: got %v, want %v, reason %q", fit, tt.wantFit, reason)
+			}
+			if tt.wantDeny && !strings.Contains(reason, common.ResourceQuotaNotFit) {
+				t.Errorf("reason %q does not contain %s", reason, common.ResourceQuotaNotFit)
 			}
 		})
 	}
