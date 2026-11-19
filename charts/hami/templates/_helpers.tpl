@@ -130,7 +130,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   Per-component image tag takes precedence over global.imageTag (trimmed non-empty imageRoot.tag wins).
 */}}
 {{- define "hami.imageTagOrGlobal" -}}
-{{- .imageRoot.tag | default (and .global .global.imageTag) | default "" | toString | trim -}}
+{{- $tag := .imageRoot.tag | default "" | toString | trim -}}
+{{- $tag | default (and .global .global.imageTag) | default "" | toString | trim -}}
 {{- end -}}
 
 {{- define "hami.image" -}}
@@ -459,6 +460,18 @@ is not hcu. Any other explicit value is kept.
 {{- $numeric := has (kindOf $count) (list "int" "int64" "float64") -}}
 {{- if not (and $numeric (gt $integer 0) (eq (float64 $count) (float64 $integer))) -}}
   {{- fail "devices.ascend.deviceSplitCount must be a positive integer" -}}
+{{- end -}}
+{{- $permits := .Values.devicePlugin.hostPIDBroker.driverAdmissionPermits -}}
+{{- $permitsInteger := int64 $permits -}}
+{{- if or (ne (toString $permitsInteger) (toString $permits))
+  (not (or (eq $permitsInteger 0) (and (ge $permitsInteger 2) (le $permitsInteger 64)))) -}}
+  {{- fail "devicePlugin.hostPIDBroker.driverAdmissionPermits must be 0 or an integer from 2 through 64" -}}
+{{- end -}}
+{{- $maxHold := .Values.devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds -}}
+{{- $maxHoldInteger := int64 $maxHold -}}
+{{- if or (ne (toString $maxHoldInteger) (toString $maxHold))
+  (lt $maxHoldInteger 1) (gt $maxHoldInteger 3600) -}}
+  {{- fail "devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600" -}}
 {{- end -}}
 {{- $_ := include "hami-vgpu.hygon.prefix" . -}}
 {{- end -}}

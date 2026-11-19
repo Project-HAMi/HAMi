@@ -113,6 +113,10 @@ type Scheduler struct {
 	// until the informer shows a newer state. Guarded by allocLock.
 	refitWrites map[k8stypes.UID]refitWrite
 
+	// filterWrites keeps the allocation the last Filter on this replica wrote
+	// to each pod, until the informer shows it. Guarded by allocLock.
+	filterWrites map[k8stypes.UID]filterWrite
+
 	allocationMetrics     *metrics.SchedulerOutcomeMetrics
 	allocationMetricsOnce sync.Once
 }
@@ -210,9 +214,13 @@ func deviceTypeForRequests(requests device.PodDeviceRequests) string {
 
 // deviceTypeForPodDevices returns the single allocated device type, or a
 // bounded fallback when the allocation contains zero or multiple types.
+// Types with only empty rows are Filter padding and are skipped.
 func deviceTypeForPodDevices(devices device.PodDevices) string {
 	types := make(map[string]struct{})
-	for deviceType := range devices {
+	for deviceType, rows := range devices {
+		if !slices.ContainsFunc(rows, func(row device.ContainerDevices) bool { return len(row) > 0 }) {
+			continue
+		}
 		types[deviceType] = struct{}{}
 	}
 	if len(types) == 0 {
@@ -363,6 +371,9 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	s.podManager.UpdatePod(newPod)
+	if s.syncNodeLocked(newPod, pi, assignedNodeName) {
+		return
+	}
 
 	rawDevices, current := s.syncAllocationLocked(oldObj, newPod, pi)
 	if !current {
@@ -370,6 +381,78 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	s.releaseCompletedInitContainersLocked(newPod, pi, rawDevices)
+}
+
+// filterWriteSettle is how long the replica that ran a Filter skips updates
+// that do not show its patch yet.
+const filterWriteSettle = time.Minute
+
+// filterWrite is what a Filter on this replica wrote to a pod: the node, the
+// time and the devices, and when.
+type filterWrite struct {
+	annotations map[string]string
+	at          time.Time
+}
+
+// shownBy reports whether pod carries the write.
+func (w filterWrite) shownBy(pod *corev1.Pod) bool {
+	for key, value := range w.annotations {
+		if pod.Annotations[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// recordFilterWrite remembers what a Filter wrote until the informer shows
+// it. See syncNodeLocked. Callers hold allocLock.
+func (s *Scheduler) recordFilterWrite(uid k8stypes.UID, patch map[string]string) {
+	written := map[string]string{
+		util.AssignedNodeAnnotations: patch[util.AssignedNodeAnnotations],
+		util.AssignedTimeAnnotations: patch[util.AssignedTimeAnnotations],
+	}
+	for _, key := range device.SupportDevices {
+		if value, ok := patch[key]; ok {
+			written[key] = value
+		}
+	}
+	if s.filterWrites == nil {
+		s.filterWrites = make(map[k8stypes.UID]filterWrite)
+	}
+	s.filterWrites[uid] = filterWrite{annotations: written, at: time.Now()}
+}
+
+// syncNodeLocked follows a pod that a Filter moved to another node after a
+// failed bind (#3435). A replica that did not run the Filter, like a standby,
+// drops the old allocation and adds the pod again from its annotations, as a
+// restart does. The replica that ran the Filter has already updated its
+// cache, so it skips older updates until its patch shows up, for up to a
+// minute.
+//
+// It reports whether the update is fully handled. Callers hold allocLock.
+func (s *Scheduler) syncNodeLocked(pod *corev1.Pod, pi *device.PodInfo, nodeName string) bool {
+	moved := pi.NodeID != nodeName
+	if write, pending := s.filterWrites[pod.UID]; pending {
+		shown := write.shownBy(pod)
+		if !shown && time.Since(write.at) < filterWriteSettle {
+			return true
+		}
+		delete(s.filterWrites, pod.UID)
+		// A minute without the patch means another replica wrote the pod
+		// since, so follow the pod.
+		moved = moved || !shown
+	}
+	if !moved {
+		return false
+	}
+	if old, ok := s.podManager.TakeAndDeletePod(pod); ok {
+		s.quotaManager.RmUsage(pod, old.Devices)
+	}
+	delete(s.refitWrites, pod.UID)
+	klog.InfoS("Pod allocation moved, adding the pod again from annotations",
+		"pod", klog.KObj(pod), "oldNode", pi.NodeID, "newNode", nodeName)
+	s.onAddPodLocked(pod, nodeName)
+	return true
 }
 
 // allocationRewritten reports whether an update changed a pod's device
@@ -455,10 +538,28 @@ func (s *Scheduler) observeAllocateResult(oldPod, newPod *corev1.Pod) {
 	}
 	switch newPod.Annotations[util.DeviceBindPhase] {
 	case util.DeviceBindSuccess:
-		s.GetAllocationMetrics().ObserveAllocation("allocate", s.podAllocationType(newPod))
+		deviceType := s.podAllocationType(newPod)
+		s.GetAllocationMetrics().ObserveAllocation("allocate", deviceType)
+		if d, ok := allocationDuration(newPod, time.Now()); ok {
+			s.GetAllocationMetrics().ObserveAllocationDuration(deviceType, d)
+		}
 	case util.DeviceBindFailed:
 		s.GetAllocationMetrics().ObserveAllocationFailure("allocate", s.podAllocationType(newPod), metrics.FailureReasonDevicePlugin)
 	}
+}
+
+// allocationDuration returns the seconds from the pod's bind-time to now.
+// It reports false when bind-time is missing, malformed, or in the future.
+func allocationDuration(pod *corev1.Pod, now time.Time) (float64, bool) {
+	bindTime, err := strconv.ParseInt(pod.Annotations[util.BindTimeAnnotations], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	d := now.Sub(time.Unix(bindTime, 0)).Seconds()
+	if d < 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 // releaseCompletedInitContainersLocked releases init usage once with allocLock held.
@@ -539,6 +640,7 @@ func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 		delete(s.refitWrites, pod.UID)
+		delete(s.filterWrites, pod.UID)
 	}
 }
 
@@ -1609,6 +1711,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 		delete(s.refitWrites, pod.UID)
+		delete(s.filterWrites, pod.UID)
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
 	if err != nil {
@@ -1678,6 +1781,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			}
 			return nil, err
 		}
+		s.recordFilterWrite(pod.UID, annotations)
 	}
 
 	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))

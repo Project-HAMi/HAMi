@@ -1,0 +1,43 @@
+suite: Scheduler NetworkPolicy
+templates:
+  - scheduler/networkpolicy.yaml
+tests:
+  - it: omits the policy by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: allows the default HTTP target port when enabled
+    set:
+      scheduler.networkPolicy.enabled: true
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 9443
+
+  - it: falls back to the HTTP target port when explicitly empty
+    set:
+      scheduler.networkPolicy.enabled: true
+      scheduler.service.httpTargetPort: ""
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 9443
+
+  - it: falls back to the HTTP target port when explicitly null
+    set:
+      scheduler.networkPolicy.enabled: true
+      scheduler.service.httpTargetPort: null
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 9443
+
+  - it: allows a custom HTTP target port
+    set:
+      scheduler.networkPolicy.enabled: true
+      scheduler.service.httpTargetPort: 10443
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 10443

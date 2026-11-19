@@ -35,7 +35,12 @@ updates:
   - package-ecosystem: "gitsubmodule"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
+    # libvgpu is HAMi-core, a Project-HAMi repository, so its fixes are
+    # taken on the next run instead of after the default 3-day cooldown.
+    cooldown:
+      exclude:
+        - "libvgpu"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

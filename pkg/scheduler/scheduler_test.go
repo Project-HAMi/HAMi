@@ -29,6 +29,7 @@ import (
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -2950,6 +2951,69 @@ hami_scheduler_allocation_failures_total{device_type="NVIDIA",failure_reason="de
 
 			require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(test.want),
 				"hami_scheduler_allocations_total", "hami_scheduler_allocation_failures_total"))
+		})
+	}
+}
+
+func Test_allocationDuration(t *testing.T) {
+	now := time.Unix(1716199327, 500_000_000)
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		want        float64
+		wantOK      bool
+	}{
+		{name: "valid bind-time", annotations: map[string]string{util.BindTimeAnnotations: "1716199325"}, want: 2.5, wantOK: true},
+		{name: "missing bind-time"},
+		{name: "malformed bind-time", annotations: map[string]string{util.BindTimeAnnotations: "2024-01-01T00:00:00Z"}},
+		{name: "bind-time in the future", annotations: map[string]string{util.BindTimeAnnotations: "1716199330"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: test.annotations}}
+			got, ok := allocationDuration(pod, now)
+			require.Equal(t, test.wantOK, ok)
+			require.InDelta(t, test.want, got, 1e-9)
+		})
+	}
+}
+
+func Test_onUpdatePod_ObservesAllocationDuration(t *testing.T) {
+	bindTime := fmt.Sprint(time.Now().Add(-15 * time.Second).Unix())
+	tests := []struct {
+		name        string
+		newPhase    string
+		annotations map[string]string
+		want        int
+	}{
+		{name: "success with bind-time", newPhase: util.DeviceBindSuccess, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 1},
+		{name: "success without bind-time", newPhase: util.DeviceBindSuccess, want: 0},
+		{name: "failed with bind-time", newPhase: util.DeviceBindFailed, annotations: map[string]string{util.BindTimeAnnotations: bindTime}, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewScheduler()
+			s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+			oldPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				UID: "uid-duration", Name: "pod-duration", Namespace: "allocate-metrics",
+				Annotations: map[string]string{util.DeviceBindPhase: util.DeviceBindAllocating},
+			}}
+			s.podManager.AddPod(oldPod, "node1", device.PodDevices{
+				nvidia.NvidiaGPUDevice:         device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500}}},
+				"NVIDIA-NVIDIA A100-SXM4-40GB": device.PodSingleDevice{{}},
+			})
+			newPod := oldPod.DeepCopy()
+			newPod.Annotations = map[string]string{util.DeviceBindPhase: test.newPhase}
+			maps.Copy(newPod.Annotations, test.annotations)
+
+			s.onUpdatePod(oldPod, newPod)
+
+			require.Equal(t, test.want, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_duration_seconds"))
+			if test.want > 0 {
+				out, err := promtestutil.CollectAndFormat(s.GetAllocationMetrics(), expfmt.TypeTextPlain, "hami_scheduler_allocation_duration_seconds")
+				require.NoError(t, err)
+				require.Contains(t, string(out), `hami_scheduler_allocation_duration_seconds_count{device_type="NVIDIA"} 1`)
+			}
 		})
 	}
 }

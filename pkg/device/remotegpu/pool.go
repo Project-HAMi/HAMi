@@ -169,6 +169,7 @@ type pool struct {
 	defaultPort int
 
 	fetchedAt    time.Time
+	podsListed   bool // an actual successful Pod list established the reservation baseline
 	forcedAt     time.Time
 	refreshing   bool                  // a refresh is already fetching; do not start a second one
 	refreshed    chan struct{}         // closed when the in-flight refresh installs its result
@@ -302,6 +303,7 @@ func (p *pool) refresh(ctx context.Context) {
 	p.refreshed = done
 	previousInUse := p.inUse
 	previousBusy := p.busy
+	previousDevices, previousEndpoints, podsListed := p.devices, p.endpoints, p.podsListed
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -369,6 +371,39 @@ func (p *pool) refresh(ctx context.Context) {
 	} else {
 		inUse, listed = reservations(ctx, previousInUse)
 	}
+	if !listed {
+		// Only unchanged servers covered by a successful Pod list can keep
+		// serving. inUse retains that list's owners and held covers allocations
+		// made by this scheduler since then; failed lists never expire holds.
+		// This relies on the same single allocating scheduler as hold(): another
+		// writer's unlisted bindings cannot be inferred from idle metrics.
+		previous := map[string][]*device.DeviceInfo{}
+		current := map[string][]*device.DeviceInfo{}
+		uncertain := map[string]bool{}
+		for _, d := range previousDevices {
+			previous[serverOf(d.ID)] = append(previous[serverOf(d.ID)], d)
+		}
+		for _, d := range devices {
+			current[serverOf(d.ID)] = append(current[serverOf(d.ID)], d)
+		}
+		// A previously busy server may have an unlisted bound owner even if
+		// its metrics now say idle. Require a Pod list before reopening it.
+		for id := range previousBusy {
+			uncertain[serverOf(id)] = true
+		}
+		for id := range previousInUse {
+			uncertain[serverOf(id)] = true
+		}
+		for server, cards := range current {
+			uncertain[server] = uncertain[server] || !podsListed ||
+				previousEndpoints[server] != endpoints[server] || !sameFleet(previous[server], cards)
+		}
+		for _, d := range devices {
+			if uncertain[serverOf(d.ID)] {
+				d.Health = false
+			}
+		}
+	}
 	// Ask every server concurrently: one unreachable server pays its own
 	// metricsTimeout instead of adding it to everyone else's.
 	busy := askServers(ctx, endpoints, previousBusy, listedServers)
@@ -389,6 +424,10 @@ func (p *pool) refresh(ctx context.Context) {
 	p.serverLabels = serverLabels
 	p.devices = devices
 	p.inUse = inUse
+	// An empty Node list skips reservations(); it is not a successful Pod list.
+	if listed && len(nodes) > 0 {
+		p.podsListed = true
+	}
 	p.busy = busy
 	p.fetchedAt = time.Now()
 	// A hold is only needed until the pod list catches up with it. Drop the
@@ -582,16 +621,16 @@ func (p *pool) revision() uint64 {
 	return p.fleetRev
 }
 
-// deviceIDs is the set of cards the pool currently carries, so a caller
-// holding a pre-refresh view can tell which of its cards survived.
-func (p *pool) deviceIDs() map[string]struct{} {
+// deviceHealth snapshots the current cards and their health, so callers with
+// older usage can check both server identity and allocation eligibility.
+func (p *pool) deviceHealth() map[string]bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ids := make(map[string]struct{}, len(p.devices))
+	health := make(map[string]bool, len(p.devices))
 	for _, d := range p.devices {
-		ids[d.ID] = struct{}{}
+		health[d.ID] = d.Health
 	}
-	return ids
+	return health
 }
 
 // refreshNow re-reads the fleet without waiting for poolTTL to lapse, so a
@@ -659,6 +698,31 @@ func (p *pool) reserved(id string) bool {
 	}
 	_, ok := p.busy[id]
 	return ok
+}
+
+// allocationSnapshot reads health and server reservations under one lock. A
+// refresh can clear a busy report while marking its cards unhealthy; mixing
+// those snapshots would offer a server whose ownership is still unknown.
+// Reservations include cards absent from registration or marked unhealthy,
+// because a client still owns the entire server in either case.
+func (p *pool) allocationSnapshot() (map[string]bool, map[string]bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	health := make(map[string]bool, len(p.devices))
+	for _, d := range p.devices {
+		health[d.ID] = d.Health
+	}
+	servers := map[string]bool{}
+	for id := range p.inUse {
+		servers[serverOf(id)] = true
+	}
+	for id := range p.held {
+		servers[serverOf(id)] = true
+	}
+	for id := range p.busy {
+		servers[serverOf(id)] = true
+	}
+	return health, servers
 }
 
 // askServers collects the cards each lupine server reports a client on. A

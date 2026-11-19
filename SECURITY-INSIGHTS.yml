@@ -1,6 +1,6 @@
 header:
   schema-version: 2.0.0
-  last-updated: '2026-10-25'
+  last-updated: '2026-11-16'
   last-reviewed: '2026-07-22'
   url: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY-INSIGHTS.yml
   comment: |
@@ -44,6 +44,29 @@ project:
       url: https://github.com/Project-HAMi/volcano-vgpu-device-plugin
       comment: |
         vGPU device plugin variant for the Volcano scheduler.
+    - name: mock-device-plugin
+      url: https://github.com/Project-HAMi/mock-device-plugin
+      comment: |
+        Registers mock devices on nodes; its image is deployed by the
+        HAMi Helm chart.
+    - name: amd-device-plugin
+      url: https://github.com/Project-HAMi/amd-device-plugin
+      comment: |
+        Device plugin for AMD GPUs with HAMi vGPU support.
+    - name: amd-hami-core
+      url: https://github.com/Project-HAMi/amd-hami-core
+      comment: |
+        In-container memory limiter for AMD GPU pods (libamvgpu.so),
+        mounted by amd-device-plugin.
+    - name: hami-vnpu-core
+      url: https://github.com/Project-HAMi/hami-vnpu-core
+      comment: |
+        In-container resource controller for Ascend NPUs (libvnpu.so).
+    - name: HAMi-DRA
+      url: https://github.com/Project-HAMi/HAMi-DRA
+      comment: |
+        Mutating webhook that converts device resource requests to
+        Dynamic Resource Allocation ResourceClaims.
     - name: website
       url: https://github.com/Project-HAMi/website
       comment: |
@@ -92,7 +115,7 @@ repository:
     contributing-guide: https://github.com/Project-HAMi/HAMi/blob/master/CONTRIBUTING.md
     dependency-management-policy: https://github.com/Project-HAMi/HAMi/blob/master/DEPENDENCY.md
     security-policy: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY.md
-    governance: https://github.com/Project-HAMi/community/blob/main/community-membership.md
+    governance: https://github.com/Project-HAMi/community/blob/main/governance.md
   license:
     url: https://github.com/Project-HAMi/HAMi/blob/master/LICENSE
     expression: Apache-2.0
@@ -116,8 +139,8 @@ repository:
           release: false
         results: {}
         comment: |
-          Automated dependency update PRs for Go modules, Dockerfiles and
-          GitHub Actions.
+          Automated dependency update PRs for Go modules, Dockerfiles,
+          GitHub Actions and the HAMi-core submodule.
       - name: CodeQL
         type: SAST
         version: latest

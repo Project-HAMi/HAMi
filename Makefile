@@ -3,6 +3,18 @@ include version.mk Makefile.defs
 
 HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
 
+# Go module proxy for the image builds. It follows the host Go setting, so a
+# GOPROXY set with `go env -w` or exported in the shell is passed to the build.
+# In mainland China, where proxy.golang.org is blocked, set a mirror once with
+# `go env -w GOPROXY=https://goproxy.cn,direct`. Without Go on the host nothing
+# is passed, and each Dockerfile keeps its own default.
+ifeq ($(strip $(GOPROXY)),)
+GOPROXY := $(shell go env GOPROXY 2>/dev/null)
+endif
+# Quoted: Go accepts `|` between proxies, which the shell reads as a pipe.
+# $(value) keeps a `$` in an exported value, such as in proxy credentials.
+GOPROXY_BUILD_ARG = $(if $(GOPROXY),--build-arg GOPROXY='$(value GOPROXY)')
+
 ifndef GITHUB_ACTIONS
 	REVISION?=$(shell git rev-parse --short HEAD)
 else
@@ -27,7 +39,7 @@ docker:
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
-	--build-arg GOPROXY=https://goproxy.cn,direct \
+	$(GOPROXY_BUILD_ARG) \
 	. -f=docker/Dockerfile -t ${IMG_NAME}:${IMG_TAG}
 
 dockerwithlib:
@@ -38,15 +50,11 @@ dockerwithlib:
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
-	--build-arg GOPROXY=https://goproxy.cn,direct \
+	$(GOPROXY_BUILD_ARG) \
 	. -f=docker/Dockerfile.withlib -t ${IMG_NAME}:${IMG_TAG}
 
 tidy:
 	$(GO) mod tidy
-
-proto:
-	$(GO) install github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
-	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
 
 build: $(CMDS) $(DEVICES)
 
@@ -60,7 +68,7 @@ clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build docker clean test $(CMDS)
+.PHONY: all build docker dockerwithlib tidy clean test lint $(CMDS) $(DEVICES)
 
 test:
 	mkdir -p ./_output/coverage/

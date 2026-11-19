@@ -44,7 +44,7 @@ spec:
               kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: TCP
-          port: {{ .Values.scheduler.service.httpTargetPort | default 443 }}
+          port: {{ .Values.scheduler.service.httpTargetPort | default 9443 }}
     - ports:
         - protocol: TCP
           port: {{ last (splitList ":" .Values.scheduler.metricsBindAddress) | int }}
