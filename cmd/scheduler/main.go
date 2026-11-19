@@ -171,6 +171,7 @@ func start() error {
 
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
+	go sher.WatchAllocateTimeouts()
 	err = sher.Start()
 	if err != nil {
 		return err
