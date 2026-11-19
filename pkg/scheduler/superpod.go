@@ -718,7 +718,7 @@ func resolveSuperpodRackBoost() float32 {
 //     largest per-rack remaining slots across all candidate superpods,
 //     derived from ctx.RackSlotCounts on the fly. The cross-superpod
 //     denominator keeps the boost comparable between superpods. Racks whose
-//     remaining slots are at most the single-pod request get no bonus.
+//     remaining slots are less than the single-pod request get no bonus.
 //
 // Nodes without a rackid label keep their base score.
 func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID string, baseScore float32, policy string) float32 {
