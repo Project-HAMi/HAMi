@@ -383,6 +383,18 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			memreq = dev.Totalmem * request.MemPercentagereq / 100
 		}
 
+		quotaCores := request.Coresreq
+		if appClass == Online {
+			quotaCores = 0
+		}
+		if !device.FitPodQuota(pod, allocated, MetaxSGPUDevice, nil, device.ContainerDevice{
+			UUID: dev.ID, Type: MetaxSGPUDevice, Usedmem: memreq, Usedcores: quotaCores,
+		}) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "memreq", memreq, "coresreq", quotaCores)
+			continue
+		}
+
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
@@ -481,6 +493,13 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		ctrDevice.CustomInfo["Pod.Annotations"] = pod.Annotations
 
 		containerDevices = append(containerDevices, ctrDevice)
+	}
+
+	// Each candidate fits the quota on its own; the selected set must fit together.
+	if !device.FitPodQuota(pod, allocated, MetaxSGPUDevice, containerDevices) {
+		reason[common.ResourceQuotaNotFit] += len(containerDevices)
+		klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "devices", len(containerDevices))
+		return false, map[string]device.ContainerDevices{}, common.GenReason(reason, len(devices))
 	}
 
 	klog.Infof("pod[%v] devices fit success, fit devices[%v]", klog.KObj(pod), containerDevices)
