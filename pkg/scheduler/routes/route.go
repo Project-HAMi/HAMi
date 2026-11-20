@@ -156,6 +156,52 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	}
 }
 
+// PreemptRoute serves the preempt verb of the scheduler extender, which
+// kube-scheduler calls during preemption once preemptVerb is set in the extender configuration.
+func PreemptRoute(s *scheduler.Scheduler) httprouter.Handle {
+	klog.Infoln("Initializing Preempt Route")
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.V(5).Infoln("Entering Preempt Route handler")
+		if !checkBody(w, r) {
+			return
+		}
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		body := io.LimitReader(r.Body, maxRequestSize)
+		var extenderPreemptionArgs extenderv1.ExtenderPreemptionArgs
+		if err := json.NewDecoder(body).Decode(&extenderPreemptionArgs); err != nil {
+			klog.ErrorS(err, "Failed to decode extender preemption arguments")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if extenderPreemptionArgs.Pod == nil {
+			err := fmt.Errorf("extender preemption args missing pod")
+			klog.ErrorS(err, "Rejecting preempt request with no pod")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !s.WaitForCacheSync(r.Context()) {
+			// Poll may return false when context is cancelled
+			err := fmt.Errorf("context cancelled")
+			klog.ErrorS(err, "Cache not synced, cannot proceed with preemption")
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		extenderPreemptionResult, err := s.Preempt(extenderPreemptionArgs)
+		if err != nil {
+			klog.ErrorS(err, "Preempt error for pod", "pod", extenderPreemptionArgs.Pod.Name)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resultBody, err := json.Marshal(extenderPreemptionResult)
+		if err != nil {
+			klog.ErrorS(err, "Failed to marshal extender preemption result", "result", extenderPreemptionResult)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeResponse(w, http.StatusOK, resultBody)
+	}
+}
+
 func WebHookRoute() httprouter.Handle {
 	h, err := scheduler.NewWebHook()
 	if err != nil {

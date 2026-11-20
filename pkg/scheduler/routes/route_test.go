@@ -343,3 +343,104 @@ func TestBind_WriteError(t *testing.T) {
 		t.Errorf("Expected 'Failed to write response' in log output, but got: %s", buf.String())
 	}
 }
+
+func TestMaxRequestSizePreempt(t *testing.T) {
+	hugePayload := strings.Repeat(" ", maxRequestSize+100)
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader(hugePayload))
+	w := httptest.NewRecorder()
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an oversized body, got %d", w.Code)
+	}
+	if respBody := w.Body.String(); !strings.Contains(respBody, "EOF") {
+		t.Errorf("LimitReader failed in PreemptRoute. Response: %s", respBody)
+	}
+}
+
+func TestPreemptRoute_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/preempt", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+
+	// This should not panic
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for nil body, got %d", w.Code)
+	}
+}
+
+func TestPreemptRoute_DecodeError(t *testing.T) {
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an undecodable body, got %d", w.Code)
+	}
+}
+
+func TestPreemptRoute_NilPod(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "pod field omitted", body: `{"NodeNameToMetaVictims":{"node1":{"Pods":[]}}}`},
+		{name: "pod field explicitly null", body: `{"Pod":null,"NodeNameToMetaVictims":{"node1":{"Pods":[]}}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/preempt", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			s := &scheduler.Scheduler{}
+			handler := PreemptRoute(s)
+
+			// Must not panic when Pod is missing/null.
+			handler(w, req, nil)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for a request with no pod, got %d", w.Code)
+			}
+			if respBody := w.Body.String(); !strings.Contains(respBody, "missing pod") {
+				t.Errorf("expected a missing-pod error in the response, got %q", respBody)
+			}
+		})
+	}
+}
+
+func TestPreemptRoute_CacheNotSynced(t *testing.T) {
+	args := extenderv1.ExtenderPreemptionArgs{Pod: &corev1.Pod{}}
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so WaitForCacheSync fails fast instead of polling forever
+
+	req := httptest.NewRequest("POST", "/preempt", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{} // zero value: synced defaults to false
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 while the cache is not synced, got %d", w.Code)
+	}
+	if respBody := w.Body.String(); !strings.Contains(respBody, "context cancelled") {
+		t.Errorf("expected 'context cancelled' error, got %q", respBody)
+	}
+}
