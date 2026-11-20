@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -912,6 +913,10 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 	})
 
 	t.Run("anchored spread subtracts boost for preferred rack", func(t *testing.T) {
+		oldBoost := superpodRackBoost
+		superpodRackBoost = 100
+		t.Cleanup(func() { superpodRackBoost = oldBoost })
+
 		ctx := &superpodContext{
 			TaskAnchored:   true,
 			Superpods:      map[string]struct{}{"sp-1": {}},
@@ -919,7 +924,7 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		}
 		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
 		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicySpread.String())
-		assert.Equal(t, float32(5.0-superpodRackBoost), score)
+		assert.Equal(t, float32(5.0)-math.Nextafter32(float32(5.0), 0), score)
 	})
 
 	t.Run("anchored binpack-first chain keeps the boost", func(t *testing.T) {
@@ -1033,6 +1038,10 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 	})
 
 	t.Run("first pod spread subtracts proportional boost", func(t *testing.T) {
+		oldBoost := superpodRackBoost
+		superpodRackBoost = 100
+		t.Cleanup(func() { superpodRackBoost = oldBoost })
+
 		ctx := &superpodContext{
 			TaskAnchored: false,
 			Superpods:    map[string]struct{}{},
@@ -1043,9 +1052,9 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		}
 		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
 		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicySpread.String())
-		// rack-A has 20 slots, the largest rack, boost = superpodRackBoost * 20/20 (full)
-		expectedBoost := superpodRackBoost
-		assert.Equal(t, float32(5.0-expectedBoost), score)
+		// A spread penalty must leave a positive score, so an idle node at 0
+		// still ranks ahead of this node.
+		assert.Equal(t, float32(5.0)-math.Nextafter32(float32(5.0), 0), score)
 	})
 
 	t.Run("first pod binpack-first chain keeps proportional boost", func(t *testing.T) {
