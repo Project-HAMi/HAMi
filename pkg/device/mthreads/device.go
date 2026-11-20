@@ -549,6 +549,13 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
+		if !device.FitPodQuota(pod, allocated, MthreadsGPUDevice, tmpDevs[MthreadsGPUDevice], device.ContainerDevice{
+			UUID: dev.ID, Type: MthreadsGPUDevice, Usedmem: memreq, Usedcores: k.Coresreq,
+		}) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memreq, "coresreq", k.Coresreq)
+			continue
+		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
