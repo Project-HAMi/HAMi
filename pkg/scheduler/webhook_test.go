@@ -1539,6 +1539,30 @@ func TestInjectSuperpodAffinity(t *testing.T) {
 	})
 }
 
+func TestHandleDoesNotInjectSuperpodAffinityWithoutHAMiResources(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "non-hami-superpod-pod",
+			Namespace: "default",
+			Labels:    map[string]string{util.TaskIDLabel: "task-1"},
+			Annotations: map[string]string{
+				util.NodeSchedulerPolicyAnnotationKey: "superpod",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "container1"}},
+		},
+	}
+
+	resp := admitPod(t, pod)
+	if !resp.Allowed {
+		t.Fatalf("expected non-HAMi pod to be admitted, got denied: %+v", resp.Result)
+	}
+	if len(resp.Patches) != 0 {
+		t.Fatalf("expected no mutations for pod without HAMi resources, got patches: %+v", resp.Patches)
+	}
+}
+
 func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
 	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
 	if !ok {

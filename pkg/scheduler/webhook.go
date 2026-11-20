@@ -165,7 +165,9 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		return admission.Denied(err.Error())
 	}
 
-	injectSuperpodAffinity(pod)
+	if hasResource {
+		injectSuperpodAffinity(pod)
+	}
 
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
