@@ -158,6 +158,7 @@ Values are listed in the same order as in [values.yaml](values.yaml).
 | devicePlugin.passDeviceSpecsEnabled | bool | `true` | Pass device specifications to kubelet in Allocate responses. Ignored when `deviceListStrategy` contains only CDI strategies. Null leaves the plugin default unchanged (disabled). |
 | devicePlugin.deviceListStrategy | string | `"envvar"` | Comma-separated device list strategies passed to the container runtime: `envvar`, `volume-mounts`, `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires kubelet/CRI support for CDI devices. |
 | devicePlugin.mpsV3 | object | `{"binary":"nvidia-cuda-mps-control","enabled":false,"root":"/var/run/hami/mps-v3"}` | Connection to a host-managed MPS v3 daemon. Select operatingmode: mps-v3 in nodeConfiguration. Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver branch r620, and cgroup v2. |
+| devicePlugin.mpsV3.enabled | bool | `false` | Enable device-plugin integration with a host-managed MPS v3 daemon. |
 | devicePlugin.mpsV3.root | string | `"/var/run/hami/mps-v3"` | Node-local host path mounted at the same path inside the plugin. State survives plugin Pod restarts. |
 | devicePlugin.mpsV3.binary | string | `"nvidia-cuda-mps-control"` | MPS control binary inside the device-plugin container (PATH lookup if bare). |
 | devicePlugin.nvidiaHookPath | string | `nil` | Path for NVIDIA CDI hooks in generated CDI specifications. Null omits `NVIDIA_CDI_HOOK_PATH` and keeps the plugin default `/usr/bin/nvidia-ctk`. |
