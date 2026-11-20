@@ -26,13 +26,17 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestMaxRequestSize(t *testing.T) {
@@ -442,5 +446,61 @@ func TestPreemptRoute_CacheNotSynced(t *testing.T) {
 	}
 	if respBody := w.Body.String(); !strings.Contains(respBody, "context cancelled") {
 		t.Errorf("expected 'context cancelled' error, got %q", respBody)
+	}
+}
+
+// syncedScheduler returns a scheduler that has finished its first registration
+// pass, which is what WaitForCacheSync waits for.
+func syncedScheduler(t *testing.T) *scheduler.Scheduler {
+	t.Helper()
+
+	previousClient := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}})
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	previousLeaderElect := config.LeaderElect
+	config.LeaderElect = false
+	t.Cleanup(func() { config.LeaderElect = previousLeaderElect })
+
+	s := scheduler.NewScheduler()
+	if err := s.Start(); err != nil {
+		t.Fatalf("failed to start the scheduler: %v", err)
+	}
+	// The node above is announced while the informers sync, and that
+	// notification starts the first registration pass.
+	registered := make(chan struct{})
+	go func() {
+		defer close(registered)
+		s.RegisterFromNodeAnnotations()
+	}()
+	t.Cleanup(func() {
+		s.Stop()
+		<-registered
+	})
+	return s
+}
+
+func TestPreemptRoute_ReturnsCandidates(t *testing.T) {
+	s := syncedScheduler(t)
+
+	const request = `{"Pod":{"metadata":{"name":"high","namespace":"default","uid":"preemptor-uid"}},` +
+		`"NodeNameToMetaVictims":{"node-1":{"Pods":[{"UID":"victim-a"}],"NumPDBViolations":1}}}`
+	const want = `{"NodeNameToMetaVictims":{"node-1":{"Pods":[{"UID":"victim-a"}],"NumPDBViolations":1}}}`
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader(request)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != want {
+		t.Errorf("unexpected answer:\n got: %s\nwant: %s", got, want)
+	}
+	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("expected a JSON answer, got Content-Type %q", contentType)
 	}
 }

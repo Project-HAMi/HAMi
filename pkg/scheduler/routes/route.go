@@ -165,7 +165,9 @@ func PreemptRoute(s *scheduler.Scheduler) httprouter.Handle {
 		if !checkBody(w, r) {
 			return
 		}
-		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks.
+		// The limit matches /filter and /bind. HAMi schedules with
+		// nodeCacheCapable: true, where a request carries pod UIDs only.
 		body := io.LimitReader(r.Body, maxRequestSize)
 		var extenderPreemptionArgs extenderv1.ExtenderPreemptionArgs
 		if err := json.NewDecoder(body).Decode(&extenderPreemptionArgs); err != nil {
