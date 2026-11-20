@@ -1041,14 +1041,8 @@ func mpsV3AllocationFor(pod *corev1.Pod, ctr *corev1.Container, devs device.Cont
 	slices.Sort(a.GPUs)
 	a.Server = a.serverName()
 	a.Namespace = mpsV3Name("ns", a.PodUID+"/"+a.Container)
-	// Reserved env vars must not shadow limits read by the privileged OCI hook.
-	for _, e := range ctr.Env {
-		if strings.HasPrefix(e.Name, "NVIDIA_GPU_MEMORY_") || strings.HasPrefix(e.Name, "CUDA_MPS_") {
-			return a, fmt.Errorf("container sets reserved MPS environment variable %s", e.Name)
-		}
-	}
-
-	return a, nil
+	// Also validate Pods that bypassed admission or did not explicitly opt in to MPS.
+	return a, nvidia.ValidateMPSV3Environment(ctr)
 }
 
 func (plugin *NvidiaDevicePlugin) allocateMPSV3(ctx context.Context, pod *corev1.Pod, ctr *corev1.Container, devs device.ContainerDevices, response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) (string, bool, error) {
@@ -1159,8 +1153,28 @@ func (plugin *NvidiaDevicePlugin) startMPSV3() error {
 	}
 	if policy.ComputeMode == nvidia.MPSV3ServerTimeslice {
 		plugin.mpsV3.incompatibleGPUs = incompatibleMPSV3TimesliceGPUs(plugin.migMgr.nvmllib, ids)
+	} else {
+		warnMPSV3NamespaceComputeMode(plugin.migMgr.nvmllib, ids)
 	}
 	return plugin.mpsV3.start(plugin.operationContext(), live)
+}
+
+func warnMPSV3NamespaceComputeMode(library nvml.Interface, ids []string) {
+	for _, id := range ids {
+		gpu, ret := library.DeviceGetHandleByUUID(id)
+		if ret != nvml.SUCCESS {
+			klog.Warningf("MPS namespace-cap: cannot look up GPU %s to verify EXCLUSIVE_PROCESS compute mode: %s", id, nvml.ErrorString(ret))
+			continue
+		}
+		mode, ret := gpu.GetComputeMode()
+		if ret != nvml.SUCCESS {
+			klog.Warningf("MPS namespace-cap: cannot verify EXCLUSIVE_PROCESS compute mode on GPU %s: %s", id, nvml.ErrorString(ret))
+			continue
+		}
+		if mode != nvml.COMPUTEMODE_EXCLUSIVE_PROCESS {
+			klog.Warningf("MPS namespace-cap: GPU %s has compute mode %v; without EXCLUSIVE_PROCESS, direct CUDA contexts can bypass MPS compute limits", id, mode)
+		}
+	}
 }
 
 func incompatibleMPSV3TimesliceGPUs(library nvml.Interface, ids []string) map[string]bool {

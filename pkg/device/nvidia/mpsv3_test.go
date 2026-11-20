@@ -9,11 +9,39 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
+
+func TestMPSV3AdmissionRejectsReservedEnvironment(t *testing.T) {
+	dev := &NvidiaGPUDevices{config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AllocateMode: MpsV3Mode}}}
+	ctr := &corev1.Container{Name: "worker"}
+	for _, name := range []string{"CUDA_MPS_PIPE_DIRECTORY", "NVIDIA_GPU_MEMORY_LIMIT"} {
+		ctr.Env = []corev1.EnvVar{{Name: name}}
+		ctr.Resources.Limits = nil
+		_, err := dev.MutateAdmission(ctr, pod)
+		require.NoError(t, err)
+		ctr.Resources.Limits = corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")}
+		_, err = dev.MutateAdmission(ctr, pod)
+		require.ErrorContains(t, err, name)
+	}
+	pod.Annotations[AllocateMode] = HamiCoreMode
+	_, err := dev.MutateAdmission(ctr, pod)
+	require.NoError(t, err)
+}
+
+func TestMPSV3FitReportsIncompatibleStrategy(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{MPSV3ComputeModeAnnotation: MPSV3ServerTimeslice}}}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: NvidiaGPUDevice, Memreq: 1024}
+	ok, _, reason := (&NvidiaGPUDevices{}).Fit(mpsV3TestGPUs(MPSV3NamespaceCap, "GPU-a"), req, pod, &device.NodeInfo{}, nil)
+	require.False(t, ok)
+	require.Equal(t, "1/1 "+common.CardMPSV3Incompatible, reason)
+}
 
 func TestMPSV3Geometry(t *testing.T) {
 	for _, tc := range []struct {

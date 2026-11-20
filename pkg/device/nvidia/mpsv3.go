@@ -40,6 +40,28 @@ const (
 	MPSV3SMMaxChunksAnnotation = "hami.io/mps-sm-max-chunks"
 )
 
+func requestsMPSV3(annotations map[string]string) bool {
+	if MatchesOperatingMode(annotations[AllocateMode], MpsV3Mode) {
+		return true
+	}
+	for _, key := range []string{MPSV3ComputeModeAnnotation, MPSV3SMCountAnnotation, MPSV3SMShareableAnnotation, MPSV3SMMaxChunksAnnotation} {
+		if _, ok := annotations[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateMPSV3Environment rejects explicit overrides of the MPS and CDI hook settings.
+func ValidateMPSV3Environment(ctr *corev1.Container) error {
+	for _, env := range ctr.Env {
+		if strings.HasPrefix(env.Name, "NVIDIA_GPU_MEMORY_") || strings.HasPrefix(env.Name, "CUDA_MPS_") {
+			return fmt.Errorf("container %q sets reserved MPS environment variable %s", ctr.Name, env.Name)
+		}
+	}
+	return nil
+}
+
 type MPSV3NodeConfig struct {
 	ComputeMode         string `json:"computeMode,omitempty" yaml:"computeMode,omitempty"`
 	Timeslice           string `json:"timeslice,omitempty" yaml:"timeslice,omitempty"`

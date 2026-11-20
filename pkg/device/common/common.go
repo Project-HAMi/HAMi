@@ -51,6 +51,7 @@ const (
 	ExclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
 	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"
+	CardMPSV3Incompatible             = "CardMPSV3Incompatible"
 	NodeInsufficientDevice            = "NodeInsufficientDevice"
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"

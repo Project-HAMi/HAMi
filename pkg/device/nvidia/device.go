@@ -461,6 +461,12 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		hasResource = true
 	}
 
+	if hasResource && requestsMPSV3(p.Annotations) {
+		if err := ValidateMPSV3Environment(ctr); err != nil {
+			return false, err
+		}
+	}
+
 	if hasResource {
 		// Set runtime class name if it is not set by user and the runtime class name is configured
 		if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
@@ -1140,7 +1146,7 @@ func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.Co
 		}
 		coresreq, mpsFits := mpsV3Fits(pod, dev, originReq, selected, k.Coresreq, allocated)
 		if !mpsFits {
-			reason[common.CardTypeMismatch]++
+			reason[common.CardMPSV3Incompatible]++
 			continue
 		}
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", coresreq, "Nums", k.Nums, "device index", i)
@@ -1174,7 +1180,7 @@ func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.Co
 		if dev.Mode == MpsV3Mode && len(selected) > 0 {
 			first := selected[0]
 			if first.Usedmem != usedmem || first.Usedcores != usedcores {
-				reason[common.CardTypeMismatch]++
+				reason[common.CardMPSV3Incompatible]++
 				continue
 			}
 		}
@@ -1256,7 +1262,7 @@ func (nv *NvidiaGPUDevices) fit(devices []*device.DeviceUsage, request device.Co
 					if !needTopology {
 						k.Nums++
 					}
-					reason[common.CardTypeMismatch]++
+					reason[common.CardMPSV3Incompatible]++
 					continue
 				}
 				if len(gpuSet) > 0 {
