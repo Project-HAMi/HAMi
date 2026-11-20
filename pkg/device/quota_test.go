@@ -873,3 +873,52 @@ func TestEmptyScopeSelectorTreatedAsUnscoped(t *testing.T) {
 		t.Errorf("expected LimitSet false after delete")
 	}
 }
+
+func TestFitPodQuota(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	const dev = "NVIDIA"
+	sidecar := corev1.ContainerRestartPolicyAlways
+	for _, tt := range []struct {
+		name      string
+		init      []corev1.Container
+		allocated PodDevices
+		tentative ContainerDevices
+		candidate ContainerDevice
+		want      bool
+	}{
+		{name: "candidate_exact", candidate: ContainerDevice{Usedmem: 8192}, want: true},
+		{name: "candidate_over", candidate: ContainerDevice{Usedmem: 8193}},
+		{name: "earlier_container_counts", allocated: PodDevices{dev: {{{Usedmem: 4096}}}}, candidate: ContainerDevice{Usedmem: 4097}},
+		{name: "tentative_counts", tentative: ContainerDevices{{Usedmem: 4096}}, candidate: ContainerDevice{Usedmem: 4097}},
+		{name: "other_device_type_ignored", allocated: PodDevices{"MLU": {{{Usedmem: 8192}}}}, candidate: ContainerDevice{Usedmem: 8192}, want: true},
+		{name: "app_reuses_init_peak", init: []corev1.Container{{Name: "init"}}, allocated: PodDevices{dev: {{{Usedmem: 8192}}}}, candidate: ContainerDevice{Usedmem: 8192}, want: true},
+		{name: "sidecar_runs_with_app", init: []corev1.Container{{Name: "sidecar", RestartPolicy: &sidecar}}, allocated: PodDevices{dev: {{{Usedmem: 4096}}}}, candidate: ContainerDevice{Usedmem: 4097}},
+		{name: "cores_over", tentative: ContainerDevices{{Usedcores: 60}}, candidate: ContainerDevice{Usedcores: 41}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: t.Name()}, Spec: corev1.PodSpec{InitContainers: tt.init}}
+			qm.Quotas[pod.Namespace] = &DeviceQuota{
+				"nvidia.com/gpumem":  &Quota{Limit: 8192, LimitSet: true},
+				"nvidia.com/gpucore": &Quota{Limit: 100, LimitSet: true},
+			}
+			t.Cleanup(func() { delete(qm.Quotas, pod.Namespace) })
+			// Spare capacity detects appends that write past the caller's slice.
+			tentative := append(append(ContainerDevices{}, tt.tentative...), ContainerDevice{UUID: "sentinel"})[:len(tt.tentative)]
+			allocatedLen := len(tt.allocated[dev])
+
+			if got := FitPodQuota(pod, &tt.allocated, dev, tentative, tt.candidate); got != tt.want {
+				t.Errorf("FitPodQuota() = %v, want %v", got, tt.want)
+			}
+			if tentative[:cap(tentative)][len(tentative)].UUID != "sentinel" {
+				t.Error("FitPodQuota wrote into the tentative slice")
+			}
+			if len(tt.allocated[dev]) != allocatedLen {
+				t.Error("FitPodQuota changed the allocated devices")
+			}
+		})
+	}
+	if !FitPodQuota(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "no-quota"}}, nil, dev, nil, ContainerDevice{Usedmem: 1 << 30}) {
+		t.Error("FitPodQuota should fit when the namespace has no quota")
+	}
+}
