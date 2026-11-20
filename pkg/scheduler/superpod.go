@@ -323,8 +323,8 @@ func superpodPodMemoryRequests(pod *corev1.Pod) (superpodMemoryRequests, error) 
 	return requests, nil
 }
 
-// nodeUsableSlots returns remaining shares on healthy devices with enough free
-// memory for the pod's largest per-container request of that device type.
+// nodeUsableSlots returns remaining shares on healthy devices, capped by the
+// number of per-container memory requests that fit in each device's free memory.
 func nodeUsableSlots(node *NodeUsage, memoryRequests superpodMemoryRequests) int64 {
 	if node == nil {
 		return 0
@@ -334,34 +334,42 @@ func nodeUsableSlots(node *NodeUsage, memoryRequests superpodMemoryRequests) int
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
 			continue
 		}
-		if !deviceHasMemoryForPod(ds.Device, memoryRequests[ds.Device.Type]) {
-			continue
-		}
-		remaining := ds.Device.Count - ds.Device.Used
-		if remaining > 0 {
-			total += remaining
-		}
+		total += deviceUsableSlots(ds.Device, memoryRequests[ds.Device.DeviceVendor])
 	}
 	return total
 }
 
-func deviceHasMemoryForPod(dev *device.DeviceUsage, requests []device.ContainerDeviceRequest) bool {
+func deviceUsableSlots(dev *device.DeviceUsage, requests []device.ContainerDeviceRequest) int64 {
 	if dev == nil {
-		return false
+		return 0
 	}
+
 	var requiredMemory int64
 	for _, request := range requests {
 		requestMemory := request.Memreq
 		if requestMemory <= 0 && request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
 			if dev.Totalmem <= 0 {
-				return false
+				return 0
 			}
 			requestMemory = max(dev.Totalmem/100*request.MemPercentagereq+
 				dev.Totalmem%100*request.MemPercentagereq/100, 1)
 		}
 		requiredMemory = max(requiredMemory, requestMemory)
 	}
-	return dev.Totalmem-dev.Usedmem >= requiredMemory
+
+	freeMemory := dev.Totalmem - dev.Usedmem
+	if freeMemory < requiredMemory {
+		return 0
+	}
+
+	remaining := dev.Count - dev.Used
+	if remaining <= 0 {
+		return 0
+	}
+	if requiredMemory > 0 {
+		remaining = min(remaining, freeMemory/requiredMemory)
+	}
+	return remaining
 }
 
 // singleSuperpodPodRequest counts the device slots one pod requests across

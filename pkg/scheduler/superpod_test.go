@@ -129,12 +129,13 @@ func makeNodeUsage(name string, labels map[string]string, count, used int64) *No
 		Devices: policy.DeviceUsageList{
 			DeviceLists: []*policy.DeviceListsScore{
 				{Device: &device.DeviceUsage{
-					ID:       name + "-gpu0",
-					Type:     nvidia.NvidiaGPUDevice,
-					Count:    count,
-					Used:     used,
-					Totalmem: 8000,
-					Health:   true,
+					ID:           name + "-gpu0",
+					Type:         nvidia.NvidiaGPUDevice,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
+					Count:        count,
+					Used:         used,
+					Totalmem:     8000,
+					Health:       true,
 				}},
 			},
 		},
@@ -145,12 +146,13 @@ func makeNodeUsageWithPhysicalCount(name string, labels map[string]string, physi
 	devices := make([]*device.DeviceUsage, physicalCount)
 	for i := range devices {
 		devices[i] = &device.DeviceUsage{
-			ID:       fmt.Sprintf("%s-gpu%d", name, i),
-			Type:     nvidia.NvidiaGPUDevice,
-			Count:    virtualCount,
-			Used:     used,
-			Totalmem: 8000,
-			Health:   true,
+			ID:           fmt.Sprintf("%s-gpu%d", name, i),
+			Type:         nvidia.NvidiaGPUDevice,
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+			Count:        virtualCount,
+			Used:         used,
+			Totalmem:     8000,
+			Health:       true,
 		}
 	}
 	return makeNodeUsageMultiDevices(name, labels, devices)
@@ -446,6 +448,38 @@ func TestNodeUsableSlots(t *testing.T) {
 			},
 		}
 		assert.Equal(t, int64(6), nodeUsableSlots(node, nil))
+	})
+
+	t.Run("matches vendor and caps shares by free memory", func(t *testing.T) {
+		node := makeNodeUsageMultiDevices("n1", nil, []*device.DeviceUsage{{
+			Type:         "NVIDIA A100-SXM4-40GB",
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+			Count:        10,
+			Totalmem:     8000,
+			Usedmem:      5000,
+			Health:       true,
+		}})
+		requests := superpodMemoryRequests{
+			nvidia.NvidiaGPUDevice: {{Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: 1000}},
+		}
+
+		assert.Equal(t, int64(3), nodeUsableSlots(node, requests))
+	})
+
+	t.Run("percentage memory caps shares by free memory", func(t *testing.T) {
+		node := makeNodeUsageMultiDevices("n1", nil, []*device.DeviceUsage{{
+			Type:         "NVIDIA A100-SXM4-40GB",
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+			Count:        10,
+			Totalmem:     8000,
+			Usedmem:      1000,
+			Health:       true,
+		}})
+		requests := superpodMemoryRequests{
+			nvidia.NvidiaGPUDevice: {{Nums: 1, Type: nvidia.NvidiaGPUDevice, MemPercentagereq: 50}},
+		}
+
+		assert.Equal(t, int64(1), nodeUsableSlots(node, requests))
 	})
 }
 
@@ -747,10 +781,10 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
-		// Each physical GPU advertises 10 shares.
-		assert.Equal(t, int64(40), ctx.RackSlotCounts["sp-1"]["rack-A"])
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-B"])
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-2"]["rack-A"])
+		// Each physical GPU can fit eight 1000-memory requests.
+		assert.Equal(t, int64(32), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		assert.Equal(t, int64(8), ctx.RackSlotCounts["sp-1"]["rack-B"])
+		assert.Equal(t, int64(8), ctx.RackSlotCounts["sp-2"]["rack-A"])
 	})
 
 	t.Run("skips nodes without superpod or rack label", func(t *testing.T) {
@@ -778,7 +812,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 		// podRequest=8 shares: n1 has 4 shares (skipped), n2 has 10 shares.
 		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 8))
 
-		// Only n2 contributes: 10 remaining shares.
+		// Only n2 contributes: its ten devices each have one remaining share.
 		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
@@ -797,7 +831,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		assert.Equal(t, int64(2), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
 	t.Run("checks percentage memory requests against each device", func(t *testing.T) {
@@ -817,7 +851,7 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		assert.Equal(t, int64(1), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 
 	t.Run("zero podRequest counts all nodes", func(t *testing.T) {
@@ -843,8 +877,8 @@ func TestCollectRackSlotCounts(t *testing.T) {
 
 		assert.NilError(t, (&Scheduler{}).collectRackSlotCounts(ctx, task, &nodes, 1))
 
-		// Only n1 contributes: 10 remaining shares.
-		assert.Equal(t, int64(10), ctx.RackSlotCounts["sp-1"]["rack-A"])
+		// Only n1 contributes: its ten shares are capped by free memory.
+		assert.Equal(t, int64(8), ctx.RackSlotCounts["sp-1"]["rack-A"])
 	})
 }
 
@@ -1507,6 +1541,7 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		}
 		pod := makeGPUPod("pod", "default", "task-1", 1)
 		pod.Labels[util.SuperpodTotalRequestLabel] = "120"
+		pod.Spec.Containers[0].Resources.Limits["hami.io/gpumem"] = *resource.NewQuantity(500, resource.BinarySI)
 
 		// sp-1's capacity is spread across two nodes: only one of them is in
 		// the candidate set. The full snapshot must still see both, so sp-1
