@@ -289,6 +289,13 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			}
 		}
 	}
+	// The webhook checks the quota at admission, but the namespace's usage can
+	// change before the pod is scheduled, so check the selected devices again.
+	if !device.FitPodQuota(pod, allocated, request.Type, tmpDevs[request.Type]) {
+		reason[common.ResourceQuotaNotFit] += len(tmpDevs[request.Type])
+		klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "devices", len(tmpDevs[request.Type]), "memreq", request.Memreq)
+		return false, map[string]device.ContainerDevices{}, common.GenReason(reason, len(devices))
+	}
 	return true, tmpDevs, ""
 }
 
