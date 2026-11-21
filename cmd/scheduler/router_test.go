@@ -144,7 +144,7 @@ func TestProfilingRouteIsolation(t *testing.T) {
 			t.Errorf("profiling route %s: status %d, body length %d", path, rec.Code, rec.Body.Len())
 		}
 	}
-	for _, path := range []string{"/", "/healthz", "/readyz", "/metrics", "/webhook", "/refit", "/filter", "/bind", "/debug/pprof/unknown"} {
+	for _, path := range []string{"/", "/healthz", "/readyz", "/metrics", "/webhook", "/refit", "/filter", "/bind", "/preempt", "/debug/pprof/unknown"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
@@ -202,7 +202,7 @@ const undecodableBody = "{"
 func TestClusterRouterDoesNotServeExtenderVerbs(t *testing.T) {
 	router := clusterRouter(nil)
 
-	for _, path := range []string{"/filter", "/bind"} {
+	for _, path := range []string{"/filter", "/bind", "/preempt"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(undecodableBody)))
 		if rec.Code != http.StatusNotFound {
@@ -216,7 +216,7 @@ func TestClusterRouterDoesNotServeExtenderVerbs(t *testing.T) {
 func TestExtenderRouterServesOnlyExtenderVerbs(t *testing.T) {
 	router := extenderRouter(nil)
 
-	for _, path := range []string{"/filter", "/bind"} {
+	for _, path := range []string{"/filter", "/bind", "/preempt"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(undecodableBody)))
 		if rec.Code == http.StatusNotFound {

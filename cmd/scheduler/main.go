@@ -245,6 +245,7 @@ func extenderRouter(s *scheduler.Scheduler) *httprouter.Router {
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(s))
 	router.POST("/bind", routes.Bind(s))
+	router.POST("/preempt", routes.PreemptRoute(s))
 	return router
 }
 
