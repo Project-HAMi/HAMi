@@ -1,3 +1,11 @@
+{{- if .Values.devicePlugin.mpsV3.enabled }}
+{{- if not (regexMatch "^cdi-(cri|annotations)(,cdi-(cri|annotations))*$" .Values.devicePlugin.deviceListStrategy) }}
+{{- fail "devicePlugin.mpsV3 requires exclusively cdi-cri or cdi-annotations deviceListStrategy" }}
+{{- end }}
+{{- if or (not (hasPrefix "/" .Values.devicePlugin.mpsV3.root)) (eq .Values.devicePlugin.mpsV3.root "/") }}
+{{- fail "devicePlugin.mpsV3.root must be an absolute dedicated host directory" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.devicePlugin.enabled (regexMatch "(?i)^(127\\.|localhost|\\[[0:]*:0{0,3}1\\]|\\[::ffff:127\\.)" .Values.devicePlugin.monitor.metricsBindAddress) }}
 {{- fail "devicePlugin.monitor.metricsBindAddress must not be a loopback address, the probes and the Service reach the monitor through the Pod IP" }}
 {{- end }}
@@ -138,6 +146,14 @@ spec:
               value: {{ .Values.devicePlugin.deviceListStrategy }}
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
+            {{- if .Values.devicePlugin.mpsV3.enabled }}
+            - name: HAMI_MPS_V3_ENABLED
+              value: "true"
+            - name: HAMI_MPS_V3_ROOT
+              value: {{ .Values.devicePlugin.mpsV3.root | quote }}
+            - name: HAMI_MPS_V3_BINARY
+              value: {{ .Values.devicePlugin.mpsV3.binary | quote }}
+            {{- end }}
             - name: HAMI_VGPU_CACHE_ROOT
               value: {{ .Values.devicePlugin.monitor.ctrPath | quote }}
             - name: HAMI_VGPU_CACHE_GRACE_PERIOD
@@ -226,6 +242,10 @@ spec:
               mountPath: /var/run/cdi
             - name: dynamic-mig-state
               mountPath: /var/run/hami/dynamic-mig-state
+            {{- if .Values.devicePlugin.mpsV3.enabled }}
+            - name: mps-v3-state
+              mountPath: {{ .Values.devicePlugin.mpsV3.root | quote }}
+            {{- end }}
             {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
             - name: nvidia-validations
               mountPath: /run/nvidia/validations
@@ -408,6 +428,12 @@ spec:
         - name: hostpid-broker
           hostPath:
             path: /var/run/hami/hostpid
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.devicePlugin.mpsV3.enabled }}
+        - name: mps-v3-state
+          hostPath:
+            path: {{ .Values.devicePlugin.mpsV3.root | quote }}
             type: DirectoryOrCreate
         {{- end }}
         - name: usrbin

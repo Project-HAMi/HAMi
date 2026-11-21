@@ -388,7 +388,7 @@ devicePlugin:
   # JSON field in `nodeConfiguration.config` overrides this setting for matching nodes.
   reportNodeCapacity: false
   nodeConfiguration:
-    # operatingmode is per-node: "hami-core", "mig", or "remote".
+    # operatingmode is per-node: "hami-core", "mig", "mps-v3", or "remote".
     # "remote" makes this node a Lupine GPU server; the plugin applies
     # hami.io/lupine-server (empty value = devices.remotegpu.defaultPort).
     # -- JSON content for the generated device plugin ConfigMap key `config.json`; ignored when
@@ -401,7 +401,10 @@ devicePlugin:
     # Selected entries apply in list order; later overrides take precedence. For per-node resource
     # settings, null, zero, or false does not replace an existing non-zero or true value. Empty
     # `operatingmode` and `filterdevices` values are ignored. Entries with both or neither of `name` and
-    # `nodelabelselector`, or with an empty or invalid label selector, are skipped.
+    # `nodelabelselector`, or with an empty or invalid label selector, are skipped. For
+    # `operatingmode: mps-v3`, `mpsv3.computeMode` defaults to `namespace-cap`.
+    # `server-timeslice` also accepts `mpsv3.timeslice` (default, short, medium, long)
+    # and optional `mpsv3.timesliceYieldLevel` (1 or 2). Each `mpsv3` object replaces the previous one.
     # @default -- Example node configuration; see [values.yaml](values.yaml).
     config: |
       {
@@ -442,6 +445,16 @@ devicePlugin:
   # `cdi-annotations`, or `cdi-cri`. CDI strategies require a CDI-capable runtime; `cdi-cri` also requires
   # kubelet/CRI support for CDI devices.
   deviceListStrategy: "envvar"
+  # -- Connection to a host-managed MPS v3 daemon. Select operatingmode: mps-v3 in nodeConfiguration.
+  # Requires exclusively CDI strategies, Toolkit >=1.20.1, NVIDIA driver branch r620, and cgroup v2.
+  mpsV3:
+    # -- Enable device-plugin integration with a host-managed MPS v3 daemon.
+    enabled: false
+    # -- Node-local host path mounted at the same path inside the plugin. State survives plugin Pod restarts.
+    root: /var/run/hami/mps-v3
+    # -- MPS control binary inside the device-plugin container (PATH lookup if bare).
+    binary: nvidia-cuda-mps-control
+
   # -- (string) Path for NVIDIA CDI hooks in generated CDI specifications. Null omits `NVIDIA_CDI_HOOK_PATH`
   # and keeps the plugin default `/usr/bin/nvidia-ctk`.
   nvidiaHookPath: null
