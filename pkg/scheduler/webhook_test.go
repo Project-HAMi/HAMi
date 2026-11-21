@@ -1978,3 +1978,172 @@ func TestUnrelatedAnnotationsStillAdmitted(t *testing.T) {
 		t.Fatalf("a pod with unrelated annotations was denied: %v", resp.Result)
 	}
 }
+
+// guardPod replays a request for pod (and oldPod, on an update) against the
+// annotation guard and returns the response.
+func guardPod(t *testing.T, oldPod, pod *corev1.Pod, username string) admission.Response {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to build the scheme: %v", err)
+	}
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("failed to encode the pod: %v", err)
+	}
+	req := admissionv1.AdmissionRequest{
+		UID:       "test-uid",
+		Namespace: pod.Namespace,
+		Name:      pod.Name,
+		Operation: admissionv1.Create,
+		UserInfo:  authenticationv1.UserInfo{Username: username},
+		Object:    runtime.RawExtension{Raw: podBytes},
+	}
+	if oldPod != nil {
+		oldBytes, err := runtime.Encode(codec, oldPod)
+		if err != nil {
+			t.Fatalf("failed to encode the old pod: %v", err)
+		}
+		req.Operation = admissionv1.Update
+		req.OldObject = runtime.RawExtension{Raw: oldBytes}
+	}
+
+	guard, err := NewAnnotationGuard()
+	if err != nil {
+		t.Fatalf("failed to create the annotation guard: %v", err)
+	}
+	return guard.Handle(context.Background(), admission.Request{AdmissionRequest: req})
+}
+
+// ignoredGPUPod is a pod that opted out of the admission webhook with the
+// label, and so sets its scheduler itself.
+func ignoredGPUPod(annotations map[string]string) *corev1.Pod {
+	pod := scheduledGPUPod("hami-scheduler", annotations)
+	pod.Labels = map[string]string{"hami.io/webhook": "ignore"}
+	return pod
+}
+
+// The hami.io/webhook: ignore label keeps a pod away from the admission
+// webhook, and the pod's creator sets it. Without the guard such a pod could
+// arrive carrying an allocation, or be given one by a later patch, and the
+// device plugin served it while the scheduler rebuilt its accounting from it.
+//
+// Reproduce on a cluster: label a GPU pod hami.io/webhook: ignore, set
+// schedulerName: hami-scheduler, and once it is scheduled patch
+// hami.io/vgpu-devices-allocated as a user with no access to nodes. Before
+// this fix the patch was admitted and the scheduler logged "Pod allocation
+// rewritten, rebuilt devices from annotations".
+func TestAnnotationGuardDeniesPresetAnnotations(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t)
+
+	for _, key := range []string{
+		util.AssignedNodeAnnotations,
+		util.BindTimeAnnotations,
+		util.DeviceBindPhase,
+		device.InRequestDevices[nvidia.NvidiaGPUDevice],
+		device.SupportDevices[nvidia.NvidiaGPUDevice],
+	} {
+		t.Run(key, func(t *testing.T) {
+			resp := guardPod(t, nil, ignoredGPUPod(map[string]string{key: "forged"}), "system:serviceaccount:team-b:builder")
+			if resp.Allowed {
+				t.Fatalf("pod presetting %s was admitted", key)
+			}
+			if !strings.Contains(resp.Result.Message, key) {
+				t.Errorf("denial message %q does not name %s", resp.Result.Message, key)
+			}
+		})
+	}
+}
+
+func TestAnnotationGuardDeniesPatchedAnnotations(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
+	key := device.SupportDevices[nvidia.NvidiaGPUDevice]
+
+	oldPod := ignoredGPUPod(map[string]string{key: "GPU-real,NVIDIA,2000,10:;"})
+	newPod := ignoredGPUPod(map[string]string{key: "GPU-real,NVIDIA,100,0:;"})
+	if resp := guardPod(t, oldPod, newPod, "system:serviceaccount:team-b:builder"); resp.Allowed {
+		t.Fatal("a workload service account rewrote the allocation")
+	}
+}
+
+// The guard has to leave HAMi's own writers working on these pods, and leave
+// everything else on them alone.
+func TestAnnotationGuardAllowsHAMiAndUnrelatedWrites(t *testing.T) {
+	initHAMiScheduler(t)
+	allowNodeWriters(t, "system:serviceaccount:hami-system:hami-scheduler")
+	key := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	t.Run("clean create", func(t *testing.T) {
+		resp := guardPod(t, nil, ignoredGPUPod(map[string]string{"team.example.com/owner": "team-b"}), "system:serviceaccount:team-b:builder")
+		if !resp.Allowed {
+			t.Fatalf("a pod without scheduler-owned annotations was denied: %v", resp.Result)
+		}
+	})
+	t.Run("scheduler patch", func(t *testing.T) {
+		resp := guardPod(t, ignoredGPUPod(nil), ignoredGPUPod(map[string]string{key: "GPU-real,NVIDIA,2000,10:;"}),
+			"system:serviceaccount:hami-system:hami-scheduler")
+		if !resp.Allowed {
+			t.Fatalf("the scheduler's own patch was denied: %v", resp.Result)
+		}
+	})
+	t.Run("unrelated update", func(t *testing.T) {
+		resp := guardPod(t, ignoredGPUPod(map[string]string{"team.example.com/owner": "team-b"}),
+			ignoredGPUPod(map[string]string{"team.example.com/owner": "team-c"}), "system:serviceaccount:team-b:builder")
+		if !resp.Allowed {
+			t.Fatalf("an unrelated update was denied: %v", resp.Result)
+		}
+		if len(resp.Patches) > 0 {
+			t.Errorf("the guard patched the pod: %v", resp.Patches)
+		}
+	})
+}
+
+// A request the guard cannot read is refused, not judged as if it carried no
+// annotations.
+func TestAnnotationGuardRejectsUndecodableRequests(t *testing.T) {
+	guard, err := NewAnnotationGuard()
+	if err != nil {
+		t.Fatalf("failed to create the annotation guard: %v", err)
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to build the scheme: %v", err)
+	}
+	podBytes, err := runtime.Encode(serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion), ignoredGPUPod(nil))
+	if err != nil {
+		t.Fatalf("failed to encode the pod: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		req  admissionv1.AdmissionRequest
+	}{
+		{
+			name: "no object",
+			req:  admissionv1.AdmissionRequest{Operation: admissionv1.Create},
+		},
+		{
+			name: "unreadable old object",
+			req: admissionv1.AdmissionRequest{
+				Operation: admissionv1.Update,
+				Object:    runtime.RawExtension{Raw: podBytes},
+				OldObject: runtime.RawExtension{Raw: []byte("{")},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := guard.Handle(context.Background(), admission.Request{AdmissionRequest: tt.req})
+			if resp.Allowed {
+				t.Fatal("an undecodable request was admitted")
+			}
+			if resp.Result == nil || resp.Result.Code != http.StatusBadRequest {
+				t.Errorf("result %v, want code %d", resp.Result, http.StatusBadRequest)
+			}
+		})
+	}
+}

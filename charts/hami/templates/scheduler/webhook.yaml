@@ -12,15 +12,7 @@ webhooks:
     - v1
     - v1beta1
     clientConfig:
-      {{- if .Values.scheduler.admissionWebhook.customURL.enabled }}
-      url: https://{{ .Values.scheduler.admissionWebhook.customURL.host}}:{{.Values.scheduler.admissionWebhook.customURL.port}}{{.Values.scheduler.admissionWebhook.customURL.path}}
-      {{- else }}
-      service:
-        name: {{ include "hami-vgpu.scheduler" . }}
-        namespace: {{ include "hami-vgpu.namespace" . }}
-        path: /webhook
-        port: {{ .Values.scheduler.service.httpPort }}
-      {{- end }}
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" . "path" "") | nindent 6 }}
     failurePolicy: {{ .Values.scheduler.admissionWebhook.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.hami.io
@@ -30,12 +22,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* Known gap, tracked in issue #3041: a namespace carrying this
-             label skips admission entirely, at the API server, before any
-             HAMi code runs. A pod placed there could carry the hami.io/
-             allocation annotations PR #3042 otherwise denies at create time.
-             Restrict who may set this label with policy (OPA/Kyverno,
-             PodSecurity admission) if that matters in your cluster. */}}
+      {{- /* A namespace failing any requirement here skips this webhook at
+             the API server, before any HAMi code runs. The annotations guard
+             below still covers its pods. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -56,9 +45,9 @@ webhooks:
       matchLabels:
         {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchLabels | nindent 8 }}
       {{- end }}
-      {{- /* Same gap as the namespaceSelector note above, at the object
-             level: a pod carrying this label skips admission regardless of
-             its namespace. See issue #3041. */}}
+      {{- /* Same at the object level: a pod failing any requirement here
+             skips this webhook regardless of its namespace, and the
+             annotations guard below covers it. */}}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -86,4 +75,129 @@ webhooks:
         scope: '*'
     sideEffects: None
     timeoutSeconds: 10
+  {{- /* Every requirement in the selectors above lets a pod skip the
+         webhook: the hami.io/webhook: ignore label, which whoever creates the
+         pod can set on it or on its namespace, and the namespaces and labels
+         an administrator leaves out. The device plugin hands out devices from
+         the scheduler-owned annotations and the scheduler rebuilds its
+         accounting from them, so on every pod they are kept to HAMi's own
+         writers. One entry per requirement, with the requirement negated,
+         reaches the pods that fail it, so together the entries cover every
+         pod the webhook above skips. Each entry also keeps the requirements
+         before it, and the namespace entries keep every pod requirement, so a
+         pod reaches only the entry for the first requirement it fails. The
+         API server calls matching webhooks one after another within one
+         request deadline, and a pod that reached one entry per failed
+         requirement would wait out one timeout per entry while the scheduler
+         hangs, and be rejected instead of failing open. They mutate nothing
+         and judge only those annotations. HAMi's own pods carry the label, so
+         they fail open: with the scheduler down, Fail would keep the
+         scheduler's own pod from being created. */}}
+  {{- $webhook := .Values.scheduler.admissionWebhook }}
+  {{- $skipIgnored := dict "key" "hami.io/webhook" "operator" "NotIn" "values" (list "ignore") }}
+  {{- $podRequirements := list $skipIgnored }}
+  {{- range $key, $value := $webhook.objectSelector.matchLabels }}
+  {{- $podRequirements = append $podRequirements (dict "key" $key "operator" "In" "values" (list (toString $value))) }}
+  {{- end }}
+  {{- range $webhook.objectSelector.matchExpressions }}
+  {{- $podRequirements = append $podRequirements . }}
+  {{- end }}
+  {{- $namespaceRequirements := list }}
+  {{- if or (not (hasKey $webhook "manageNamespaceSelector")) $webhook.manageNamespaceSelector }}
+  {{- $namespaceRequirements = append $namespaceRequirements $skipIgnored }}
+  {{- if $webhook.whitelistNamespaces }}
+  {{- $namespaceRequirements = append $namespaceRequirements (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" $webhook.whitelistNamespaces) }}
+  {{- end }}
+  {{- range $key, $value := $webhook.namespaceSelector.matchLabels }}
+  {{- $namespaceRequirements = append $namespaceRequirements (dict "key" $key "operator" "In" "values" (list (toString $value))) }}
+  {{- end }}
+  {{- range $webhook.namespaceSelector.matchExpressions }}
+  {{- $namespaceRequirements = append $namespaceRequirements . }}
+  {{- end }}
+  {{- end }}
+  {{- range $i, $requirement := $podRequirements }}
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" $ "path" "/annotations") | nindent 6 }}
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    name: pods-{{ $i }}.annotations.vgpu.hami.io
+    objectSelector:
+      matchExpressions:
+      {{- if $i }}
+      {{- toYaml (slice $podRequirements 0 $i) | nindent 6 }}
+      {{- end }}
+      {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
+    reinvocationPolicy: Never
+    rules:
+      {{- include "hami-vgpu.scheduler.webhook.podRules" $ | nindent 6 }}
+    sideEffects: None
+    timeoutSeconds: 10
+  {{- end }}
+  {{- range $i, $requirement := $namespaceRequirements }}
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      {{- include "hami-vgpu.scheduler.webhook.clientConfig" (dict "root" $ "path" "/annotations") | nindent 6 }}
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    name: namespaces-{{ $i }}.annotations.vgpu.hami.io
+    namespaceSelector:
+      matchExpressions:
+      {{- if $i }}
+      {{- toYaml (slice $namespaceRequirements 0 $i) | nindent 6 }}
+      {{- end }}
+      {{- include "hami-vgpu.scheduler.webhook.negatedRequirement" $requirement | nindent 6 }}
+    objectSelector:
+      matchExpressions:
+      {{- toYaml $podRequirements | nindent 6 }}
+    reinvocationPolicy: Never
+    rules:
+      {{- include "hami-vgpu.scheduler.webhook.podRules" $ | nindent 6 }}
+    sideEffects: None
+    timeoutSeconds: 10
+  {{- end }}
 {{- end }}
+
+{{- /* A label selector requirement matching exactly the objects the given one
+       does not. */}}
+{{- define "hami-vgpu.scheduler.webhook.negatedRequirement" -}}
+{{- $negated := dict "In" "NotIn" "NotIn" "In" "Exists" "DoesNotExist" "DoesNotExist" "Exists" -}}
+{{- $operator := get $negated (toString .operator) -}}
+{{- if not $operator -}}
+{{- fail (printf "unsupported label selector operator %q" (toString .operator)) -}}
+{{- end -}}
+- key: {{ .key | quote }}
+  operator: {{ $operator }}
+  {{- if or (eq $operator "In") (eq $operator "NotIn") }}
+  values:
+    {{- toYaml .values | nindent 4 }}
+  {{- end }}
+{{- end -}}
+
+{{- define "hami-vgpu.scheduler.webhook.clientConfig" -}}
+{{- $root := .root -}}
+{{- if $root.Values.scheduler.admissionWebhook.customURL.enabled -}}
+url: https://{{ $root.Values.scheduler.admissionWebhook.customURL.host }}:{{ $root.Values.scheduler.admissionWebhook.customURL.port }}{{ $root.Values.scheduler.admissionWebhook.customURL.path }}{{ .path }}
+{{- else -}}
+service:
+  name: {{ include "hami-vgpu.scheduler" $root }}
+  namespace: {{ include "hami-vgpu.namespace" $root }}
+  path: /webhook{{ .path }}
+  port: {{ $root.Values.scheduler.service.httpPort }}
+{{- end -}}
+{{- end -}}
+
+{{- define "hami-vgpu.scheduler.webhook.podRules" -}}
+- apiGroups:
+    - ""
+  apiVersions:
+    - v1
+  operations:
+    - CREATE
+    - UPDATE
+  resources:
+    - pods
+  scope: '*'
+{{- end -}}

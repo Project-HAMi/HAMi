@@ -1,0 +1,225 @@
+suite: Scheduler-owned annotations guard
+templates:
+  - scheduler/webhook.yaml
+tests:
+  - it: guards pods labeled to skip the admission webhook
+    asserts:
+      - equal:
+          path: webhooks[1].name
+          value: pods-0.annotations.vgpu.hami.io
+      - equal:
+          path: webhooks[1].clientConfig.service.path
+          value: /webhook/annotations
+      - equal:
+          path: webhooks[1].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: In
+              values:
+                - ignore
+      - notExists:
+          path: webhooks[1].namespaceSelector
+      - equal:
+          path: webhooks[1].rules[0].operations
+          value:
+            - CREATE
+            - UPDATE
+
+  - it: guards pods in namespaces labeled to skip the admission webhook
+    asserts:
+      - lengthEqual:
+          path: webhooks
+          count: 3
+      - equal:
+          path: webhooks[2].name
+          value: namespaces-0.annotations.vgpu.hami.io
+      - equal:
+          path: webhooks[2].namespaceSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: In
+              values:
+                - ignore
+      - equal:
+          path: webhooks[2].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+
+  - it: guards pods in whitelisted namespaces
+    set:
+      scheduler.admissionWebhook.whitelistNamespaces:
+        - kube-system
+        - monitoring
+    asserts:
+      - equal:
+          path: webhooks[3].name
+          value: namespaces-1.annotations.vgpu.hami.io
+      - equal:
+          path: webhooks[3].namespaceSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - kube-system
+                - monitoring
+
+  - it: guards pods and namespaces that miss the configured selectors, one entry per pod
+    set:
+      scheduler.admissionWebhook.namespaceSelector.matchLabels:
+        hami: enabled
+      scheduler.admissionWebhook.namespaceSelector.matchExpressions:
+        - key: tier
+          operator: Exists
+      scheduler.admissionWebhook.objectSelector.matchLabels:
+        gpu: "true"
+      scheduler.admissionWebhook.objectSelector.matchExpressions:
+        - key: skip-me
+          operator: DoesNotExist
+        - key: team
+          operator: In
+          values: [a, b]
+    asserts:
+      - lengthEqual:
+          path: webhooks
+          count: 8
+      - equal:
+          path: webhooks[2].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: NotIn
+              values:
+                - "true"
+      - equal:
+          path: webhooks[3].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
+            - key: skip-me
+              operator: Exists
+      - equal:
+          path: webhooks[4].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
+            - key: skip-me
+              operator: DoesNotExist
+            - key: team
+              operator: NotIn
+              values:
+                - a
+                - b
+      - equal:
+          path: webhooks[6].namespaceSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: hami
+              operator: NotIn
+              values:
+                - enabled
+      - equal:
+          path: webhooks[7].namespaceSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: hami
+              operator: In
+              values:
+                - enabled
+            - key: tier
+              operator: DoesNotExist
+      - equal:
+          path: webhooks[7].objectSelector.matchExpressions
+          value:
+            - key: hami.io/webhook
+              operator: NotIn
+              values:
+                - ignore
+            - key: gpu
+              operator: In
+              values:
+                - "true"
+            - key: skip-me
+              operator: DoesNotExist
+            - key: team
+              operator: In
+              values:
+                - a
+                - b
+
+  - it: fails open even when the admission webhook fails closed
+    set:
+      scheduler.admissionWebhook.failurePolicy: Fail
+    asserts:
+      - equal:
+          path: webhooks[0].failurePolicy
+          value: Fail
+      - equal:
+          path: webhooks[1].failurePolicy
+          value: Ignore
+      - equal:
+          path: webhooks[2].failurePolicy
+          value: Ignore
+
+  - it: keeps only the pod entries when the namespace selector is not managed
+    set:
+      scheduler.admissionWebhook.manageNamespaceSelector: false
+      scheduler.admissionWebhook.whitelistNamespaces:
+        - kube-system
+    asserts:
+      - lengthEqual:
+          path: webhooks
+          count: 2
+      - notExists:
+          path: webhooks[1].namespaceSelector
+
+  - it: rejects a selector operator it cannot negate
+    set:
+      scheduler.admissionWebhook.objectSelector.matchExpressions:
+        - key: team
+          operator: Gt
+          values: ["1"]
+    asserts:
+      - failedTemplate:
+          errorPattern: unsupported label selector operator "Gt"
+
+  - it: appends the guard path to a custom webhook URL
+    set:
+      scheduler.admissionWebhook.customURL.enabled: true
+      scheduler.admissionWebhook.customURL.host: 10.0.0.1
+      scheduler.admissionWebhook.customURL.port: 31998
+      scheduler.admissionWebhook.customURL.path: /webhook
+    asserts:
+      - equal:
+          path: webhooks[0].clientConfig.url
+          value: https://10.0.0.1:31998/webhook
+      - equal:
+          path: webhooks[1].clientConfig.url
+          value: https://10.0.0.1:31998/webhook/annotations

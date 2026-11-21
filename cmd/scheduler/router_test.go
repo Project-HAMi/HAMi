@@ -224,11 +224,24 @@ func TestExtenderRouterServesOnlyExtenderVerbs(t *testing.T) {
 		}
 	}
 
-	for _, path := range []string{"/refit", "/webhook"} {
+	for _, path := range []string{"/refit", "/webhook", "/webhook/annotations"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(undecodableBody)))
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s is served on the extender router (status %d), its callers are outside this pod", path, rec.Code)
+		}
+	}
+}
+
+// kube-apiserver calls both webhooks on the router the Service publishes.
+func TestClusterRouterServesBothWebhooks(t *testing.T) {
+	router := clusterRouter(nil)
+
+	for _, path := range []string{"/webhook", "/webhook/annotations"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(undecodableBody)))
+		if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+			t.Errorf("%s is not served on the cluster-facing router (status %d)", path, rec.Code)
 		}
 	}
 }
