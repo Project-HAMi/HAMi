@@ -117,6 +117,98 @@ func TestNodeSwap(t *testing.T) {
 	}
 }
 
+func TestNodePolicyUsesSpread(t *testing.T) {
+	tests := []struct {
+		policy string
+		want   bool
+	}{
+		{policy: "spread", want: true},
+		{policy: "superpod,spread", want: true},
+		{policy: "binpack,spread", want: false},
+		{policy: "superpod,binpack", want: false},
+		{policy: "superpod", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.policy, func(t *testing.T) {
+			if got := NodePolicyUsesSpread(tt.policy); got != tt.want {
+				t.Errorf("NodePolicyUsesSpread(%q) = %t, want %t", tt.policy, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNodePolicyFallsBackToConfiguredDefault(t *testing.T) {
+	original := config.NodeSchedulerPolicy
+	t.Cleanup(func() { config.NodeSchedulerPolicy = original })
+	config.NodeSchedulerPolicy = "spread"
+
+	if got := nodeScorePolicy("superpod"); got != "spread" {
+		t.Errorf("nodeScorePolicy(%q) = %q, want %q", "superpod", got, "spread")
+	}
+	if !NodePolicyUsesSpread("superpod") {
+		t.Error("NodePolicyUsesSpread(\"superpod\") = false, want true with configured spread default")
+	}
+
+	list := NodeScoreList{
+		NodeList: []*NodeScore{{Score: 20}, {Score: 10}},
+		Policy:   "superpod",
+	}
+	if !list.Less(0, 1) {
+		t.Error("NodeScoreList.Less should use the configured spread policy")
+	}
+}
+
+func TestNodeScorePolicy(t *testing.T) {
+	tests := []struct {
+		policy string
+		want   string
+	}{
+		{policy: "binpack", want: "binpack"},
+		{policy: "spread", want: "spread"},
+		{policy: "superpod,spread", want: "spread"},
+		{policy: "spread,superpod,binpack", want: "spread"},
+		{policy: "superpod,binpack", want: "binpack"},
+		{policy: "superpod", want: "binpack"},
+		{policy: "", want: "binpack"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.policy, func(t *testing.T) {
+			if got := nodeScorePolicy(tt.policy); got != tt.want {
+				t.Errorf("nodeScorePolicy(%q) = %q, want %q", tt.policy, got, tt.want)
+			}
+		})
+	}
+}
+
+type policyRecordingDevice struct {
+	device.Devices
+	gotPolicy string
+}
+
+func (d *policyRecordingDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, policy string) float32 {
+	d.gotPolicy = policy
+	return 0
+}
+
+func TestOverrideScorePassesPrimarySortKeyToDevice(t *testing.T) {
+	originalDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = originalDevices })
+	scorer := &policyRecordingDevice{}
+	device.DevicesMap = map[string]device.Devices{"test": scorer}
+
+	ns := &NodeScore{
+		Node:    &corev1.Node{},
+		Devices: device.PodDevices{"test": device.PodSingleDevice{}},
+	}
+	ns.OverrideScore(nil, "superpod,spread")
+
+	if scorer.gotPolicy != "spread" {
+		t.Fatalf("ScoreNode received policy %q, want %q", scorer.gotPolicy, "spread")
+	}
+}
+
 func TestLess(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -176,6 +268,45 @@ func TestLess(t *testing.T) {
 			i:        0,
 			j:        1,
 			expected: false,
+		},
+		{
+			name: "superpod then spread uses spread score direction",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 20},
+					{NodeID: "node2", Score: 10},
+				},
+				Policy: "superpod,spread",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
+		},
+		{
+			name: "binpack then spread uses binpack score direction",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 10},
+					{NodeID: "node2", Score: 20},
+				},
+				Policy: "binpack,spread",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
+		},
+		{
+			name: "superpod without sort key defaults to binpack",
+			nodeScoreList: NodeScoreList{
+				NodeList: []*NodeScore{
+					{NodeID: "node1", Score: 10},
+					{NodeID: "node2", Score: 20},
+				},
+				Policy: "superpod",
+			},
+			i:        0,
+			j:        1,
+			expected: true,
 		},
 	}
 
@@ -411,6 +542,20 @@ func TestOverrideScore(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("Metax-SGPU spread score is inverted after superpod", func(t *testing.T) {
+		for _, tt := range tests {
+			if tt.name != "MetaX-SGPU with spread policy returns inverted weighted score" {
+				continue
+			}
+			chained := *tt.nodeScore
+			chained.Score = 0
+			chained.OverrideScore(tt.devices, "superpod,spread")
+			assert.Equal(t, tt.wantScore, chained.Score)
+			return
+		}
+		t.Fatal("spread fixture not found")
+	})
 }
 
 func TestComputeDefaultScore(t *testing.T) {

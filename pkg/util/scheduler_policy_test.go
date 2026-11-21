@@ -58,13 +58,21 @@ func TestIsValidNodeSchedulerPolicy(t *testing.T) {
 	}{
 		{"binpack", true},
 		{"spread", true},
+		{"superpod", true},
 		{" binpack", true},
 		{"spread ", true},
+		{"superpod,binpack", true},
+		{"superpod, spread", true},
+		{"spread,superpod", true},
+		{"binpack,superpod", true},
+		{"binpack,spread", false},
+		{"spread,binpack", false},
 		{"", false},
 		{"   ", false},
 		{"binpakc", false},
 		{"Spread", false},
-		{"binpack,spread", false},
+		{"superpod,", false},
+		{"superpod,numa", false},
 		{"numa", false},
 	}
 	for _, tt := range tests {
@@ -155,6 +163,7 @@ func TestSchedulerPolicyAnnotationError(t *testing.T) {
 		{name: "valid gpu policy", pod: podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpack"})},
 		{name: "padded chain", pod: podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpack, numa"})},
 		{name: "valid node policy", pod: podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: " spread "})},
+		{name: "valid superpod policy chain", pod: podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: "superpod, binpack"})},
 		{
 			name:        "typo in gpu policy",
 			pod:         podWith(map[string]string{GPUSchedulerPolicyAnnotationKey: "binpakc"}),
@@ -168,6 +177,11 @@ func TestSchedulerPolicyAnnotationError(t *testing.T) {
 		{
 			name:        "numa is not a node policy",
 			pod:         podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: "numa"}),
+			wantMessage: NodeSchedulerPolicyAnnotationKey,
+		},
+		{
+			name:        "unknown entry in node policy chain",
+			pod:         podWith(map[string]string{NodeSchedulerPolicyAnnotationKey: "superpod,numa"}),
 			wantMessage: NodeSchedulerPolicyAnnotationKey,
 		},
 		{

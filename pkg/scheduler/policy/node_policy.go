@@ -18,6 +18,7 @@ package policy
 
 import (
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -50,11 +52,54 @@ func (l NodeScoreList) Swap(i, j int) {
 }
 
 func (l NodeScoreList) Less(i, j int) bool {
-	if l.Policy == util.NodeSchedulerPolicySpread.String() {
+	if effectiveNodeSortKey(l.Policy) == util.NodeSchedulerPolicySpread {
 		return l.NodeList[i].Score > l.NodeList[j].Score
 	}
 	// default policy is Binpack
 	return l.NodeList[i].Score < l.NodeList[j].Score
+}
+
+// primaryNodeSortKey returns the first recognized node sort key without
+// allocating. Filtering policies such as superpod are skipped.
+func primaryNodeSortKey(policy string) util.SchedulerPolicyName {
+	for len(policy) > 0 {
+		part := policy
+		if comma := strings.IndexByte(policy, ','); comma >= 0 {
+			part = policy[:comma]
+			policy = policy[comma+1:]
+		} else {
+			policy = ""
+		}
+
+		switch strings.TrimSpace(part) {
+		case util.NodeSchedulerPolicyBinpack.String():
+			return util.NodeSchedulerPolicyBinpack
+		case util.NodeSchedulerPolicySpread.String():
+			return util.NodeSchedulerPolicySpread
+		}
+	}
+	return ""
+}
+
+func effectiveNodeSortKey(policy string) util.SchedulerPolicyName {
+	if key := primaryNodeSortKey(policy); key != "" {
+		return key
+	}
+	if key := primaryNodeSortKey(config.NodeSchedulerPolicy); key != "" {
+		return key
+	}
+	return util.NodeSchedulerPolicyBinpack
+}
+
+// NodePolicyUsesSpread reports whether spread is the primary node sort key.
+func NodePolicyUsesSpread(policy string) bool {
+	return effectiveNodeSortKey(policy) == util.NodeSchedulerPolicySpread
+}
+
+// nodeScorePolicy returns the primary node sort key for device scorers.
+// Filtering policies such as superpod are not device scoring strategies.
+func nodeScorePolicy(policy string) string {
+	return effectiveNodeSortKey(policy).String()
 }
 
 // policyNeutralScorer is an optional interface a device backend may implement to
@@ -70,6 +115,7 @@ type policyNeutralScorer interface {
 
 func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string) {
 	devScore := float32(0)
+	scorePolicy := nodeScorePolicy(policy)
 	for idx, val := range ns.Devices {
 		dev, ok := device.GetDevices()[idx]
 		if !ok || dev == nil {
@@ -77,16 +123,16 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 			continue
 		}
 
-		score := dev.ScoreNode(ns.Node, val, previous, policy)
+		score := dev.ScoreNode(ns.Node, val, previous, scorePolicy)
 
 		// Backends implementing policyNeutralScorer return policy-independent
-		// "higher is better" scores. For the Spread policy (which selects the
-		// lowest score), we invert the score to preserve the ranking.
+		// "higher is better" scores. For Spread (which selects the lowest
+		// score), we invert the score to preserve the ranking.
 		// We also apply a weight of 10000 to ensure device scores dominate
 		// the base node score.
 		if _, ok := dev.(policyNeutralScorer); ok {
 			weight := float32(10000)
-			if policy == util.NodeSchedulerPolicySpread.String() {
+			if NodePolicyUsesSpread(policy) {
 				weight = -10000
 			}
 			score = weight * score
@@ -204,7 +250,7 @@ func (ns *NodeScore) AddNodeAffinityScore(pref *PreferredNodeAffinity, policy st
 	matched := pref.terms.Score(ns.Node)
 	r := float32(matched) / float32(pref.totalWeight)
 	bonus := weight * r
-	if policy == util.NodeSchedulerPolicySpread.String() {
+	if NodePolicyUsesSpread(policy) {
 		bonus = -bonus
 	}
 	ns.Score += bonus

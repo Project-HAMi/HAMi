@@ -80,6 +80,10 @@ const (
 	GPUSchedulerPolicyMutex SchedulerPolicyName = "mutex"
 	// GPUSchedulerPolicyNuma is GPU use numa scheduler, chained as a sort key alongside binpack/spread.
 	GPUSchedulerPolicyNuma SchedulerPolicyName = "numa"
+	// NodeSchedulerPolicySuperpod is a node-level filter that converges pods
+	// with the same taskid into the same superpod. It is consumed via
+	// PolicyContains in the scheduler's filter stage, not as a sort key.
+	NodeSchedulerPolicySuperpod SchedulerPolicyName = "superpod"
 )
 
 const (
@@ -93,6 +97,15 @@ const (
 	// reconciles the scheduler-selected GPU with the NUMA-aligned replica
 	// preferred by kubelet's Topology Manager. See NumaAlignmentMode.
 	NumaAlignmentAnnotationKey = "hami.io/numa-alignment"
+
+	// TaskIDLabel groups pods of the same logical task for superpod convergence.
+	TaskIDLabel = "hami.io/taskid"
+	// SuperPodIDLabel is the node label identifying the superpod, usable as podAffinity topologyKey.
+	SuperPodIDLabel = "hami.io/superpodid"
+	// RackIDLabel is the optional node label identifying the rack within a superpod.
+	RackIDLabel = "hami.io/rackid"
+	// SuperpodTotalRequestLabel explicitly declares the task's total device request, overriding automatic aggregation.
+	SuperpodTotalRequestLabel = "hami.io/superpod-total-request"
 )
 
 func (s SchedulerPolicyName) String() string {

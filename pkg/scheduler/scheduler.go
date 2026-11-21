@@ -38,6 +38,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
+	batchlisters "k8s.io/client-go/listers/batch/v1"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -78,11 +80,14 @@ type Scheduler struct {
 	nodeNotify   chan struct{}
 	leaderNotify chan struct{}
 
-	kubeClient  kubernetes.Interface
-	podLister   listerscorev1.PodLister
-	nodeLister  listerscorev1.NodeLister
-	quotaLister listerscorev1.ResourceQuotaLister
-	leaseLister coordinationv1.LeaseLister
+	kubeClient        kubernetes.Interface
+	podLister         listerscorev1.PodLister
+	nodeLister        listerscorev1.NodeLister
+	quotaLister       listerscorev1.ResourceQuotaLister
+	leaseLister       coordinationv1.LeaseLister
+	replicaSetLister  appslisters.ReplicaSetLister
+	statefulSetLister appslisters.StatefulSetLister
+	jobLister         batchlisters.JobLister
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -847,6 +852,9 @@ func (s *Scheduler) Start() error {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
+	s.replicaSetLister = informerFactory.Apps().V1().ReplicaSets().Lister()
+	s.statefulSetLister = informerFactory.Apps().V1().StatefulSets().Lister()
+	s.jobLister = informerFactory.Batch().V1().Jobs().Lister()
 
 	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,

@@ -107,6 +107,10 @@ spec:
             - name: HAMI_NODELOCK_EXPIRE
               value: "{{ .Values.scheduler.nodeLockExpire }}"
           {{- end }}
+          {{- if .Values.scheduler.superpodRackBoost }}
+            - name: HAMI_SUPERPOD_RACK_BOOST
+              value: "{{ .Values.scheduler.superpodRackBoost }}"
+          {{- end }}
           {{- if .Values.global.managedNodeSelectorEnable }}
           {{- range $key, $value := .Values.global.managedNodeSelector }}
             - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" | replace "/" "_" | replace "." "_" }}
