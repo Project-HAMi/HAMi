@@ -1,0 +1,13 @@
+suite: Lupine server device order
+templates:
+  - device-plugin/daemonsetlupine.yaml
+set:
+  devices.remotegpu.enabled: true
+tests:
+  - it: numbers the server's GPUs in PCI bus order, as the device plugin does
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUDA_DEVICE_ORDER
+            value: PCI_BUS_ID

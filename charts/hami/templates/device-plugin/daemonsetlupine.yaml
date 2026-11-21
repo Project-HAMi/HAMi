@@ -75,6 +75,11 @@ spec:
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
+            # Clients select their GPUs by index through CUDA_VISIBLE_DEVICES.
+            # The scheduler names the device plugin's NVML indices, which are in
+            # PCI bus order, so the server's CUDA ordinals must be too.
+            - name: CUDA_DEVICE_ORDER
+              value: PCI_BUS_ID
           {{- with .Values.devices.remotegpu.server.securityContext }}
           securityContext: {{ toYaml . | nindent 12 }}
           {{- end }}
