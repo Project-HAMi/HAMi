@@ -1019,6 +1019,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 				}
 				continue
 			}
+			s.GetAllocationMetrics().InitDeviceType(devhandsk)
 			if !needUpdate {
 				klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 				continue
