@@ -255,26 +255,34 @@ func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, sk
 	return nil
 }
 
-// Mirror util.DeviceBindPhase and util.DeviceBindAllocating, which this package
-// cannot import without a cycle.
+// Mirror util.DeviceBindPhase, util.DeviceBindAllocating and
+// util.AssignedNodeAnnotations, which this package cannot import without a
+// cycle.
 const (
 	deviceBindPhaseAnnotation = "hami.io/bind-phase"
 	deviceBindAllocating      = "allocating"
+	assignedNodeAnnotation    = "hami.io/vgpu-node"
 )
 
-// podAwaitingAllocation reports whether the pod named by a node lock is still
-// pending and marked allocating, which is the window in which the device
-// plugin reads that lock to find out which pod its Allocate belongs to. A pod
-// that is gone, has moved past Pending, or has finished allocating (a pod that
-// stays Pending on an image pull after its lock release failed) can no longer
-// be handed an allocation, so its lock is free to take.
+// podAwaitingAllocation reports whether the pod named by nodeName's lock is
+// still pending and marked allocating on that node, which is the window in
+// which the device plugin reads that lock to find out which pod its Allocate
+// belongs to. A pod that is gone, has moved past Pending, or has finished
+// allocating (a pod that stays Pending on an image pull after its lock release
+// failed) can no longer be handed an allocation, so its lock is free to take.
+//
+// Only an Allocate on nodeName reads this lock, and the kubelet there runs only
+// pods bound to it. A holder that was never bound, as when the scheduler went
+// away between taking the lock and binding, or that the scheduler has since
+// placed on another node, will never be allocated here, and holding the node
+// for it would keep the node locked for as long as it stays pending.
 //
 // The lock records only a namespace and a name, so a later pod can carry the
 // same one, as a StatefulSet replacement does. A pod created after the lock was
 // taken cannot be the pod the lock was taken for, and holding the node for it
 // would keep the node locked for as long as it stays pending, so only a pod
 // that already existed counts as the holder.
-func podAwaitingAllocation(ctx context.Context, ns, name string, lockTime time.Time) (bool, error) {
+func podAwaitingAllocation(ctx context.Context, nodeName, ns, name string, lockTime time.Time) (bool, error) {
 	if ns == "" || name == "" {
 		return false, nil
 	}
@@ -286,6 +294,9 @@ func podAwaitingAllocation(ctx context.Context, ns, name string, lockTime time.T
 		return false, err
 	}
 	if pod.CreationTimestamp.After(lockTime) {
+		return false, nil
+	}
+	if pod.Spec.NodeName != nodeName || pod.Annotations[assignedNodeAnnotation] != nodeName {
 		return false, nil
 	}
 	return pod.Status.Phase == corev1.PodPending &&
@@ -329,7 +340,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		// crossed with this one, so a pod reclaiming its own expired lock
 		// still re-stamps it below and keeps its place.
 		if ns != pods.Namespace || previousPodName != pods.Name {
-			waiting, err := podAwaitingAllocation(ctx, ns, previousPodName, lockTime)
+			waiting, err := podAwaitingAllocation(ctx, nodeName, ns, previousPodName, lockTime)
 			if err != nil {
 				return err
 			}
