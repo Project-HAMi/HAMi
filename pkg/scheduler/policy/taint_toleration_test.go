@@ -17,6 +17,7 @@ limitations under the License.
 package policy
 
 import (
+	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -135,5 +136,27 @@ func TestAddTaintTolerationScore(t *testing.T) {
 			ns.AddTaintTolerationScore(tc.count, tc.maxCount, tc.policy, tc.weight)
 			assertScoreNear(t, ns.Score, tc.want)
 		})
+	}
+}
+
+// A large finite weight passes validation. Multiplying it by the count before
+// dividing by maxCount would overflow float32 and give every tainted node the
+// same infinite penalty, losing the order by taint count.
+func TestAddTaintTolerationScoreLargeWeightKeepsOrder(t *testing.T) {
+	const weight = float32(3e38)
+	binpack := util.NodeSchedulerPolicyBinpack.String()
+
+	fewer := &NodeScore{NodeID: "fewer"}
+	fewer.AddTaintTolerationScore(2, 3, binpack, weight)
+	more := &NodeScore{NodeID: "more"}
+	more.AddTaintTolerationScore(3, 3, binpack, weight)
+
+	for _, ns := range []*NodeScore{fewer, more} {
+		if math.IsInf(float64(ns.Score), 0) || math.IsNaN(float64(ns.Score)) {
+			t.Fatalf("node %s score = %v, want a finite penalty", ns.NodeID, ns.Score)
+		}
+	}
+	if !(fewer.Score > more.Score) {
+		t.Fatalf("fewer taints score %v, more taints score %v: want fewer > more", fewer.Score, more.Score)
 	}
 }

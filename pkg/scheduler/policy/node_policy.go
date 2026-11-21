@@ -262,7 +262,8 @@ func (ns *NodeScore) AddTaintTolerationScore(count, maxCount int, policy string,
 	if count <= 0 || maxCount <= 0 {
 		return
 	}
-	penalty := weight * float32(count) / float32(maxCount)
+	// Normalize first so a large finite weight cannot overflow float32 before the division.
+	penalty := weight * (float32(count) / float32(maxCount))
 	if policy == util.NodeSchedulerPolicySpread.String() {
 		penalty = -penalty
 	}
