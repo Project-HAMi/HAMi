@@ -65,7 +65,7 @@ func newSchedulerConfigCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "scheduler-config",
 		Short: "Validate HAMi scheduler startup options offline",
-		Long: "Check HAMi's node-affinity score weight and device-plugin ServiceAccount options " +
+		Long: "Check HAMi's node-affinity and taint-toleration score weights and device-plugin ServiceAccount options " +
 			"without creating a Kubernetes client or starting servers. " +
 			"Non-loopback extender and enabled profiling addresses keep their startup warnings. " +
 			"Use 'validate device-config <path>' separately for device configuration files.",

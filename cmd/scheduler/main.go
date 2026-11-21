@@ -149,9 +149,6 @@ func start() error {
 	if err := validateSchedulerOptions(); err != nil {
 		return err
 	}
-	if err := config.ValidateTaintTolerationScoreWeight(config.TaintTolerationScoreWeight); err != nil {
-		return err
-	}
 
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
