@@ -17,6 +17,9 @@ limitations under the License.
 package remotegpu
 
 import (
+	"sort"
+	"time"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
@@ -57,5 +60,36 @@ func (p *pool) inspect() []PoolDevice {
 	for i := range out {
 		out[i].Reserved = p.reserved(out[i].Device.ID)
 	}
+	return out
+}
+
+// PoolServer is one Lupine server the pool hands out cards from, with the
+// outcome of the scheduler's last read of its /metrics endpoint.
+type PoolServer struct {
+	Server   string
+	Endpoint string
+	// Up is false when the last read failed, or the server could not read its
+	// GPUs. The pool then keeps the usage the server reported before, so a
+	// server down for long means stale data.
+	Up bool
+	// LastSuccess is zero until a read has worked.
+	LastSuccess time.Time
+}
+
+// InspectServers reports the servers the pool last saw, sorted by name, without
+// refreshing it.
+func (dev *RemoteGPUDevices) InspectServers() []PoolServer {
+	return dev.pool.inspectServers()
+}
+
+func (p *pool) inspectServers() []PoolServer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]PoolServer, 0, len(p.endpoints))
+	for server, endpoint := range p.endpoints {
+		s := p.scrapes[server]
+		out = append(out, PoolServer{Server: server, Endpoint: endpoint, Up: s.up, LastSuccess: s.lastSuccess})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Server < out[j].Server })
 	return out
 }

@@ -81,6 +81,12 @@ spec:
           {{- with .Values.devices.remotegpu.server.resources }}
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.devices.remotegpu.server.livenessProbe }}
+          livenessProbe: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.devices.remotegpu.server.readinessProbe }}
+          readinessProbe: {{ toYaml . | nindent 12 }}
+          {{- end }}
         {{- if .Values.devices.remotegpu.monitor.enabled }}
         - name: remote-gpu-monitor
           image: {{ include "hami.devicePlugin.monitor.image" . }}

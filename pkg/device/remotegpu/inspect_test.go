@@ -61,3 +61,60 @@ func TestInspect_ReportsEachCardOnceByServer(t *testing.T) {
 	assert.Equal(t, byID["gpu-a/GPU-1"].Device.Devmem, int64(40000))
 	assert.Equal(t, byID["gpu-a/GPU-1"].Device.Type, RemoteGPUCommonWord)
 }
+
+// A server whose /metrics stops answering reads as down, and keeps the time of
+// its last good read so an alert can tell how stale its reported usage is.
+func TestInspectServers_TracksScrapeOutcome(t *testing.T) {
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-2", 40000)}),
+	}, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": nil})
+
+	p := newPool(DefaultLupinePort)
+	assert.Equal(t, len(p.inspectServers()), 0, "nothing read yet")
+	p.snapshot(context.Background())
+
+	got := p.inspectServers()
+	assert.Equal(t, len(got), 2)
+	assert.Equal(t, got[0].Server, "gpu-a")
+	assert.Assert(t, got[0].Up)
+	firstSuccess := got[0].LastSuccess
+	assert.Assert(t, !firstSuccess.IsZero())
+	assert.Equal(t, got[1].Server, "gpu-b")
+	assert.Assert(t, !got[1].Up)
+	assert.Assert(t, got[1].LastSuccess.IsZero(), "never read")
+
+	stubServerUsage(t, map[string][]string{})
+	p.refreshNow(context.Background())
+	got = p.inspectServers()
+	assert.Assert(t, !got[0].Up)
+	assert.Equal(t, got[0].LastSuccess, firstSuccess, "a failed read keeps the last success")
+}
+
+// A server that is NotReady for one refresh is not asked, and must not lose
+// the time of its last good read while it is out.
+func TestInspectServers_KeepsLastSuccessAcrossNotReady(t *testing.T) {
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}
+	stubFleet(t, nodes, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": nil})
+
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	firstSuccess := p.inspectServers()[0].LastSuccess
+	assert.Assert(t, !firstSuccess.IsZero())
+
+	setNodeReady(&nodes[0], corev1.ConditionFalse)
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	assert.Equal(t, len(p.inspectServers()), 0, "a NotReady server is not listed")
+
+	setNodeReady(&nodes[0], corev1.ConditionTrue)
+	stubServerUsage(t, map[string][]string{})
+	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
+	p.snapshot(context.Background())
+	got := p.inspectServers()
+	assert.Equal(t, len(got), 1)
+	assert.Assert(t, !got[0].Up)
+	assert.Equal(t, got[0].LastSuccess, firstSuccess)
+}

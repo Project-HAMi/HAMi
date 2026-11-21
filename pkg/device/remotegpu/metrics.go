@@ -19,6 +19,7 @@ package remotegpu
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,10 @@ const (
 	// there.
 	clientMemoryMetric = "lupine_client_device_memory_used_bytes"
 
+	// nvmlUpMetric is 0 when the server cannot read its GPUs. It then reports
+	// no clients at all, which says nothing about whether the cards are free.
+	nvmlUpMetric = "lupine_monitor_nvml_up"
+
 	// deviceUUIDLabel ties a metric line back to a card in the node's
 	// registration annotation.
 	deviceUUIDLabel = "device_uuid"
@@ -44,6 +49,8 @@ const (
 
 // Swappable for tests, like the API listers above.
 var fetchBusyDevices = httpBusyDevices
+
+var errNVMLDown = errors.New("lupine server cannot read its GPUs through NVML")
 
 var metricsClient = &http.Client{Timeout: metricsTimeout}
 
@@ -82,6 +89,9 @@ func parseBusyDevices(r io.Reader) (map[string]struct{}, error) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if value, ok := strings.CutPrefix(line, nvmlUpMetric+" "); ok && strings.TrimSpace(value) != "1" {
+			return nil, errNVMLDown
+		}
 		if !strings.HasPrefix(line, clientMemoryMetric+"{") {
 			continue
 		}

@@ -160,6 +160,15 @@ var remoteGPUPool = func() []remotegpu.PoolDevice {
 	return dev.Inspect()
 }
 
+// remoteGPUServers reads the lupine servers the same way. Swappable for tests.
+var remoteGPUServers = func() []remotegpu.PoolServer {
+	dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices)
+	if !ok {
+		return nil
+	}
+	return dev.InspectServers()
+}
+
 // collectNodeMetrics emits node-level GPU metrics (memory/core limits and
 // allocations, sharing counts, MIG instances and overview) for every device on
 // every node. AMD core values are normalized to a percentage.
@@ -470,41 +479,70 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 	}
 }
 
-// collectRemoteGPUMetrics exports the lupine fleet once, keyed by the server
-// that owns each card rather than the client nodes that can reach it. A card
-// is handed out whole, so allocation is a flag and allocated memory is either
-// the whole card or nothing.
-func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.Metric) {
-	labels := []string{"server", "endpoint", "device_uuid", "device_index", "device_type"}
-	memoryLimitDesc := prometheus.NewDesc(
+var (
+	remoteGPULabels          = []string{"server", "endpoint", "device_uuid", "device_index", "device_type"}
+	remoteGPUMemoryLimitDesc = prometheus.NewDesc(
 		"hami_remote_gpu_memory_limit_bytes",
 		"Device memory limit for a lupine-served GPU",
-		labels, nil,
+		remoteGPULabels, nil,
 	)
-	allocatedDesc := prometheus.NewDesc(
+	remoteGPUAllocatedDesc = prometheus.NewDesc(
 		"hami_remote_gpu_allocated",
 		"1 if a pod holds this lupine-served GPU, 0 if it is free",
-		labels, nil,
+		remoteGPULabels, nil,
 	)
-	overviewDesc := prometheus.NewDesc(
+	remoteGPUOverviewDesc = prometheus.NewDesc(
 		"hami_remote_gpu_overview",
 		"Memory allocated on a lupine-served GPU, with its server and capacity",
 		[]string{"server", "endpoint", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
 	)
+	remoteGPUServerUpDesc = prometheus.NewDesc(
+		"hami_remote_gpu_server_up",
+		"1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise",
+		[]string{"server", "endpoint"}, nil,
+	)
+	remoteGPUServerLastSuccessDesc = prometheus.NewDesc(
+		"hami_remote_gpu_server_last_scrape_success_timestamp_seconds",
+		"Time of the scheduler's last successful read of a lupine server's /metrics",
+		[]string{"server", "endpoint"}, nil,
+	)
+)
+
+// collectRemoteGPUMetrics exports the lupine fleet once, keyed by the server
+// that owns each card rather than the client nodes that can reach it. A card
+// is handed out whole, so allocation is a flag and allocated memory is either
+// the whole card or nothing. The descriptors are built once, so a cluster
+// without remote GPUs pays nothing per scrape.
+func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.Metric) {
 	for _, pd := range remoteGPUPool() {
 		d := pd.Device
 		allocated, usedmem := 0.0, int64(0)
 		if pd.Reserved {
 			allocated, usedmem = 1, d.Devmem
 		}
-		if err := sendMetric(ch, memoryLimitDesc, prometheus.GaugeValue, mibToBytes(d.Devmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+		if err := sendMetric(ch, remoteGPUMemoryLimitDesc, prometheus.GaugeValue, mibToBytes(d.Devmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_memory_limit_bytes metric: %v", err)
 		}
-		if err := sendMetric(ch, allocatedDesc, prometheus.GaugeValue, allocated, pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
+		if err := sendMetric(ch, remoteGPUAllocatedDesc, prometheus.GaugeValue, allocated, pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), d.Type); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_allocated metric: %v", err)
 		}
-		if err := sendMetric(ch, overviewDesc, prometheus.GaugeValue, mibToBytes(usedmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), fmt.Sprint(d.Devcore), fmt.Sprint(d.Devmem), d.Type); err != nil {
+		if err := sendMetric(ch, remoteGPUOverviewDesc, prometheus.GaugeValue, mibToBytes(usedmem), pd.Server, pd.Endpoint, d.ID, fmt.Sprint(d.Index), fmt.Sprint(d.Devcore), fmt.Sprint(d.Devmem), d.Type); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_overview metric: %v", err)
+		}
+	}
+	for _, s := range remoteGPUServers() {
+		up := 0.0
+		if s.Up {
+			up = 1
+		}
+		if err := sendMetric(ch, remoteGPUServerUpDesc, prometheus.GaugeValue, up, s.Server, s.Endpoint); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_server_up metric: %v", err)
+		}
+		if s.LastSuccess.IsZero() {
+			continue
+		}
+		if err := sendMetric(ch, remoteGPUServerLastSuccessDesc, prometheus.GaugeValue, float64(s.LastSuccess.Unix()), s.Server, s.Endpoint); err != nil {
+			klog.V(4).Infof("Failed to send hami_remote_gpu_server_last_scrape_success_timestamp_seconds metric: %v", err)
 		}
 	}
 }

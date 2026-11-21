@@ -180,7 +180,14 @@ type pool struct {
 	inUse        map[string]struct{}  // device ID held by a live pod
 	held         map[string]booking   // device ID booked since the last refresh
 	busy         map[string]struct{}  // device ID a server reports a client on
+	scrapes      map[string]scrape    // lupine node name -> outcome of reading its /metrics
 	waiting      map[types.UID]waiter // pods Fit refused since the fleet last changed
+}
+
+// scrape is what the last attempt to read one server's /metrics found.
+type scrape struct {
+	up          bool
+	lastSuccess time.Time
 }
 
 func newPool(defaultPort int) *pool {
@@ -191,6 +198,7 @@ func newPool(defaultPort int) *pool {
 		inUse:        map[string]struct{}{},
 		held:         map[string]booking{},
 		busy:         map[string]struct{}{},
+		scrapes:      map[string]scrape{},
 		waiting:      map[types.UID]waiter{},
 	}
 }
@@ -304,6 +312,7 @@ func (p *pool) refresh(ctx context.Context) {
 	previousInUse := p.inUse
 	previousBusy := p.busy
 	previousDevices, previousEndpoints, podsListed := p.devices, p.endpoints, p.podsListed
+	previousScrapes := p.scrapes
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -406,7 +415,7 @@ func (p *pool) refresh(ctx context.Context) {
 	}
 	// Ask every server concurrently: one unreachable server pays its own
 	// metricsTimeout instead of adding it to everyone else's.
-	busy := askServers(ctx, endpoints, previousBusy, listedServers)
+	busy, scrapes := askServers(ctx, endpoints, previousBusy, previousScrapes, listedServers)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -429,6 +438,7 @@ func (p *pool) refresh(ctx context.Context) {
 		p.podsListed = true
 	}
 	p.busy = busy
+	p.scrapes = scrapes
 	p.fetchedAt = time.Now()
 	// A hold is only needed until the pod list catches up with it. Drop the
 	// ones it has, and the ones so old that the pod they were taken for is
@@ -735,14 +745,25 @@ func (p *pool) allocationSnapshot() (map[string]bool, map[string]bool) {
 // Every server is asked concurrently: fetchBusyDevices carries its own
 // metricsTimeout, and asking sequentially would make one unreachable server
 // add its timeout to every other server's, one at a time.
-func askServers(ctx context.Context, endpoints map[string]string, previous map[string]struct{}, listedServers map[string]struct{}) map[string]struct{} {
+//
+// It also reports, per server asked, whether the read worked and when it last
+// did, carrying the time of the last success over from previousScrapes.
+func askServers(ctx context.Context, endpoints map[string]string, previous map[string]struct{}, previousScrapes map[string]scrape, listedServers map[string]struct{}) (map[string]struct{}, map[string]scrape) {
 	busy := map[string]struct{}{}
+	scrapes := make(map[string]scrape, len(endpoints))
 	// A server can temporarily disappear from endpoints because it is NotReady.
 	// Its old usage is still safer than assuming its direct clients went away.
 	// Drop only records for Nodes no longer returned by Kubernetes at all.
 	for id := range previous {
 		if _, stillListed := listedServers[serverOf(id)]; stillListed {
 			busy[id] = struct{}{}
+		}
+	}
+	// Such a server is not asked, but the time of its last good read must
+	// outlive the gap, or a failed read after it returns would lose it.
+	for node, s := range previousScrapes {
+		if _, stillListed := listedServers[node]; stillListed {
+			scrapes[node] = scrape{lastSuccess: s.lastSuccess}
 		}
 	}
 	var mu sync.Mutex
@@ -757,8 +778,10 @@ func askServers(ctx context.Context, endpoints map[string]string, previous map[s
 			if err != nil {
 				klog.V(4).InfoS("remotegpu: no usage from lupine server, keeping what it last reported",
 					"node", node, "endpoint", endpoint, "error", err)
+				scrapes[node] = scrape{lastSuccess: previousScrapes[node].lastSuccess}
 				return
 			}
+			scrapes[node] = scrape{up: true, lastSuccess: time.Now()}
 			// A successful response is authoritative, including an empty one.
 			for id := range busy {
 				if serverOf(id) == node {
@@ -771,7 +794,7 @@ func askServers(ctx context.Context, endpoints map[string]string, previous map[s
 		}(node, endpoint)
 	}
 	wg.Wait()
-	return busy
+	return busy, scrapes
 }
 
 // endpoint returns the "host:port" a client should point LUPINE_SERVER at.
