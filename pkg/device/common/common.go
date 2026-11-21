@@ -22,8 +22,12 @@ import (
 	"strings"
 )
 
-// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
-// device UUIDs that must not receive new pods.
+// DeviceCordonAnnotation is a node annotation holding a comma-separated list
+// of device UUIDs that must not receive new pods, without affecting pods
+// already running on those devices. It's a live, per-GPU equivalent of
+// `kubectl cordon`: unlike a vendor's register-time device list, it takes
+// effect after the scheduler's node cache observes the update, and needs no
+// device-plugin restart.
 const DeviceCordonAnnotation = "hami.io/device-cordon"
 
 // CordonedDevices parses DeviceCordonAnnotation off a node's annotations into a UUID set.
