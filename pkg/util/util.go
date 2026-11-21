@@ -85,6 +85,18 @@ func GetNodeWithContext(ctx context.Context, nodename string) (*corev1.Node, err
 // beyond creating the pod, and when the lock is missing the nearest annotated
 // pod is not the pod being allocated, so that path served one pod's devices to
 // another (issue #3076).
+//
+// The lock records only a namespace and a name, so the pod it resolves to is
+// checked against what the scheduler leaves on the pod it locks for: bound to
+// this node, assigned here by the scheduler, and still allocating. A pod
+// failing any of these is not the pod this Allocate is for, and serving it
+// would hand its allocation, and mark its bind phase, from the wrong node.
+//
+// The pod is not compared with the time the lock was taken. A pod recreated
+// under the same name, as a StatefulSet replacement is, finds the lock its
+// predecessor left and keeps it without a new timestamp, and the lock time
+// comes from the scheduler's clock while the creation time comes from the API
+// server's. Either way the pod being allocated would be refused.
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	pod, err := GetAllocatePodByNode(ctx, node)
 	if err != nil {
@@ -93,7 +105,28 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	if pod == nil {
 		return nil, fmt.Errorf("no node lock naming a pending pod on node %s", node)
 	}
+	if err := checkPendingPod(pod, node); err != nil {
+		return nil, err
+	}
 	return pod, nil
+}
+
+// checkPendingPod rejects a pod the node lock names that cannot be the pod
+// the scheduler locked the node for.
+func checkPendingPod(pod *corev1.Pod, node string) error {
+	if pod.Spec.NodeName != node {
+		return fmt.Errorf("node lock on %s names pod %s/%s, which is bound to node %q",
+			node, pod.Namespace, pod.Name, pod.Spec.NodeName)
+	}
+	if assigned := pod.Annotations[AssignedNodeAnnotations]; assigned != node {
+		return fmt.Errorf("node lock on %s names pod %s/%s, which the scheduler assigned to node %q",
+			node, pod.Namespace, pod.Name, assigned)
+	}
+	if phase := pod.Annotations[DeviceBindPhase]; phase != DeviceBindAllocating {
+		return fmt.Errorf("node lock on %s names pod %s/%s, whose bind phase is %q, not %q",
+			node, pod.Namespace, pod.Name, phase, DeviceBindAllocating)
+	}
+	return nil
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
