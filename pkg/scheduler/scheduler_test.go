@@ -1256,6 +1256,52 @@ func Test_register_RegistersTecoriginNode(t *testing.T) {
 	require.Equal(t, int64(0b1111), got.Devices[tecorigin.TecoCommonWord][0].Devcore)
 }
 
+func Test_register_InitsOutcomeMetricsForNodeDevices(t *testing.T) {
+	previousDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = previousDevices })
+	device.DevicesMap = map[string]device.Devices{
+		nvidia.NvidiaGPUDevice: nvidia.InitNvidiaDevice(nvidia.NvidiaConfig{}),
+		tecorigin.TecoDevice:   tecorigin.InitTecoDevice(tecorigin.TecoConfig{ResourceCountName: "tecorigin.com/gpucore"}),
+	}
+
+	client.KubeClient = fake.NewClientset()
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+
+	// The node only has Tecorigin devices.
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "teco-metrics-node",
+			Annotations: map[string]string{
+				"hami.io/node-tecorigin-register": "SN123432552,4,15296,15,Tecorigin,0,true,0,hami-core:",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				"tecorigin.com/gpucore": resource.MustParse("4"),
+			},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	s.register(labels.Everything())
+
+	require.Equal(t, 3, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocations_total"))
+	require.Equal(t, 10, promtestutil.CollectAndCount(s.GetAllocationMetrics(), "hami_scheduler_allocation_failures_total"))
+	require.NoError(t, promtestutil.CollectAndCompare(s.GetAllocationMetrics(), strings.NewReader(`
+# HELP hami_scheduler_allocations_total Successful HAMi device allocations.
+# TYPE hami_scheduler_allocations_total counter
+hami_scheduler_allocations_total{device_type="Tecorigin",failure_reason="none",phase="allocate"} 0
+hami_scheduler_allocations_total{device_type="Tecorigin",failure_reason="none",phase="bind"} 0
+hami_scheduler_allocations_total{device_type="Tecorigin",failure_reason="none",phase="filter"} 0
+`), "hami_scheduler_allocations_total"))
+}
+
 func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 	// Define a helper function to create a scheduler with a node that has nil annotations.
 	createSchedulerWithNilAnnotations := func() *Scheduler {
