@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"net"
@@ -102,7 +103,8 @@ func TestStartMetricsServerBindFailure(t *testing.T) {
 	defer occupied.Close()
 
 	errCh := make(chan error, 1)
-	listener, err := startMetricsServer(occupied.Addr().String(), nil, false, errCh)
+	var wg sync.WaitGroup
+	listener, err := startMetricsServer(t.Context(), &wg, occupied.Addr().String(), nil, false, errCh)
 	if listener != nil {
 		listener.Close()
 		t.Fatal("metrics unexpectedly bound an occupied port")
@@ -127,7 +129,8 @@ func TestStartMetricsServer(t *testing.T) {
 		podManager:   device.NewPodManager(),
 	}
 	errCh := make(chan error, 1)
-	listener, err := startMetricsServer("127.0.0.1:0", provider, false, errCh)
+	var wg sync.WaitGroup
+	listener, err := startMetricsServer(t.Context(), &wg, "127.0.0.1:0", provider, false, errCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +233,7 @@ func TestStartMetricsLifecycle(t *testing.T) {
 			return listener, err
 		}
 
-		err = start()
+		err = start(t.Context())
 		var networkError *net.OpError
 		if !errors.As(err, &networkError) || !strings.Contains(err.Error(), "metrics address") {
 			t.Fatalf("expected startup to return the metrics bind error, got %v", err)
@@ -285,7 +288,7 @@ func TestStartMetricsLifecycle(t *testing.T) {
 			<-done
 		})
 		go func() {
-			result <- start()
+			result <- start(t.Context())
 			close(done)
 		}()
 
@@ -308,6 +311,53 @@ func TestStartMetricsLifecycle(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("startup did not return the supervised server error")
+		}
+		for _, listener := range startedListeners {
+			rebound, err := net.Listen("tcp", listener.Addr().String())
+			if err != nil {
+				t.Errorf("listener %s was not released: %v", listener.Addr(), err)
+				continue
+			}
+			rebound.Close()
+		}
+	})
+
+	t.Run("termination signal releases all listeners", func(t *testing.T) {
+		clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+		config.MetricsBindAddress = "127.0.0.1:0"
+		acquired := make(chan net.Listener, 3)
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				acquired <- listener
+			}
+			return listener, err
+		}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		result := make(chan error, 1)
+		go func() {
+			result <- start(ctx)
+		}()
+
+		startedListeners := make([]net.Listener, 0, cap(acquired))
+		for len(startedListeners) < cap(acquired) {
+			select {
+			case listener := <-acquired:
+				startedListeners = append(startedListeners, listener)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("startup acquired %d listeners, want 3", len(startedListeners))
+			}
+		}
+		cancel()
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatalf("expected a clean shutdown, got %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("startup did not return after its context was canceled")
 		}
 		for _, listener := range startedListeners {
 			rebound, err := net.Listen("tcp", listener.Addr().String())

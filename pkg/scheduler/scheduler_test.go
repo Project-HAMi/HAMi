@@ -4296,3 +4296,16 @@ func Test_buildNodeUsage_LeavesPodInfosNil(t *testing.T) {
 	assert.Equal(t, len(usage.Devices.DeviceLists), 1)
 	assert.Assert(t, usage.Devices.DeviceLists[0].Device.PodInfos == nil)
 }
+
+// TestSchedulerStopIsIdempotent checks that repeated Stop calls close stopCh
+// once without panicking.
+func TestSchedulerStopIsIdempotent(t *testing.T) {
+	s := &Scheduler{stopCh: make(chan struct{})}
+	s.Stop()
+	s.Stop()
+	select {
+	case <-s.stopCh:
+	default:
+		t.Fatal("Stop did not close stopCh")
+	}
+}

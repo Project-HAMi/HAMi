@@ -75,6 +75,7 @@ type Scheduler struct {
 	leaderManager leaderelection.LeaderManager
 
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 	nodeNotify   chan struct{}
 	leaderNotify chan struct{}
 
@@ -895,8 +896,12 @@ func (s *Scheduler) Start() error {
 	return nil
 }
 
+// Stop stops the scheduler's informers and background loops. It is safe to
+// call more than once.
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 }
 
 func (s *Scheduler) RegisterFromNodeAnnotations() {
