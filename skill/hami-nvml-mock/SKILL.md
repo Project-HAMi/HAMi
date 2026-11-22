@@ -20,4 +20,8 @@ Use a physical NVIDIA GPU to run CUDA workloads, verify runtime enforcement of G
 
 ## Set up the test environment
 
-Follow Lab 5 for prerequisites, cluster setup, test workloads, and cleanup. The lab installs a published HAMi release. To test a local code change, use an image built from the checkout for the component under test. [Lab 5 in English](https://project-hami.io/tutorials/labs/nvml-mock) · [中文实验](https://project-hami.io/zh/tutorials/labs/nvml-mock)
+Follow Lab 5 for prerequisites, cluster setup, test workloads, and cleanup. The lab installs a published HAMi release. [Lab 5 in English](https://project-hami.io/tutorials/labs/nvml-mock) · [中文实验](https://project-hami.io/zh/tutorials/labs/nvml-mock)
+
+### Lab 5 known issue
+
+If `kubectl version --client --short` reports `unknown flag: --short` during the prerequisite check, run `kubectl version --client`.
