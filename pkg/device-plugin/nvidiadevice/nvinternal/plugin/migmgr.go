@@ -243,6 +243,10 @@ func (m *MigInstanceManager) DisableIdleGPUs(deviceCount int, inUse map[int]stru
 		if _, busy := inUse[gpuIndex]; busy {
 			enabled, err := m.migCurrentlyEnabled(gpuIndex)
 			lk.Unlock()
+			if isUnusableGPU(err) {
+				klog.Warningf("Skipping GPU %d while disabling MIG: %v", gpuIndex, err)
+				continue
+			}
 			if err != nil {
 				return disabled, err
 			}
@@ -253,6 +257,10 @@ func (m *MigInstanceManager) DisableIdleGPUs(deviceCount int, inUse map[int]stru
 		}
 		if err := m.ensureMigModeDisabled(gpuIndex); err != nil {
 			lk.Unlock()
+			if isUnusableGPU(err) {
+				klog.Warningf("Skipping GPU %d while disabling MIG: %v", gpuIndex, err)
+				continue
+			}
 			return disabled, err
 		}
 		m.clearAllocationsForGPU(gpuIndex)
@@ -281,7 +289,7 @@ func (m *MigInstanceManager) clearAllocationsForGPU(gpuIndex int) {
 func (m *MigInstanceManager) deviceHandleByIndex(gpuIndex int) (nvml.Device, error) {
 	dev, ret := m.nvmllib.DeviceGetHandleByIndex(gpuIndex)
 	if ret != nvml.SUCCESS {
-		return nil, fmt.Errorf("nvml get handle by index %d: %s", gpuIndex, nvml.ErrorString(ret))
+		return nil, nvmlError(ret, "nvml get handle by index %d: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	return dev, nil
 }
@@ -302,7 +310,7 @@ func (m *MigInstanceManager) ensureMigModeEnabled(gpuIndex int) error {
 		return nil
 	}
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
+		return nvmlError(ret, "gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if curMode == nvml.DEVICE_MIG_ENABLE {
 		if pendingMode == nvml.DEVICE_MIG_ENABLE {
@@ -328,7 +336,7 @@ func (m *MigInstanceManager) ensureMigModeEnabled(gpuIndex int) error {
 	}
 	curMode, pendingMode, ret = dev.GetMigMode()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d verify mig mode after set: %s", gpuIndex, nvml.ErrorString(ret))
+		return nvmlError(ret, "gpu %d verify mig mode after set: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if curMode == nvml.DEVICE_MIG_ENABLE {
 		return nil
@@ -349,7 +357,7 @@ func (m *MigInstanceManager) migCurrentlyEnabled(gpuIndex int) (bool, error) {
 		return false, nil
 	}
 	if ret != nvml.SUCCESS {
-		return false, fmt.Errorf("gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
+		return false, nvmlError(ret, "gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	return curMode == nvml.DEVICE_MIG_ENABLE || pendingMode == nvml.DEVICE_MIG_ENABLE, nil
 }
@@ -369,7 +377,7 @@ func (m *MigInstanceManager) ensureMigModeDisabled(gpuIndex int) error {
 		return nil
 	}
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
+		return nvmlError(ret, "gpu %d get mig mode: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if curMode == nvml.DEVICE_MIG_DISABLE {
 		if pendingMode == nvml.DEVICE_MIG_DISABLE {
@@ -399,7 +407,7 @@ func (m *MigInstanceManager) ensureMigModeDisabled(gpuIndex int) error {
 	}
 	curMode, pendingMode, ret = dev.GetMigMode()
 	if ret != nvml.SUCCESS {
-		return fmt.Errorf("gpu %d verify mig mode after set: %s", gpuIndex, nvml.ErrorString(ret))
+		return nvmlError(ret, "gpu %d verify mig mode after set: %s", gpuIndex, nvml.ErrorString(ret))
 	}
 	if curMode == nvml.DEVICE_MIG_DISABLE {
 		return nil
@@ -952,15 +960,30 @@ func (m *MigInstanceManager) needsMigDisable(deviceCount int) (bool, error) {
 	}
 	defer done()
 	needsDisable := false
+	inspected := 0
+	var lastErr error
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
 		lk := m.gpuLock(gpuIndex)
 		lk.Lock()
 		enabled, err := m.migCurrentlyEnabled(gpuIndex)
 		lk.Unlock()
+		if isUnusableGPU(err) {
+			// A skipped GPU is also left out of the device map, so its unknown
+			// MIG state is never advertised.
+			klog.Warningf("Skipping GPU %d in the MIG state check: %v", gpuIndex, err)
+			lastErr = err
+			continue
+		}
 		if err != nil {
 			return false, err
 		}
+		inspected++
 		needsDisable = needsDisable || enabled
+	}
+	// When no GPU's MIG state could be read, the state of the node is unknown:
+	// fail as before rather than guess.
+	if deviceCount > 0 && inspected == 0 {
+		return false, lastErr
 	}
 	return needsDisable, nil
 }
