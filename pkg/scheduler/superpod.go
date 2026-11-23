@@ -19,7 +19,6 @@ package scheduler
 import (
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -776,15 +775,16 @@ func resolveSuperpodRackBoost() float32 {
 // applySuperpodRackBoost applies a rack preference to a node's base score.
 //
 //   - Anchored: nodes in racks where the task's pods already run get the full
-//     bonus, added under binpack and capped below the base score under spread
-//     so idle nodes remain preferred.
+//     bonus, added under binpack and capped under spread.
 //   - Not anchored (first pod): nodes get a proportional bonus of
 //     superpodRackBoost * rackSlots / maxRackSlots, where maxRackSlots is the
 //     largest per-rack remaining slots across all candidate superpods,
 //     derived from ctx.RackSlotCounts on the fly. The cross-superpod
 //     denominator keeps the boost comparable between superpods. Racks whose
 //     remaining slots are less than the single-pod request get no bonus. Under
-//     spread, the resulting penalty is capped below a positive base score.
+//     spread, the boost is capped so positive scores stay positive and retain
+//     their relative order; zero and negative scores still receive a bounded
+//     rack preference.
 //
 // Nodes without a rackid label keep their base score.
 func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID string, baseScore float32, policy string) float32 {
@@ -860,11 +860,8 @@ func applyRackBoostToScore(baseScore, boost float32, spread bool) float32 {
 	if !spread {
 		return baseScore + boost
 	}
-	if baseScore <= 0 {
-		return baseScore
-	}
-	if boost >= baseScore {
-		boost = math.Nextafter32(baseScore, 0)
+	if baseScore > 0 && boost > baseScore/2 {
+		boost = baseScore / 2
 	}
 	return baseScore - boost
 }

@@ -18,7 +18,6 @@ package scheduler
 
 import (
 	"fmt"
-	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -924,7 +923,7 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		}
 		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
 		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicySpread.String())
-		assert.Equal(t, float32(5.0)-math.Nextafter32(float32(5.0), 0), score)
+		assert.Equal(t, float32(2.5), score)
 	})
 
 	t.Run("anchored binpack-first chain keeps the boost", func(t *testing.T) {
@@ -1052,9 +1051,30 @@ func TestApplySuperpodRackBoost(t *testing.T) {
 		}
 		node := makeNodeWithLabels("n1", map[string]string{util.SuperPodIDLabel: "sp-1", util.RackIDLabel: "rack-A"})
 		score := applySuperpodRackBoost(ctx, node, "n1", 5.0, util.NodeSchedulerPolicySpread.String())
-		// A spread penalty must leave a positive score, so an idle node at 0
-		// still ranks ahead of this node.
-		assert.Equal(t, float32(5.0)-math.Nextafter32(float32(5.0), 0), score)
+		assert.Equal(t, float32(2.5), score)
+	})
+
+	t.Run("spread caps boost without flattening scores", func(t *testing.T) {
+		boost := float32(util.Weight) * 2
+		higher := applyRackBoostToScore(5, boost, true)
+		lower := applyRackBoostToScore(4, boost, true)
+		assert.Equal(t, float32(2.5), higher)
+		assert.Equal(t, float32(2), lower)
+		assert.Assert(t, lower < higher)
+	})
+
+	t.Run("spread boosts zero and negative scores", func(t *testing.T) {
+		boost := float32(util.Weight) * 2
+		assert.Equal(t, -boost, applyRackBoostToScore(0, boost, true))
+		assert.Equal(t, float32(-10)-boost, applyRackBoostToScore(-10, boost, true))
+	})
+
+	t.Run("spread keeps idle preferred rack ahead of idle rack elsewhere", func(t *testing.T) {
+		boost := float32(2)
+		preferredRackScore := applyRackBoostToScore(0, boost, true)
+		otherRackScore := float32(0)
+		assert.Equal(t, float32(-2), preferredRackScore)
+		assert.Assert(t, preferredRackScore < otherRackScore)
 	})
 
 	t.Run("first pod binpack-first chain keeps proportional boost", func(t *testing.T) {
