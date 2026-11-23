@@ -102,39 +102,45 @@ func (o *deviceListBuilder) build() (DeviceList, error) {
 }
 
 // buildWithSession borrows NVML; the caller owns its lifecycle.
+//
+// GPUs that NVML reports as unusable are left out (see VisitUsableDevices), so
+// one such GPU does not stop the scores of the others from being computed. Each
+// Device keeps its NVML index, and Links is keyed by that index.
 func (o *deviceListBuilder) buildWithSession() (DeviceList, error) {
-	nvmlDevices, err := o.devicelib.GetDevices()
+	var devices DeviceList
+	err := VisitUsableDevices(o.nvmllib, o.devicelib, func(i int, d device.Device) error {
+		device, err := newDevice(i, d)
+		if err != nil {
+			return fmt.Errorf("failed to construct linked device: %v", err)
+		}
+		devices = append(devices, device)
+		return nil
+	}, func(i int, ret nvml.Return) {
+		klog.Warningf("Leaving GPU at index %d out of the topology score: %v", i, ret)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %v", err)
 	}
 
-	var devices DeviceList
-	for i, d := range nvmlDevices {
-		device, err := newDevice(i, d)
-		if err != nil {
-			return nil, fmt.Errorf("failed to construct linked device: %v", err)
-		}
-		devices = append(devices, device)
-	}
+	for _, d1 := range devices {
+		for _, d2 := range devices {
+			if d1 == d2 {
+				continue
+			}
+			p2plink, err := GetP2PLink(d1.Device, d2.Device)
+			if err != nil {
+				return nil, fmt.Errorf("error getting P2PLink for devices (%v, %v): %v", d1.Index, d2.Index, err)
+			}
+			if p2plink != P2PLinkUnknown {
+				d1.Links[d2.Index] = append(d1.Links[d2.Index], P2PLink{d2, p2plink})
+			}
 
-	for i, d1 := range nvmlDevices {
-		for j, d2 := range nvmlDevices {
-			if i != j {
-				p2plink, err := GetP2PLink(d1, d2)
-				if err != nil {
-					return nil, fmt.Errorf("error getting P2PLink for devices (%v, %v): %v", i, j, err)
-				}
-				if p2plink != P2PLinkUnknown {
-					devices[i].Links[j] = append(devices[i].Links[j], P2PLink{devices[j], p2plink})
-				}
-
-				nvlink, err := GetNVLink(d1, d2)
-				if err != nil {
-					return nil, fmt.Errorf("error getting NVLink for devices (%v, %v): %v", i, j, err)
-				}
-				if nvlink != P2PLinkUnknown {
-					devices[i].Links[j] = append(devices[i].Links[j], P2PLink{devices[j], nvlink})
-				}
+			nvlink, err := GetNVLink(d1.Device, d2.Device)
+			if err != nil {
+				return nil, fmt.Errorf("error getting NVLink for devices (%v, %v): %v", d1.Index, d2.Index, err)
+			}
+			if nvlink != P2PLinkUnknown {
+				d1.Links[d2.Index] = append(d1.Links[d2.Index], P2PLink{d2, nvlink})
 			}
 		}
 	}
