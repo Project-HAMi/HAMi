@@ -28,6 +28,8 @@ type nvmlInfo struct{ info.Interface }
 
 func (nvmlInfo) HasNvml() (bool, string) { return true, "" }
 
+func (nvmlInfo) ResolvePlatform() info.Platform { return info.PlatformNVML }
+
 // migCapableLib returns MIG-capable GPUs that each support only the 1g.10gb
 // profile. The GPU at lostIndex fails the handle lookup with ret.
 func migCapableLib(count, lostIndex int, ret nvml.Return) (nvml.Interface, device.Interface) {
@@ -105,4 +107,37 @@ func TestAddDefaultResourcesMixedStillFails(t *testing.T) {
 		err := AddDefaultResourcesToConfig(nvmlInfo{}, nvmllib, devicelib, mixedConfig())
 		require.ErrorContains(t, err, "GPU at index 0 is unusable")
 	})
+}
+
+// When no GPU is usable, building the resource managers fails. It must not
+// return an empty set, which would make the plugin log "No devices found.
+// Waiting indefinitely." and keep running.
+func TestNewNVMLResourceManagersFailsWhenNoGPUIsUsable(t *testing.T) {
+	for _, failAt := range []string{"DeviceGetHandleByIndex", "GetName"} {
+		t.Run(failAt, func(t *testing.T) {
+			nvmllib, devicelib := realDeviceLib([]string{"NVIDIA H100", "NVIDIA H100"}, -1, "")
+			lib := nvmllib.(*nvmlmock.Interface)
+			lib.InitFunc = func() nvml.Return { return nvml.SUCCESS }
+			lib.ShutdownFunc = func() nvml.Return { return nvml.SUCCESS }
+			getHandle := lib.DeviceGetHandleByIndexFunc
+			lib.DeviceGetHandleByIndexFunc = func(i int) (nvml.Device, nvml.Return) {
+				if failAt == "DeviceGetHandleByIndex" {
+					return nil, nvml.ERROR_GPU_IS_LOST
+				}
+				d, ret := getHandle(i)
+				d.(*nvmlmock.Device).GetNameFunc = func() (string, nvml.Return) { return "", nvml.ERROR_GPU_IS_LOST }
+				return d, ret
+			}
+			migStrategy := spec.MigStrategyNone
+			config := &spec.Config{
+				Flags:     spec.Flags{CommandLineFlags: spec.CommandLineFlags{MigStrategy: &migStrategy}},
+				Resources: spec.Resources{GPUs: []spec.Resource{{Pattern: "*", Name: "nvidia.com/gpu"}}},
+			}
+
+			rms, err := NewNVMLResourceManagers(nvmlInfo{}, nvmllib, devicelib, config)
+
+			require.ErrorContains(t, err, "GPU at index 1 is unusable")
+			require.Empty(t, rms)
+		})
+	}
 }

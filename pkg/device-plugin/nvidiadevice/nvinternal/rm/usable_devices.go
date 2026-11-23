@@ -25,7 +25,8 @@ import (
 // Without it, one such GPU fails every walk and the plugin cannot build a device
 // map for the healthy GPUs either. GPU indices are kept, so device names do not
 // change, and a skipped GPU is not advertised until the plugin restarts after it
-// recovers. When every GPU is unusable the walk still fails.
+// recovers. When every GPU is unusable the walk fails, so the plugin does not
+// start with an empty device map and wait.
 //
 // When nvmllib is set, VisitDevices walks NVML itself through
 // nvidia.VisitUsableDevices, because go-nvlib's walk stops at the first GPU whose
@@ -60,13 +61,24 @@ func (u *usableDevices) VisitDevices(visit func(int, device.Device) error) error
 	if u.nvmllib != nil {
 		return nvidia.VisitUsableDevices(u.nvmllib, u.Interface, notSkipped, u.skip)
 	}
-	return u.Interface.VisitDevices(func(i int, gpu device.Device) error {
+	usable := 0
+	var lastErr error
+	err := u.Interface.VisitDevices(func(i int, gpu device.Device) error {
 		if ret, unusable := nvidia.UnusableGPUReason(gpu); unusable {
 			u.skip(i, ret)
+			lastErr = fmt.Errorf("GPU at index %d is unusable: %v", i, ret)
 			return nil
 		}
+		usable++
 		return notSkipped(i, gpu)
 	})
+	if err != nil {
+		return err
+	}
+	if usable == 0 && lastErr != nil {
+		return lastErr
+	}
+	return nil
 }
 
 // VisitMigDevices visits the MIG devices of each GPU that can be used. It

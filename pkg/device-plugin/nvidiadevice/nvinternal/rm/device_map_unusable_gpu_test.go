@@ -302,3 +302,13 @@ func TestDeviceMapFailsWhenNoGPUIsUsable(t *testing.T) {
 
 	require.ErrorContains(t, err, "GPU at index 0 is unusable")
 }
+
+// The walk over a devicelib without NVML follows the same rule.
+func TestUsableDevicesWithoutNVMLFailsWhenNoGPUIsUsable(t *testing.T) {
+	lost := fakeGPU{migModeRet: nvml.ERROR_GPU_IS_LOST}
+	u := newUsableDevices(fakeDeviceLib{gpus: []fakeGPU{lost, lost}}, nil)
+
+	err := u.VisitDevices(func(int, device.Device) error { return nil })
+
+	require.ErrorContains(t, err, "GPU at index 1 is unusable")
+}
