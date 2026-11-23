@@ -32,14 +32,18 @@ lstat /var/lib/nvml-mock/driver/dev/nvidia-modeset: no such file or directory
 
 Before you retry, isolate the host's real NVIDIA device nodes from the test containers. If you cannot isolate them, use a host without NVIDIA GPUs.
 
-Add this setting to the Helm values file. Follow the deployment steps above, then recreate the test Pod.
+For scheduling and startup checks, set this Helm value, then redeploy and recreate the test Pod.
 
 ```yaml
 devicePlugin:
   passDeviceSpecsEnabled: false
 ```
 
-HAMi's `Allocate` response still sets `NVIDIA_VISIBLE_DEVICES` to the simulated GPU UUID. The setting omits HAMi's `DeviceSpec` entries. nvml-mock can still inject device nodes.
+#### NRI limitation with `envvar`
+
+With the default `envvar` strategy and DeviceSpecs disabled, nvml-mock 0.7.0's NRI plugin cannot recognize the GPU allocation. The Pod can start without the mock driver overlay.
+
+To test NRI injection, set `devicePlugin.deviceListStrategy: cdi-cri` on a cluster that supports CDI over CRI, or keep DeviceSpecs enabled on a host without NVIDIA GPUs. Verify the `/opt/nvml-mock` mount and `MOCK_NVML_CONFIG` in the test container. [How nvml-mock 0.7.0 recognizes GPU allocations](https://github.com/NVIDIA/k8s-test-infra/blob/v0.7.0/docs/components/nri-plugin.md#recognising-a-gpu-allocation)
 
 ## Allocate and container metrics
 
