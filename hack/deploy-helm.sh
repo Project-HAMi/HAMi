@@ -57,6 +57,11 @@ elif [ "${E2E_TYPE}" == "release" ]; then
   HELM_SOURCE="${HELM_NAME}/${HAMI_ALIAS}"
   echo "Using remote chart: ${HELM_SOURCE}"
 elif [ "${E2E_TYPE}" == "local" ]; then
+  if [[ -n "${HELM_VALUES_FILE:-}" && ! -r "${HELM_VALUES_FILE}" ]]; then
+    echo "Error: Cannot read Helm values file: ${HELM_VALUES_FILE}" >&2
+    exit 1
+  fi
+
   # Package the chart from source and derive image settings from the VERSION file.
   helm dependency update charts/hami
   helm package charts/hami -d charts/
@@ -76,7 +81,7 @@ elif [ "${E2E_TYPE}" == "local" ]; then
   fi
 
   # Detect the kube-scheduler version from the live cluster.
-  KUBE_SCHEDULER_TAG=$(kubectl version -o json 2>/dev/null | jq --raw-output '.serverVersion.gitVersion')
+  KUBE_SCHEDULER_TAG=$(kubectl --kubeconfig "${KUBE_CONF}" version -o json 2>/dev/null | jq --raw-output '.serverVersion.gitVersion')
   if [ -z "${KUBE_SCHEDULER_TAG}" ]; then
     echo "Error: Could not detect Kubernetes server version."
     exit 1
@@ -127,6 +132,7 @@ echo "Kubeconfig: ${KUBE_CONF}"
 if [ "${E2E_TYPE}" == "local" ]; then
   if ! helm --debug upgrade --install --create-namespace --cleanup-on-fail \
     "${HAMI_ALIAS}" "${HELM_SOURCE}" -n "${TARGET_NS}" \
+    ${HELM_VALUES_FILE:+--values "${HELM_VALUES_FILE}"} \
     --set global.imageTag="${IMG_TAG}" \
     --set scheduler.extender.image.registry="" \
     --set scheduler.extender.image.repository="${IMG_NAME}" \

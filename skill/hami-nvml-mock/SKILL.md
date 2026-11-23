@@ -1,27 +1,28 @@
 ---
 name: hami-nvml-mock
-description: Use kind and nvml-mock for local integration tests of the HAMi scheduler or NVIDIA device plugin, including reproducing bugs and testing fixes without physical GPUs.
+description: Test the HAMi scheduler or HAMi's NVIDIA device plugin with kind and nvml-mock. Reproduce bugs or verify local fixes without physical GPUs.
 ---
 
 # Test HAMi with nvml-mock
 
-## When to use this setup
+Use Lab 5 to set up the cluster, run test workloads, and clean up. [Lab 5 in English](https://project-hami.io/tutorials/labs/nvml-mock) · [中文实验](https://project-hami.io/zh/tutorials/labs/nvml-mock)
 
-Use this setup when you need to exercise the HAMi scheduler or NVIDIA device plugin in Kubernetes and the test can use simulated GPUs. Run both components in a local kind cluster, with nvml-mock supplying devices to the plugin through NVML.
+## Deploy the current checkout
 
-## What you can test
+Install `jq` for local deployment. Use a regular HAMi clone with the `libvgpu` submodule initialized. The Docker build reads `.git/modules/libvgpu`.
 
-- **NVIDIA device plugin.** Test device discovery through NVML and registration of vGPU resources with the kubelet. When the kubelet prepares a new container that requests a vGPU on the mock node, it calls the plugin's `Allocate` RPC for the simulated devices.
-- **HAMi scheduler.** Test GPU-aware Pod placement and allocation. Use the allocation annotations to check whether Pods share a GPU, whether a Pod gets multiple GPUs, and how much GPU memory or compute the scheduler assigns.
+Follow these steps for the HAMi deployment stage of Lab 5 after you install nvml-mock.
 
-## When you need a physical GPU
+1. Copy the lab's `devicePlugin.nvidiaDriverRoot` and `devicePlugin.nvidiaNodeSelector.gpu` overrides into a Helm values file. [Lab 5 Helm settings](https://project-hami.io/tutorials/labs/nvml-mock#31-install-via-helm)
+2. Choose a kubeconfig whose current context is the kind-generated context for the lab cluster, such as `kind-nvml-mock-test`.
+3. Run `make local-deploy` with the kubeconfig and values file. The command replaces any existing `hami` release in `hami-system` on that cluster. For an ARM64 kind node, add `TARGET_PLATFORMS=linux/arm64`.
 
-Use a physical NVIDIA GPU to run CUDA workloads, verify runtime enforcement of GPU memory or compute limits, or measure actual GPU utilization and performance.
+   ```bash
+   make local-deploy KUBE_CONF=/path/to/kubeconfig HELM_VALUES_FILE=/path/to/values.yaml
+   ```
 
-## Set up the test environment
+## Allocate and container metrics
 
-Follow Lab 5 for prerequisites, cluster setup, test workloads, and cleanup. The lab installs a published HAMi release. [Lab 5 in English](https://project-hami.io/tutorials/labs/nvml-mock) · [中文实验](https://project-hami.io/zh/tutorials/labs/nvml-mock)
+The kubelet calls `Allocate` when it prepares a test container that requests a vGPU. With `CUDA_DISABLE_CONTROL=true`, `Allocate` omits the `/etc/ld.so.preload` mount that loads HAMi Core.
 
-### Lab 5 known issue
-
-If `kubectl version --client --short` reports `unknown flag: --short` during the prerequisite check, run `kubectl version --client`.
+For partial-GPU allocations in the lab, expect metrics that depend on HAMi Core shared memory, such as `hami_vgpu_memory_used_bytes`, to be absent. For whole-GPU allocations, `vGPUmonitor` can report the same metric from NVML. That path requires whole-GPU monitoring and successful initialization of the mock NVML library.

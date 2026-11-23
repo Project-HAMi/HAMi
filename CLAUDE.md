@@ -22,6 +22,8 @@ make verify-helm-chart-docs   # Check that generated table is current
 make local-deploy       # Build the image and deploy it to a local minikube/kind cluster
 ```
 
+To test the HAMi scheduler or HAMi's NVIDIA device plugin with simulated GPUs, read [Test HAMi with nvml-mock](skill/hami-nvml-mock/SKILL.md).
+
 ### Running a single test
 
 ```bash
