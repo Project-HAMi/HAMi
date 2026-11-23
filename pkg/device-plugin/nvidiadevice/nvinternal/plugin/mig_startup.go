@@ -197,16 +197,29 @@ func (m *MigInstanceManager) deviceInventory() (int, []string, error) {
 		return 0, nil, fmt.Errorf("get device count: %s", nvml.ErrorString(ret))
 	}
 	names := make([]string, 0, count)
+	usable := 0
+	var lastErr error
 	for i := 0; i < count; i++ {
 		dev, ret := m.nvmllib.DeviceGetHandleByIndex(i)
-		if ret != nvml.SUCCESS {
+		if ret == nvml.SUCCESS {
+			var name string
+			if name, ret = dev.GetName(); ret == nvml.SUCCESS {
+				names = append(names, name)
+				usable++
+				continue
+			}
+		}
+		if !isUnusableGPUReturn(ret) {
 			return 0, nil, fmt.Errorf("get device %d: %s", i, nvml.ErrorString(ret))
 		}
-		name, ret := dev.GetName()
-		if ret != nvml.SUCCESS {
-			return 0, nil, fmt.Errorf("get device %d name: %s", i, nvml.ErrorString(ret))
-		}
-		names = append(names, name)
+		// Keep the slot so the indices of the other GPUs do not change.
+		klog.Warningf("Skipping GPU %d at startup: %s", i, nvml.ErrorString(ret))
+		lastErr = fmt.Errorf("get device %d: %s", i, nvml.ErrorString(ret))
+		names = append(names, "")
+	}
+	// With no usable GPU at all there is nothing to serve; fail as before.
+	if count > 0 && usable == 0 {
+		return 0, nil, lastErr
 	}
 	return count, names, nil
 }

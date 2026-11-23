@@ -37,17 +37,30 @@ func (m *MigInstanceManager) RestoreAllocations(deviceCount int, inUse map[int]s
 		if !busy {
 			if err := m.ensureMigModeEnabled(gpuIndex); err != nil {
 				lk.Unlock()
+				if isUnusableGPU(err) {
+					klog.Warningf("Skipping GPU %d in MIG recovery: %v", gpuIndex, err)
+					continue
+				}
 				return err
 			}
 		}
 		dev, err := m.deviceHandleByIndex(gpuIndex)
 		if err != nil {
 			lk.Unlock()
+			if isUnusableGPU(err) {
+				klog.Warningf("Skipping GPU %d in MIG recovery: %v", gpuIndex, err)
+				continue
+			}
 			return err
 		}
 		current, _, ret := dev.GetMigMode()
 		if ret == nvml.ERROR_NOT_SUPPORTED {
 			lk.Unlock()
+			continue
+		}
+		if isUnusableGPUReturn(ret) {
+			lk.Unlock()
+			klog.Warningf("Skipping GPU %d in MIG recovery: %s", gpuIndex, nvml.ErrorString(ret))
 			continue
 		}
 		if ret != nvml.SUCCESS {
