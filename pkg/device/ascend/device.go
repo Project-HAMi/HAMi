@@ -995,6 +995,20 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
+		// In topology and 910C pair mode tmpDevs holds every candidate, not
+		// the final choice, so each card is checked on its own here and the
+		// selected cards are checked together after the loop.
+		tentative := tmpDevs[k.Type]
+		if needTopology || pair910C {
+			tentative = nil
+		}
+		if !device.FitPodQuota(pod, allocated, k.Type, tentative, device.ContainerDevice{
+			UUID: dev.ID, Type: k.Type, Usedmem: memreq, Usedcores: k.Coresreq,
+		}) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
+		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
@@ -1073,6 +1087,16 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 	}
 
+	// Each selected card fits the quota on its own; the set must fit together.
+	selectedFitQuota := func() bool {
+		if device.FitPodQuota(pod, allocated, k.Type, tmpDevs[k.Type]) {
+			return true
+		}
+		reason[common.ResourceQuotaNotFit] += len(tmpDevs[k.Type])
+		klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "devices", len(tmpDevs[k.Type]))
+		return false
+	}
+
 	if pair910C {
 		// Ascend 910C requires full module-pair allocation (2 NPUs per physical card).
 		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
@@ -1082,12 +1106,18 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			return false, tmpDevs, common.GenReason(reason, int(originReq))
 		}
 		tmpDevs[k.Type] = combination
+		if !selectedFitQuota() {
+			return false, tmpDevs, common.GenReason(reason, len(devices))
+		}
 		klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 		return true, tmpDevs, ""
 	}
 
 	if needTopology {
 		if len(tmpDevs[k.Type]) == int(originReq) {
+			if !selectedFitQuota() {
+				return false, tmpDevs, common.GenReason(reason, len(devices))
+			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		} else if len(tmpDevs[k.Type]) > int(originReq) {
@@ -1097,6 +1127,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				// If requesting multiple devices, select the best combination of cards.
 				combination := npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
 				tmpDevs[k.Type] = combination
+			}
+			if !selectedFitQuota() {
+				return false, tmpDevs, common.GenReason(reason, len(devices))
 			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
