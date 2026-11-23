@@ -178,7 +178,16 @@ func start(ctx context.Context) error {
 		return fmt.Errorf("empty hostname returned")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	sher = scheduler.NewScheduler()
+	// Start waits for the informer caches on the scheduler's stop channel, not
+	// on ctx, so stop the scheduler as soon as ctx is canceled.
+	go func(s *scheduler.Scheduler) {
+		<-ctx.Done()
+		s.Stop()
+	}(sher)
 	go sher.RegisterFromNodeAnnotations()
 	go sher.WatchAllocateTimeouts()
 	err = sher.Start()
@@ -186,6 +195,9 @@ func start(ctx context.Context) error {
 		return err
 	}
 	defer sher.Stop()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	router := clusterRouter(sher)
 
@@ -224,8 +236,6 @@ func start(ctx context.Context) error {
 	defer clusterListener.Close()
 	errCh := make(chan error, 4)
 	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	metricsListener, err := startMetricsServer(ctx, &wg, config.MetricsBindAddress, sher, legacyMetrics, errCh)
 	if err != nil {
 		return err
@@ -316,7 +326,11 @@ func serve(ctx context.Context, listener net.Listener, handler http.Handler, tls
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return server.Shutdown(shutdown)
+	if err := server.Shutdown(shutdown); err != nil {
+		klog.ErrorS(err, "Server shutdown failed", "address", listener.Addr())
+		return err
+	}
+	return nil
 }
 
 // isLoopbackAddr reports whether addr binds the loopback interface only. An
