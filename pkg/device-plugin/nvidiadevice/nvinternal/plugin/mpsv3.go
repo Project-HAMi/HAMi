@@ -72,7 +72,9 @@ type mpsV3Manager struct {
 	incompatibleGPUs map[string]bool
 	unhealthyGPUs    atomic.Pointer[map[string]bool]
 	generation       uint64 // Protected by mu. Changes before allocation mutations.
-	policyFailures   int    // Protected by mu.
+	daemonFailures   int    // Protected by mu.
+
+	deviceAllocations atomic.Pointer[map[string]mpsV3Allocation] // Immutable snapshot for device registration.
 }
 
 func newMPSV3Manager() *mpsV3Manager {
@@ -145,8 +147,18 @@ func (m *mpsV3Manager) save() error {
 	if err != nil {
 		return err
 	}
-	return atomicMPSFile(m.statePath(), data, 0600)
+	if err := atomicMPSFile(m.statePath(), data, 0600); err != nil {
+		return err
+	}
+	m.publishDeviceAllocations()
+	return nil
 }
+
+func (m *mpsV3Manager) publishDeviceAllocations() {
+	snapshot := maps.Clone(m.allocations)
+	m.deviceAllocations.Store(&snapshot)
+}
+
 func (m *mpsV3Manager) load() error {
 	data, err := os.ReadFile(m.statePath())
 	if os.IsNotExist(err) {
@@ -179,6 +191,7 @@ func (m *mpsV3Manager) load() error {
 	if saved != nil {
 		m.allocations = saved
 	}
+	m.publishDeviceAllocations()
 	return nil
 }
 func (a mpsV3Allocation) serverName() string {
@@ -444,10 +457,11 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 			}
 		}
 	}
-	exists, err := m.serverExists(ctx, a.Server)
+	servers, err := m.serverNames(ctx)
 	if err != nil {
 		return false, err
 	}
+	exists := slices.Contains(servers, a.Server)
 	if exists != shared {
 		return false, fmt.Errorf("MPS server %s presence does not match recorded ownership", a.Server)
 	}
@@ -474,7 +488,12 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 			}
 		}
 	}
-	// Persist intent before any external mutation. Rollback derives all resource
+	if !exists {
+		if err := m.ensureComputePolicy(ctx, servers); err != nil {
+			return false, err
+		}
+	}
+	// Persist intent before creating allocation resources. Rollback derives all resource
 	// names from this record, including partitions created just before a crash.
 	m.generation++
 	m.allocations[a.Namespace] = a
@@ -542,7 +561,12 @@ func (m *mpsV3Manager) configureComputePolicy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if len(names) == 0 {
+	return m.ensureComputePolicy(ctx, names)
+}
+
+func (m *mpsV3Manager) ensureComputePolicy(ctx context.Context, servers []string) error {
+	err := m.checkComputePolicy(ctx)
+	if len(servers) == 0 && errors.Is(err, errMPSPolicyMismatch) {
 		yield, err := m.run(ctx, "compute-policy", "get", "timeslice-yield-level")
 		if err != nil {
 			return err
@@ -563,8 +587,9 @@ func (m *mpsV3Manager) configureComputePolicy(ctx context.Context) error {
 		if _, err := m.run(ctx, args...); err != nil {
 			return err
 		}
+		return m.checkComputePolicy(ctx)
 	}
-	return m.checkComputePolicy(ctx)
+	return err
 }
 
 func (m *mpsV3Manager) desiredTimeslice() string {
@@ -574,27 +599,37 @@ func (m *mpsV3Manager) desiredTimeslice() string {
 	return "default"
 }
 
-var errMPSPolicyQuery = errors.New("MPS compute policy query failed")
+var errMPSPolicyMismatch = errors.New("MPS compute policy mismatch")
 
 func (m *mpsV3Manager) checkComputePolicy(ctx context.Context) error {
 	timeslice, err := m.run(ctx, "compute-policy", "get", "timeslice")
 	if err != nil {
-		return fmt.Errorf("%w: %w", errMPSPolicyQuery, err)
+		return fmt.Errorf("query MPS timeslice: %w", err)
+	}
+	switch timeslice {
+	case "default", "short", "medium", "long":
+	default:
+		return fmt.Errorf("unexpected r620 compute policy timeslice %q", timeslice)
 	}
 	wantTimeslice := m.desiredTimeslice()
 	if timeslice != wantTimeslice {
-		return fmt.Errorf("MPS timeslice is %q, expected %q; drain and restart the daemon", timeslice, wantTimeslice)
+		return fmt.Errorf("%w: timeslice is %q, expected %q; drain and restart the daemon", errMPSPolicyMismatch, timeslice, wantTimeslice)
 	}
 	yield, err := m.run(ctx, "compute-policy", "get", "timeslice-yield-level")
 	if err != nil {
-		return fmt.Errorf("%w: %w", errMPSPolicyQuery, err)
+		return fmt.Errorf("query MPS yield level: %w", err)
+	}
+	switch yield {
+	case "unset", "1", "2":
+	default:
+		return fmt.Errorf("unexpected r620 compute policy yield level %q", yield)
 	}
 	wantYield := "unset"
 	if m.policy.TimesliceYieldLevel != nil {
 		wantYield = strconv.Itoa(*m.policy.TimesliceYieldLevel)
 	}
 	if yield != wantYield {
-		return fmt.Errorf("MPS timeslice yield level is %q, expected %q; drain and restart the daemon", yield, wantYield)
+		return fmt.Errorf("%w: timeslice yield level is %q, expected %q; drain and restart the daemon", errMPSPolicyMismatch, yield, wantYield)
 	}
 	return nil
 }
@@ -984,10 +1019,12 @@ func (m *mpsV3Manager) checkPublishedAllocation(ctx context.Context, a mpsV3Allo
 }
 
 func (m *mpsV3Manager) deviceInfo(gpu string) map[string]any {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	info := map[string]any{nvidia.MPSV3GeometryKey: m.geometry[gpu], nvidia.MPSV3ComputeModeKey: m.policy.ComputeMode}
-	for _, a := range m.allocations {
+	snapshot := m.deviceAllocations.Load()
+	if snapshot == nil {
+		return info
+	}
+	for _, a := range *snapshot {
 		if slices.Contains(a.GPUs, gpu) {
 			mode := "percentage"
 			if a.SMCount > 0 {
@@ -1222,8 +1259,8 @@ func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
 	generation := m.generation
 	m.mu.Unlock()
 
-	// Read-only checks must not hold either allocation lock.
-	err := m.checkComputePolicy(plugin.runCtx)
+	// Probe daemon liveness here; validate the policy before server creation.
+	_, err := m.run(plugin.runCtx, "compute-policy", "get", "timeslice")
 	unhealthy := make(map[string]bool)
 	if err != nil {
 		klog.ErrorS(err, "MPS v3 daemon health check failed")
@@ -1248,14 +1285,14 @@ func (plugin *NvidiaDevicePlugin) reconcileMPSV3() {
 	}
 	m.mu.Lock()
 	if err == nil {
-		m.policyFailures = 0
+		m.daemonFailures = 0
 		m.healthy.Store(true)
 		if generation == m.generation {
 			m.unhealthyGPUs.Store(&unhealthy)
 		}
 	} else {
-		m.policyFailures++
-		if !errors.Is(err, errMPSPolicyQuery) || m.policyFailures >= 3 {
+		m.daemonFailures++
+		if m.daemonFailures >= 3 {
 			m.healthy.Store(false)
 		}
 	}

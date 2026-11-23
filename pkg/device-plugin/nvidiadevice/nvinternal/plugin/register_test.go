@@ -878,6 +878,7 @@ func TestRegisterMPSV3SchedulingMetadata(t *testing.T) {
 			a := testMPSAllocation(t, 0)
 			a.ComputeMode = mode
 			manager.allocations[a.Namespace] = a
+			require.NoError(t, manager.save())
 			plugin := &NvidiaDevicePlugin{
 				operatingMode: nvidia.MpsV3Mode, mpsV3: manager,
 				rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {

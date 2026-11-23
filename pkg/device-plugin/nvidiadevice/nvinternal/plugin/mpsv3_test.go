@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
@@ -527,6 +528,82 @@ func TestMPSV3ServerTimesliceRecovery(t *testing.T) {
 	require.NoError(t, recovered.configureComputePolicy(ctx))
 	require.Equal(t, "default", f.timeslice)
 	require.Equal(t, "unset", f.yield)
+}
+
+func TestMPSV3RepairsComputePolicyBeforeCreatingServer(t *testing.T) {
+	m, f := testMPSV3(t)
+	ctx := context.Background()
+	level := 2
+	m.policy = nvidia.MPSV3NodeConfig{ComputeMode: nvidia.MPSV3ServerTimeslice, Timeslice: "short", TimesliceYieldLevel: &level}
+	require.NoError(t, m.configureComputePolicy(ctx))
+	f.timeslice, f.yield = "default", "unset" // The external daemon restarted.
+	plugin := newTestPlugin(t)
+	plugin.mpsV3, plugin.runCtx = m, ctx
+	f.calls = nil
+	plugin.reconcileMPSV3()
+	require.Equal(t, []string{"compute-policy get timeslice"}, f.calls)
+	require.True(t, m.gpuHealthy("GPU-a"))
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test-pod", Annotations: map[string]string{nvidia.MPSV3ComputeModeAnnotation: nvidia.MPSV3ServerTimeslice}}}
+	devs := device.ContainerDevices{cd("GPU-a", "NVIDIA", 2048, 25)}
+	a, err := mpsV3AllocationFor(pod, &corev1.Container{Name: "first"}, devs)
+	require.NoError(t, err)
+	created, err := m.ensure(ctx, a)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, "short", f.timeslice)
+	require.Equal(t, "2", f.yield)
+	require.Equal(t, "25", f.weights[a.Server])
+
+	f.timeslice = "medium"
+	b, err := mpsV3AllocationFor(pod, &corev1.Container{Name: "second"}, devs)
+	require.NoError(t, err)
+	created, err = m.ensure(ctx, b)
+	require.ErrorIs(t, err, errMPSPolicyMismatch)
+	require.False(t, created)
+	require.NotContains(t, f.servers, b.Server)
+	require.Equal(t, "medium", f.timeslice)
+}
+
+func TestMPSV3DeviceInfoDoesNotWaitForServerCreation(t *testing.T) {
+	m, _ := testMPSV3(t)
+	a := testMPSAllocation(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	run := m.run
+	m.run = func(ctx context.Context, args ...string) (string, error) {
+		if args[0] == "server" && args[1] == "create" {
+			close(started)
+			<-ctx.Done()
+			return "", ctx.Err()
+		}
+		return run(ctx, args...)
+	}
+	finished := make(chan error, 1)
+	go func() {
+		_, err := m.ensure(ctx, a)
+		finished <- err
+	}()
+	select {
+	case <-started:
+	case err := <-finished:
+		t.Fatalf("allocation stopped before server creation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation did not reach server creation")
+	}
+	reported := make(chan map[string]any, 1)
+	go func() { reported <- m.deviceInfo("GPU-a") }()
+	select {
+	case info := <-reported:
+		require.Equal(t, a.GPUs, info[nvidia.MPSV3GPUSetKey])
+	case <-time.After(5 * time.Second):
+		t.Fatal("device info blocked on server creation")
+	}
+	cancel()
+	require.ErrorIs(t, <-finished, context.Canceled)
+	require.NoError(t, m.release(context.Background(), a.Namespace))
+	require.NotContains(t, m.deviceInfo("GPU-a"), nvidia.MPSV3GPUSetKey)
 }
 
 func TestMPSV3RejectsUnversionedState(t *testing.T) {
