@@ -90,3 +90,30 @@ func (u *usableDevices) VisitMigDevices(visit func(int, device.Device, int, devi
 	}
 	return nil
 }
+
+// VisitMigProfiles visits each MIG profile supported by a GPU that can be used,
+// once per profile. It replaces the go-nvlib implementation for the same reason
+// as VisitMigDevices.
+func (u *usableDevices) VisitMigProfiles(visit func(device.MigProfile) error) error {
+	visited := make(map[string]bool)
+	err := u.VisitDevices(func(i int, gpu device.Device) error {
+		err := gpu.VisitMigProfiles(func(p device.MigProfile) error {
+			if visited[p.String()] {
+				return nil
+			}
+			if err := visit(p); err != nil {
+				return fmt.Errorf("error visiting MIG profile: %v", err)
+			}
+			visited[p.String()] = true
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("error visiting device: %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error visiting devices: %v", err)
+	}
+	return nil
+}

@@ -144,7 +144,9 @@ func AddDefaultResourcesToConfig(infolib info.Interface, nvmllib nvml.Interface,
 			}
 		}()
 
-		return devicelib.VisitMigProfiles(func(p device.MigProfile) error {
+		// Walk the GPUs through the same wrapper as the device map, so that a
+		// GPU NVML cannot use does not stop the plugin from starting.
+		return newUsableDevices(devicelib, nvmllib).VisitMigProfiles(func(p device.MigProfile) error {
 			info := p.GetInfo()
 			if info.C != info.G {
 				return nil
