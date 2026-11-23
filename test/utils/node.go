@@ -104,6 +104,50 @@ func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string)
 	return result, nil
 }
 
+// SetNodeAnnotation sets a single annotation on a node, retrying on update conflicts
+// the same way AddNodeLabel does for labels.
+func SetNodeAnnotation(clientSet *kubernetes.Clientset, nodeName, key, value string) (*v1.Node, error) {
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Annotations == nil {
+			node.Annotations = make(map[string]string)
+		}
+		node.Annotations[key] = value
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RemoveNodeAnnotation deletes a single annotation from a node, retrying on update
+// conflicts the same way RemoveNodeLabel does for labels. Removing an annotation
+// that isn't set is not an error.
+func RemoveNodeAnnotation(clientSet *kubernetes.Clientset, nodeName, key string) (*v1.Node, error) {
+	var result *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if node.Annotations != nil {
+			delete(node.Annotations, key)
+		}
+		result, err = clientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // WaitForDevicePluginReady polls until the HAMi device-plugin pod on the given
 // node is Running and Ready with no terminating pods from a previous revision,
 // and the node reports healthy GPU resources in its Allocatable capacity.

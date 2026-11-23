@@ -37,6 +37,11 @@ kubectl --kubeconfig "${KUBE_CONF}" annotate node "${NODE}" "hami.io/node-amd-re
 kubectl --kubeconfig "${KUBE_CONF}" patch node "${NODE}" --subresource=status --type=merge \
   -p '{"status":{"capacity":{"amd.com/gpu":"8"},"allocatable":{"amd.com/gpu":"8"}}}'
 
+# Which specs to run against these fake devices. Defaults to the AMD-specific
+# suite; the cordon mock workflow overrides this to run the vendor-parameterised
+# test/e2e/cordon/ specs against the same fake registration instead.
+GINKGO_TARGET=${GINKGO_TARGET:-"./test/e2e/amd/"}
+
 GINKGO_VERSION=$(go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
 AMD_E2E_MOCK=true go run "github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}" \
-  run -v -r --fail-fast ./test/e2e/amd/ -- --kubeconfig="${KUBE_CONF}"
+  run -v -r --fail-fast "${GINKGO_TARGET}" -- --kubeconfig="${KUBE_CONF}"
