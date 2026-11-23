@@ -144,3 +144,27 @@ func TestFit_TopologySelectionRespectsMemoryQuota(t *testing.T) {
 		})
 	}
 }
+
+// TestFit_910CPairQuotaRejectsEveryCandidate covers 910C pair mode when the
+// quota rejects every card: the reason must be ResourceQuotaNotFit only, not
+// AllocatedCardsInsufficientRequest for an empty combination.
+func TestFit_910CPairQuotaRejectsEveryCandidate(t *testing.T) {
+	oldDevices := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevices })
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType, SuperPod: true,
+		ResourceName: "huawei.com/Ascend910C", ResourceMemoryName: "huawei.com/Ascend910C-memory"}}
+	device.DevicesMap = map[string]device.Devices{dev.CommonWord(): dev}
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: t.Name()}}
+	addMemoryQuota(t, dev, pod.Namespace, 0)
+	var cards []*device.DeviceUsage
+	for i := range 2 {
+		cards = append(cards, &device.DeviceUsage{ID: fmt.Sprintf("npu-%d", i), Index: uint(i), Type: dev.CommonWord(),
+			Health: true, Count: 4, Totalmem: quotaCardMiB, Totalcore: 20})
+	}
+	request := device.ContainerDeviceRequest{Nums: 2, Type: dev.CommonWord(), MemPercentagereq: 100}
+
+	fit, _, reason := dev.Fit(cards, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, !fit)
+	assert.Equal(t, reason, "2/2 "+common.ResourceQuotaNotFit)
+}

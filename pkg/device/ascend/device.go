@@ -1101,8 +1101,12 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		// Ascend 910C requires full module-pair allocation (2 NPUs per physical card).
 		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
 		if len(combination) != int(originReq) {
-			reason[common.AllocatedCardsInsufficientRequest] = len(combination)
-			klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
+			// When the quota rejected every candidate, ResourceQuotaNotFit
+			// already explains the failure.
+			if len(tmpDevs[k.Type]) > 0 || reason[common.ResourceQuotaNotFit] == 0 {
+				reason[common.AllocatedCardsInsufficientRequest] = len(combination)
+				klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
+			}
 			return false, tmpDevs, common.GenReason(reason, int(originReq))
 		}
 		tmpDevs[k.Type] = combination
