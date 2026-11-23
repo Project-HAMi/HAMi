@@ -1524,8 +1524,13 @@ func TestInjectSuperpodAffinity(t *testing.T) {
 		}
 	})
 
-	t.Run("existing superpod term is not overwritten", func(t *testing.T) {
-		existing := corev1.PodAffinityTerm{TopologyKey: util.SuperPodIDLabel}
+	t.Run("existing superpod term for another task does not suppress injection", func(t *testing.T) {
+		existing := corev1.PodAffinityTerm{
+			TopologyKey: util.SuperPodIDLabel,
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{util.TaskIDLabel: "task-2"},
+			},
+		}
 		pod := newPod("superpod", map[string]string{util.TaskIDLabel: "task-1"}, &corev1.Affinity{
 			PodAffinity: &corev1.PodAffinity{
 				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{existing},
@@ -1533,8 +1538,28 @@ func TestInjectSuperpodAffinity(t *testing.T) {
 		})
 		injectSuperpodAffinity(pod)
 		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
-		if len(terms) != 1 || terms[0].LabelSelector != nil {
-			t.Fatalf("existing user-managed term was changed: %#v", terms)
+		if len(terms) != 2 || terms[0].LabelSelector.MatchLabels[util.TaskIDLabel] != "task-2" ||
+			terms[1].LabelSelector.MatchLabels[util.TaskIDLabel] != "task-1" {
+			t.Fatalf("expected existing term and an injected task-1 term, got %#v", terms)
+		}
+	})
+
+	t.Run("matching superpod term is not duplicated", func(t *testing.T) {
+		existing := corev1.PodAffinityTerm{
+			TopologyKey: util.SuperPodIDLabel,
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{util.TaskIDLabel: "task-1"},
+			},
+		}
+		pod := newPod("superpod", map[string]string{util.TaskIDLabel: "task-1"}, &corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{existing},
+			},
+		})
+		injectSuperpodAffinity(pod)
+		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 1 || terms[0].LabelSelector.MatchLabels[util.TaskIDLabel] != "task-1" {
+			t.Fatalf("matching term was changed or duplicated: %#v", terms)
 		}
 	})
 }

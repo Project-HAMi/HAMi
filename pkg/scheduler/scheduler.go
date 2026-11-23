@@ -80,14 +80,17 @@ type Scheduler struct {
 	nodeNotify   chan struct{}
 	leaderNotify chan struct{}
 
-	kubeClient        kubernetes.Interface
-	podLister         listerscorev1.PodLister
-	nodeLister        listerscorev1.NodeLister
-	quotaLister       listerscorev1.ResourceQuotaLister
-	leaseLister       coordinationv1.LeaseLister
-	replicaSetLister  appslisters.ReplicaSetLister
-	statefulSetLister appslisters.StatefulSetLister
-	jobLister         batchlisters.JobLister
+	kubeClient              kubernetes.Interface
+	informerFactory         informers.SharedInformerFactory
+	podLister               listerscorev1.PodLister
+	nodeLister              listerscorev1.NodeLister
+	quotaLister             listerscorev1.ResourceQuotaLister
+	leaseLister             coordinationv1.LeaseLister
+	replicaSetLister        appslisters.ReplicaSetLister
+	statefulSetLister       appslisters.StatefulSetLister
+	jobLister               batchlisters.JobLister
+	superpodInformerMu      sync.Mutex
+	superpodInformersSynced bool
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -766,12 +769,10 @@ func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
+	s.informerFactory = informerFactory
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
-	s.replicaSetLister = informerFactory.Apps().V1().ReplicaSets().Lister()
-	s.statefulSetLister = informerFactory.Apps().V1().StatefulSets().Lister()
-	s.jobLister = informerFactory.Batch().V1().Jobs().Lister()
 
 	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
@@ -817,6 +818,36 @@ func (s *Scheduler) Start() error {
 	}
 
 	atomic.StoreUint32(&s.started, 1)
+	return nil
+}
+
+func (s *Scheduler) ensureSuperpodInformers() error {
+	s.superpodInformerMu.Lock()
+	defer s.superpodInformerMu.Unlock()
+
+	if s.superpodInformersSynced {
+		return nil
+	}
+	if s.informerFactory == nil {
+		return fmt.Errorf("shared informer factory is unavailable")
+	}
+
+	replicaSetInformer := s.informerFactory.Apps().V1().ReplicaSets().Informer()
+	statefulSetInformer := s.informerFactory.Apps().V1().StatefulSets().Informer()
+	jobInformer := s.informerFactory.Batch().V1().Jobs().Informer()
+	s.replicaSetLister = s.informerFactory.Apps().V1().ReplicaSets().Lister()
+	s.statefulSetLister = s.informerFactory.Apps().V1().StatefulSets().Lister()
+	s.jobLister = s.informerFactory.Batch().V1().Jobs().Lister()
+
+	s.informerFactory.Start(s.stopCh)
+	if !cache.WaitForCacheSync(s.stopCh,
+		replicaSetInformer.HasSynced,
+		statefulSetInformer.HasSynced,
+		jobInformer.HasSynced,
+	) {
+		return fmt.Errorf("failed to sync SuperPod controller informer caches")
+	}
+	s.superpodInformersSynced = true
 	return nil
 }
 

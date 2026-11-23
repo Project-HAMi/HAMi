@@ -28,6 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	batchlisters "k8s.io/client-go/listers/batch/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -77,6 +79,25 @@ func newSuperpodTestListers(t *testing.T, objects ...runtime.Object) (appslister
 		assert.NilError(t, indexer.Add(obj))
 	}
 	return appslisters.NewReplicaSetLister(replicaSets), appslisters.NewStatefulSetLister(statefulSets), batchlisters.NewJobLister(jobs)
+}
+
+func TestEnsureSuperpodInformers(t *testing.T) {
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	s := &Scheduler{
+		informerFactory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
+		stopCh:          stopCh,
+	}
+	if s.replicaSetLister != nil || s.statefulSetLister != nil || s.jobLister != nil {
+		t.Fatal("SuperPod listers should not be initialized before the policy is used")
+	}
+	if err := s.ensureSuperpodInformers(); err != nil {
+		t.Fatalf("ensureSuperpodInformers() error = %v", err)
+	}
+	if s.replicaSetLister == nil || s.statefulSetLister == nil || s.jobLister == nil {
+		t.Fatal("expected all SuperPod controller listers to be initialized")
+	}
 }
 
 // ---------------------------------------------------------------------------

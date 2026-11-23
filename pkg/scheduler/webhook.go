@@ -419,8 +419,11 @@ func injectSuperpodAffinity(pod *corev1.Pod) {
 		pod.Spec.Affinity.PodAffinity = &corev1.PodAffinity{}
 	}
 	for _, existing := range pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
-		if existing.TopologyKey == util.SuperPodIDLabel {
-			// Already injected or user-managed: never duplicate.
+		if existing.TopologyKey == util.SuperPodIDLabel &&
+			existing.LabelSelector != nil &&
+			existing.LabelSelector.MatchLabels[util.TaskIDLabel] == taskid &&
+			len(existing.LabelSelector.MatchExpressions) == 0 &&
+			len(existing.LabelSelector.MatchLabels) == 1 {
 			return
 		}
 	}
