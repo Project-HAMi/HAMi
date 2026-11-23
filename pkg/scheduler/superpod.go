@@ -263,9 +263,9 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 // hold the current pod's single-pod request contribute their nodeUsableSlots.
 // podRequest is passed in to avoid recomputing.
 func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) error {
-	memoryRequests, err := superpodPodMemoryRequests(task)
+	deviceRequests, err := superpodPodDeviceRequests(task)
 	if err != nil {
-		return fmt.Errorf("failed to calculate per-pod device memory request: %w", err)
+		return fmt.Errorf("failed to calculate per-pod device request: %w", err)
 	}
 	for nodeID, usage := range *nodes {
 		if usage == nil || usage.Node == nil {
@@ -280,7 +280,7 @@ func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod
 		if !ok || rack == "" {
 			continue
 		}
-		slots := nodeUsableSlots(usage, memoryRequests)
+		slots := nodeUsableSlots(usage, deviceRequests)
 		if podRequest > 0 && slots < podRequest {
 			klog.V(5).InfoS("Superpod rack count: node skipped, insufficient single-pod capacity",
 				"node", nodeID,
@@ -302,10 +302,10 @@ func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod
 	return nil
 }
 
-type superpodMemoryRequests map[string][]device.ContainerDeviceRequest
+type superpodDeviceRequests map[string][]device.ContainerDeviceRequest
 
-func superpodPodMemoryRequests(pod *corev1.Pod) (superpodMemoryRequests, error) {
-	requests := make(superpodMemoryRequests)
+func superpodPodDeviceRequests(pod *corev1.Pod) (superpodDeviceRequests, error) {
+	requests := make(superpodDeviceRequests)
 	if pod == nil {
 		return requests, nil
 	}
@@ -324,8 +324,8 @@ func superpodPodMemoryRequests(pod *corev1.Pod) (superpodMemoryRequests, error) 
 }
 
 // nodeUsableSlots returns remaining shares on healthy devices, capped by the
-// number of per-container memory requests that fit in each device's free memory.
-func nodeUsableSlots(node *NodeUsage, memoryRequests superpodMemoryRequests) int64 {
+// per-container memory and core requests that fit in each device's free resources.
+func nodeUsableSlots(node *NodeUsage, requests superpodDeviceRequests) int64 {
 	if node == nil {
 		return 0
 	}
@@ -334,7 +334,7 @@ func nodeUsableSlots(node *NodeUsage, memoryRequests superpodMemoryRequests) int
 		if ds == nil || ds.Device == nil || !ds.Device.Health {
 			continue
 		}
-		total += deviceUsableSlots(ds.Device, memoryRequests[ds.Device.DeviceVendor])
+		total += deviceUsableSlots(ds.Device, requests[ds.Device.DeviceVendor])
 	}
 	return total
 }
@@ -344,7 +344,7 @@ func deviceUsableSlots(dev *device.DeviceUsage, requests []device.ContainerDevic
 		return 0
 	}
 
-	var requiredMemory int64
+	var requiredMemory, requiredCores int64
 	for _, request := range requests {
 		requestMemory := request.Memreq
 		if requestMemory <= 0 && request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
@@ -355,19 +355,26 @@ func deviceUsableSlots(dev *device.DeviceUsage, requests []device.ContainerDevic
 				dev.Totalmem%100*request.MemPercentagereq/100, 1)
 		}
 		requiredMemory = max(requiredMemory, requestMemory)
+		requiredCores = max(requiredCores, request.Coresreq)
 	}
 
 	freeMemory := dev.Totalmem - dev.Usedmem
 	if freeMemory < requiredMemory {
 		return 0
 	}
-
 	remaining := dev.Count - dev.Used
 	if remaining <= 0 {
 		return 0
 	}
 	if requiredMemory > 0 {
 		remaining = min(remaining, freeMemory/requiredMemory)
+	}
+	if requiredCores > 0 {
+		freeCores := dev.Totalcore - dev.Usedcores
+		if freeCores < requiredCores {
+			return 0
+		}
+		remaining = min(remaining, freeCores/requiredCores)
 	}
 	return remaining
 }
@@ -569,9 +576,9 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 	if len(spids) == 0 {
 		return capacities, nil
 	}
-	memoryRequests, err := superpodPodMemoryRequests(currentTask)
+	deviceRequests, err := superpodPodDeviceRequests(currentTask)
 	if err != nil {
-		return nil, fmt.Errorf("failed to calculate per-pod device memory request: %w", err)
+		return nil, fmt.Errorf("failed to calculate per-pod device request: %w", err)
 	}
 	// getNodesUsage with a nil node list returns the full snapshot; the pod
 	// argument only drives the scoring policy, so an empty task is safe.
@@ -588,7 +595,7 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 		if _, wanted := spids[spid]; !wanted {
 			continue
 		}
-		capacities[spid] += nodeUsableSlots(usage, memoryRequests)
+		capacities[spid] += nodeUsableSlots(usage, deviceRequests)
 	}
 	reservations, err := s.collectAnchoredTaskReservations(spids, *overall, currentTask)
 	if err != nil {
