@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,8 +34,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -335,10 +338,15 @@ func TestStartMetricsLifecycle(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
 		result := make(chan error, 1)
+		done := make(chan struct{})
+		t.Cleanup(func() {
+			cancel()
+			<-done
+		})
 		go func() {
 			result <- start(ctx)
+			close(done)
 		}()
 
 		startedListeners := make([]net.Listener, 0, cap(acquired))
@@ -366,6 +374,60 @@ func TestStartMetricsLifecycle(t *testing.T) {
 				continue
 			}
 			rebound.Close()
+		}
+	})
+
+	t.Run("termination signal while caches sync stops startup", func(t *testing.T) {
+		var recovered atomic.Bool
+		client := k8sfake.NewSimpleClientset()
+		// Fail every list like an unreachable API server, so the informer
+		// caches never sync and Start keeps waiting on them.
+		client.PrependReactor("list", "*", func(ktesting.Action) (bool, runtime.Object, error) {
+			if !recovered.Load() {
+				return true, nil, errors.New("API unavailable")
+			}
+			return false, nil, nil
+		})
+		clientpkg.KubeClient = client
+		config.MetricsBindAddress = "127.0.0.1:0"
+		var acquired []net.Listener
+		t.Cleanup(func() {
+			for _, listener := range acquired {
+				listener.Close()
+			}
+		})
+		listenTCP = func(network, address string) (net.Listener, error) {
+			listener, err := net.Listen(network, address)
+			if err == nil {
+				acquired = append(acquired, listener)
+			}
+			return listener, err
+		}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		result := make(chan error, 1)
+		done := make(chan struct{})
+		t.Cleanup(func() {
+			// Let the caches sync, so a startup that ignored the cancellation
+			// still returns before the parent test restores shared state.
+			recovered.Store(true)
+			<-done
+		})
+		go func() {
+			result <- start(ctx)
+			close(done)
+		}()
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatalf("expected a clean shutdown, got %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("startup kept waiting for the informer caches after its context was canceled")
+		}
+		if len(acquired) != 0 {
+			t.Fatalf("startup acquired %d listeners after its context was canceled, want 0", len(acquired))
 		}
 	})
 }
