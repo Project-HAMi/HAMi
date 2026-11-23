@@ -403,3 +403,31 @@ func TestDeviceMapReplicasWithUnusableGPU(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceMapReplicasKeptWhenSameNameRuleListsOnlyLostGPU(t *testing.T) {
+	resources := &spec.Resources{GPUs: []spec.Resource{{Pattern: spec.ResourcePattern("*"), Name: "nvidia.com/gpu"}}}
+	migStrategy := spec.MigStrategyNone
+	b := deviceMapBuilder{
+		Interface:   newUsableDevices(fakeDeviceLib{gpus: eightGPUs(1, nvml.ERROR_GPU_IS_LOST)}, nil),
+		migStrategy: &migStrategy,
+		resources:   resources,
+		replicatedResources: &spec.ReplicatedResources{Resources: []spec.ReplicatedResource{
+			{Name: "nvidia.com/gpu", Devices: spec.ReplicatedDevices{List: []spec.ReplicatedDeviceRef{"0"}}, Replicas: 2},
+			{Name: "nvidia.com/gpu", Devices: spec.ReplicatedDevices{List: []spec.ReplicatedDeviceRef{"1"}}, Replicas: 2},
+		}},
+		newGPUDevice: newFakeGPUDevice,
+	}
+
+	devices, err := b.build()
+
+	require.NoError(t, err)
+	replicated := 0
+	for _, d := range devices["nvidia.com/gpu"] {
+		require.NotEqual(t, "1", d.Index, "lost GPU is advertised")
+		if d.Replicas > 0 {
+			require.Equal(t, "0", d.Index)
+			replicated++
+		}
+	}
+	require.Equal(t, 2, replicated, "replicas from the first rule were dropped")
+}

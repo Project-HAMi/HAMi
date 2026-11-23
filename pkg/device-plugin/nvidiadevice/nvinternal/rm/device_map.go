@@ -365,8 +365,10 @@ func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, 
 		// Skip any resources not matched in oDevices
 		if len(ids) == 0 {
 			// Every listed device was on a skipped GPU: serve the others unshared.
-			if ds, ok := oDevices[r.Name]; ok && len(skipped) > 0 {
-				devices[r.Name] = ds
+			if len(skipped) > 0 {
+				for _, d := range oDevices[r.Name] {
+					devices.insert(r.Name, d)
+				}
 			}
 			continue
 		}
