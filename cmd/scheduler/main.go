@@ -243,6 +243,9 @@ func start(ctx context.Context) error {
 	defer metricsListener.Close()
 	profilingListener, err := startProfilingServer(ctx, &wg, enableProfiling, profilingBindAddress, errCh)
 	if err != nil {
+		// The metrics server is already running; stop it before returning.
+		cancel()
+		wg.Wait()
 		return err
 	}
 	if profilingListener != nil {
