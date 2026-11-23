@@ -202,7 +202,7 @@ func TestDevices_Fit_ResourceQuotaCandidateFallback(t *testing.T) {
 	}
 }
 
-func TestFitQuota_ResourceQuotaAggregateUsage(t *testing.T) {
+func TestFitPodQuota_ResourceQuotaAggregateUsage(t *testing.T) {
 	_, qm := initHygonQuotaTest(t, 1)
 	sidecar := corev1.ContainerRestartPolicyAlways
 	for _, tt := range []struct {
@@ -241,7 +241,7 @@ func TestFitQuota_ResourceQuotaAggregateUsage(t *testing.T) {
 				beforePrior[i] = append(device.ContainerDevices{}, prior[i]...)
 			}
 			beforeTentative := append(device.ContainerDevices{}, tentative...)
-			assert.Equal(t, fitQuota(pod, tmp, &allocated, pod.Namespace, "hcu", tt.candidateMem, tt.candidateCores), tt.wantFit)
+			assert.Equal(t, device.FitPodQuota(pod, &allocated, HygonHCUDevice, tmp[HygonHCUDevice], device.ContainerDevice{UUID: "hcu", Usedmem: tt.candidateMem, Usedcores: tt.candidateCores}), tt.wantFit)
 			assert.DeepEqual(t, prior, beforePrior)
 			assert.DeepEqual(t, tentative, beforeTentative)
 			assert.Equal(t, len(allocated[HygonHCUDevice]), len(tt.prior))
@@ -251,6 +251,6 @@ func TestFitQuota_ResourceQuotaAggregateUsage(t *testing.T) {
 	}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: t.Name() + "-unlimited"}}
 	var allocated device.PodDevices
-	assert.Assert(t, fitQuota(pod, nil, nil, pod.Namespace, "hcu", 8192, 0))
-	assert.Assert(t, fitQuota(pod, nil, &allocated, pod.Namespace, "hcu", 8192, 0))
+	assert.Assert(t, device.FitPodQuota(pod, nil, HygonHCUDevice, nil, device.ContainerDevice{UUID: "hcu", Usedmem: 8192}))
+	assert.Assert(t, device.FitPodQuota(pod, &allocated, HygonHCUDevice, nil, device.ContainerDevice{UUID: "hcu", Usedmem: 8192}))
 }

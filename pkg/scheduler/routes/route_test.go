@@ -26,13 +26,17 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestMaxRequestSize(t *testing.T) {
@@ -341,5 +345,162 @@ func TestBind_WriteError(t *testing.T) {
 	klog.Flush()
 	if !strings.Contains(buf.String(), "Failed to write response") {
 		t.Errorf("Expected 'Failed to write response' in log output, but got: %s", buf.String())
+	}
+}
+
+func TestMaxRequestSizePreempt(t *testing.T) {
+	hugePayload := strings.Repeat(" ", maxRequestSize+100)
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader(hugePayload))
+	w := httptest.NewRecorder()
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an oversized body, got %d", w.Code)
+	}
+	if respBody := w.Body.String(); !strings.Contains(respBody, "EOF") {
+		t.Errorf("LimitReader failed in PreemptRoute. Response: %s", respBody)
+	}
+}
+
+func TestPreemptRoute_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/preempt", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+
+	// This should not panic
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for nil body, got %d", w.Code)
+	}
+}
+
+func TestPreemptRoute_DecodeError(t *testing.T) {
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an undecodable body, got %d", w.Code)
+	}
+}
+
+func TestPreemptRoute_NilPod(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "pod field omitted", body: `{"NodeNameToMetaVictims":{"node1":{"Pods":[]}}}`},
+		{name: "pod field explicitly null", body: `{"Pod":null,"NodeNameToMetaVictims":{"node1":{"Pods":[]}}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/preempt", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			s := &scheduler.Scheduler{}
+			handler := PreemptRoute(s)
+
+			// Must not panic when Pod is missing/null.
+			handler(w, req, nil)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for a request with no pod, got %d", w.Code)
+			}
+			if respBody := w.Body.String(); !strings.Contains(respBody, "missing pod") {
+				t.Errorf("expected a missing-pod error in the response, got %q", respBody)
+			}
+		})
+	}
+}
+
+func TestPreemptRoute_CacheNotSynced(t *testing.T) {
+	args := extenderv1.ExtenderPreemptionArgs{Pod: &corev1.Pod{}}
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so WaitForCacheSync fails fast instead of polling forever
+
+	req := httptest.NewRequest("POST", "/preempt", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{} // zero value: synced defaults to false
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 while the cache is not synced, got %d", w.Code)
+	}
+	if respBody := w.Body.String(); !strings.Contains(respBody, "context cancelled") {
+		t.Errorf("expected 'context cancelled' error, got %q", respBody)
+	}
+}
+
+// syncedScheduler returns a scheduler that has finished its first registration
+// pass, which is what WaitForCacheSync waits for.
+func syncedScheduler(t *testing.T) *scheduler.Scheduler {
+	t.Helper()
+
+	previousClient := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}})
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	previousLeaderElect := config.LeaderElect
+	config.LeaderElect = false
+	t.Cleanup(func() { config.LeaderElect = previousLeaderElect })
+
+	s := scheduler.NewScheduler()
+	if err := s.Start(); err != nil {
+		t.Fatalf("failed to start the scheduler: %v", err)
+	}
+	// The node above is announced while the informers sync, and that
+	// notification starts the first registration pass.
+	registered := make(chan struct{})
+	go func() {
+		defer close(registered)
+		s.RegisterFromNodeAnnotations()
+	}()
+	t.Cleanup(func() {
+		s.Stop()
+		<-registered
+	})
+	return s
+}
+
+func TestPreemptRoute_ReturnsCandidates(t *testing.T) {
+	s := syncedScheduler(t)
+
+	const request = `{"Pod":{"metadata":{"name":"high","namespace":"default","uid":"preemptor-uid"}},` +
+		`"NodeNameToMetaVictims":{"node-1":{"Pods":[{"UID":"victim-a"}],"NumPDBViolations":1}}}`
+	const want = `{"NodeNameToMetaVictims":{"node-1":{"Pods":[{"UID":"victim-a"}],"NumPDBViolations":1}}}`
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader(request)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler := PreemptRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != want {
+		t.Errorf("unexpected answer:\n got: %s\nwant: %s", got, want)
+	}
+	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("expected a JSON answer, got Content-Type %q", contentType)
 	}
 }

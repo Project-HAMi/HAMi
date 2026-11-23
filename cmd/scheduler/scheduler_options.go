@@ -28,6 +28,9 @@ func validateSchedulerOptions() error {
 	if err := config.ValidateNodeAffinityScoreWeight(config.NodeAffinityScoreWeight); err != nil {
 		return err
 	}
+	if err := config.ValidateTaintTolerationScoreWeight(config.TaintTolerationScoreWeight); err != nil {
+		return err
+	}
 	return validateDevicePluginIdentity(config.DevicePluginNamespace, config.DevicePluginServiceAccount)
 }
 

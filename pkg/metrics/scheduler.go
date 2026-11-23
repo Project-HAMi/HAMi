@@ -47,7 +47,15 @@ const (
 	FailureReasonInternal        SchedulerFailureReason = "internal"
 	FailureReasonConflict        SchedulerFailureReason = "conflict"
 	FailureReasonDevicePlugin    SchedulerFailureReason = "device_plugin"
+	FailureReasonTimeout         SchedulerFailureReason = "timeout"
 )
+
+// allocationFailureReasons lists the failure reasons each allocation phase can report.
+var allocationFailureReasons = map[string][]SchedulerFailureReason{
+	"filter":   {FailureReasonNoFit, FailureReasonInternal, FailureReasonAnnotationPatch},
+	"bind":     {FailureReasonLookup, FailureReasonIdentity, FailureReasonLock, FailureReasonAnnotationPatch, FailureReasonBind},
+	"allocate": {FailureReasonDevicePlugin, FailureReasonTimeout},
+}
 
 // newSchedulerCounter creates an outcome counter with the shared label contract.
 func newSchedulerCounter(name, help string) *prometheus.CounterVec {
@@ -71,6 +79,18 @@ func NewSchedulerOutcomeMetrics() *SchedulerOutcomeMetrics {
 // labels builds the bounded labels shared by every scheduler outcome counter.
 func (m *SchedulerOutcomeMetrics) labels(phase, deviceType string, reason SchedulerFailureReason) prometheus.Labels {
 	return prometheus.Labels{"phase": phase, "device_type": deviceType, "failure_reason": string(reason)}
+}
+
+// InitDeviceType exports zero values for the outcomes of a device type, so
+// rate() sees the first increase of each series.
+func (m *SchedulerOutcomeMetrics) InitDeviceType(deviceType string) {
+	for phase, reasons := range allocationFailureReasons {
+		m.allocations.With(m.labels(phase, deviceType, FailureReasonNone)).Add(0)
+		for _, reason := range reasons {
+			m.allocationFailures.With(m.labels(phase, deviceType, reason)).Add(0)
+		}
+	}
+	m.allocationDuration.WithLabelValues(deviceType)
 }
 
 // ObserveAllocation records a successful allocation.
