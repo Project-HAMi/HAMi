@@ -18,7 +18,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/stretchr/testify/require"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
@@ -153,7 +153,7 @@ func TestBuildGPUDeviceMapToleratesOneUnusableGPU(t *testing.T) {
 				require.Len(t, devices[resourceName], tc.wantHealthy)
 				for id, dev := range devices[resourceName] {
 					require.NotEqual(t, fmt.Sprintf("%d", tc.badIndex), dev.Index, "unusable GPU %s is advertised", id)
-					require.Equal(t, pluginapi.Healthy, dev.Health, "device %s", id)
+					require.Equal(t, kubeletdevicepluginv1beta1.Healthy, dev.Health, "device %s", id)
 				}
 			})
 		}
