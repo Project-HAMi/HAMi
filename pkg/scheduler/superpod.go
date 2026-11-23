@@ -27,6 +27,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	appslisters "k8s.io/client-go/listers/apps/v1"
+	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
+	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -590,17 +592,37 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 		return nil, err
 	}
 	policy := resolveNodeSchedulerPolicy(currentTask)
-	// getNodesUsage with a nil node list returns the full snapshot; the pod
-	// argument only drives the scoring policy, so an empty task is safe.
-	_, overall, _, err := s.getNodesUsage(nil, &corev1.Pod{})
+	// Use the actual task so device usage reflects its policy, then apply the
+	// kube-scheduler hard filters before counting capacity.
+	_, overall, _, err := s.getNodesUsage(nil, currentTask)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect node usage: %w", err)
 	}
+	requiredNodeAffinity := nodeaffinity.GetRequiredNodeAffinity(currentTask)
 	for nodeID, usage := range *overall {
 		if usage == nil || usage.Node == nil || usage.Node.Spec.Unschedulable {
 			continue
 		}
 		node := s.currentNode(nodeID, usage.Node)
+		matches, err := requiredNodeAffinity.Match(node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to match node affinity for node %q: %w", nodeID, err)
+		}
+		if !matches {
+			continue
+		}
+		if _, untolerated := corev1helpers.FindMatchingUntoleratedTaint(
+			klog.Background(),
+			node.Spec.Taints,
+			currentTask.Spec.Tolerations,
+			func(taint *corev1.Taint) bool {
+				return taint.Effect == corev1.TaintEffectNoSchedule ||
+					taint.Effect == corev1.TaintEffectNoExecute
+			},
+			true,
+		); untolerated {
+			continue
+		}
 		spid := node.Labels[util.SuperPodIDLabel]
 		if _, wanted := spids[spid]; !wanted {
 			continue

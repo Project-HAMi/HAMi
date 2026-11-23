@@ -1628,6 +1628,62 @@ func TestApplySuperpodFilter_UnanchoredCapacityFilter(t *testing.T) {
 		assert.Equal(t, int64(60), capacities["sp-1"])
 	})
 
+	t.Run("node affinity and untolerated taints exclude capacity", func(t *testing.T) {
+		s := newSuperpodTestScheduler()
+		eligibleLabels := map[string]string{
+			util.SuperPodIDLabel: "sp-1",
+			"capacity-eligible":  "true",
+			"zone":               "a",
+		}
+		affinityMismatchLabels := map[string]string{
+			util.SuperPodIDLabel: "sp-1",
+			"capacity-eligible":  "true",
+			"zone":               "b",
+		}
+		s.registerSuperpodNode("n-eligible", eligibleLabels, 6, 10)
+		s.registerSuperpodNode("n-affinity-mismatch", affinityMismatchLabels, 6, 10)
+		s.registerSuperpodNode("n-untolerated", eligibleLabels, 6, 10)
+
+		taintedNode, err := s.GetNode("n-untolerated")
+		assert.NilError(t, err)
+		taintedNode.Node.Spec.Taints = []corev1.Taint{{
+			Key:    "dedicated",
+			Value:  "other-workload",
+			Effect: corev1.TaintEffectNoSchedule,
+		}}
+		s.addNode("n-untolerated", taintedNode)
+
+		pod := makeGPUPod("pod", "default", "task-1", 1)
+		pod.Spec.Containers[0].Resources.Limits["hami.io/gpucores"] = *resource.NewQuantity(1, resource.BinarySI)
+		pod.Spec.Containers[0].Resources.Limits["hami.io/gpumem"] = *resource.NewQuantity(500, resource.BinarySI)
+		pod.Spec.NodeSelector = map[string]string{"capacity-eligible": "true"}
+		pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+					MatchExpressions: []corev1.NodeSelectorRequirement{{
+						Key:      "zone",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"a"},
+					}},
+				}},
+			},
+		}}
+
+		capacities, err := s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}}, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, int64(60), capacities["sp-1"])
+
+		pod.Spec.Tolerations = []corev1.Toleration{{
+			Key:      "dedicated",
+			Operator: corev1.TolerationOpEqual,
+			Value:    "other-workload",
+			Effect:   corev1.TaintEffectNoSchedule,
+		}}
+		capacities, err = s.collectSuperpodCapacities(map[string]struct{}{"sp-1": {}}, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, int64(120), capacities["sp-1"])
+	})
+
 	t.Run("remaining demand of an anchored task is reserved", func(t *testing.T) {
 		s := newSuperpodTestScheduler()
 		s.registerSuperpodNode("n-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 8, 1)
