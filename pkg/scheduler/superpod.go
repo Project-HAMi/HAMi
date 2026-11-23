@@ -50,18 +50,18 @@ type superpodContext struct {
 	// PreferredRacks holds every rack where the task's pods already run,
 	// used to boost same-rack nodes in anchored mode.
 	PreferredRacks map[string]struct{}
-	// RackSlotCounts maps each superpod to a per-rack available device slot
-	// count, populated during the filter stage for first-pod rack preference.
-	RackSlotCounts map[string]map[string]int64
+	// RackFittingPods maps each superpod to the number of copies of the
+	// current pod that fit in each rack, for first-pod rack preference.
+	RackFittingPods map[string]map[string]int64
 
 	// podRequest is the current pod's single-pod device request, resolved
 	// during the filter stage.
 	podRequest int64
-	// totalRequest is the whole task's device request, resolved during the
-	// filter stage for unanchored capacity validation.
-	totalRequest int64
-	// superpodCapacities maps each candidate superpod to its total usable
-	// capacity, populated during the filter stage for unanchored mode.
+	// totalPods is the whole task's replica count, resolved during the filter
+	// stage for unanchored capacity validation.
+	totalPods int64
+	// superpodCapacities maps each candidate superpod to its number of fitting
+	// copies of the current pod, populated during the filter stage.
 	superpodCapacities map[string]int64
 }
 
@@ -80,10 +80,10 @@ func (s *Scheduler) prepareSuperpodContext(task *corev1.Pod, userNodePolicy stri
 	}
 
 	ctx := &superpodContext{
-		TaskID:         taskid,
-		Superpods:      make(map[string]struct{}),
-		PreferredRacks: make(map[string]struct{}),
-		RackSlotCounts: make(map[string]map[string]int64),
+		TaskID:          taskid,
+		Superpods:       make(map[string]struct{}),
+		PreferredRacks:  make(map[string]struct{}),
+		RackFittingPods: make(map[string]map[string]int64),
 	}
 	selector := labels.SelectorFromSet(labels.Set{util.TaskIDLabel: taskid})
 	pods, err := s.podLister.Pods(task.Namespace).List(selector)
@@ -138,8 +138,8 @@ func (s *Scheduler) prepareSuperpodContext(task *corev1.Pod, userNodePolicy stri
 // applySuperpodFilter enforces the superpod node-scheduler policy in two
 // stages, driven by whether the task is already anchored:
 //
-//   - Not anchored: reject superpods whose total usable capacity cannot hold
-//     the task's total device request, so the first pod never anchors the
+//   - Not anchored: reject superpods whose total fitting-pod capacity cannot
+//     hold all replicas of the task, so the first pod never anchors the
 //     task into a superpod too small to fit the whole task.
 //   - Anchored: reject nodes outside the task's superpods so the task stays
 //     converged. The capacity check is skipped because the superpod was
@@ -158,7 +158,7 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 	ctx.podRequest = podRequest
 
 	if !taskAnchored {
-		ctx.totalRequest, err = s.resolveSuperpodTotalRequest(task, ctx.podRequest)
+		ctx.totalPods, err = s.resolveSuperpodTotalRequest(task, ctx.podRequest)
 		if err != nil {
 			return fmt.Errorf("failed to resolve superpod total request for pod %s: %w", task.Name, err)
 		}
@@ -169,7 +169,7 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 				candidateSuperpods[spid] = struct{}{}
 			}
 		}
-		if ctx.totalRequest > 0 {
+		if ctx.totalPods > 0 {
 			ctx.superpodCapacities, err = s.collectSuperpodCapacities(candidateSuperpods, task)
 			if err != nil {
 				return fmt.Errorf("failed to collect superpod capacities: %w", err)
@@ -178,7 +178,7 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 		klog.V(4).InfoS("Superpod capacity filter",
 			"taskid", ctx.TaskID,
 			"taskAnchored", taskAnchored,
-			"totalRequest", ctx.totalRequest,
+			"totalPods", ctx.totalPods,
 			"podRequest", ctx.podRequest)
 	}
 
@@ -187,8 +187,8 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 	// Rack counting runs after rejectNodesBySuperpod so only surviving nodes
 	// are counted, avoiding bias from nodes that fail the capacity check.
 	if !taskAnchored {
-		if err := s.collectRackSlotCounts(ctx, task, nodes, ctx.podRequest); err != nil {
-			return fmt.Errorf("failed to collect superpod rack slots: %w", err)
+		if err := s.collectRackFittingPods(ctx, task, nodes); err != nil {
+			return fmt.Errorf("failed to count fitting pods per rack: %w", err)
 		}
 	}
 
@@ -209,7 +209,7 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 //   - Unanchored: reject nodes of superpods whose capacity cannot hold the
 //     task's total request (SuperpodInsufficientCapacity).
 //
-// The derived filtering state (podRequest, totalRequest, superpodCapacities)
+// The derived filtering state (podRequest, totalPods, superpodCapacities)
 // is carried by ctx, populated by applySuperpodFilter, so it does not need to
 // be passed as loose parameters.
 //
@@ -241,7 +241,7 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 				continue
 			}
 		} else {
-			if ctx.totalRequest > 0 && ctx.superpodCapacities[spid] < ctx.totalRequest {
+			if ctx.totalPods > 0 && ctx.superpodCapacities[spid] < ctx.totalPods {
 				failedNodes[nodeID] = common.SuperpodInsufficientCapacity
 				klog.V(5).InfoS(common.SuperpodInsufficientCapacity,
 					"pod", klog.KObj(task), "node", nodeID,
@@ -249,7 +249,7 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 					"superpod", spid,
 					"capacity", ctx.superpodCapacities[spid],
 					"podRequest", ctx.podRequest,
-					"totalRequest", ctx.totalRequest)
+					"totalPods", ctx.totalPods)
 				delete(*nodes, nodeID)
 				rejected++
 			}
@@ -258,14 +258,16 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 	return rejected
 }
 
-// collectRackSlotCounts accumulates, per superpod, the total remaining device
-// shares each rack holds, for first-pod rack preference. Only nodes that can
-// hold the current pod's single-pod request contribute their nodeUsableSlots.
-// podRequest is passed in to avoid recomputing.
-func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, podRequest int64) error {
-	deviceRequests, err := superpodPodDeviceRequests(task)
+// collectRackFittingPods counts, per superpod and rack, how many copies of the
+// current pod fit using the same device Fit path as scheduling.
+func (s *Scheduler) collectRackFittingPods(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage) error {
+	resourceRequests, err := device.Resourcereqs(task)
 	if err != nil {
-		return fmt.Errorf("failed to calculate per-pod device request: %w", err)
+		return fmt.Errorf("failed to calculate per-pod device requests: %w", err)
+	}
+	weights, err := util.GetDeviceScoringWeightsByPod(task)
+	if err != nil {
+		return err
 	}
 	for nodeID, usage := range *nodes {
 		if usage == nil || usage.Node == nil {
@@ -280,106 +282,87 @@ func (s *Scheduler) collectRackSlotCounts(ctx *superpodContext, task *corev1.Pod
 		if !ok || rack == "" {
 			continue
 		}
-		slots := nodeUsableSlots(usage, deviceRequests)
-		if podRequest > 0 && slots < podRequest {
-			klog.V(5).InfoS("Superpod rack count: node skipped, insufficient single-pod capacity",
-				"node", nodeID,
-				"superpod", spid,
-				"rack", rack,
-				"nodeUsable", slots,
-				"podRequest", podRequest)
+		fittingPods, err := s.countFittingPods(nodeID, usage, task, resourceRequests, resolveNodeSchedulerPolicy(task), weights)
+		if err != nil {
+			return fmt.Errorf("failed to count fitting pods on node %q: %w", nodeID, err)
+		}
+		if fittingPods == 0 {
 			continue
 		}
-		if ctx.RackSlotCounts[spid] == nil {
-			ctx.RackSlotCounts[spid] = make(map[string]int64)
+		if ctx.RackFittingPods[spid] == nil {
+			ctx.RackFittingPods[spid] = make(map[string]int64)
 		}
-		ctx.RackSlotCounts[spid][rack] += slots
+		ctx.RackFittingPods[spid][rack] += fittingPods
 	}
-	klog.V(5).InfoS("Superpod rack device counts",
+	klog.V(5).InfoS("Superpod rack fitting pod counts",
 		"taskid", ctx.TaskID,
-		"podRequest", podRequest,
-		"rackNodeCounts", ctx.RackSlotCounts)
+		"rackNodeCounts", ctx.RackFittingPods)
 	return nil
 }
 
-type superpodDeviceRequests map[string][]device.ContainerDeviceRequest
-
-func superpodPodDeviceRequests(pod *corev1.Pod) (superpodDeviceRequests, error) {
-	requests := make(superpodDeviceRequests)
-	if pod == nil {
-		return requests, nil
+// countFittingPods repeatedly simulates scheduling the same pod on a node copy
+// and counts complete successful allocations. scoreNode mutates only the
+// supplied node state after a successful Fit, so later attempts see the prior
+// simulated allocations without changing the live snapshot.
+func (s *Scheduler) countFittingPods(
+	nodeID string,
+	node *NodeUsage,
+	pod *corev1.Pod,
+	resourceRequests device.PodDeviceRequests,
+	policy string,
+	weights util.DeviceScoringWeights,
+) (int64, error) {
+	if node == nil || node.Node == nil || pod == nil {
+		return 0, nil
 	}
-	containerRequests, err := device.Resourcereqs(pod)
-	if err != nil {
-		return nil, err
-	}
-	for _, devices := range containerRequests {
-		for _, request := range devices {
+	hasRequest := false
+	for _, requests := range resourceRequests {
+		for _, request := range requests {
 			if request.Nums > 0 {
-				requests[request.Type] = append(requests[request.Type], request)
+				hasRequest = true
+				break
 			}
 		}
-	}
-	return requests, nil
-}
-
-// nodeUsableSlots returns remaining shares on healthy devices, capped by the
-// per-container memory and core requests that fit in each device's free resources.
-func nodeUsableSlots(node *NodeUsage, requests superpodDeviceRequests) int64 {
-	if node == nil {
-		return 0
-	}
-	var total int64
-	for _, ds := range node.Devices.DeviceLists {
-		if ds == nil || ds.Device == nil || !ds.Device.Health {
-			continue
+		if hasRequest {
+			break
 		}
-		total += deviceUsableSlots(ds.Device, requests[ds.Device.DeviceVendor])
 	}
-	return total
-}
-
-func deviceUsableSlots(dev *device.DeviceUsage, requests []device.ContainerDeviceRequest) int64 {
-	if dev == nil {
-		return 0
+	if !hasRequest {
+		return 0, nil
 	}
 
-	var requiredMemory, requiredCores int64
-	for _, request := range requests {
-		requestMemory := request.Memreq
-		if requestMemory <= 0 && request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
-			if dev.Totalmem <= 0 {
-				return 0
+	nodeCopy := node.DeepCopy()
+	var fittingPods int64
+	for {
+		before := snapshotPeakUsage(nodeCopy.Devices)
+		result := s.scoreNode(nodeID, nodeCopy, resourceRequests, pod, policy, nil, weights)
+		if result.err != nil {
+			return 0, result.err
+		}
+		if result.score == nil {
+			return fittingPods, nil
+		}
+		consumed := false
+		for _, ds := range nodeCopy.Devices.DeviceLists {
+			if ds == nil || ds.Device == nil {
+				continue
 			}
-			requestMemory = max(dev.Totalmem/100*request.MemPercentagereq+
-				dev.Totalmem%100*request.MemPercentagereq/100, 1)
+			previous := before[ds.Device.ID]
+			if ds.Device.Used != previous.used ||
+				ds.Device.Usedcores != previous.usedcores ||
+				ds.Device.Usedmem != previous.usedmem {
+				consumed = true
+				break
+			}
 		}
-		requiredMemory = max(requiredMemory, requestMemory)
-		requiredCores = max(requiredCores, request.Coresreq)
-	}
-
-	freeMemory := dev.Totalmem - dev.Usedmem
-	if freeMemory < requiredMemory {
-		return 0
-	}
-	remaining := dev.Count - dev.Used
-	if remaining <= 0 {
-		return 0
-	}
-	if requiredMemory > 0 {
-		remaining = min(remaining, freeMemory/requiredMemory)
-	}
-	if requiredCores > 0 {
-		freeCores := dev.Totalcore - dev.Usedcores
-		if freeCores < requiredCores {
-			return 0
+		if !consumed {
+			return 0, fmt.Errorf("device Fit succeeded without changing node usage")
 		}
-		remaining = min(remaining, freeCores/requiredCores)
+		fittingPods++
 	}
-	return remaining
 }
 
-// singleSuperpodPodRequest counts the device slots one pod requests across
+// singleSuperpodPodRequest counts the device shares one pod requests across
 // all HAMi backends. App container requests are summed, init container
 // requests take the running-max, and the larger of the two wins.
 func singleSuperpodPodRequest(pod *corev1.Pod) (int64, error) {
@@ -414,8 +397,8 @@ func singleSuperpodPodRequest(pod *corev1.Pod) (int64, error) {
 }
 
 // resolveTaskIDSuperpodTotal lists every ReplicaSet labeled with the given
-// taskid and returns the aggregate total device slots (singlePodRequest *
-// Replicas summed across all matching ReplicaSets).
+// taskid and returns the aggregate replica count of matching workloads that
+// request HAMi devices.
 func resolveTaskIDSuperpodTotal(replicaSetLister appslisters.ReplicaSetLister, namespace, taskID string) (int64, error) {
 	if replicaSetLister == nil || strings.TrimSpace(taskID) == "" {
 		return 0, nil
@@ -439,16 +422,23 @@ func resolveTaskIDSuperpodTotal(replicaSetLister appslisters.ReplicaSetLister, n
 		if podReq <= 0 {
 			continue
 		}
-		total += podReq * int64(*rs.Spec.Replicas)
+		total += int64(*rs.Spec.Replicas)
 	}
 	return total, nil
 }
 
-// superpodOwnerReplicas returns the total device slots declared by the pod's
-// owning controller (singlePodRequest * Replicas/Parallelism) and true when
-// such an owner is resolvable. A missing or zero count yields (0, false).
+// superpodOwnerReplicas returns the desired replica count declared by the pod's
+// owning controller and true when such an owner is resolvable. A missing,
+// zero-count, or device-less owner yields (0, false).
 func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error) {
 	if len(task.OwnerReferences) == 0 {
+		return 0, false, nil
+	}
+	request, err := singleSuperpodPodRequest(task)
+	if err != nil {
+		return 0, false, err
+	}
+	if request <= 0 {
 		return 0, false, nil
 	}
 	owner := task.OwnerReferences[0]
@@ -466,11 +456,7 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return 0, false, fmt.Errorf("failed to get owner %s %s: %w", owner.Kind, owner.Name, err)
 		}
 		if err == nil && rs != nil && rs.Spec.Replicas != nil && *rs.Spec.Replicas > 0 {
-			request, err := singleSuperpodPodRequest(task)
-			if err != nil {
-				return 0, false, err
-			}
-			return request * int64(*rs.Spec.Replicas), true, nil
+			return int64(*rs.Spec.Replicas), true, nil
 		}
 	case "StatefulSet":
 		if s.statefulSetLister == nil {
@@ -483,11 +469,7 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return 0, false, fmt.Errorf("failed to get owner %s %s: %w", owner.Kind, owner.Name, err)
 		}
 		if err == nil && sts != nil && sts.Spec.Replicas != nil && *sts.Spec.Replicas > 0 {
-			request, err := singleSuperpodPodRequest(task)
-			if err != nil {
-				return 0, false, err
-			}
-			return request * int64(*sts.Spec.Replicas), true, nil
+			return int64(*sts.Spec.Replicas), true, nil
 		}
 	case "Job":
 		if s.jobLister == nil {
@@ -500,25 +482,21 @@ func (s *Scheduler) superpodOwnerReplicas(task *corev1.Pod) (int64, bool, error)
 			return 0, false, fmt.Errorf("failed to get owner %s %s: %w", owner.Kind, owner.Name, err)
 		}
 		if err == nil && job != nil && job.Spec.Parallelism != nil && *job.Spec.Parallelism > 0 {
-			request, err := singleSuperpodPodRequest(task)
-			if err != nil {
-				return 0, false, err
-			}
-			return request * int64(*job.Spec.Parallelism), true, nil
+			return int64(*job.Spec.Parallelism), true, nil
 		}
 	}
 	return 0, false, nil
 }
 
-// resolveSuperpodTotalRequest derives the total device slots the whole task
+// resolveSuperpodTotalRequest derives the number of pods the whole task
 // requests, in priority order:
-//  1. Explicit hami.io/superpod-total-request label (for CRD-owned workloads).
+//  1. Explicit hami.io/superpod-total-request label, expressed in device shares.
 //  2. Aggregation across same-taskid ReplicaSets.
 //  3. Pod's own owner controller replicas.
-//  4. Fallback to the single-pod request.
+//  4. Fallback to one pod.
 //
-// single is the task's single-pod device request, passed in to avoid
-// recomputing.
+// single is the task's single-pod device-share request, used to convert the
+// legacy explicit label value into a pod count.
 func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) (int64, error) {
 	if task == nil || single <= 0 {
 		return 0, nil
@@ -530,16 +508,20 @@ func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) 
 			klog.V(4).InfoS("Superpod total request: invalid or non-positive label, ignoring",
 				"labelValue", raw, "err", parseErr)
 		} else {
+			pods := declared / single
+			if declared%single != 0 {
+				pods++
+			}
 			klog.V(4).InfoS("Superpod total request resolved from explicit label",
-				"totalRequest", declared, "singlePodRequest", single)
-			return declared, nil
+				"declaredDeviceShares", declared, "singlePodRequest", single, "totalPods", pods)
+			return pods, nil
 		}
 	}
 	// Priority 2: same-taskid ReplicaSets.
 	if taskid := task.Labels[util.TaskIDLabel]; taskid != "" && s.replicaSetLister != nil {
 		if total, resolveErr := resolveTaskIDSuperpodTotal(s.replicaSetLister, task.Namespace, taskid); resolveErr == nil && total > 0 {
 			klog.V(4).InfoS("Superpod total request resolved from task's ReplicaSets",
-				"taskid", taskid, "totalRequest", total)
+				"taskid", taskid, "totalPods", total)
 			return total, nil
 		} else if resolveErr != nil {
 			if _, ok := errors.AsType[*device.ErrInvalidDeviceRequest](resolveErr); ok {
@@ -557,29 +539,35 @@ func (s *Scheduler) resolveSuperpodTotalRequest(task *corev1.Pod, single int64) 
 	if r, ok, err := s.superpodOwnerReplicas(task); err != nil {
 		return 0, err
 	} else if ok && r > 0 {
-		klog.V(4).InfoS("Superpod total request resolved from owner controller replicas",
-			"pod", klog.KObj(task), "totalRequest", r)
+		klog.V(4).InfoS("Superpod total pods resolved from owner controller",
+			"pod", klog.KObj(task), "totalPods", r)
 		return r, nil
 	}
 	// Priority 4: single-pod request.
-	klog.V(4).InfoS("Superpod total request fell back to single pod request",
-		"totalRequest", single)
-	return single, nil
+	klog.V(4).InfoS("Superpod total request fell back to one pod")
+	return 1, nil
 }
 
-// collectSuperpodCapacities computes the aggregate usable device capacity per
-// requested superpod from a full node snapshot, then reserves the outstanding
-// requests of other tasks already anchored there. Allocations recorded in the
-// snapshot are excluded from those outstanding requests.
+// collectSuperpodCapacities computes how many copies of the current pod fit in
+// each requested superpod using a full node snapshot, then reserves the
+// outstanding replica counts of other tasks already anchored there.
 func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, currentTask *corev1.Pod) (map[string]int64, error) {
 	capacities := make(map[string]int64, len(spids))
 	if len(spids) == 0 {
 		return capacities, nil
 	}
-	deviceRequests, err := superpodPodDeviceRequests(currentTask)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate per-pod device request: %w", err)
+	if currentTask == nil {
+		return capacities, nil
 	}
+	resourceRequests, err := device.Resourcereqs(currentTask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate per-pod device requests: %w", err)
+	}
+	weights, err := util.GetDeviceScoringWeightsByPod(currentTask)
+	if err != nil {
+		return nil, err
+	}
+	policy := resolveNodeSchedulerPolicy(currentTask)
 	// getNodesUsage with a nil node list returns the full snapshot; the pod
 	// argument only drives the scoring policy, so an empty task is safe.
 	_, overall, _, err := s.getNodesUsage(nil, &corev1.Pod{})
@@ -595,7 +583,11 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 		if _, wanted := spids[spid]; !wanted {
 			continue
 		}
-		capacities[spid] += nodeUsableSlots(usage, deviceRequests)
+		fittingPods, err := s.countFittingPods(nodeID, usage, currentTask, resourceRequests, policy, weights)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count fitting pods on node %q: %w", nodeID, err)
+		}
+		capacities[spid] += fittingPods
 	}
 	reservations, err := s.collectAnchoredTaskReservations(spids, *overall, currentTask)
 	if err != nil {
@@ -619,7 +611,7 @@ type superpodTaskKey struct {
 	taskID    string
 }
 
-// collectAnchoredTaskReservations returns the remaining task demand to reserve
+// collectAnchoredTaskReservations returns the remaining pod count to reserve
 // in each requested superpod. When a task is anchored to multiple superpods,
 // its outstanding demand is reserved in each one so a new task cannot consume
 // capacity that the anchored task may still need.
@@ -694,7 +686,7 @@ func (s *Scheduler) collectAnchoredTaskReservations(spids map[string]struct{}, o
 		}
 	}
 
-	accountedByTask := make(map[superpodTaskKey]int64)
+	accountedPodsByTask := make(map[superpodTaskKey]map[string]struct{})
 	for _, usage := range overall {
 		if usage == nil {
 			continue
@@ -720,14 +712,28 @@ func (s *Scheduler) collectAnchoredTaskReservations(spids map[string]struct{}, o
 				if key.taskID == "" || len(anchoredSuperpods[key]) == 0 {
 					continue
 				}
+				hasAllocation := false
 				for _, containers := range podInfo.Devices {
 					for _, devices := range containers {
 						for _, allocated := range devices {
 							if allocated.UUID == nodeDevice.Device.ID {
-								accountedByTask[key] += max(allocated.Slots, 1)
+								hasAllocation = true
+								break
 							}
 						}
+						if hasAllocation {
+							break
+						}
 					}
+					if hasAllocation {
+						break
+					}
+				}
+				if hasAllocation {
+					if accountedPodsByTask[key] == nil {
+						accountedPodsByTask[key] = make(map[string]struct{})
+					}
+					accountedPodsByTask[key][podKey] = struct{}{}
 				}
 			}
 		}
@@ -743,11 +749,11 @@ func (s *Scheduler) collectAnchoredTaskReservations(spids map[string]struct{}, o
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate request for anchored task %q in namespace %q: %w", key.taskID, key.namespace, err)
 		}
-		totalRequest, err := s.resolveSuperpodTotalRequest(representative, singleRequest)
+		totalPods, err := s.resolveSuperpodTotalRequest(representative, singleRequest)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve total request for anchored task %q in namespace %q: %w", key.taskID, key.namespace, err)
 		}
-		remaining := totalRequest - accountedByTask[key]
+		remaining := totalPods - int64(len(accountedPodsByTask[key]))
 		if remaining <= 0 {
 			continue
 		}
@@ -784,11 +790,9 @@ func resolveSuperpodRackBoost() float32 {
 //   - Anchored: nodes in racks where the task's pods already run get the full
 //     bonus, added under binpack and capped under spread.
 //   - Not anchored (first pod): nodes get a proportional bonus of
-//     superpodRackBoost * rackSlots / maxRackSlots, where maxRackSlots is the
-//     largest per-rack remaining slots across all candidate superpods,
-//     derived from ctx.RackSlotCounts on the fly. The cross-superpod
-//     denominator keeps the boost comparable between superpods. Racks whose
-//     remaining slots are less than the single-pod request get no bonus. Under
+//     superpodRackBoost * rackFittingPods / maxRackFittingPods, where the
+//     denominator is the largest fitting-pod count across all candidate
+//     superpods. Under
 //     spread, the boost is capped so positive scores stay positive and retain
 //     their relative order; zero and negative scores still receive a bounded
 //     rack preference.
@@ -816,47 +820,38 @@ func applySuperpodRackBoost(ctx *superpodContext, node *corev1.Node, nodeID stri
 		return finalScore
 	}
 
-	// First-pod mode: proportional bonus based on the rack's remaining
-	// device slots relative to the largest rack across all candidate
-	// superpods.
+	// First-pod mode: proportional bonus based on complete pods that fit in
+	// the rack relative to the largest rack across all candidate superpods.
 	spid, ok := node.Labels[util.SuperPodIDLabel]
 	if !ok || spid == "" {
 		return baseScore
 	}
-	rackSlotsMap, ok := ctx.RackSlotCounts[spid]
+	rackPodsByRack, ok := ctx.RackFittingPods[spid]
 	if !ok {
 		klog.V(5).InfoS("Superpod rack boost skipped: no rack counts for superpod",
 			"node", nodeID, "superpod", spid, "rack", rack)
 		return baseScore
 	}
-	rackSlots := rackSlotsMap[rack]
-	if rackSlots < ctx.podRequest {
-		// A rack whose remaining slots cannot fit even one more pod offers no
-		// room for convergence.
-		klog.V(5).InfoS("Superpod rack boost skipped: rack has insufficient remaining slots",
-			"node", nodeID, "superpod", spid, "rack", rack, "rackSlots", rackSlots,
-			"podRequest", ctx.podRequest)
-		return baseScore
-	}
-	maxRackSlots := int64(0)
-	for _, racks := range ctx.RackSlotCounts {
-		for _, slots := range racks {
-			if slots > maxRackSlots {
-				maxRackSlots = slots
+	rackFittingPods := rackPodsByRack[rack]
+	maxRackFittingPods := int64(0)
+	for _, racks := range ctx.RackFittingPods {
+		for _, fittingPods := range racks {
+			if fittingPods > maxRackFittingPods {
+				maxRackFittingPods = fittingPods
 			}
 		}
 	}
-	if maxRackSlots <= 0 {
+	if maxRackFittingPods <= 0 {
 		return baseScore
 	}
-	boost := superpodRackBoost * float32(rackSlots) / float32(maxRackSlots)
+	boost := superpodRackBoost * float32(rackFittingPods) / float32(maxRackFittingPods)
 	finalScore := applyRackBoostToScore(baseScore, boost, schedulerpolicy.NodePolicyUsesSpread(policy))
 	klog.V(5).InfoS("Superpod rack boost applied (first pod)",
 		"node", nodeID,
 		"superpod", spid,
 		"rack", rack,
-		"rackSlots", rackSlots,
-		"maxRackSlots", maxRackSlots,
+		"rackFittingPods", rackFittingPods,
+		"maxRackFittingPods", maxRackFittingPods,
 		"boost", boost,
 		"baseScore", baseScore,
 		"finalScore", finalScore)
