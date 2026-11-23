@@ -63,6 +63,34 @@ func NewQuotaManager() *QuotaManager {
 	return &localCache
 }
 
+// FitPodQuota reports whether the pod still fits the namespace quota of
+// devType when the current container gets the tentative devices plus the
+// candidates. allocated holds the devices of the pod's earlier containers;
+// init container usage is collapsed the same way the scheduler records it.
+// Neither allocated nor tentative is modified. Usedcores is summed as a plain
+// number, so backends that store a core bitmask in it need their own count.
+func FitPodQuota(pod *corev1.Pod, allocated *PodDevices, devType string, tentative ContainerDevices, candidates ...ContainerDevice) bool {
+	hypo := PodDevices{}
+	if allocated != nil {
+		for t, podSingle := range *allocated {
+			hypo[t] = append(PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(ContainerDevices{}, tentative...)
+	cur = append(cur, candidates...)
+	hypo[devType] = append(hypo[devType], cur)
+
+	var mem, core int64
+	for _, ctrDevs := range CollapseInitContainerUsage(pod, hypo)[devType] {
+		for _, val := range ctrDevs {
+			mem += val.Usedmem
+			core += val.Usedcores
+		}
+	}
+
+	return GetLocalCache().FitQuota(pod.Namespace, mem, core, devType)
+}
+
 func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceName string) bool {
 	devs, ok := GetDevices()[deviceName]
 	if !ok {

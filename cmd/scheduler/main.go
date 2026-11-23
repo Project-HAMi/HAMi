@@ -24,6 +24,9 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -59,7 +62,9 @@ var (
 		Short: "kubernetes vgpu scheduler",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			return start()
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			return start(ctx)
 		},
 	}
 )
@@ -76,6 +81,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().Float32Var(&config.NodeAffinityScoreWeight, "node-affinity-score-weight", 0.0, "Bonus added to the node score for nodes matching the pod's preferred nodeAffinity, scaled by the matched weight ratio (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
+	rootCmd.Flags().Float32Var(&config.TaintTolerationScoreWeight, "taint-toleration-score-weight", 0.0, "Penalty applied to the node score for PreferNoSchedule taints the pod does not tolerate, scaled by the node's untolerated taint count over the highest count among candidate nodes (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 
@@ -126,7 +132,7 @@ func listenProfiling(enabled bool, address string) (net.Listener, error) {
 
 // startProfilingServer returns the listener for the caller to close.
 // Serving errors use the same channel as the scheduler's other HTTP servers.
-func startProfilingServer(enabled bool, address string, errCh chan<- error) (net.Listener, error) {
+func startProfilingServer(ctx context.Context, wg *sync.WaitGroup, enabled bool, address string, errCh chan<- error) (net.Listener, error) {
 	listener, err := listenProfiling(enabled, address)
 	if err != nil {
 		return nil, err
@@ -135,16 +141,19 @@ func startProfilingServer(enabled bool, address string, errCh chan<- error) (net
 		return nil, nil
 	}
 	klog.Infof("Profiling enabled, visit http://%s/debug/pprof/ to view profiles", listener.Addr())
-	go func() {
-		errCh <- fmt.Errorf("profiling server error: %w", serve(listener, profilingMux(), nil))
-	}()
+	wg.Go(func() {
+		if err := serve(ctx, listener, profilingMux(), nil); err != nil {
+			errCh <- fmt.Errorf("profiling server error: %w", err)
+		}
+	})
 	return listener, nil
 }
 
 // start initializes the scheduler, claims its HTTP listeners synchronously,
-// and blocks until a supervised server reports an error. All acquired
-// listeners and scheduler resources are released before it returns.
-func start() error {
+// and blocks until ctx is canceled or a supervised server reports an error,
+// then shuts every server down. All acquired listeners and scheduler
+// resources are released before it returns.
+func start(ctx context.Context) error {
 	if err := validateSchedulerOptions(); err != nil {
 		return err
 	}
@@ -169,13 +178,26 @@ func start() error {
 		return fmt.Errorf("empty hostname returned")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	sher = scheduler.NewScheduler()
+	// Start waits for the informer caches on the scheduler's stop channel, not
+	// on ctx, so stop the scheduler as soon as ctx is canceled.
+	go func(s *scheduler.Scheduler) {
+		<-ctx.Done()
+		s.Stop()
+	}(sher)
 	go sher.RegisterFromNodeAnnotations()
+	go sher.WatchAllocateTimeouts()
 	err = sher.Start()
 	if err != nil {
 		return err
 	}
 	defer sher.Stop()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	router := clusterRouter(sher)
 
@@ -213,13 +235,17 @@ func start() error {
 	}
 	defer clusterListener.Close()
 	errCh := make(chan error, 4)
-	metricsListener, err := startMetricsServer(config.MetricsBindAddress, sher, legacyMetrics, errCh)
+	var wg sync.WaitGroup
+	metricsListener, err := startMetricsServer(ctx, &wg, config.MetricsBindAddress, sher, legacyMetrics, errCh)
 	if err != nil {
 		return err
 	}
 	defer metricsListener.Close()
-	profilingListener, err := startProfilingServer(enableProfiling, profilingBindAddress, errCh)
+	profilingListener, err := startProfilingServer(ctx, &wg, enableProfiling, profilingBindAddress, errCh)
 	if err != nil {
+		// The metrics server is already running; stop it before returning.
+		cancel()
+		wg.Wait()
 		return err
 	}
 	if profilingListener != nil {
@@ -228,13 +254,30 @@ func start() error {
 
 	// Supervise metrics and profiling alongside the scheduler listeners so server failures
 	// are returned to the caller instead of leaving a partially working process.
-	go func() {
-		errCh <- fmt.Errorf("extender server error: %w", serve(extenderListener, extenderRouter(sher), tlsCfg))
-	}()
-	go func() {
-		errCh <- fmt.Errorf("server error: %w", serve(clusterListener, router, tlsCfg))
-	}()
-	return <-errCh
+	wg.Go(func() {
+		if err := serve(ctx, extenderListener, extenderRouter(sher), tlsCfg); err != nil {
+			errCh <- fmt.Errorf("extender server error: %w", err)
+		}
+	})
+	wg.Go(func() {
+		if err := serve(ctx, clusterListener, router, tlsCfg); err != nil {
+			errCh <- fmt.Errorf("server error: %w", err)
+		}
+	})
+	// A signal is a normal shutdown, an error is not: return it so main exits
+	// non-zero and the container reports the failure instead of Completed.
+	var runErr error
+	select {
+	case <-ctx.Done():
+		klog.InfoS("Received termination signal, shutting down")
+	case runErr = <-errCh:
+	}
+	// Stop the scheduler before draining, so a Bind still retrying a node lock
+	// gives up instead of taking one near the end of the drain.
+	sher.Stop()
+	cancel()
+	wg.Wait()
+	return runErr
 }
 
 // extenderRouter serves the scheduler extender verbs. kube-scheduler calls
@@ -244,6 +287,7 @@ func extenderRouter(s *scheduler.Scheduler) *httprouter.Router {
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(s))
 	router.POST("/bind", routes.Bind(s))
+	router.POST("/preempt", routes.PreemptRoute(s))
 	return router
 }
 
@@ -259,19 +303,37 @@ func clusterRouter(s *scheduler.Scheduler) *httprouter.Router {
 	return router
 }
 
-func serve(listener net.Listener, handler http.Handler, tlsCfg *tls.Config) error {
+func serve(ctx context.Context, listener net.Listener, handler http.Handler, tlsCfg *tls.Config) error {
 	server := &http.Server{
 		Handler:           handler,
 		TLSConfig:         tlsCfg,
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       60 * time.Second,
 	}
-	if tlsCfg == nil {
-		klog.InfoS("Starting HTTP server", "address", listener.Addr())
-		return server.Serve(listener)
+	serveErr := make(chan error, 1)
+	go func() {
+		if tlsCfg == nil {
+			klog.InfoS("Starting HTTP server", "address", listener.Addr())
+			serveErr <- server.Serve(listener)
+			return
+		}
+		klog.InfoS("Starting HTTPS server", "address", listener.Addr())
+		serveErr <- server.ServeTLS(listener, "", "")
+	}()
+
+	// Graceful shutdown on context cancellation
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
 	}
-	klog.InfoS("Starting HTTPS server", "address", listener.Addr())
-	return server.ServeTLS(listener, "", "")
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdown); err != nil {
+		klog.ErrorS(err, "Server shutdown failed", "address", listener.Addr())
+		return err
+	}
+	return nil
 }
 
 // isLoopbackAddr reports whether addr binds the loopback interface only. An
