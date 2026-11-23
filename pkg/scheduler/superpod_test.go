@@ -17,9 +17,11 @@ limitations under the License.
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -34,7 +36,9 @@ import (
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	batchlisters "k8s.io/client-go/listers/batch/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -98,6 +102,60 @@ func TestEnsureSuperpodInformers(t *testing.T) {
 	}
 	if s.replicaSetLister == nil || s.statefulSetLister == nil || s.jobLister == nil {
 		t.Fatal("expected all SuperPod controller listers to be initialized")
+	}
+}
+
+func TestFilterSyncsSuperpodInformersOutsideAllocLock(t *testing.T) {
+	resetSuperpodTestDevices(t)
+
+	s := NewScheduler()
+	t.Cleanup(s.Stop)
+	pod := makeGPUPod("pod", "default", "", 1)
+	pod.Labels[util.TaskIDLabel] = "task-1"
+	pod.Annotations = map[string]string{
+		util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySuperpod.String(),
+	}
+	s.podLister = newTestPodLister(t, pod)
+
+	clientset := fake.NewSimpleClientset()
+	s.kubeClient = clientset
+	s.informerFactory = informers.NewSharedInformerFactory(clientset, 0)
+	replicaSetListStarted := make(chan struct{}, 1)
+	clientset.PrependReactor("list", "replicasets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		select {
+		case replicaSetListStarted <- struct{}{}:
+		default:
+		}
+		<-s.stopCh
+		return true, nil, errors.New("informer stopped")
+	})
+
+	filterDone := make(chan error, 1)
+	go func() {
+		_, err := s.Filter(extenderv1.ExtenderArgs{
+			Pod:       pod,
+			NodeNames: &[]string{},
+		})
+		filterDone <- err
+	}()
+
+	select {
+	case <-replicaSetListStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Filter did not start the SuperPod ReplicaSet informer")
+	}
+
+	if !s.allocLock.TryLock() {
+		t.Fatal("Filter held allocLock while waiting for SuperPod informer sync")
+	}
+	s.allocLock.Unlock()
+
+	s.Stop()
+	select {
+	case err := <-filterDone:
+		assert.Assert(t, err != nil)
+	case <-time.After(time.Second):
+		t.Fatal("Filter did not return after informer sync was stopped")
 	}
 }
 

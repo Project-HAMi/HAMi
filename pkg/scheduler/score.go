@@ -529,13 +529,6 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		NodeList: make([]*policy.NodeScore, 0),
 	}
 
-	// Superpod filter stage: converge same-task pods into one superpod.
-	if util.PolicyContains(userNodePolicy, util.NodeSchedulerPolicySuperpod) &&
-		task.Labels[util.TaskIDLabel] != "" {
-		if err := s.ensureSuperpodInformers(); err != nil {
-			return nil, fmt.Errorf("failed to initialize SuperPod informers: %w", err)
-		}
-	}
 	superpodCtx := s.prepareSuperpodContext(task, userNodePolicy)
 	if err := s.applySuperpodFilter(superpodCtx, task, nodes, failedNodes); err != nil {
 		return nil, err

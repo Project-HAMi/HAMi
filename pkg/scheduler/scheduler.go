@@ -1790,6 +1790,18 @@ func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
 	return live, nil
 }
 
+func (s *Scheduler) ensureSuperpodInformersForPod(pod *corev1.Pod) error {
+	if pod == nil ||
+		pod.Labels[util.TaskIDLabel] == "" ||
+		!util.PolicyContains(resolveNodeSchedulerPolicy(pod), util.NodeSchedulerPolicySuperpod) {
+		return nil
+	}
+	if err := s.ensureSuperpodInformers(); err != nil {
+		return fmt.Errorf("failed to initialize SuperPod informers: %w", err)
+	}
+	return nil
+}
+
 // Filter selects a node and reserves devices for a scheduler extender request.
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
@@ -1840,6 +1852,14 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			FailedNodes: nil,
 			Error:       "",
 		}, nil
+	}
+	if err := s.ensureSuperpodInformersForPod(pod); err != nil {
+		err = fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
+		if args.Nodes == nil {
+			s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonInternal)
+			s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
+		}
+		return nil, err
 	}
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
