@@ -312,3 +312,94 @@ func TestUsableDevicesWithoutNVMLFailsWhenNoGPUIsUsable(t *testing.T) {
 
 	require.ErrorContains(t, err, "GPU at index 1 is unusable")
 }
+
+// A replica config that names devices on a skipped GPU must not fail the device
+// map, while a reference to a device that is not on the node still does.
+func TestGetIDsOfDevicesToReplicateWithSkippedGPU(t *testing.T) {
+	devices := DeviceMap{"nvidia.com/gpu": Devices{}}
+	for _, i := range []string{"0", "2", "3"} {
+		devices["nvidia.com/gpu"][i] = &Device{Device: kubeletdevicepluginv1beta1.Device{ID: i}, Index: i}
+	}
+	skipped := map[int]struct{}{1: {}}
+	list := func(refs ...string) spec.ReplicatedDevices {
+		var l []spec.ReplicatedDeviceRef
+		for _, r := range refs {
+			l = append(l, spec.ReplicatedDeviceRef(r))
+		}
+		return spec.ReplicatedDevices{List: l}
+	}
+
+	testCases := []struct {
+		description string
+		devices     spec.ReplicatedDevices
+		wantIDs     []string
+		wantErr     string
+	}{
+		{description: "index of a skipped GPU", devices: list("0", "1"), wantIDs: []string{"0"}},
+		{description: "MIG index on a skipped GPU", devices: list("1:0")},
+		{description: "UUID not found while a GPU is skipped", devices: list("GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b77", "2"), wantIDs: []string{"2"}},
+		{description: "index not on the node", devices: list("0", "4"), wantErr: "no matching device at index: 4"},
+		{description: "count larger than the usable GPUs", devices: spec.ReplicatedDevices{Count: 4}, wantIDs: []string{"0", "2", "3"}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			r := &spec.ReplicatedResource{Name: "nvidia.com/gpu", Devices: tc.devices, Replicas: 2}
+
+			ids, err := devices.getIDsOfDevicesToReplicate(r, skipped)
+
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantIDs, ids)
+		})
+	}
+}
+
+// Time-slicing with an explicit list that names a lost GPU keeps serving the
+// other GPUs: the listed healthy GPU is shared and the rest are served as is.
+func TestDeviceMapReplicasWithUnusableGPU(t *testing.T) {
+	resources := &spec.Resources{GPUs: []spec.Resource{{Pattern: spec.ResourcePattern("*"), Name: "nvidia.com/gpu"}}}
+	migStrategy := spec.MigStrategyNone
+
+	testCases := []struct {
+		description    string
+		list           []spec.ReplicatedDeviceRef
+		wantReplicated int
+		wantShared     int
+	}{
+		{description: "one listed GPU is lost", list: []spec.ReplicatedDeviceRef{"0", "1"}, wantReplicated: 2, wantShared: 6},
+		{description: "every listed GPU is lost", list: []spec.ReplicatedDeviceRef{"1"}, wantReplicated: 0, wantShared: 7},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			b := deviceMapBuilder{
+				Interface:   newUsableDevices(fakeDeviceLib{gpus: eightGPUs(1, nvml.ERROR_GPU_IS_LOST)}, nil),
+				migStrategy: &migStrategy,
+				resources:   resources,
+				replicatedResources: &spec.ReplicatedResources{Resources: []spec.ReplicatedResource{{
+					Name:     "nvidia.com/gpu",
+					Devices:  spec.ReplicatedDevices{List: tc.list},
+					Replicas: 2,
+				}}},
+				newGPUDevice: newFakeGPUDevice,
+			}
+
+			devices, err := b.build()
+
+			require.NoError(t, err)
+			replicated, unshared := 0, 0
+			for _, d := range devices["nvidia.com/gpu"] {
+				require.NotEqual(t, "1", d.Index, "lost GPU is advertised")
+				if d.Replicas > 0 {
+					replicated++
+				} else {
+					unshared++
+				}
+			}
+			require.Equal(t, tc.wantReplicated, replicated)
+			require.Equal(t, tc.wantShared, unshared)
+		})
+	}
+}

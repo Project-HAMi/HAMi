@@ -34,6 +34,8 @@ package rm
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
@@ -78,11 +80,20 @@ func (b *deviceMapBuilder) build() (DeviceMap, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error building device map from config.resources: %v", err)
 	}
-	devices, err = updateDeviceMapWithReplicas(b.replicatedResources, devices)
+	devices, err = updateDeviceMapWithReplicas(b.replicatedResources, devices, b.skippedGPUs())
 	if err != nil {
 		return nil, fmt.Errorf("error updating device map with replicas from replicatedResources config: %v", err)
 	}
 	return devices, nil
+}
+
+// skippedGPUs returns the indices of the GPUs that were left out of the device
+// map because NVML reported them as unusable.
+func (b *deviceMapBuilder) skippedGPUs() map[int]struct{} {
+	if u, ok := b.Interface.(*usableDevices); ok {
+		return u.skipped
+	}
+	return nil
 }
 
 // buildDeviceMapFromConfigResources builds a map of resource names to devices from spec.Config.Resources
@@ -251,7 +262,11 @@ func (d DeviceMap) isEmpty() bool {
 }
 
 // getIDsOfDevicesToReplicate returns a list of device IDs that we want to replicate.
-func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]string, error) {
+//
+// skipped holds the indices of GPUs left out of the device map because they are
+// unusable. A reference to such a GPU is not an error, so one unusable GPU does
+// not stop the others from being shared.
+func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource, skipped map[int]struct{}) ([]string, error) {
 	devices, exists := d[r.Name]
 	if !exists {
 		return nil, nil
@@ -265,7 +280,11 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 	// If a specific number of devices for this resource type are to be replicated.
 	if r.Devices.Count > 0 {
 		if r.Devices.Count > len(devices) {
-			return nil, fmt.Errorf("requested %d devices to be replicated, but only %d devices available", r.Devices.Count, len(devices))
+			if len(skipped) == 0 {
+				return nil, fmt.Errorf("requested %d devices to be replicated, but only %d devices available", r.Devices.Count, len(devices))
+			}
+			klog.Warningf("Requested %d %s devices to be replicated, but only %d are available because %d GPU(s) were skipped; replicating those", r.Devices.Count, r.Name, len(devices), len(skipped))
+			return devices.GetIDs(), nil
 		}
 		return devices.GetIDs()[:r.Devices.Count], nil
 	}
@@ -277,6 +296,12 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 			if ref.IsUUID() {
 				d := devices.GetByID(string(ref))
 				if d == nil {
+					if len(skipped) > 0 {
+						// The UUID of a skipped GPU cannot be read, so it cannot be told
+						// apart from a UUID that is not on the node.
+						klog.Warningf("No usable %s device with UUID %v; it may be on a skipped GPU, so it is not replicated", r.Name, ref)
+						continue
+					}
 					return nil, fmt.Errorf("no matching device with UUID: %v", ref)
 				}
 				ids = append(ids, d.ID)
@@ -284,6 +309,10 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 			if ref.IsGPUIndex() || ref.IsMigIndex() {
 				d := devices.GetByIndex(string(ref))
 				if d == nil {
+					if isOnSkippedGPU(ref, skipped) {
+						klog.Warningf("%s device at index %v is on a skipped GPU, so it is not replicated", r.Name, ref)
+						continue
+					}
 					return nil, fmt.Errorf("no matching device at index: %v", ref)
 				}
 				ids = append(ids, d.ID)
@@ -295,9 +324,21 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 	return nil, fmt.Errorf("unexpected error")
 }
 
+// isOnSkippedGPU reports whether a GPU index ("1") or MIG index ("1:0") refers
+// to a skipped GPU.
+func isOnSkippedGPU(ref spec.ReplicatedDeviceRef, skipped map[int]struct{}) bool {
+	gpu, _, _ := strings.Cut(string(ref), ":")
+	i, err := strconv.Atoi(gpu)
+	if err != nil {
+		return false
+	}
+	_, ok := skipped[i]
+	return ok
+}
+
 // updateDeviceMapWithReplicas returns an updated map of resource names to devices with replica
 // information from the active replicated resources config.
-func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, oDevices DeviceMap) (DeviceMap, error) {
+func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, oDevices DeviceMap, skipped map[int]struct{}) (DeviceMap, error) {
 	devices := make(DeviceMap)
 
 	// Begin by walking replicatedResources.Resources and building a map of just the resource names.
@@ -317,12 +358,16 @@ func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, 
 	for _, resource := range replicatedResources.Resources {
 		r := resource
 		// Get the IDs of the devices we want to replicate from oDevices
-		ids, err := oDevices.getIDsOfDevicesToReplicate(&r)
+		ids, err := oDevices.getIDsOfDevicesToReplicate(&r, skipped)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get IDs of devices to replicate for '%v' resource: %v", r.Name, err)
 		}
 		// Skip any resources not matched in oDevices
 		if len(ids) == 0 {
+			// Every listed device was on a skipped GPU: serve the others unshared.
+			if ds, ok := oDevices[r.Name]; ok && len(skipped) > 0 {
+				devices[r.Name] = ds
+			}
 			continue
 		}
 

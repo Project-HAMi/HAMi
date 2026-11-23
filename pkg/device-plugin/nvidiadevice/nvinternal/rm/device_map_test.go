@@ -232,7 +232,7 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			devices, _ := updateDeviceMapWithReplicas(&tc.config.Config.Sharing.TimeSlicing, tc.devices)
+			devices, _ := updateDeviceMapWithReplicas(&tc.config.Config.Sharing.TimeSlicing, tc.devices, nil)
 			require.EqualValues(t, tc.expectedDeviceMap, devices)
 		})
 	}
@@ -568,7 +568,7 @@ func TestDeviceMapGetIDsOfDevicesToReplicate(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			ids, err := tc.deviceMap.getIDsOfDevicesToReplicate(tc.resource)
+			ids, err := tc.deviceMap.getIDsOfDevicesToReplicate(tc.resource, nil)
 
 			if tc.expectedErr != nil {
 				require.Error(t, err)

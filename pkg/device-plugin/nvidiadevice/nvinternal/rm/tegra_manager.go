@@ -51,7 +51,7 @@ func NewTegraResourceManagers(config *spec.Config) ([]ResourceManager, error) {
 		return nil, fmt.Errorf("error building Tegra device map: %v", err)
 	}
 
-	deviceMap, err = updateDeviceMapWithReplicas(config.Sharing.ReplicatedResources(), deviceMap)
+	deviceMap, err = updateDeviceMapWithReplicas(config.Sharing.ReplicatedResources(), deviceMap, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error updating device map with replicas from sharing resources: %v", err)
 	}
