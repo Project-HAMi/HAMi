@@ -18,11 +18,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +33,8 @@ import (
 
 func TestStartProfilingServer(t *testing.T) {
 	errCh := make(chan error, 1)
-	listener, err := startProfilingServer(true, "127.0.0.1:0", errCh)
+	var wg sync.WaitGroup
+	listener, err := startProfilingServer(t.Context(), &wg, true, "127.0.0.1:0", errCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +67,8 @@ func TestStartProfilingServer(t *testing.T) {
 
 func TestStartProfilingServerDisabledAndBindFailure(t *testing.T) {
 	errCh := make(chan error, 1)
-	listener, err := startProfilingServer(false, "invalid address", errCh)
+	var wg sync.WaitGroup
+	listener, err := startProfilingServer(t.Context(), &wg, false, "invalid address", errCh)
 	if listener != nil || err != nil {
 		t.Fatalf("disabled profiling = %v, %v; want nil, nil", listener, err)
 	}
@@ -73,7 +77,7 @@ func TestStartProfilingServerDisabledAndBindFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer occupied.Close()
-	listener, err = startProfilingServer(true, occupied.Addr().String(), errCh)
+	listener, err = startProfilingServer(t.Context(), &wg, true, occupied.Addr().String(), errCh)
 	if listener != nil {
 		listener.Close()
 		t.Fatal("profiling bound an occupied port")
@@ -265,7 +269,7 @@ func TestServeAnswersOnTheGivenListener(t *testing.T) {
 	defer listener.Close()
 
 	served := make(chan error, 1)
-	go func() { served <- serve(listener, clusterRouter(nil), nil) }()
+	go func() { served <- serve(t.Context(), listener, clusterRouter(nil), nil) }()
 
 	resp, err := http.Get("http://" + listener.Addr().String() + "/healthz")
 	if err != nil {
@@ -286,5 +290,57 @@ func TestServeAnswersOnTheGivenListener(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("serve did not return after its listener closed")
+	}
+}
+
+func TestServeWaitsForInFlightRequests(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to open a listener: %v", err)
+	}
+	defer listener.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, handler, nil) }()
+
+	status := make(chan int, 1)
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String() + "/bind")
+		if err != nil {
+			t.Errorf("in-flight request failed: %v", err)
+			status <- 0
+			return
+		}
+		resp.Body.Close()
+		status <- resp.StatusCode
+	}()
+
+	<-entered
+	cancel()
+	select {
+	case err := <-served:
+		t.Fatalf("serve returned %v before the in-flight request finished", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if got := <-status; got != http.StatusOK {
+		t.Errorf("in-flight request returned %d, want %d", got, http.StatusOK)
+	}
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Errorf("serve returned %v after a clean shutdown, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after the in-flight request finished")
 	}
 }

@@ -17,11 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -580,21 +582,24 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 
 // startMetricsServer binds the metrics address before serving so startup
 // failures are synchronous. Runtime serving errors are reported to errCh.
-func startMetricsServer(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool, errCh chan<- error) (net.Listener, error) {
+func startMetricsServer(ctx context.Context, wg *sync.WaitGroup, bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool, errCh chan<- error) (net.Listener, error) {
 	listener, err := listenTCP("tcp", bindAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on the metrics address %s: %w", bindAddress, err)
 	}
 	klog.InfoS("Metrics listener initialized", "address", listener.Addr())
-	go func() {
-		errCh <- fmt.Errorf("metrics server error: %w", initMetrics(listener, metricsProvider, legacyMetrics))
-	}()
+	wg.Go(func() {
+		if err := initMetrics(ctx, listener, metricsProvider, legacyMetrics); err != nil {
+			errCh <- fmt.Errorf("metrics server error: %w", err)
+		}
+	})
 	return listener, nil
 }
 
 // initMetrics registers the scheduler collectors and serves them on listener
-// until the HTTP server returns an error. The caller owns the listener.
-func initMetrics(listener net.Listener, metricsProvider schedulerMetricsProvider, legacyMetrics bool) error {
+// until ctx is canceled or the HTTP server returns an error. The caller owns
+// the listener.
+func initMetrics(ctx context.Context, listener net.Listener, metricsProvider schedulerMetricsProvider, legacyMetrics bool) error {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
@@ -603,7 +608,7 @@ func initMetrics(listener net.Listener, metricsProvider schedulerMetricsProvider
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	return serve(listener, mux, nil)
+	return serve(ctx, listener, mux, nil)
 }
 
 func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {
