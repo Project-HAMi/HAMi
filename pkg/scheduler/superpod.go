@@ -19,6 +19,7 @@ package scheduler
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	appslisters "k8s.io/client-go/listers/apps/v1"
+	resourcehelper "k8s.io/component-helpers/resource"
 	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
 	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 	"k8s.io/klog/v2"
@@ -289,7 +291,7 @@ func (s *Scheduler) collectRackFittingPods(ctx *superpodContext, task *corev1.Po
 	if err != nil {
 		return fmt.Errorf("failed to calculate per-pod device requests: %w", err)
 	}
-	weights, err := util.GetDeviceScoringWeightsByPod(task)
+	hostFitLimits, err := s.hostResourceFitLimits(task, *nodes)
 	if err != nil {
 		return err
 	}
@@ -306,10 +308,7 @@ func (s *Scheduler) collectRackFittingPods(ctx *superpodContext, task *corev1.Po
 		if !ok || rack == "" {
 			continue
 		}
-		fittingPods, err := s.countFittingPods(nodeID, usage, task, resourceRequests, resolveNodeSchedulerPolicy(task), weights)
-		if err != nil {
-			return fmt.Errorf("failed to count fitting pods on node %q: %w", nodeID, err)
-		}
+		fittingPods := s.countFittingPods(usage, task, resourceRequests, hostFitLimits[nodeID])
 		if fittingPods == 0 {
 			continue
 		}
@@ -324,66 +323,264 @@ func (s *Scheduler) collectRackFittingPods(ctx *superpodContext, task *corev1.Po
 	return nil
 }
 
-// countFittingPods repeatedly simulates scheduling the same pod on a node copy
-// and counts complete successful allocations. scoreNode mutates only the
-// supplied node state after a successful Fit, so later attempts see the prior
-// simulated allocations without changing the live snapshot.
+type devicePodDemand struct {
+	slots            int64
+	minDevices       int64
+	memory           int64
+	memoryPercentage int64
+	cores            int64
+}
+
+// countFittingPods estimates capacity arithmetically from device slots,
+// per-device memory/core headroom, and the node's remaining CPU/memory.
 func (s *Scheduler) countFittingPods(
-	nodeID string,
 	node *NodeUsage,
 	pod *corev1.Pod,
 	resourceRequests device.PodDeviceRequests,
-	policy string,
-	weights util.DeviceScoringWeights,
-) (int64, error) {
+	hostFitLimit int64,
+) int64 {
 	if node == nil || node.Node == nil || pod == nil {
-		return 0, nil
+		return 0
 	}
-	hasRequest := false
-	for _, requests := range resourceRequests {
-		for _, request := range requests {
-			if request.Nums > 0 {
-				hasRequest = true
-				break
-			}
-		}
-		if hasRequest {
-			break
-		}
+	demands := podDeviceDemands(pod, resourceRequests)
+	if len(demands) == 0 {
+		return 0
 	}
-	if !hasRequest {
-		return 0, nil
-	}
-
-	nodeCopy := node.DeepCopy()
-	var fittingPods int64
-	for {
-		before := snapshotPeakUsage(nodeCopy.Devices)
-		result := s.scoreNode(nodeID, nodeCopy, resourceRequests, pod, policy, nil, weights)
-		if result.err != nil {
-			return 0, result.err
+	fittingPods := int64(math.MaxInt64)
+	for deviceType, demand := range demands {
+		if demand.slots <= 0 {
+			continue
 		}
-		if result.score == nil {
-			return fittingPods, nil
-		}
-		consumed := false
-		for _, ds := range nodeCopy.Devices.DeviceLists {
-			if ds == nil || ds.Device == nil {
+		var availableSlots int64
+		var eligibleDevices int64
+		for _, ds := range node.Devices.DeviceLists {
+			if ds == nil || ds.Device == nil ||
+				ds.Device.DeviceVendor != deviceType ||
+				!deviceTypeMatches(ds.Device.Type, deviceType) {
 				continue
 			}
-			previous := before[ds.Device.ID]
-			if ds.Device.Used != previous.used ||
-				ds.Device.Usedcores != previous.usedcores ||
-				ds.Device.Usedmem != previous.usedmem {
-				consumed = true
-				break
+			usage := ds.Device
+			slots := max(usage.Count-usage.Used, 0)
+			if slots == 0 {
+				continue
+			}
+			deviceCapacity := slots
+			memoryPerSlot := ceilDiv(demand.memory, demand.slots)
+			if demand.memoryPercentage > 0 && usage.Totalmem <= 0 {
+				deviceCapacity = 0
+			}
+			if demand.memoryPercentage > 0 {
+				percentPerSlot := ceilDiv(demand.memoryPercentage, demand.slots)
+				memoryPerSlot = saturatingAdd(
+					memoryPerSlot,
+					ceilDiv(saturatingMultiply(usage.Totalmem, percentPerSlot), 100))
+			}
+			if memoryPerSlot > 0 {
+				deviceCapacity = min(deviceCapacity,
+					max(usage.Totalmem-usage.Usedmem, 0)/memoryPerSlot)
+			}
+			coresPerSlot := ceilDiv(demand.cores, demand.slots)
+			if coresPerSlot > 0 {
+				usedCores := usage.Usedcores
+				if accounting, ok := device.GetDevices()[deviceType].(device.CoreMaskAccounting); ok {
+					usedCores = accounting.CountAllocatedCores(usedCores)
+				}
+				deviceCapacity = min(deviceCapacity,
+					max(usage.Totalcore-usedCores, 0)/coresPerSlot)
+			}
+			if deviceCapacity > 0 {
+				eligibleDevices++
+			}
+			availableSlots = saturatingAdd(availableSlots, deviceCapacity)
+		}
+		if eligibleDevices < demand.minDevices {
+			return 0
+		}
+		fittingPods = min(fittingPods, availableSlots/demand.slots)
+	}
+	return min(fittingPods, max(hostFitLimit, 0))
+}
+
+func podDeviceDemands(pod *corev1.Pod, requests device.PodDeviceRequests) map[string]devicePodDemand {
+	merge := func(dst map[string]devicePodDemand, src map[string]devicePodDemand) {
+		for deviceType, demand := range src {
+			current := dst[deviceType]
+			current.slots = saturatingAdd(current.slots, demand.slots)
+			current.minDevices = max(current.minDevices, demand.minDevices)
+			current.memory = saturatingAdd(current.memory, demand.memory)
+			current.memoryPercentage = saturatingAdd(current.memoryPercentage, demand.memoryPercentage)
+			current.cores = saturatingAdd(current.cores, demand.cores)
+			dst[deviceType] = current
+		}
+	}
+	maximize := func(dst map[string]devicePodDemand, src map[string]devicePodDemand) {
+		for deviceType, demand := range src {
+			current := dst[deviceType]
+			current.slots = max(current.slots, demand.slots)
+			current.minDevices = max(current.minDevices, demand.minDevices)
+			current.memory = max(current.memory, demand.memory)
+			current.memoryPercentage = max(current.memoryPercentage, demand.memoryPercentage)
+			current.cores = max(current.cores, demand.cores)
+			dst[deviceType] = current
+		}
+	}
+	requestDemand := func(requests device.ContainerDeviceRequests) map[string]devicePodDemand {
+		demands := make(map[string]devicePodDemand)
+		for deviceType, request := range requests {
+			if request.Nums <= 0 {
+				continue
+			}
+			demand := devicePodDemand{slots: request.Nums, minDevices: request.Nums}
+			if request.Memreq > 0 {
+				demand.memory = saturatingMultiply(request.Nums, request.Memreq)
+			} else if request.MemPercentagereq > 0 && request.MemPercentagereq != 101 {
+				demand.memoryPercentage = saturatingMultiply(request.Nums, request.MemPercentagereq)
+			}
+			if request.TotalCoresreq > 0 {
+				demand.cores = request.TotalCoresreq
+			} else {
+				demand.cores = saturatingMultiply(request.Nums, request.Coresreq)
+			}
+			demands[deviceType] = demand
+		}
+		return demands
+	}
+
+	appDemand := make(map[string]devicePodDemand)
+	initDemand := make(map[string]devicePodDemand)
+	persistentSidecars := make(map[string]devicePodDemand)
+	sidecarIndexes := sidecarInitIndexes(pod)
+	for i, containerRequests := range requests {
+		containerDemand := requestDemand(containerRequests)
+		if i >= len(pod.Spec.InitContainers) {
+			merge(appDemand, containerDemand)
+			continue
+		}
+		stageDemand := make(map[string]devicePodDemand, len(persistentSidecars)+len(containerDemand))
+		merge(stageDemand, persistentSidecars)
+		merge(stageDemand, containerDemand)
+		maximize(initDemand, stageDemand)
+		if _, sidecar := sidecarIndexes[i]; sidecar {
+			merge(persistentSidecars, containerDemand)
+		}
+	}
+	merge(appDemand, persistentSidecars)
+	maximize(appDemand, initDemand)
+	for deviceType, demand := range appDemand {
+		if demand.slots <= 0 {
+			delete(appDemand, deviceType)
+		}
+	}
+	return appDemand
+}
+
+func ceilDiv(value, divisor int64) int64 {
+	if value <= 0 || divisor <= 0 {
+		return 0
+	}
+	return 1 + (value-1)/divisor
+}
+
+func saturatingAdd(a, b int64) int64 {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
+func saturatingMultiply(a, b int64) int64 {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	if a > math.MaxInt64/b {
+		return math.MaxInt64
+	}
+	return a * b
+}
+
+func (s *Scheduler) hostResourceFitLimits(pod *corev1.Pod, nodes map[string]*NodeUsage) (map[string]int64, error) {
+	limits := make(map[string]int64, len(nodes))
+	if pod == nil {
+		return limits, nil
+	}
+	requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{})
+	var cpuRequest, memoryRequest int64
+	if quantity, ok := requests[corev1.ResourceCPU]; ok {
+		cpuRequest = quantity.MilliValue()
+	}
+	if quantity, ok := requests[corev1.ResourceMemory]; ok {
+		memoryRequest = quantity.Value()
+	}
+
+	type podAssignment struct {
+		pod      *corev1.Pod
+		nodeName string
+	}
+	podsByKey := make(map[string]podAssignment)
+	addPod := func(existing *corev1.Pod, nodeName string) {
+		if existing == nil || nodeName == "" ||
+			existing.UID == pod.UID && pod.UID != "" ||
+			existing.Namespace == pod.Namespace && existing.Name == pod.Name ||
+			util.IsPodTerminating(existing) || util.IsPodInTerminatedState(existing) {
+			return
+		}
+		key := existing.Namespace + "/" + existing.Name
+		assignment, found := podsByKey[key]
+		if !found || assignment.nodeName == "" {
+			podsByKey[key] = podAssignment{pod: existing, nodeName: nodeName}
+		}
+	}
+	if s.podLister != nil {
+		pods, err := s.podLister.List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list pods for node resource capacity: %w", err)
+		}
+		for _, existing := range pods {
+			addPod(existing, existing.Spec.NodeName)
+		}
+	}
+	if s.podManager != nil {
+		for _, podInfo := range s.podManager.ListPodsInfo() {
+			if podInfo != nil {
+				addPod(podInfo.Pod, podInfo.NodeID)
 			}
 		}
-		if !consumed {
-			return 0, fmt.Errorf("device Fit succeeded without changing node usage")
-		}
-		fittingPods++
 	}
+
+	usedCPUByNode := make(map[string]int64)
+	usedMemoryByNode := make(map[string]int64)
+	for _, assignment := range podsByKey {
+		used := resourcehelper.PodRequests(assignment.pod, resourcehelper.PodResourcesOptions{})
+		if quantity, ok := used[corev1.ResourceCPU]; ok {
+			usedCPUByNode[assignment.nodeName] = saturatingAdd(
+				usedCPUByNode[assignment.nodeName], quantity.MilliValue())
+		}
+		if quantity, ok := used[corev1.ResourceMemory]; ok {
+			usedMemoryByNode[assignment.nodeName] = saturatingAdd(
+				usedMemoryByNode[assignment.nodeName], quantity.Value())
+		}
+	}
+
+	for nodeID, usage := range nodes {
+		limit := int64(math.MaxInt64)
+		if usage == nil || usage.Node == nil {
+			limits[nodeID] = 0
+			continue
+		}
+		allocatable := usage.Node.Status.Allocatable
+		if cpuRequest > 0 {
+			if quantity, ok := allocatable[corev1.ResourceCPU]; ok {
+				limit = min(limit, max(quantity.MilliValue()-usedCPUByNode[nodeID], 0)/cpuRequest)
+			}
+		}
+		if memoryRequest > 0 {
+			if quantity, ok := allocatable[corev1.ResourceMemory]; ok {
+				limit = min(limit, max(quantity.Value()-usedMemoryByNode[nodeID], 0)/memoryRequest)
+			}
+		}
+		limits[nodeID] = limit
+	}
+	return limits, nil
 }
 
 // singleSuperpodPodRequest counts the device shares one pod requests across
@@ -587,16 +784,15 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate per-pod device requests: %w", err)
 	}
-	weights, err := util.GetDeviceScoringWeightsByPod(currentTask)
-	if err != nil {
-		return nil, err
-	}
-	policy := resolveNodeSchedulerPolicy(currentTask)
 	// Use the actual task so device usage reflects its policy, then apply the
 	// kube-scheduler hard filters before counting capacity.
 	_, overall, _, err := s.getNodesUsage(nil, currentTask)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect node usage: %w", err)
+	}
+	hostFitLimits, err := s.hostResourceFitLimits(currentTask, *overall)
+	if err != nil {
+		return nil, err
 	}
 	requiredNodeAffinity := nodeaffinity.GetRequiredNodeAffinity(currentTask)
 	for nodeID, usage := range *overall {
@@ -627,10 +823,7 @@ func (s *Scheduler) collectSuperpodCapacities(spids map[string]struct{}, current
 		if _, wanted := spids[spid]; !wanted {
 			continue
 		}
-		fittingPods, err := s.countFittingPods(nodeID, usage, currentTask, resourceRequests, policy, weights)
-		if err != nil {
-			return nil, fmt.Errorf("failed to count fitting pods on node %q: %w", nodeID, err)
-		}
+		fittingPods := s.countFittingPods(usage, currentTask, resourceRequests, hostFitLimits[nodeID])
 		capacities[spid] += fittingPods
 	}
 	reservations, err := s.collectAnchoredTaskReservations(spids, *overall, currentTask)

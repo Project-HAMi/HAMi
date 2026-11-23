@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -394,11 +395,7 @@ func TestCountFittingPods(t *testing.T) {
 		t.Helper()
 		requests, err := device.Resourcereqs(pod)
 		assert.NilError(t, err)
-		weights, err := util.GetDeviceScoringWeightsByPod(pod)
-		assert.NilError(t, err)
-		got, err := (&Scheduler{}).countFittingPods(
-			node.Node.Name, node, pod, requests, resolveNodeSchedulerPolicy(pod), weights)
-		assert.NilError(t, err)
+		got := (&Scheduler{}).countFittingPods(node, pod, requests, math.MaxInt64)
 		return got
 	}
 
@@ -429,7 +426,7 @@ func TestCountFittingPods(t *testing.T) {
 		node.Devices.DeviceLists = append(node.Devices.DeviceLists, &policy.DeviceListsScore{
 			Device: &device.DeviceUsage{
 				ID:           "n1-unrequested",
-				Type:         "unrequested-vendor",
+				Type:         nvidia.NvidiaGPUDevice + " compatible model",
 				DeviceVendor: "unrequested-vendor",
 				Count:        100,
 				Totalmem:     8000,
@@ -442,12 +439,56 @@ func TestCountFittingPods(t *testing.T) {
 		assert.Equal(t, int64(3), count(t, node, pod))
 	})
 
+	t.Run("caps device capacity by host resource limit", func(t *testing.T) {
+		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 0)
+		pod := makeGPUPod("pod", "default", "task-1", 1)
+		requests, err := device.Resourcereqs(pod)
+		assert.NilError(t, err)
+
+		got := (&Scheduler{}).countFittingPods(node, pod, requests, 2)
+
+		assert.Equal(t, int64(2), got)
+	})
+
 	t.Run("pod without device requests has no finite capacity", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 0)
 		pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "cpu"}}}}
 
 		assert.Equal(t, int64(0), count(t, node, pod))
 	})
+}
+
+func TestHostResourceFitLimits(t *testing.T) {
+	current := makeGPUPod("current", "default", "task-1", 1)
+	current.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1"),
+		corev1.ResourceMemory: resource.MustParse("2Gi"),
+	}
+	existing := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "existing", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			NodeName: "n1",
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("1"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+				}},
+			}},
+		},
+	}
+	node := makeNodeWithLabels("n1", nil)
+	node.Status.Allocatable = corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("4"),
+		corev1.ResourceMemory: resource.MustParse("8Gi"),
+	}
+	s := &Scheduler{podLister: newTestPodLister(t, existing)}
+
+	limits, err := s.hostResourceFitLimits(current, map[string]*NodeUsage{
+		"n1": {Node: node},
+	})
+
+	assert.NilError(t, err)
+	assert.Equal(t, int64(3), limits["n1"])
 }
 
 // ---------------------------------------------------------------------------
