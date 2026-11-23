@@ -140,7 +140,8 @@ func (s *Scheduler) prepareSuperpodContext(task *corev1.Pod, userNodePolicy stri
 //
 //   - Not anchored: reject superpods whose total fitting-pod capacity cannot
 //     hold all replicas of the task, so the first pod never anchors the
-//     task into a superpod too small to fit the whole task.
+//     task into a superpod too small to fit the whole task. Under binpack,
+//     keep only the smallest superpod capacity that can hold the task.
 //   - Anchored: reject nodes outside the task's superpods so the task stays
 //     converged. The capacity check is skipped because the superpod was
 //     already validated when the task anchored into it.
@@ -216,6 +217,16 @@ func (s *Scheduler) applySuperpodFilter(ctx *superpodContext, task *corev1.Pod, 
 // Returns the number of nodes rejected.
 func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod, nodes *map[string]*NodeUsage, failedNodes map[string]string) int {
 	rejected := 0
+	bestFitCapacity := int64(0)
+	if !ctx.TaskAnchored && ctx.totalPods > 0 &&
+		!schedulerpolicy.NodePolicyUsesSpread(resolveNodeSchedulerPolicy(task)) {
+		for _, capacity := range ctx.superpodCapacities {
+			if capacity >= ctx.totalPods && (bestFitCapacity == 0 || capacity < bestFitCapacity) {
+				bestFitCapacity = capacity
+			}
+		}
+	}
+
 	for nodeID, usage := range *nodes {
 		node := s.currentNode(nodeID, usage.Node)
 		spid, ok := node.Labels[util.SuperPodIDLabel]
@@ -241,17 +252,28 @@ func (s *Scheduler) rejectNodesBySuperpod(ctx *superpodContext, task *corev1.Pod
 				continue
 			}
 		} else {
-			if ctx.totalPods > 0 && ctx.superpodCapacities[spid] < ctx.totalPods {
-				failedNodes[nodeID] = common.SuperpodInsufficientCapacity
-				klog.V(5).InfoS(common.SuperpodInsufficientCapacity,
-					"pod", klog.KObj(task), "node", nodeID,
-					"taskid", ctx.TaskID,
-					"superpod", spid,
-					"capacity", ctx.superpodCapacities[spid],
-					"podRequest", ctx.podRequest,
-					"totalPods", ctx.totalPods)
-				delete(*nodes, nodeID)
-				rejected++
+			if ctx.totalPods > 0 {
+				capacity := ctx.superpodCapacities[spid]
+				reason := ""
+				switch {
+				case capacity < ctx.totalPods:
+					reason = common.SuperpodInsufficientCapacity
+				case bestFitCapacity > 0 && capacity > bestFitCapacity:
+					reason = common.SuperpodNotBestFit
+				}
+				if reason != "" {
+					failedNodes[nodeID] = reason
+					klog.V(5).InfoS(reason,
+						"pod", klog.KObj(task), "node", nodeID,
+						"taskid", ctx.TaskID,
+						"superpod", spid,
+						"capacity", capacity,
+						"bestFitCapacity", bestFitCapacity,
+						"podRequest", ctx.podRequest,
+						"totalPods", ctx.totalPods)
+					delete(*nodes, nodeID)
+					rejected++
+				}
 			}
 		}
 	}

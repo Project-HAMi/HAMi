@@ -424,6 +424,24 @@ func TestCountFittingPods(t *testing.T) {
 		assert.Equal(t, int64(1), count(t, node, pod))
 	})
 
+	t.Run("does not count devices from unrequested vendors", func(t *testing.T) {
+		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 0)
+		node.Devices.DeviceLists = append(node.Devices.DeviceLists, &policy.DeviceListsScore{
+			Device: &device.DeviceUsage{
+				ID:           "n1-unrequested",
+				Type:         "unrequested-vendor",
+				DeviceVendor: "unrequested-vendor",
+				Count:        100,
+				Totalmem:     8000,
+				Totalcore:    100,
+				Health:       true,
+			},
+		})
+		pod := makeGPUPod("pod", "default", "task-1", 1)
+
+		assert.Equal(t, int64(3), count(t, node, pod))
+	})
+
 	t.Run("pod without device requests has no finite capacity", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 0)
 		pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "cpu"}}}}
@@ -667,6 +685,54 @@ func TestRejectNodesBySuperpod(t *testing.T) {
 
 		assert.Equal(t, 0, rejected)
 		assert.Equal(t, 1, len(nodes))
+	})
+
+	t.Run("binpack chooses the smallest superpod that fits", func(t *testing.T) {
+		task := makeGPUPod("task-pod", "default", "task-1", 1)
+		task.Annotations = map[string]string{
+			util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+		}
+		nodes := map[string]*NodeUsage{
+			"node-too-small": makeNodeUsage("node-too-small", map[string]string{util.SuperPodIDLabel: "sp-small"}, 10, 0),
+			"node-best-fit":  makeNodeUsage("node-best-fit", map[string]string{util.SuperPodIDLabel: "sp-fit"}, 10, 0),
+			"node-larger":    makeNodeUsage("node-larger", map[string]string{util.SuperPodIDLabel: "sp-large"}, 10, 0),
+		}
+		failed := map[string]string{}
+		ctx := &superpodContext{
+			TaskAnchored:       false,
+			totalPods:          10,
+			superpodCapacities: map[string]int64{"sp-small": 5, "sp-fit": 12, "sp-large": 30},
+		}
+
+		rejected := (&Scheduler{}).rejectNodesBySuperpod(ctx, task, &nodes, failed)
+
+		assert.Equal(t, 2, rejected)
+		assert.Assert(t, nodes["node-best-fit"] != nil)
+		assert.Assert(t, nodes["node-too-small"] == nil)
+		assert.Assert(t, nodes["node-larger"] == nil)
+		assert.Equal(t, common.SuperpodInsufficientCapacity, failed["node-too-small"])
+		assert.Equal(t, common.SuperpodNotBestFit, failed["node-larger"])
+	})
+
+	t.Run("spread keeps all superpods that fit", func(t *testing.T) {
+		task := makeGPUPod("task-pod", "default", "task-1", 1)
+		task.Annotations = map[string]string{
+			util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
+		}
+		nodes := map[string]*NodeUsage{
+			"node-sp1": makeNodeUsage("node-sp1", map[string]string{util.SuperPodIDLabel: "sp-1"}, 10, 0),
+			"node-sp2": makeNodeUsage("node-sp2", map[string]string{util.SuperPodIDLabel: "sp-2"}, 10, 0),
+		}
+		ctx := &superpodContext{
+			TaskAnchored:       false,
+			totalPods:          10,
+			superpodCapacities: map[string]int64{"sp-1": 12, "sp-2": 30},
+		}
+
+		rejected := (&Scheduler{}).rejectNodesBySuperpod(ctx, task, &nodes, map[string]string{})
+
+		assert.Equal(t, 0, rejected)
+		assert.Equal(t, 2, len(nodes))
 	})
 
 	t.Run("unanchored rejects nodes without superpod label", func(t *testing.T) {
