@@ -60,6 +60,13 @@ func samplerFromEnv() sdktrace.Sampler {
 	}
 }
 
+// newSampler makes every span with a parent follow the parent's decision, so a
+// trace is kept or dropped as a whole. Spans without a parent go to
+// linksBasedSampler.
+func newSampler() sdktrace.Sampler {
+	return sdktrace.ParentBased(linksBasedSampler{root: samplerFromEnv()})
+}
+
 // traceIDRatioFromEnv returns OTEL_TRACES_SAMPLER_ARG, or 1 when it is unset or invalid.
 func traceIDRatioFromEnv() float64 {
 	ratio := 1.0

@@ -27,6 +27,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
 	"gotest.tools/v3/assert"
 )
 
@@ -63,6 +64,25 @@ func TestSetup(t *testing.T) {
 			assert.NilError(t, shutdown(context.Background()))
 		})
 	}
+}
+
+func TestSetupChildFollowsParent(t *testing.T) {
+	t.Setenv(endpointEnvName, "http://localhost:4317")
+	t.Setenv(tracesEndpointEnvName, "")
+	t.Setenv(sdkDisabledEnvName, "")
+	t.Setenv(tracesSamplerEnvName, "always_on")
+	global := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(global) })
+
+	shutdown, err := Setup(context.Background(), "hami-scheduler")
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, shutdown(context.Background())) })
+
+	// The webhook decided not to trace this pod, so Bind must not be traced either.
+	parent := trace.ContextWithRemoteSpanContext(context.Background(), testSpanContext(t, 0))
+	_, span := Tracer().Start(parent, "bind")
+	defer span.End()
+	assert.Assert(t, !span.SpanContext().IsSampled())
 }
 
 func TestNewResource(t *testing.T) {

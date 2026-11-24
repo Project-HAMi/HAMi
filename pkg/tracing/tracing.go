@@ -60,7 +60,7 @@ func Setup(ctx context.Context, serviceName string) (func(context.Context) error
 		return nil, err
 	}
 	res := newResource(ctx, serviceName)
-	sampler := linksBasedSampler{root: samplerFromEnv()}
+	sampler := newSampler()
 	tp := newTracerProvider(res, sampler, exporter)
 	otel.SetTracerProvider(tp)
 	name, _ := res.Set().Value(semconv.ServiceNameKey)

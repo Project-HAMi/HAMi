@@ -60,6 +60,36 @@ func TestSamplerFromEnv(t *testing.T) {
 	}
 }
 
+func TestNewSamplerChildFollowsParent(t *testing.T) {
+	tests := []struct {
+		name    string
+		sampler string
+		arg     string
+		parent  trace.TraceFlags
+		traceID trace.TraceID
+		want    sdktrace.SamplingDecision
+	}{
+		// TraceIDRatioBased(0.5) drops this trace ID: bytes 8 to 15 are all 0xff.
+		{name: "traceidratio keeps child of sampled parent", sampler: "traceidratio", arg: "0.5", parent: trace.FlagsSampled,
+			traceID: trace.TraceID{8: 0xff, 9: 0xff, 10: 0xff, 11: 0xff, 12: 0xff, 13: 0xff, 14: 0xff, 15: 0xff}, want: sdktrace.RecordAndSample},
+		// TraceIDRatioBased(0.5) keeps this trace ID: bytes 8 to 15 are all 0.
+		{name: "traceidratio drops child of unsampled parent", sampler: "traceidratio", arg: "0.5", parent: 0, want: sdktrace.Drop},
+		{name: "always_on drops child of unsampled parent", sampler: "always_on", parent: 0, want: sdktrace.Drop},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tracesSamplerEnvName, tt.sampler)
+			t.Setenv(tracesSamplerArgEnvName, tt.arg)
+			parent := testSpanContext(t, tt.parent)
+			got := newSampler().ShouldSample(sdktrace.SamplingParameters{
+				ParentContext: trace.ContextWithSpanContext(context.Background(), parent),
+				TraceID:       tt.traceID,
+			})
+			assert.Equal(t, got.Decision, tt.want)
+		})
+	}
+}
+
 func TestLinksBasedSampler(t *testing.T) {
 	sampled := testSpanContext(t, trace.FlagsSampled)
 	notSampled := testSpanContext(t, 0)
