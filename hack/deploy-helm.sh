@@ -57,8 +57,8 @@ elif [ "${E2E_TYPE}" == "release" ]; then
   HELM_SOURCE="${HELM_NAME}/${HAMI_ALIAS}"
   echo "Using remote chart: ${HELM_SOURCE}"
 elif [ "${E2E_TYPE}" == "local" ]; then
-  if [[ -n "${HELM_VALUES_FILE:-}" && ! -r "${HELM_VALUES_FILE}" ]]; then
-    echo "Error: Cannot read Helm values file: ${HELM_VALUES_FILE}" >&2
+  if [[ -n "${HELM_VALUES_FILE:-}" && ( ! -f "${HELM_VALUES_FILE}" || ! -r "${HELM_VALUES_FILE}" ) ]]; then
+    echo "Error: Helm values path must be a readable regular file: ${HELM_VALUES_FILE}" >&2
     exit 1
   fi
 
