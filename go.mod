@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/NVIDIA/go-dcgm v1.4712.2
+	github.com/NVIDIA/go-dcgm v1.4801.0
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.13.0
 	github.com/NVIDIA/go-nvml v0.13.4-1
