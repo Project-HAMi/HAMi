@@ -86,7 +86,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	}
 
 	// The first call waits for the informer, so do this without allocLock.
-	budgets, err := s.podDisruptionBudgets()
+	budgets, err := s.podDisruptionBudgets(candidates)
 	if err != nil {
 		klog.ErrorS(err, "Rejecting preemption request", "pod", klog.KObj(pod))
 		return nil, err
@@ -183,7 +183,7 @@ func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDevice
 		victims = append(victims, candidate)
 		return false
 	}
-	protected, others := budgets.split(nodePods, proposed.Pods, candidates)
+	protected, others := budgets.split(proposed.Pods, candidates)
 	var violations int64
 	for _, candidate := range protected {
 		if !spare(candidate) {
@@ -201,23 +201,15 @@ func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDevice
 	return victims, planned, violations, true
 }
 
-// disruptionBudgets are the PodDisruptionBudgets of the cluster, with their
-// selectors parsed once.
+// disruptionBudgets are the PodDisruptionBudgets of the cluster with their
+// selectors parsed once, and the victims the request proposes, by UID.
 type disruptionBudgets struct {
 	pdbs      []*policyv1.PodDisruptionBudget
 	selectors []labels.Selector
+	proposed  map[k8stypes.UID]*corev1.Pod
 }
 
-// podDisruptionBudgets returns the PodDisruptionBudgets for one preemption.
-// It fails if they cannot be read, so that no victim is picked without them.
-func (s *Scheduler) podDisruptionBudgets() (*disruptionBudgets, error) {
-	if err := s.ensurePDBInformer(); err != nil {
-		return nil, err
-	}
-	pdbs, err := s.pdbLister.List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
+func newDisruptionBudgets(pdbs []*policyv1.PodDisruptionBudget) *disruptionBudgets {
 	budgets := &disruptionBudgets{pdbs: pdbs, selectors: make([]labels.Selector, len(pdbs))}
 	for i, pdb := range pdbs {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
@@ -227,14 +219,60 @@ func (s *Scheduler) podDisruptionBudgets() (*disruptionBudgets, error) {
 		}
 		budgets.selectors[i] = selector
 	}
+	return budgets
+}
+
+// podDisruptionBudgets returns the PodDisruptionBudgets for one preemption.
+// It fails if they cannot be read, so that no victim is picked without them.
+func (s *Scheduler) podDisruptionBudgets(candidates map[string]*extenderv1.MetaVictims) (*disruptionBudgets, error) {
+	if err := s.ensurePDBInformer(); err != nil {
+		return nil, err
+	}
+	pdbs, err := s.pdbLister.List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+	budgets := newDisruptionBudgets(pdbs)
+	if len(pdbs) == 0 {
+		return budgets, nil
+	}
+	if budgets.proposed, err = s.proposedVictims(candidates); err != nil {
+		return nil, err
+	}
 	return budgets, nil
 }
 
+// proposedVictims returns the pods the request proposes as victims, by UID.
+// The request has only UIDs, and a victim without a HAMi device is not in the
+// pod cache, so they are looked up in the pod lister.
+func (s *Scheduler) proposedVictims(candidates map[string]*extenderv1.MetaVictims) (map[k8stypes.UID]*corev1.Pod, error) {
+	wanted := make(map[k8stypes.UID]struct{})
+	for _, victims := range candidates {
+		for _, victim := range victims.Pods {
+			wanted[k8stypes.UID(victim.UID)] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 || s.podLister == nil {
+		return nil, nil
+	}
+	pods, err := s.podLister.List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+	found := make(map[k8stypes.UID]*corev1.Pod, len(wanted))
+	for _, pod := range pods {
+		if _, ok := wanted[pod.UID]; ok {
+			found[pod.UID] = pod
+		}
+	}
+	return found, nil
+}
+
 // split sorts candidates into the pods whose eviction breaks a budget and the
-// others, in their order. It counts like kube-scheduler: a budget allows
-// status.disruptionsAllowed more evictions, and every pod it covers uses one.
-// The proposed victims go anyway, so they are counted first.
-func (b *disruptionBudgets) split(nodePods []*device.PodInfo, proposed []*extenderv1.MetaPod, candidates []*device.PodInfo) (protected, others []*device.PodInfo) {
+// others, in their order. A budget allows status.disruptionsAllowed more
+// evictions, and a pod uses one from every budget that covers it. The proposed
+// victims go anyway, so they are counted first.
+func (b *disruptionBudgets) split(proposed []*extenderv1.MetaPod, candidates []*device.PodInfo) (protected, others []*device.PodInfo) {
 	if len(b.pdbs) == 0 {
 		return nil, candidates
 	}
@@ -242,7 +280,10 @@ func (b *disruptionBudgets) split(nodePods []*device.PodInfo, proposed []*extend
 	for i, pdb := range b.pdbs {
 		allowed[i] = pdb.Status.DisruptionsAllowed
 	}
+	// Every budget that covers the pod is updated, so the result does not
+	// depend on the order of the budgets.
 	breaksBudget := func(pod *corev1.Pod) bool {
+		broken := false
 		for i, pdb := range b.pdbs {
 			if pdb.Namespace != pod.Namespace || !b.selectors[i].Matches(labels.Set(pod.Labels)) {
 				continue
@@ -253,22 +294,13 @@ func (b *disruptionBudgets) split(nodePods []*device.PodInfo, proposed []*extend
 			}
 			allowed[i]--
 			if allowed[i] < 0 {
-				return true
+				broken = true
 			}
 		}
-		return false
-	}
-
-	// The request names victims by UID. The pod cache knows the ones that
-	// hold devices on this node.
-	known := make(map[k8stypes.UID]*corev1.Pod, len(nodePods))
-	for _, pi := range nodePods {
-		if pi != nil && pi.Pod != nil {
-			known[pi.UID] = pi.Pod
-		}
+		return broken
 	}
 	for _, victim := range proposed {
-		if pod, ok := known[k8stypes.UID(victim.UID)]; ok {
+		if pod, ok := b.proposed[k8stypes.UID(victim.UID)]; ok {
 			breaksBudget(pod)
 		}
 	}

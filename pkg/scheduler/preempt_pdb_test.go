@@ -22,12 +22,15 @@ import (
 	"time"
 
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	policylisters "k8s.io/client-go/listers/policy/v1"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
@@ -57,6 +60,20 @@ func withBudgets(t *testing.T, s *Scheduler, pdbs ...*policyv1.PodDisruptionBudg
 	}
 	s.pdbLister = policylisters.NewPodDisruptionBudgetLister(indexer)
 	s.pdbInformerSynced = true
+}
+
+// withPods gives s a pod lister that holds the tracked pods and others, as
+// its informer would.
+func withPods(t *testing.T, s *Scheduler, tracked []*device.PodInfo, others ...*corev1.Pod) {
+	t.Helper()
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	for _, pi := range tracked {
+		assert.NilError(t, indexer.Add(pi.Pod))
+	}
+	for _, pod := range others {
+		assert.NilError(t, indexer.Add(pod))
+	}
+	s.podLister = listerscorev1.NewPodLister(indexer)
 }
 
 // labeled gives a pod of trackedOn the label a budget of budgetFor selects.
@@ -90,6 +107,8 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 		name    string
 		budgets []*policyv1.PodDisruptionBudget
 		tracked []*device.PodInfo
+		// others are pods that hold no HAMi device.
+		others  []*corev1.Pod
 		request *extenderv1.MetaVictims
 		want    *extenderv1.MetaVictims
 	}{
@@ -146,6 +165,20 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 			want:    victims(1, "proposed", "other"),
 		},
 		{
+			// kube-scheduler proposed it for CPU or memory. HAMi does not
+			// track it, but it uses the budget all the same.
+			name:    "a proposed victim without devices uses the budget too",
+			budgets: []*policyv1.PodDisruptionBudget{budgetFor("db", 1)},
+			tracked: []*device.PodInfo{
+				labeled(holding(trackedOn(moveNodeX, "gpu", 10), 8000), "db"),
+			},
+			others: []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{
+				Name: "cpu-only", Namespace: "default", UID: "cpu-only", Labels: map[string]string{"app": "db"},
+			}}},
+			request: victims(0, "cpu-only"),
+			want:    victims(1, "cpu-only", "gpu"),
+		},
+		{
 			name:    "a budget of another namespace does not cover the pod",
 			budgets: []*policyv1.PodDisruptionBudget{otherNamespace},
 			tracked: []*device.PodInfo{
@@ -188,6 +221,7 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 			s, pod := devicePreemptor(t)
 			withBudgets(t, s, tt.budgets...)
 			track(t, s, tt.tracked...)
+			withPods(t, s, tt.tracked, tt.others...)
 
 			res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
 				Pod:                   pod,
@@ -197,6 +231,57 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 			assert.DeepEqual(t, res.NodeNameToMetaVictims, map[string]*extenderv1.MetaVictims{moveNodeX: tt.want})
 		})
 	}
+}
+
+// A pod uses every budget that covers it, so the order of the budgets does
+// not change the result. The proposed pod breaks the strict budget and uses
+// up the shared one, which the candidate then breaks.
+func Test_disruptionBudgets_split_CountsEveryBudget(t *testing.T) {
+	strict := budgetFor("db", 0)
+	shared := budgetFor("shared", 1)
+	shared.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "data"}}
+
+	proposed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "proposed", Namespace: "default", UID: "proposed",
+		Labels: map[string]string{"app": "db", "tier": "data"},
+	}}
+	candidate := trackedOn(moveNodeX, "candidate", 10)
+	candidate.Labels = map[string]string{"tier": "data"}
+
+	for name, pdbs := range map[string][]*policyv1.PodDisruptionBudget{
+		"strict budget first": {strict, shared},
+		"shared budget first": {shared, strict},
+	} {
+		t.Run(name, func(t *testing.T) {
+			budgets := newDisruptionBudgets(pdbs)
+			budgets.proposed = map[k8stypes.UID]*corev1.Pod{proposed.UID: proposed}
+
+			protected, others := budgets.split([]*extenderv1.MetaPod{{UID: "proposed"}}, []*device.PodInfo{candidate})
+			assert.Equal(t, len(protected), 1)
+			assert.Assert(t, protected[0] == candidate)
+			assert.Equal(t, len(others), 0)
+		})
+	}
+}
+
+// Proposed victims are looked up by UID in the pod lister, which also holds
+// the pods without a HAMi device.
+func Test_proposedVictims(t *testing.T) {
+	request := map[string]*extenderv1.MetaVictims{
+		moveNodeX: {Pods: []*extenderv1.MetaPod{{UID: "cpu-only"}, {UID: "gone"}}},
+	}
+	s := NewScheduler()
+	found, err := s.proposedVictims(request)
+	assert.NilError(t, err)
+	assert.Equal(t, len(found), 0)
+
+	cpuOnly := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "cpu-only", Namespace: "default", UID: "cpu-only"}}
+	other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default", UID: "other"}}
+	withPods(t, s, nil, cpuOnly, other)
+	found, err = s.proposedVictims(request)
+	assert.NilError(t, err)
+	assert.Equal(t, len(found), 1)
+	assert.Assert(t, found["cpu-only"] == cpuOnly)
 }
 
 // Without PodDisruptionBudgets Preempt picks no victim. A pod that asks for
