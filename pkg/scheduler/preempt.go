@@ -276,9 +276,7 @@ func moreImportantPod(a, b *corev1.Pod) bool {
 	return a.UID < b.UID
 }
 
-// victimCandidates returns the pods preemptor may evict from nodeName, most
-// important first. Only bound pods count, because kube-scheduler fails the
-// whole preemption on a victim it does not know.
+// victimCandidates returns the pods preemptor may evict from nodeName, most important first.
 func victimCandidates(nodePods []*device.PodInfo, nodeName string, preemptor *corev1.Pod, taken map[k8stypes.UID]struct{}) []*device.PodInfo {
 	var candidates []*device.PodInfo
 	for _, pi := range nodePods {
@@ -288,7 +286,7 @@ func victimCandidates(nodePods []*device.PodInfo, nodeName string, preemptor *co
 		if _, ok := taken[pi.UID]; ok {
 			continue
 		}
-		if pi.Spec.NodeName != nodeName || util.IsPodTerminating(pi.Pod) || podPriority(pi.Pod) >= podPriority(preemptor) {
+		if pi.Spec.NodeName != nodeName || podPriority(pi.Pod) >= podPriority(preemptor) {
 			continue
 		}
 		candidates = append(candidates, pi)

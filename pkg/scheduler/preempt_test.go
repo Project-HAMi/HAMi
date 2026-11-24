@@ -263,10 +263,7 @@ func Test_victimCandidates(t *testing.T) {
 		trackedOn("node-1", "already-proposed", 10),
 		trackedOn("node-2", "other-node", 10),
 		changed(trackedOn("node-1", "not-bound", 10), func(pi *device.PodInfo) { pi.Spec.NodeName = "" }),
-		changed(trackedOn("node-1", "terminating", 10), func(pi *device.PodInfo) {
-			now := metav1.Now()
-			pi.DeletionTimestamp = &now
-		}),
+		terminating(trackedOn("node-1", "terminating", 10)),
 		changed(trackedOn("node-1", "no-devices", 10), func(pi *device.PodInfo) { pi.Devices = nil }),
 	}
 	taken := map[k8stypes.UID]struct{}{"already-proposed": {}}
@@ -275,7 +272,7 @@ func Test_victimCandidates(t *testing.T) {
 	for _, pi := range victimCandidates(nodePods, "node-1", preemptor, taken) {
 		got = append(got, pi.Name)
 	}
-	assert.DeepEqual(t, got, []string{"mid", "low-old", "low-new", "low-not-started"})
+	assert.DeepEqual(t, got, []string{"mid", "low-old", "low-new", "low-not-started", "terminating"})
 }
 
 // The fit check works without the given pods and leaves the caches alone.
@@ -327,6 +324,13 @@ func holding(pi *device.PodInfo, mem int64) *device.PodInfo {
 // notBound makes a pod of trackedOn assigned by Filter but not bound yet.
 func notBound(pi *device.PodInfo) *device.PodInfo {
 	pi.Spec.NodeName = ""
+	return pi
+}
+
+// terminating makes a pod of trackedOn one that is being deleted.
+func terminating(pi *device.PodInfo) *device.PodInfo {
+	now := metav1.Now()
+	pi.DeletionTimestamp = &now
 	return pi
 }
 
@@ -429,6 +433,23 @@ func Test_Preempt_SelectsVictims(t *testing.T) {
 			},
 			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
 			want:    map[string]*extenderv1.MetaVictims{},
+		},
+		{
+			name: "a terminating pod is a victim like any other",
+			tracked: []*device.PodInfo{
+				terminating(holding(trackedOn(moveNodeX, "leaving", 10), 8000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("leaving")},
+		},
+		{
+			name: "no running pod goes for room a terminating pod frees",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "mid", 500), 4000),
+				terminating(holding(trackedOn(moveNodeX, "leaving", 10), 4000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("leaving")},
 		},
 		{
 			name: "what the pod holds from an earlier attempt does not count",
