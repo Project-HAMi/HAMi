@@ -113,6 +113,13 @@ type Scheduler struct {
 	// to each pod, until the informer shows it. Guarded by allocLock.
 	filterWrites map[k8stypes.UID]filterWrite
 
+	// preemptionPlans keeps, for each pod Preempt answered with victims, the
+	// devices that pod gets on every node of the answer once the victims are
+	// gone. The plan for the node kube-scheduler then nominates the pod to is
+	// held back from the pods that must leave it alone, see
+	// nominatedReservations. Guarded by allocLock.
+	preemptionPlans map[k8stypes.UID]*preemptionPlan
+
 	// timedOutPods keeps the bind-time of each pod counted as an allocate
 	// timeout, so a bind is counted once. Guarded by timeoutLock.
 	timeoutLock  sync.Mutex
@@ -1301,6 +1308,16 @@ func migAllocationUsage(allocation nvidia.MigAllocation) device.MigAllocation {
 // With nil candidates it builds a full snapshot of the scheduler's registered
 // node cache for the metrics overview.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
+	return s.nodesUsageFrom(nodes, task, s.podManager.ListPodsInfo(), nil)
+}
+
+// nodesUsageFrom builds the snapshot getNodesUsage builds, from podsInfo in
+// place of the pod cache and as if the pods in without held no devices.
+// Preemption uses it to ask whether a pod fits on a node once its victims are
+// gone, and passes only the pods of that node. The usage is rebuilt from the
+// pods that remain rather than subtracted from a full snapshot, because a core
+// mask and a MIG placement cannot be subtracted.
+func (s *Scheduler) nodesUsageFrom(nodes *[]string, task *corev1.Pod, podsInfo []*device.PodInfo, without map[k8stypes.UID]struct{}) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
@@ -1343,8 +1360,10 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 	}
 
-	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
+		if _, gone := without[p.UID]; gone {
+			continue
+		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			// With a candidate list most Pods sit on nodes that were
@@ -1814,7 +1833,10 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		delete(s.refitWrites, pod.UID)
 		delete(s.filterWrites, pod.UID)
 	}
-	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, pod)
+	// What is held back for a pod nominated to a node counts as taken there,
+	// unless this pod has a higher priority than that one.
+	podsInfo := append(s.podManager.ListPodsInfo(), s.nominatedReservations(pod)...)
+	nodeUsage, _, failedNodes, err := s.nodesUsageFrom(args.NodeNames, pod, podsInfo, nil)
 	if err != nil {
 		s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonInternal)
 		s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
@@ -1883,6 +1905,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			return nil, err
 		}
 		s.recordFilterWrite(pod.UID, annotations)
+		// The pod has devices now, so nothing is held back for it any more.
+		delete(s.preemptionPlans, pod.UID)
 	}
 
 	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))

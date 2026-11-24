@@ -481,6 +481,11 @@ func syncedScheduler(t *testing.T) *scheduler.Scheduler {
 
 func TestPreemptRoute_ReturnsCandidates(t *testing.T) {
 	s := syncedScheduler(t)
+	// Preempt resolves the pod of a request before it answers.
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "high", Namespace: "default", UID: "preemptor-uid"}}
+	if _, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create the pod: %v", err)
+	}
 
 	const request = `{"Pod":{"metadata":{"name":"high","namespace":"default","uid":"preemptor-uid"}},` +
 		`"NodeNameToMetaVictims":{"node-1":{"Pods":[{"UID":"victim-a"}],"NumPDBViolations":1}}}`
