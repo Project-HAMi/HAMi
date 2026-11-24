@@ -19,22 +19,34 @@ package scheduler
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 func preemptorPod() *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "high", Namespace: "default", UID: "preemptor-uid"}}
 }
 
-// Until HAMi picks victims itself, the preempt verb must be invisible to
-// kube-scheduler: every candidate node goes back with the victims it came
-// with. A node that carries no victim is a candidate too. It is how
-// kube-scheduler 1.38 and later hands over a node whose in-tree filters
-// already fit, and leaving it out of the answer would reject the node.
+// preemptScheduler returns a scheduler that knows pod.
+func preemptScheduler(t *testing.T, pod *corev1.Pod) *Scheduler {
+	t.Helper()
+	s := NewScheduler()
+	seedPods(t, s, pod)
+	return s
+}
+
+// A pod that asks for no HAMi device gets every candidate node back with the
+// victims it came with. That includes a node without victims, which is how
+// kube-scheduler 1.38 and later hands over a node that fits by its own count.
 func Test_Preempt_ReturnsCandidatesUnchanged(t *testing.T) {
 	tests := []struct {
 		name string
@@ -148,7 +160,7 @@ func Test_Preempt_ReturnsCandidatesUnchanged(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := NewScheduler().Preempt(tt.args)
+			res, err := preemptScheduler(t, tt.args.Pod).Preempt(tt.args)
 			assert.NilError(t, err)
 			assert.DeepEqual(t, res.NodeNameToMetaVictims, tt.want)
 		})
@@ -165,13 +177,13 @@ func Test_Preempt_RejectsRequestWithoutPod(t *testing.T) {
 	assert.Assert(t, res == nil)
 }
 
-// Victim selection will add to the answer, and must not write into the
-// request while doing so.
+// Victim selection must not write into the request.
 func Test_Preempt_AnswerDoesNotAliasRequest(t *testing.T) {
 	requested := &extenderv1.MetaVictims{Pods: []*extenderv1.MetaPod{{UID: "victim-a"}}}
+	pod := preemptorPod()
 
-	res, err := NewScheduler().Preempt(extenderv1.ExtenderPreemptionArgs{
-		Pod:                   preemptorPod(),
+	res, err := preemptScheduler(t, pod).Preempt(extenderv1.ExtenderPreemptionArgs{
+		Pod:                   pod,
 		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{"node-1": requested},
 	})
 	assert.NilError(t, err)
@@ -203,10 +215,319 @@ func Test_Preempt_WireFormat(t *testing.T) {
 	var args extenderv1.ExtenderPreemptionArgs
 	assert.NilError(t, json.Unmarshal([]byte(request), &args))
 
-	res, err := NewScheduler().Preempt(args)
+	res, err := preemptScheduler(t, preemptorPod()).Preempt(args)
 	assert.NilError(t, err)
 
 	answer, err := json.Marshal(res)
 	assert.NilError(t, err)
 	assert.Equal(t, string(answer), want)
+}
+
+// trackedOn returns a pod bound to nodeName that holds 1000 MiB of one GPU.
+func trackedOn(nodeName, uid string, priority int32) *device.PodInfo {
+	return &device.PodInfo{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: k8stypes.UID(uid), Name: uid, Namespace: "default"},
+			Spec:       corev1.PodSpec{NodeName: nodeName, Priority: &priority},
+		},
+		NodeID: nodeName,
+		Devices: device.PodDevices{nvidia.NvidiaGPUDevice: {{{
+			UUID: nodeName + "-gpu-0", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000,
+		}}}},
+	}
+}
+
+// Only pods that may be evicted are candidates, most important first.
+func Test_victimCandidates(t *testing.T) {
+	preemptor := preemptorPod()
+	high := int32(1000)
+	preemptor.Spec.Priority = &high
+
+	started := func(pi *device.PodInfo, unix int64) *device.PodInfo {
+		at := metav1.NewTime(time.Unix(unix, 0))
+		pi.Status.StartTime = &at
+		return pi
+	}
+	changed := func(pi *device.PodInfo, change func(*device.PodInfo)) *device.PodInfo {
+		change(pi)
+		return pi
+	}
+
+	nodePods := []*device.PodInfo{
+		started(trackedOn("node-1", "low-new", 10), 200),
+		started(trackedOn("node-1", "low-old", 10), 100),
+		trackedOn("node-1", "mid", 500),
+		trackedOn("node-1", "low-not-started", 10),
+		trackedOn("node-1", "same-priority", 1000),
+		trackedOn("node-1", "higher-priority", 2000),
+		trackedOn("node-1", "already-proposed", 10),
+		trackedOn("node-2", "other-node", 10),
+		changed(trackedOn("node-1", "not-bound", 10), func(pi *device.PodInfo) { pi.Spec.NodeName = "" }),
+		terminating(trackedOn("node-1", "terminating", 10)),
+		changed(trackedOn("node-1", "no-devices", 10), func(pi *device.PodInfo) { pi.Devices = nil }),
+	}
+	taken := map[k8stypes.UID]struct{}{"already-proposed": {}}
+
+	var got []string
+	for _, pi := range victimCandidates(nodePods, "node-1", preemptor, taken) {
+		got = append(got, pi.Name)
+	}
+	assert.DeepEqual(t, got, []string{"mid", "low-old", "low-new", "low-not-started", "terminating"})
+}
+
+// The fit check works without the given pods and leaves the caches alone.
+func Test_fitsWithout(t *testing.T) {
+	pod := movePod()
+	s, _ := filterLeader(t, pod, 1)
+	resourceReqs, err := device.Resourcereqs(pod)
+	assert.NilError(t, err)
+
+	// The only GPU of the node is nearly full.
+	holder := trackedOn(moveNodeX, "holder", 10)
+	holder.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem = 8000
+	assert.Assert(t, s.podManager.AddPod(holder.Pod, moveNodeX, holder.Devices))
+	nodePods := s.podManager.ListPodsInfo()
+
+	_, fits := s.fitsWithout(pod, resourceReqs, moveNodeX, nodePods, nil)
+	assert.Assert(t, !fits, "8000 of 8192 MiB are taken, 1000 more must not fit")
+
+	devices, fits := s.fitsWithout(pod, resourceReqs, moveNodeX, nodePods, map[k8stypes.UID]struct{}{"holder": {}})
+	assert.Assert(t, fits, "the pod must fit once the holder is gone")
+	assert.Equal(t, devices[nvidia.NvidiaGPUDevice][0][0].UUID, moveNodeX+"-gpu-0")
+
+	_, fits = s.fitsWithout(pod, resourceReqs, "no-such-node", nodePods, nil)
+	assert.Assert(t, !fits, "a node HAMi does not know cannot fit the pod")
+
+	_, tracked := s.podManager.GetPod(pod)
+	assert.Assert(t, !tracked, "a fit check must not assign the pod")
+	_, tracked = s.podManager.GetPod(holder.Pod)
+	assert.Assert(t, tracked, "a fit check must not drop the pod it left out")
+}
+
+// devicePreemptor returns a pod of priority 1000 that asks for 1000 MiB of one
+// GPU, and its scheduler. node-x and node-y have one GPU of 8192 MiB each.
+func devicePreemptor(t *testing.T) (*Scheduler, *corev1.Pod) {
+	t.Helper()
+	pod := movePod()
+	priority := int32(1000)
+	pod.Spec.Priority = &priority
+	s, _ := filterLeader(t, pod, 1)
+	return s, pod
+}
+
+// holding sets how much of its GPU a pod of trackedOn has.
+func holding(pi *device.PodInfo, mem int64) *device.PodInfo {
+	pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem = mem
+	return pi
+}
+
+// notBound makes a pod of trackedOn assigned by Filter but not bound yet.
+func notBound(pi *device.PodInfo) *device.PodInfo {
+	pi.Spec.NodeName = ""
+	return pi
+}
+
+// terminating makes a pod of trackedOn one that is being deleted.
+func terminating(pi *device.PodInfo) *device.PodInfo {
+	now := metav1.Now()
+	pi.DeletionTimestamp = &now
+	return pi
+}
+
+// track puts pods into the pod cache of s.
+func track(t *testing.T, s *Scheduler, pods ...*device.PodInfo) {
+	t.Helper()
+	for _, pi := range pods {
+		assert.Assert(t, s.podManager.AddPod(pi.Pod, pi.NodeID, pi.Devices), "pod %s is tracked twice", pi.Name)
+	}
+}
+
+// Preempt adds the pods the devices need to the victims of a candidate node,
+// and leaves out a node where the devices cannot fit.
+func Test_Preempt_SelectsVictims(t *testing.T) {
+	victims := func(uids ...string) *extenderv1.MetaVictims {
+		meta := &extenderv1.MetaVictims{Pods: []*extenderv1.MetaPod{}}
+		for _, uid := range uids {
+			meta.Pods = append(meta.Pods, &extenderv1.MetaPod{UID: uid})
+		}
+		return meta
+	}
+
+	tests := []struct {
+		name    string
+		tracked []*device.PodInfo
+		request map[string]*extenderv1.MetaVictims
+		want    map[string]*extenderv1.MetaVictims
+	}{
+		{
+			name: "the less important pod is added to an empty victim list",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "mid", 500), 4000),
+				holding(trackedOn(moveNodeX, "low", 10), 4000),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("low")},
+		},
+		{
+			name: "every pod in the way is added, most important first",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "higher", 2000), 7000),
+				holding(trackedOn(moveNodeX, "low-b", 10), 500),
+				holding(trackedOn(moveNodeX, "low-a", 10), 600),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("low-a", "low-b")},
+		},
+		{
+			name: "no pod is added where the devices fit already",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "low", 10), 4000),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+		},
+		{
+			name: "the devices of a victim kube-scheduler proposed count as free",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "proposed", 10), 4000),
+				holding(trackedOn(moveNodeX, "low", 10), 4000),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: {
+				Pods:             []*extenderv1.MetaPod{{UID: "without-devices"}, {UID: "proposed"}},
+				NumPDBViolations: 1,
+			}},
+			want: map[string]*extenderv1.MetaVictims{moveNodeX: {
+				Pods:             []*extenderv1.MetaPod{{UID: "without-devices"}, {UID: "proposed"}},
+				NumPDBViolations: 1,
+			}},
+		},
+		{
+			name: "pods are added after the victims kube-scheduler proposed",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "proposed", 10), 100),
+				holding(trackedOn(moveNodeX, "low", 10), 8000),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims("proposed")},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("proposed", "low")},
+		},
+		{
+			name: "a node the devices do not fit on is left out",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "higher", 2000), 8000),
+			},
+			request: map[string]*extenderv1.MetaVictims{
+				moveNodeX: victims("without-devices"),
+				moveNodeY: victims(),
+			},
+			want: map[string]*extenderv1.MetaVictims{moveNodeY: victims()},
+		},
+		{
+			name:    "a node without devices of HAMi is left out",
+			request: map[string]*extenderv1.MetaVictims{"no-such-node": victims("without-devices")},
+			want:    map[string]*extenderv1.MetaVictims{},
+		},
+		{
+			name: "a pod that is not bound yet is not offered as a victim",
+			tracked: []*device.PodInfo{
+				notBound(holding(trackedOn(moveNodeX, "assigned", 10), 8000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{},
+		},
+		{
+			name: "a terminating pod is a victim like any other",
+			tracked: []*device.PodInfo{
+				terminating(holding(trackedOn(moveNodeX, "leaving", 10), 8000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("leaving")},
+		},
+		{
+			name: "no running pod goes for room a terminating pod frees",
+			tracked: []*device.PodInfo{
+				holding(trackedOn(moveNodeX, "mid", 500), 4000),
+				terminating(holding(trackedOn(moveNodeX, "leaving", 10), 4000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("leaving")},
+		},
+		{
+			name: "what the pod holds from an earlier attempt does not count",
+			tracked: []*device.PodInfo{
+				notBound(holding(trackedOn(moveNodeX, "move-uid", 1000), 8000)),
+			},
+			request: map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims()},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, pod := devicePreemptor(t)
+			track(t, s, tt.tracked...)
+
+			res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{Pod: pod, NodeNameToMetaVictims: tt.request})
+			assert.NilError(t, err)
+			assert.DeepEqual(t, res.NodeNameToMetaVictims, tt.want)
+		})
+	}
+}
+
+// Preempt only answers: it changes no cache and writes nothing to the API.
+func Test_Preempt_OnlyAnswers(t *testing.T) {
+	pod := movePod()
+	priority := int32(1000)
+	pod.Spec.Priority = &priority
+	s, kubeClient := filterLeader(t, pod, 1)
+	low := holding(trackedOn(moveNodeX, "low", 10), 8000)
+	track(t, s, low)
+
+	res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
+		Pod:                   pod,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{moveNodeX: {}},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res.NodeNameToMetaVictims, map[string]*extenderv1.MetaVictims{
+		moveNodeX: {Pods: []*extenderv1.MetaPod{{UID: "low"}}},
+	})
+
+	_, tracked := s.podManager.GetPod(pod)
+	assert.Assert(t, !tracked, "Preempt must not assign the pod")
+	pi, tracked := s.podManager.GetPod(low.Pod)
+	assert.Assert(t, tracked, "Preempt must not drop the pod it names")
+	assert.Equal(t, pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem, int64(8000))
+	for _, action := range kubeClient.Actions() {
+		verb := action.GetVerb()
+		assert.Assert(t, verb == "create" || verb == "get", "Preempt must not write to the API server, it sent %s", verb)
+	}
+}
+
+// Preempt rejects a request whose pod is not the live pod.
+func Test_Preempt_RejectsRequestForAnotherPod(t *testing.T) {
+	s, pod := devicePreemptor(t)
+	track(t, s, holding(trackedOn(moveNodeX, "low", 10), 8000))
+
+	other := pod.DeepCopy()
+	other.UID = "another-uid"
+	res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
+		Pod:                   other,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{moveNodeX: {}},
+	})
+	assert.ErrorContains(t, err, "UID")
+	assert.Assert(t, res == nil)
+}
+
+// No pod is evicted for a pod with an invalid device request.
+func Test_Preempt_RejectsInvalidDeviceRequest(t *testing.T) {
+	pod := movePod()
+	pod.Spec.Containers[0].Resources.Limits["hami.io/gpucores"] = *resource.NewQuantity(200, resource.DecimalSI)
+	s, _ := filterLeader(t, pod, 1)
+	track(t, s, holding(trackedOn(moveNodeX, "low", 10), 8000))
+
+	res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
+		Pod:                   pod,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{moveNodeX: {}},
+	})
+	assert.ErrorContains(t, err, "invalid device request")
+	assert.Assert(t, res == nil)
 }
