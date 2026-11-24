@@ -188,6 +188,10 @@ func TestGetPendingPod(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "allocated-pod",
 			Namespace: "default",
+			Annotations: map[string]string{
+				DeviceBindPhase:         DeviceBindAllocating,
+				AssignedNodeAnnotations: "test-node-1",
+			},
 		},
 		Spec: corev1.PodSpec{NodeName: "test-node-1"},
 		Status: corev1.PodStatus{
@@ -281,6 +285,110 @@ func TestGetPendingPodIgnoresHandWrittenAnnotations(t *testing.T) {
 	got, err := GetPendingPod(context.TODO(), "gpu-node-1")
 	if err == nil {
 		t.Fatalf("GetPendingPod() served %s, which no node lock names", got.Name)
+	}
+}
+
+// TestGetPendingPodRejectsPodTheLockWasNotTakenFor covers a lock that names a
+// pod by namespace and name only. The failing cases are pods that carry the
+// name the lock records but are not the pod the scheduler locked this node for,
+// so their allocation must not be served here and their bind phase must not be
+// touched. The passing cases are pods that are.
+func TestGetPendingPodRejectsPodTheLockWasNotTakenFor(t *testing.T) {
+	const node = "gpu-node-1"
+	lockTime := time.Now().Add(-time.Minute)
+	locked := func(mutate func(*corev1.Pod)) *corev1.Pod {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "locked",
+				Namespace:         "default",
+				CreationTimestamp: metav1.NewTime(lockTime.Add(-time.Minute)),
+				Annotations: map[string]string{
+					DeviceBindPhase:         DeviceBindAllocating,
+					AssignedNodeAnnotations: node,
+				},
+			},
+			Spec:   corev1.PodSpec{NodeName: node},
+			Status: corev1.PodStatus{Phase: corev1.PodPending},
+		}
+		if mutate != nil {
+			mutate(pod)
+		}
+		return pod
+	}
+
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		wantErr string
+	}{
+		{
+			name: "pod the lock was taken for",
+			pod:  locked(nil),
+		},
+		{
+			name: "pod bound to another node",
+			pod: locked(func(p *corev1.Pod) {
+				p.Spec.NodeName = "gpu-node-2"
+			}),
+			wantErr: `which is bound to node "gpu-node-2"`,
+		},
+		{
+			name: "pod not bound yet",
+			pod: locked(func(p *corev1.Pod) {
+				p.Spec.NodeName = ""
+			}),
+			wantErr: `which is bound to node ""`,
+		},
+		{
+			name: "pod the scheduler assigned to another node",
+			pod: locked(func(p *corev1.Pod) {
+				p.Annotations[AssignedNodeAnnotations] = "gpu-node-2"
+			}),
+			wantErr: `which the scheduler assigned to node "gpu-node-2"`,
+		},
+		{
+			name: "pod that already finished allocating",
+			pod: locked(func(p *corev1.Pod) {
+				p.Annotations[DeviceBindPhase] = DeviceBindSuccess
+			}),
+			wantErr: `whose bind phase is "success"`,
+		},
+		{
+			name: "pod without a bind phase",
+			pod: locked(func(p *corev1.Pod) {
+				delete(p.Annotations, DeviceBindPhase)
+			}),
+			wantErr: `whose bind phase is ""`,
+		},
+		{
+			// A StatefulSet replacement scheduled to the same node keeps the
+			// lock its predecessor left, with the predecessor's timestamp.
+			name: "pod recreated under the same name after the lock was taken",
+			pod: locked(func(p *corev1.Pod) {
+				p.CreationTimestamp = metav1.NewTime(lockTime.Add(time.Minute))
+			}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset(tt.pod, &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: node,
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: lockTime.Format(time.RFC3339Nano) + nodelock.NodeLockSep +
+							"default" + nodelock.NodeLockSep + "locked",
+					},
+				},
+			})
+			got, err := GetPendingPod(context.TODO(), node)
+			if tt.wantErr == "" {
+				assert.NilError(t, err)
+				assert.Equal(t, got.Name, "locked")
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+			assert.Assert(t, got == nil)
+		})
 	}
 }
 
