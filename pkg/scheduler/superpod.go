@@ -352,7 +352,7 @@ func (s *Scheduler) countFittingPods(
 			continue
 		}
 		var availableSlots int64
-		var eligibleDevices int64
+		deviceCapacities := make([]int64, 0, len(node.Devices.DeviceLists))
 		for _, ds := range node.Devices.DeviceLists {
 			if ds == nil || ds.Device == nil ||
 				ds.Device.DeviceVendor != deviceType ||
@@ -389,16 +389,35 @@ func (s *Scheduler) countFittingPods(
 					max(usage.Totalcore-usedCores, 0)/coresPerSlot)
 			}
 			if deviceCapacity > 0 {
-				eligibleDevices++
+				deviceCapacities = append(deviceCapacities, deviceCapacity)
 			}
 			availableSlots = saturatingAdd(availableSlots, deviceCapacity)
 		}
-		if eligibleDevices < demand.minDevices {
-			return 0
-		}
-		fittingPods = min(fittingPods, availableSlots/demand.slots)
+		fittingPods = min(fittingPods, countPodsWithDistinctDevices(
+			deviceCapacities, availableSlots, demand.slots, demand.minDevices))
 	}
 	return min(fittingPods, max(hostFitLimit, 0))
+}
+
+func countPodsWithDistinctDevices(deviceCapacities []int64, totalSlots, slotsPerPod, minDevicesPerPod int64) int64 {
+	if slotsPerPod <= 0 || minDevicesPerPod <= 0 || totalSlots <= 0 {
+		return 0
+	}
+	low, high := int64(0), totalSlots/slotsPerPod
+	for low < high {
+		distance := high - low
+		mid := low + distance/2 + distance%2
+		var distinctAllocations int64
+		for _, capacity := range deviceCapacities {
+			distinctAllocations = saturatingAdd(distinctAllocations, min(capacity, mid))
+		}
+		if distinctAllocations >= saturatingMultiply(mid, minDevicesPerPod) {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return low
 }
 
 func podDeviceDemands(pod *corev1.Pod, requests device.PodDeviceRequests) map[string]devicePodDemand {

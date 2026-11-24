@@ -479,6 +479,24 @@ func TestCountFittingPods(t *testing.T) {
 		assert.Equal(t, int64(1), count(t, node, pod))
 	})
 
+	t.Run("does not reuse a GPU twice for each multi-GPU pod", func(t *testing.T) {
+		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 3, 0)
+		node.Devices.DeviceLists = append(node.Devices.DeviceLists, &policy.DeviceListsScore{
+			Device: &device.DeviceUsage{
+				ID:           "n1-gpu1",
+				Type:         nvidia.NvidiaGPUDevice,
+				DeviceVendor: nvidia.NvidiaGPUDevice,
+				Count:        1,
+				Totalmem:     8000,
+				Totalcore:    100,
+				Health:       true,
+			},
+		})
+		pod := makeGPUPod("pod", "default", "task-1", 2)
+
+		assert.Equal(t, int64(1), count(t, node, pod))
+	})
+
 	t.Run("does not count devices from unrequested vendors", func(t *testing.T) {
 		node := makeNodeUsageWithPhysicalCount("n1", nil, 1, 10, 0)
 		node.Devices.DeviceLists = append(node.Devices.DeviceLists, &policy.DeviceListsScore{
