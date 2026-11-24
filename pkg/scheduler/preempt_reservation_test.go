@@ -52,6 +52,7 @@ func nominationScheduler(t *testing.T, pods ...*corev1.Pod) *Scheduler {
 	client.KubeClient = s.kubeClient
 	t.Cleanup(func() { client.KubeClient = oldClient })
 	s.addNode(moveNodeX, testNodeInfo(moveNodeX, 1))
+	withBudgets(t, s)
 	return s
 }
 

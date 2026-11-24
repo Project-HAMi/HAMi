@@ -42,6 +42,7 @@ import (
 	batchlisters "k8s.io/client-go/listers/batch/v1"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
+	policylisters "k8s.io/client-go/listers/policy/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -66,6 +67,7 @@ const (
 	syncedPollPeriod               = 100 * time.Millisecond
 	superpodInformerSyncTimeout    = 30 * time.Second
 	superpodInformerSyncPollPeriod = 100 * time.Millisecond
+	pdbInformerSyncTimeout         = 5 * time.Second
 
 	// sessionReconcileTimeout caps how long the lupine session stub reconcile
 	// may hold the scheduler lock it runs under.
@@ -95,6 +97,11 @@ type Scheduler struct {
 	superpodInformerMu      sync.Mutex
 	superpodInformersSynced bool
 	superpodInformerTimeout time.Duration
+	// Only Preempt reads PodDisruptionBudgets, see ensurePDBInformer.
+	pdbLister          policylisters.PodDisruptionBudgetLister
+	pdbInformerMu      sync.Mutex
+	pdbInformerSynced  bool
+	pdbInformerTimeout time.Duration
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -955,6 +962,38 @@ func (s *Scheduler) ensureSuperpodInformers() error {
 		return fmt.Errorf("failed to sync SuperPod controller informer caches within %s: %w", timeout, err)
 	}
 	s.superpodInformersSynced = true
+	return nil
+}
+
+// ensurePDBInformer starts the PodDisruptionBudget informer on first use and
+// waits for its cache, like ensureSuperpodInformers. A scheduler that never
+// preempts does not watch PodDisruptionBudgets.
+func (s *Scheduler) ensurePDBInformer() error {
+	s.pdbInformerMu.Lock()
+	defer s.pdbInformerMu.Unlock()
+
+	if s.pdbInformerSynced {
+		return nil
+	}
+	if s.informerFactory == nil {
+		return errors.New("shared informer factory is unavailable")
+	}
+
+	pdbInformer := s.informerFactory.Policy().V1().PodDisruptionBudgets()
+	hasSynced := pdbInformer.Informer().HasSynced
+	s.pdbLister = pdbInformer.Lister()
+	s.informerFactory.Start(s.stopCh)
+
+	timeout := s.pdbInformerTimeout
+	if timeout <= 0 {
+		timeout = pdbInformerSyncTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if !cache.WaitForCacheSync(ctx.Done(), hasSynced) {
+		return fmt.Errorf("failed to sync PodDisruptionBudget informer cache within %s", timeout)
+	}
+	s.pdbInformerSynced = true
 	return nil
 }
 

@@ -73,6 +73,7 @@ func Test_Preempt_FreesMigPlacement(t *testing.T) {
 	pod.Spec.Priority = &high
 	pod.Spec.Containers[0].Resources.Limits[moveMem] = *resource.NewQuantity(12000, resource.BinarySI)
 	s, _ := filterLeader(t, pod, 1)
+	withBudgets(t, s)
 	addMigCard(s)
 	track(t, s, onMigSlice("mid", 500, 0), onMigSlice("low", 10, 2))
 
@@ -130,6 +131,7 @@ func Test_Preempt_FreesCoreMask(t *testing.T) {
 		},
 	}
 	s := schedulerWithPods(t, pod)
+	withBudgets(t, s)
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "neuron-node", Labels: map[string]string{"node.kubernetes.io/instance-type": "inf1.xlarge"}},
