@@ -105,6 +105,7 @@ data:
       defaultGPUNum: {{ .Values.devices.amd.defaultGPUNum }}
       defaultMemory: {{ .Values.devices.amd.defaultMemory }}
       defaultCores: {{ .Values.devices.amd.defaultCores }}
+      computeSharing: {{ .Values.devices.amd.computeSharing }}
       resourceMemoryPercentageName: {{ .Values.devices.amd.resourceMemoryPercentageName }}
       runtimeClassName: "{{ .Values.devices.amd.runtimeClassName }}"
     vastai:

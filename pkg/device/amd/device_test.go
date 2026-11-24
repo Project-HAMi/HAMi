@@ -1377,6 +1377,50 @@ func TestGenerateResourceRequestsDefaults(t *testing.T) {
 	assert.Equal(t, int64(100), got.Coresreq)
 }
 
+// With compute sharing a container without cores takes none, so a memory
+// slice fits next to a pod that holds every CU, while cores and a whole GPU
+// are counted as before.
+func TestComputeSharing(t *testing.T) {
+	q := func(n int64) resource.Quantity { return *resource.NewQuantity(n, resource.DecimalSI) }
+	cfg := AMDConfig{ResourceCountName: "amd.com/gpu", ResourceMemoryName: "amd.com/gpumem", ResourceCoreName: "amd.com/gpucores", DefaultCores: 40}
+	fit := func(sharing bool, limits corev1.ResourceList) (bool, int64) {
+		cfg.ComputeSharing = sharing
+		dev := InitAMDGPUDevice(cfg)
+		req, err := dev.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: limits}})
+		assert.NilError(t, err)
+		busy := []*device.DeviceUsage{{
+			ID: "dev-0", Count: 10, Used: 1, Totalmem: 16000, Usedmem: 4000, Totalcore: 64, Usedcores: 64,
+			Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+		}}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		ok, got, _ := dev.Fit(busy, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		if !ok {
+			return false, 0
+		}
+		return true, got[AMDDevice][0].Usedcores
+	}
+	slice := corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem": q(4000)}
+	ok, cores := fit(true, slice)
+	assert.Assert(t, ok, "a memory slice shares the CUs")
+	assert.Equal(t, int64(0), cores)
+	ok, _ = fit(false, slice)
+	assert.Assert(t, !ok, "without sharing it takes the default cores")
+	ok, _ = fit(true, corev1.ResourceList{"amd.com/gpu": q(1), "amd.com/gpumem": q(4000), "amd.com/gpucores": q(50)})
+	assert.Assert(t, !ok, "a core request keeps its own CUs")
+
+	cfg.ComputeSharing = true
+	idle := []*device.DeviceUsage{{
+		ID: "dev-0", Count: 10, Totalmem: 16000, Totalcore: 64,
+		Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
+	}}
+	dev := InitAMDGPUDevice(cfg)
+	req, err := dev.GenerateResourceRequests(&corev1.Container{Name: "c", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{"amd.com/gpu": q(1)}}})
+	assert.NilError(t, err)
+	ok, got, _ := dev.Fit(idle, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, ok)
+	assert.Equal(t, int64(64), got[AMDDevice][0].Usedcores, "a whole GPU still takes every CU")
+}
+
 func TestFitSkipsCordonedDevices(t *testing.T) {
 	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
 	devices := func() []*device.DeviceUsage {
