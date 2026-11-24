@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
 
 const gangNode = "gang-node"
@@ -438,4 +440,77 @@ func TestFailureBeforeNewerFilterKeepsReservation(t *testing.T) {
 	s.onUpdatePod(cycleB, withSchedulingFailure(cycleB, "cycle B failed"))
 	_, held = s.podManager.GetPod(pod)
 	require.False(t, held)
+}
+
+// TestReleaseClearsAllocationForRestart checks that a release removes the
+// allocation from the pod, so that a restarted scheduler, which has no
+// in-memory marker, does not count the released GPU again.
+func TestReleaseClearsAllocationForRestart(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	permitTimeout(t, s, kubeClient, pod)
+	s.allocationCleanups.Wait()
+
+	live := livePod(t, kubeClient, pod)
+	require.NotContains(t, live.Annotations, util.AssignedNodeAnnotations)
+	require.NotContains(t, live.Annotations, util.AssignedTimeAnnotations)
+	for _, key := range device.SupportDevices {
+		require.NotContains(t, live.Annotations, key)
+	}
+
+	restarted := NewScheduler()
+	restarted.quotaManager = &device.QuotaManager{Quotas: map[string]*device.DeviceQuota{}}
+	restarted.kubeClient = kubeClient
+	restarted.addNode(gangNode, testNodeInfo(gangNode, 1))
+	restarted.onAddPod(live) // the informer's initial sync
+	_, held := restarted.podManager.GetPod(pod)
+	require.False(t, held)
+	other := gangPod("other", 1)
+	seedPods(t, restarted, other)
+	require.True(t, gangFilter(t, restarted, other), "the released GPU must be free after a restart")
+}
+
+// TestClearReleasedAllocationKeepsNewerAllocation checks that the cleanup of a
+// released allocation does not remove one that a later Filter wrote.
+func TestClearReleasedAllocationKeepsNewerAllocation(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	newer := livePod(t, kubeClient, pod)
+
+	released := maps.Clone(newer.Annotations)
+	released[util.AssignedTimeAnnotations] = "1"
+	s.allocLock.Lock()
+	s.clearReleasedAllocation(newer, released)
+	s.allocLock.Unlock()
+	s.allocationCleanups.Wait()
+
+	require.Equal(t, newer.Annotations, livePod(t, kubeClient, pod).Annotations)
+}
+
+// TestStandbyDoesNotClearReleasedAllocation checks that only the leader writes
+// the cleanup; a standby releases its own copy and keeps the marker.
+func TestStandbyDoesNotClearReleasedAllocation(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	s.leaderManager = leaderelection.NewDummyLeaderManager(false)
+	permitTimeout(t, s, kubeClient, pod)
+	s.allocationCleanups.Wait()
+
+	_, held := s.podManager.GetPod(pod)
+	require.False(t, held)
+	require.Contains(t, livePod(t, kubeClient, pod).Annotations, util.AssignedNodeAnnotations)
+}
+
+func TestReleasedAllocationPatch(t *testing.T) {
+	patch, err := releasedAllocationPatch("node-1", "100", []string{util.AssignedNodeAnnotations, util.AssignedTimeAnnotations})
+	require.NoError(t, err)
+	require.JSONEq(t, `[
+		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-node","value":"node-1"},
+		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-time","value":"100"},
+		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-node"},
+		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-time"}
+	]`, string(patch))
 }

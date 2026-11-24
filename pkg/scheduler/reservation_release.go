@@ -17,11 +17,16 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
@@ -117,6 +122,7 @@ func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod)
 		// Not cached, as on a replica that started after the Filter: the
 		// allocation is just as dead, so do not add it.
 		s.markReservationReleased(newPod.UID, reservationKey(newPod))
+		s.clearReleasedAllocation(newPod, newPod.Annotations)
 	}
 	return true
 }
@@ -132,14 +138,15 @@ func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) boo
 	if !ok {
 		return false
 	}
-	key := reservationKey(pod)
+	allocation := pod.Annotations
 	if write, pending := s.filterWrites[pod.UID]; pending {
 		// The informer has not shown this replica's Filter patch yet, so
-		// pod may still carry an older allocation. Remember the one written.
-		key = releasedReservation{
-			node: write.annotations[util.AssignedNodeAnnotations],
-			time: write.annotations[util.AssignedTimeAnnotations],
-		}
+		// pod may still carry an older allocation. Release the one written.
+		allocation = write.annotations
+	}
+	key := releasedReservation{
+		node: allocation[util.AssignedNodeAnnotations],
+		time: allocation[util.AssignedTimeAnnotations],
 	}
 	s.quotaManager.RmUsage(pod, pi.Devices)
 	// Give back RemoteGPU cards booked for the attempt now, as a Filter whose
@@ -150,9 +157,79 @@ func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) boo
 	delete(s.refitWrites, pod.UID)
 	delete(s.filterWrites, pod.UID)
 	s.markReservationReleased(pod.UID, key)
+	s.clearReleasedAllocation(pod, allocation)
 	klog.InfoS("Released device reservation of a pod that was not bound",
 		"pod", klog.KObj(pod), "node", pi.NodeID, "reason", reason)
 	return true
+}
+
+// releasedAllocationPatchTimeout bounds the API call that clears a released
+// allocation from its pod.
+const releasedAllocationPatchTimeout = 30 * time.Second
+
+// clearReleasedAllocation removes a released allocation's annotations from the
+// pod in the background, so that the allocation is not counted again after a
+// scheduler restart or by a new leader, which do not have the in-memory
+// marker. The patch only applies while the pod still carries this allocation,
+// so it never clears one that a later Filter wrote. Only the leader patches;
+// every replica keeps its own marker. Callers hold allocLock.
+func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod, allocation map[string]string) {
+	if s.kubeClient == nil || (s.leaderManager != nil && !s.leaderManager.IsLeader()) {
+		return
+	}
+	node, at := allocation[util.AssignedNodeAnnotations], allocation[util.AssignedTimeAnnotations]
+	if node == "" || at == "" {
+		return
+	}
+	keys := []string{util.AssignedNodeAnnotations, util.AssignedTimeAnnotations}
+	for _, key := range device.SupportDevices {
+		if _, ok := allocation[key]; ok {
+			keys = append(keys, key)
+		}
+	}
+	patch, err := releasedAllocationPatch(node, at, keys)
+	if err != nil {
+		klog.ErrorS(err, "Failed to build the patch clearing a released allocation", "pod", klog.KObj(pod))
+		return
+	}
+	namespace, name := pod.Namespace, pod.Name
+	s.allocationCleanups.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), releasedAllocationPatchTimeout)
+		defer cancel()
+		_, err := s.kubeClient.CoreV1().Pods(namespace).Patch(ctx, name, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+		switch {
+		case err == nil:
+			klog.V(4).InfoS("Cleared a released allocation from the pod", "pod", klog.KRef(namespace, name))
+		case apierrors.IsNotFound(err):
+		default:
+			// Most often a later Filter has written a new allocation, which
+			// the test operations protect. The in-memory marker still
+			// keeps the released one from being added back here.
+			klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
+		}
+	})
+}
+
+// releasedAllocationPatch returns a JSON patch that removes keys from a pod's
+// annotations if, and only if, the pod still carries the allocation of node
+// made at time at.
+func releasedAllocationPatch(node, at string, keys []string) ([]byte, error) {
+	type operation struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value,omitempty"`
+	}
+	path := func(key string) string {
+		return "/metadata/annotations/" + strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
+	}
+	ops := []operation{
+		{Op: "test", Path: path(util.AssignedNodeAnnotations), Value: node},
+		{Op: "test", Path: path(util.AssignedTimeAnnotations), Value: at},
+	}
+	for _, key := range keys {
+		ops = append(ops, operation{Op: "remove", Path: path(key)})
+	}
+	return json.Marshal(ops)
 }
 
 func (s *Scheduler) markReservationReleased(uid k8stypes.UID, key releasedReservation) {

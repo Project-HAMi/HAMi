@@ -140,6 +140,10 @@ type Scheduler struct {
 	releasedReservations map[k8stypes.UID]releasedReservation
 	releasedMu           sync.Mutex
 
+	// allocationCleanups tracks the patches that clear released allocations
+	// from their pods.
+	allocationCleanups sync.WaitGroup
+
 	// lastReservationSweep is when Filter last looked for reservations older
 	// than config.UnboundReservationTTL. Guarded by allocLock.
 	lastReservationSweep time.Time
