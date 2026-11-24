@@ -17,7 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -419,40 +418,6 @@ func TestRemoteGPU_FilterAnnotationPatchFailureReleasesReservation(t *testing.T)
 	// podB must be able to immediately acquire gpu-a during Filter.
 	filteredB, errB := s.Filter(extenderv1.ExtenderArgs{Pod: podB, NodeNames: &[]string{clientNode.Name}})
 	assert.NilError(t, errB)
-	assert.DeepEqual(t, *filteredB.NodeNames, []string{clientNode.Name})
-}
-
-// A reservation released after a failed scheduling cycle (#3484) must give
-// back its RemoteGPU booking too, so another pod can take the server's card
-// without waiting for heldTTL.
-func TestRemoteGPU_SchedulingFailureReleasesBooking(t *testing.T) {
-	gpuA := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
-	clientNode := gpulessNode("cpu-1")
-	podA := remoteGPUPod("pod-a", 1, 0)
-	podB := remoteGPUPod("pod-b", 1, 0)
-
-	dev := setupRemoteGPUScheduler(t, gpuA, clientNode, podA, podB)
-	s := remoteGPUBindScheduler(t, []*corev1.Node{gpuA, clientNode}, podA, podB)
-
-	filtered, err := s.Filter(extenderv1.ExtenderArgs{Pod: podA, NodeNames: &[]string{clientNode.Name}})
-	assert.NilError(t, err)
-	assert.DeepEqual(t, *filtered.NodeNames, []string{clientNode.Name})
-
-	patched, err := client.KubeClient.CoreV1().Pods(podA.Namespace).Get(context.Background(), podA.Name, metav1.GetOptions{})
-	assert.NilError(t, err)
-	failed := patched.DeepCopy()
-	failed.Status.Conditions = []corev1.PodCondition{{
-		Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
-	}}
-	s.onUpdatePod(patched, failed)
-
-	for _, pDev := range dev.Inspect() {
-		if pDev.Device.ID == "gpu-a/GPU-a" {
-			assert.Assert(t, !pDev.Reserved, "the released pod must not keep its card booked")
-		}
-	}
-	filteredB, err := s.Filter(extenderv1.ExtenderArgs{Pod: podB, NodeNames: &[]string{clientNode.Name}})
-	assert.NilError(t, err)
 	assert.DeepEqual(t, *filteredB.NodeNames, []string{clientNode.Name})
 }
 

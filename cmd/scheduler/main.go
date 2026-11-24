@@ -94,7 +94,6 @@ func init() {
 	rootCmd.Flags().StringVar(&profilingBindAddress, "profiling-bind-address", "127.0.0.1:6060", "Bind address for the dedicated pprof HTTP server when profiling is enabled")
 	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", nodelock.NodeLockTimeout, "timeout for node locks; defaults to HAMI_NODELOCK_EXPIRE, or 5m")
 	rootCmd.Flags().DurationVar(&config.NodeLockRetryTimeout, "node-lock-retry-timeout", 28*time.Second, "timeout for retrying LockNode when contended by another PodGroup member (0 disables retry). Align the Extender's httpTimeout in KubeSchedulerConfiguration with this value.")
-	rootCmd.Flags().DurationVar(&config.UnboundReservationTTL, "unbound-reservation-ttl", 0, "release the device reservation of a pod that is still not bound this long after Filter (0 disables). Set it above the longest Permit wait, such as a gang's scheduling timeout.")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
 	rootCmd.Flags().StringVar(&config.DevicePluginNamespace, "device-plugin-namespace", "", "namespace of the device-plugin ServiceAccount allowed to call the /refit endpoint")
 	rootCmd.Flags().StringVar(&config.DevicePluginServiceAccount, "device-plugin-service-account", "", "name of the device-plugin ServiceAccount allowed to call the /refit endpoint")

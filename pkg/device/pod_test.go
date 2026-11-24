@@ -661,19 +661,6 @@ func TestListPodsInfoReturnsSnapshot(t *testing.T) {
 	assert.Equal(t, "GPU-0", inner.Devices["dev"][0][0].UUID)
 }
 
-func TestUnboundPodsSkipsBoundPods(t *testing.T) {
-	pm := NewPodManager()
-	unbound := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "waiting", Namespace: "ns"}}
-	bound := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-2", Name: "running", Namespace: "ns"},
-		Spec: corev1.PodSpec{NodeName: "node-1"}}
-	pm.AddPod(unbound, "node-1", PodDevices{})
-	pm.AddPod(bound, "node-1", PodDevices{})
-
-	pods := pm.UnboundPods()
-	assert.Len(t, pods, 1)
-	assert.Equal(t, "waiting", pods[0].Name)
-}
-
 func TestTakeAndDeletePodIsAtomic(t *testing.T) {
 	pm := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p", Namespace: "ns"}}

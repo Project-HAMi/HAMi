@@ -144,15 +144,6 @@ type Scheduler struct {
 	// from their pods.
 	allocationCleanups sync.WaitGroup
 
-	// lastReservationSweep is when Filter last looked for reservations older
-	// than config.UnboundReservationTTL. Guarded by allocLock.
-	lastReservationSweep time.Time
-
-	// bindClaims holds the pods whose reservation a Bind is committing, until
-	// the informer shows them bound or the Bind fails. No release touches a
-	// claimed reservation. Guarded by allocLock.
-	bindClaims map[k8stypes.UID]struct{}
-
 	// timedOutPods keeps the bind-time of each pod counted as an allocate
 	// timeout, so a bind is counted once. Guarded by timeoutLock.
 	timeoutLock  sync.Mutex
@@ -354,13 +345,13 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 
 	if s.reservationReleased(pod) {
 		// A failed scheduling cycle released this allocation (#3484); the
-		// pod only keeps its annotations until a new Filter rewrites them.
+		// pod keeps its annotations until they are cleared or a new Filter
+		// rewrites them.
 		klog.V(5).InfoS("Skipping a released reservation", "pod", klog.KObj(pod))
 		return
 	}
 	if pod.Spec.NodeName != "" {
 		s.forgetReleasedReservation(pod.UID)
-		delete(s.bindClaims, pod.UID)
 	}
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
@@ -425,9 +416,6 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
-	if newPod.Spec.NodeName != "" {
-		delete(s.bindClaims, newPod.UID)
-	}
 	// kube-scheduler gave up this cycle after HAMi's Filter reserved
 	// devices, for example at a gang's Permit timeout. The extender API has
 	// no Unreserve, so release the reservation here (#3484).
@@ -793,7 +781,6 @@ func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
 		delete(s.refitWrites, pod.UID)
 		delete(s.filterWrites, pod.UID)
 	}
-	delete(s.bindClaims, pod.UID)
 }
 
 // onDelNode handles node delete events. It removes any in-memory per-node
@@ -1784,23 +1771,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 	}
 
-	// Keep the reservation from being released while this Bind waits for
-	// node locks and commits it (#3484).
-	claimed, err := s.claimBind(current)
-	if err != nil {
-		klog.ErrorS(err, "Rejecting bind request", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-		s.GetAllocationMetrics().ObserveAllocationFailure("bind", s.podAllocationType(current), metrics.FailureReasonIdentity)
-		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
-	}
-	bound := false
-	if claimed {
-		defer func() {
-			if !bound {
-				s.dropBindClaim(current.UID)
-			}
-		}()
-	}
-
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 
 	node, err := s.nodeLister.Get(args.Node)
@@ -1879,7 +1849,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 	bindSpan.End()
 
-	bound = true
 	s.GetAllocationMetrics().ObserveAllocation("bind", s.podAllocationType(current))
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", tracing.WithTraceID(span, "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)...)
@@ -2009,7 +1978,6 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
-	s.expireReservationsLocked(time.Now())
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 		delete(s.refitWrites, pod.UID)

@@ -19,8 +19,6 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,8 +29,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -41,13 +37,12 @@ import (
 // when a gang's Permit wait times out, HAMi is not told, and the reservation
 // would stay counted until the pod is filtered again or deleted (#3484). The
 // code here releases such a reservation when kube-scheduler reports the
-// failure in the pod's PodScheduled condition, or, when
-// config.UnboundReservationTTL is set, once it is older than that.
+// failure in the pod's PodScheduled condition.
 
 // releasedReservation identifies the Filter allocation that was released.
-// The pod keeps the annotations of that allocation, so the marker stops an
-// informer event from adding it back. A later Filter writes a new
-// allocation, which no longer matches.
+// Until the allocation is cleared from the pod, the marker stops an informer
+// event from adding it back. A later Filter writes a new allocation, which no
+// longer matches.
 type releasedReservation struct {
 	node string
 	time string
@@ -94,23 +89,12 @@ func schedulingFailureReported(oldPod, newPod *corev1.Pod) bool {
 		!oldCond.LastProbeTime.Equal(&newCond.LastProbeTime)
 }
 
-// reservationReleasable reports whether pod's reservation may be released:
-// the pod is not bound and Bind has not started allocating it.
-func reservationReleasable(pod *corev1.Pod) bool {
-	return pod.Spec.NodeName == "" &&
-		pod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating
-}
-
 // releaseOnSchedulingFailureLocked releases pod's reservation when an update
 // reports that kube-scheduler gave up the cycle it was made for. It reports
 // whether it handled the update. Callers hold allocLock.
 func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod) bool {
-	if !schedulingFailureReported(oldPod, newPod) || !reservationReleasable(newPod) {
-		return false
-	}
-	if _, binding := s.bindClaims[newPod.UID]; binding {
-		// Bind is committing this reservation, so the failure is from an
-		// earlier cycle.
+	if !schedulingFailureReported(oldPod, newPod) ||
+		newPod.Annotations[util.DeviceBindPhase] == util.DeviceBindAllocating {
 		return false
 	}
 	if write, pending := s.filterWrites[newPod.UID]; pending && !write.shownBy(newPod) {
@@ -118,48 +102,17 @@ func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod)
 		// failure it reports is from an earlier cycle.
 		return false
 	}
-	if !s.releaseReservationLocked(newPod, "SchedulingFailed") {
-		// Not cached, as on a replica that started after the Filter: the
-		// allocation is just as dead, so do not add it.
-		s.markReservationReleased(newPod.UID, reservationKey(newPod))
-		s.clearReleasedAllocation(newPod, newPod.Annotations)
+	if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
+		s.quotaManager.RmUsage(newPod, pi.Devices)
+		delete(s.refitWrites, newPod.UID)
+		delete(s.filterWrites, newPod.UID)
+		klog.InfoS("Released device reservation of a pod that was not bound",
+			"pod", klog.KObj(newPod), "node", pi.NodeID, "reason", "SchedulingFailed")
 	}
-	return true
-}
-
-// releaseReservationLocked drops pod's Filter reservation and remembers the
-// allocation so informer events do not add it back. A reservation that Bind
-// has claimed is kept. Callers hold allocLock.
-func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) bool {
-	if _, binding := s.bindClaims[pod.UID]; binding {
-		return false
-	}
-	pi, ok := s.podManager.TakeAndDeletePod(pod)
-	if !ok {
-		return false
-	}
-	allocation := pod.Annotations
-	if write, pending := s.filterWrites[pod.UID]; pending {
-		// The informer has not shown this replica's Filter patch yet, so
-		// pod may still carry an older allocation. Release the one written.
-		allocation = write.annotations
-	}
-	key := releasedReservation{
-		node: allocation[util.AssignedNodeAnnotations],
-		time: allocation[util.AssignedTimeAnnotations],
-	}
-	s.quotaManager.RmUsage(pod, pi.Devices)
-	// Give back RemoteGPU cards booked for the attempt now, as a Filter whose
-	// patch failed does, instead of after the booking's TTL.
-	if remote, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
-		_ = remote.ReleaseNodeLock(nil, pod)
-	}
-	delete(s.refitWrites, pod.UID)
-	delete(s.filterWrites, pod.UID)
-	s.markReservationReleased(pod.UID, key)
-	s.clearReleasedAllocation(pod, allocation)
-	klog.InfoS("Released device reservation of a pod that was not bound",
-		"pod", klog.KObj(pod), "node", pi.NodeID, "reason", reason)
+	// Also when not cached, as on a replica that started after the Filter:
+	// the allocation is just as dead, so do not add it.
+	s.markReservationReleased(newPod.UID, reservationKey(newPod))
+	s.clearReleasedAllocation(newPod)
 	return true
 }
 
@@ -167,29 +120,21 @@ func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) boo
 // allocation from its pod.
 const releasedAllocationPatchTimeout = 30 * time.Second
 
-// clearReleasedAllocation removes a released allocation's annotations from the
-// pod in the background, so that the allocation is not counted again after a
-// scheduler restart or by a new leader, which do not have the in-memory
-// marker. The patch only applies while the pod still carries this allocation,
-// so it never clears one that a later Filter wrote. Only the leader patches;
-// every replica keeps its own marker. Callers hold allocLock.
-func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod, allocation map[string]string) {
+// clearReleasedAllocation removes the released allocation's annotations from
+// pod in the background, so that a restarted scheduler or a new leader, which
+// do not have the in-memory marker, do not count it again. The patch applies
+// only while the pod is unchanged since the failure was reported, so it never
+// clears an allocation that a later Filter wrote. Only the leader patches.
+func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 	if s.kubeClient == nil || (s.leaderManager != nil && !s.leaderManager.IsLeader()) {
 		return
 	}
-	node, at := allocation[util.AssignedNodeAnnotations], allocation[util.AssignedTimeAnnotations]
-	if node == "" || at == "" {
-		return
-	}
-	keys := []string{util.AssignedNodeAnnotations, util.AssignedTimeAnnotations}
-	for _, key := range device.SupportDevices {
-		if _, ok := allocation[key]; ok {
-			keys = append(keys, key)
-		}
-	}
-	patch, err := releasedAllocationPatch(node, at, keys)
+	patch, err := releasedAllocationPatch(pod)
 	if err != nil {
 		klog.ErrorS(err, "Failed to build the patch clearing a released allocation", "pod", klog.KObj(pod))
+		return
+	}
+	if patch == nil {
 		return
 	}
 	namespace, name := pod.Namespace, pod.Name
@@ -202,32 +147,42 @@ func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod, allocation map[stri
 			klog.V(4).InfoS("Cleared a released allocation from the pod", "pod", klog.KRef(namespace, name))
 		case apierrors.IsNotFound(err):
 		default:
-			// Most often a later Filter has written a new allocation, which
-			// the test operations protect. The in-memory marker still
-			// keeps the released one from being added back here.
+			// Most often the pod changed since, for example a new Filter
+			// wrote another allocation, which the test operations protect.
+			// The in-memory marker still keeps the released one out.
 			klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
 		}
 	})
 }
 
-// releasedAllocationPatch returns a JSON patch that removes keys from a pod's
-// annotations if, and only if, the pod still carries the allocation of node
-// made at time at.
-func releasedAllocationPatch(node, at string, keys []string) ([]byte, error) {
+// releasedAllocationPatch returns a JSON patch that removes pod's allocation
+// annotations if, and only if, the pod still has the resourceVersion and the
+// allocation it had when the failure was reported. It returns nil when pod
+// carries no allocation.
+func releasedAllocationPatch(pod *corev1.Pod) ([]byte, error) {
+	node, at := pod.Annotations[util.AssignedNodeAnnotations], pod.Annotations[util.AssignedTimeAnnotations]
+	if node == "" || at == "" || pod.ResourceVersion == "" {
+		return nil, nil
+	}
 	type operation struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
 		Value string `json:"value,omitempty"`
 	}
-	path := func(key string) string {
+	annotation := func(key string) string {
 		return "/metadata/annotations/" + strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
 	}
 	ops := []operation{
-		{Op: "test", Path: path(util.AssignedNodeAnnotations), Value: node},
-		{Op: "test", Path: path(util.AssignedTimeAnnotations), Value: at},
+		{Op: "test", Path: "/metadata/resourceVersion", Value: pod.ResourceVersion},
+		{Op: "test", Path: annotation(util.AssignedNodeAnnotations), Value: node},
+		{Op: "test", Path: annotation(util.AssignedTimeAnnotations), Value: at},
+		{Op: "remove", Path: annotation(util.AssignedNodeAnnotations)},
+		{Op: "remove", Path: annotation(util.AssignedTimeAnnotations)},
 	}
-	for _, key := range keys {
-		ops = append(ops, operation{Op: "remove", Path: path(key)})
+	for _, key := range device.SupportDevices {
+		if _, ok := pod.Annotations[key]; ok {
+			ops = append(ops, operation{Op: "remove", Path: annotation(key)})
+		}
 	}
 	return json.Marshal(ops)
 }
@@ -258,88 +213,4 @@ func (s *Scheduler) reservationReleased(pod *corev1.Pod) bool {
 	defer s.releasedMu.Unlock()
 	released, ok := s.releasedReservations[pod.UID]
 	return ok && released == reservationKey(pod)
-}
-
-// claimBind is called by Bind before it acts on pod's reservation. A reserved
-// pod is claimed, and no release touches a claimed reservation until the
-// informer shows the pod bound or Bind drops the claim on failure. An
-// unreserved, unbound pod whose reservation was released is refused: its
-// devices may belong to another pod by now. The check and the claim happen
-// under allocLock, like every release. It reports whether pod was claimed.
-func (s *Scheduler) claimBind(pod *corev1.Pod) (bool, error) {
-	s.allocLock.Lock()
-	defer s.allocLock.Unlock()
-	if _, reserved := s.podManager.GetPod(pod); reserved {
-		if s.bindClaims == nil {
-			s.bindClaims = make(map[k8stypes.UID]struct{})
-		}
-		s.bindClaims[pod.UID] = struct{}{}
-		return true, nil
-	}
-	if pod.Spec.NodeName == "" && s.hasReleasedReservation(pod.UID) {
-		return false, fmt.Errorf("device reservation of pod %s/%s was released after a failed scheduling cycle",
-			pod.Namespace, pod.Name)
-	}
-	return false, nil
-}
-
-// dropBindClaim ends a claim of a Bind that failed.
-func (s *Scheduler) dropBindClaim(uid k8stypes.UID) {
-	s.allocLock.Lock()
-	defer s.allocLock.Unlock()
-	delete(s.bindClaims, uid)
-}
-
-// hasReleasedReservation reports whether any reservation of the pod was
-// released since its last Filter.
-func (s *Scheduler) hasReleasedReservation(uid k8stypes.UID) bool {
-	s.releasedMu.Lock()
-	defer s.releasedMu.Unlock()
-	_, ok := s.releasedReservations[uid]
-	return ok
-}
-
-// reservationTime returns when pod's reservation was made. A Filter on this
-// replica that the informer does not show yet is newer than the pod's
-// annotations. Callers hold allocLock.
-func (s *Scheduler) reservationTime(pod *corev1.Pod) (time.Time, bool) {
-	if write, pending := s.filterWrites[pod.UID]; pending {
-		return write.at, true
-	}
-	unix, err := strconv.ParseInt(pod.Annotations[util.AssignedTimeAnnotations], 10, 64)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return time.Unix(unix, 0), true
-}
-
-// reservationSweepInterval bounds how often Filter scans the reservations
-// for ones older than the TTL.
-func reservationSweepInterval(ttl time.Duration) time.Duration {
-	return max(ttl/10, time.Second)
-}
-
-// expireReservationsLocked releases reservations of unbound pods older than
-// config.UnboundReservationTTL. It does nothing when the TTL is zero and scans
-// at most once per reservationSweepInterval. Callers hold allocLock.
-func (s *Scheduler) expireReservationsLocked(now time.Time) int {
-	ttl := config.UnboundReservationTTL
-	if ttl <= 0 || now.Sub(s.lastReservationSweep) < reservationSweepInterval(ttl) {
-		return 0
-	}
-	s.lastReservationSweep = now
-	released := 0
-	for _, pod := range s.podManager.UnboundPods() {
-		if !reservationReleasable(pod) {
-			continue
-		}
-		reservedAt, ok := s.reservationTime(pod)
-		if !ok || now.Sub(reservedAt) < ttl {
-			continue
-		}
-		if s.releaseReservationLocked(pod, "UnboundReservationTTL") {
-			released++
-		}
-	}
-	return released
 }

@@ -19,7 +19,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strconv"
 	"testing"
 	"time"
@@ -33,7 +32,6 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
@@ -93,6 +91,17 @@ func livePod(t *testing.T, kubeClient *fake.Clientset, pod *corev1.Pod) *corev1.
 	live, err := kubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 	return live
+}
+
+// storeVersion stores pod in the fake API server with resourceVersion rv,
+// which the fake does not set itself, and returns it.
+func storeVersion(t *testing.T, kubeClient *fake.Clientset, pod *corev1.Pod, rv string) *corev1.Pod {
+	t.Helper()
+	pod = pod.DeepCopy()
+	pod.ResourceVersion = rv
+	stored, err := kubeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	return stored
 }
 
 // withSchedulingFailure returns pod as kube-scheduler leaves it after giving
@@ -214,8 +223,7 @@ func TestBoundOrAllocatingPodIsNotReleased(t *testing.T) {
 }
 
 // TestRefilterAfterReleaseReservesAgain checks that the next Filter of a
-// released pod reserves and counts its GPU again, and that its bind is then
-// accepted.
+// released pod reserves and counts its GPU again.
 func TestRefilterAfterReleaseReservesAgain(t *testing.T) {
 	pod := gangPod("job", 1)
 	s, kubeClient := gangScheduler(t, 1, pod)
@@ -233,41 +241,10 @@ func TestRefilterAfterReleaseReservesAgain(t *testing.T) {
 	_, held = s.podManager.GetPod(pod)
 	require.True(t, held, "a resync after the new Filter must keep it")
 	require.False(t, s.reservationReleased(refiltered))
-	claimed, err := s.claimBind(refiltered)
-	require.NoError(t, err)
-	require.True(t, claimed)
 
 	other := gangPod("other", 1)
 	seedPods(t, s, other)
 	require.False(t, gangFilter(t, s, other), "the GPU is reserved again")
-}
-
-// TestBindRejectsReleasedReservation checks that a pod whose reservation was
-// released cannot be bound with the devices Filter picked for it: another
-// pod may have them by now.
-func TestBindRejectsReleasedReservation(t *testing.T) {
-	pod := gangPod("job", 1)
-	s, kubeClient := gangScheduler(t, 1, pod)
-	require.True(t, gangFilter(t, s, pod))
-	permitTimeout(t, s, kubeClient, pod)
-
-	_, err := s.claimBind(livePod(t, kubeClient, pod))
-	require.ErrorContains(t, err, "was released")
-
-	// The pod lister can lag behind the Filter patch, so the pod Bind sees
-	// may still carry an older allocation than the one released.
-	_, err = s.claimBind(pod)
-	require.ErrorContains(t, err, "was released")
-}
-
-// TestUnreservedPodWithoutReleaseStillBinds checks that the bind guard does
-// not change binding for pods that never had a released reservation.
-func TestUnreservedPodWithoutReleaseStillBinds(t *testing.T) {
-	pod := gangPod("job", 1)
-	s, kubeClient := gangScheduler(t, 1, pod)
-	claimed, err := s.claimBind(livePod(t, kubeClient, pod))
-	require.NoError(t, err)
-	require.False(t, claimed, "nothing to claim without a reservation")
 }
 
 // TestDeletedPodForgetsRelease checks that the release marker does not
@@ -300,114 +277,6 @@ func TestReleaseOnUncachedReplica(t *testing.T) {
 	standby.onAddPod(withSchedulingFailure(patched, "timeout"))
 	_, held = standby.podManager.GetPod(pod)
 	require.False(t, held)
-}
-
-// TestUnboundReservationTTL checks the opt-in backstop for failures that
-// kube-scheduler does not report again, because the condition it would write
-// is the same as before.
-func TestUnboundReservationTTL(t *testing.T) {
-	old := config.UnboundReservationTTL
-	t.Cleanup(func() { config.UnboundReservationTTL = old })
-
-	stale, fresh, bound := gangPod("stale", 1), gangPod("fresh", 1), gangPod("bound", 1)
-	s, kubeClient := gangScheduler(t, 3, stale, fresh, bound)
-	for _, p := range []*corev1.Pod{stale, fresh, bound} {
-		require.True(t, gangFilter(t, s, p))
-		s.onUpdatePod(p, livePod(t, kubeClient, p))
-	}
-	boundLive := livePod(t, kubeClient, bound)
-	boundLive.Spec.NodeName = gangNode
-	s.onUpdatePod(livePod(t, kubeClient, bound), boundLive)
-
-	now := time.Now().Add(10 * time.Minute)
-	config.UnboundReservationTTL = 0
-	require.Zero(t, s.expireReservationsLocked(now), "zero disables the TTL")
-
-	config.UnboundReservationTTL = 5 * time.Minute
-	// Age the reservations the way the informer would show them.
-	age := func(pod *corev1.Pod, at time.Time) {
-		before := livePod(t, kubeClient, pod)
-		aged := before.DeepCopy()
-		aged.Annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(at.Unix(), 10)
-		_, err := kubeClient.CoreV1().Pods(aged.Namespace).Update(context.Background(), aged, metav1.UpdateOptions{})
-		require.NoError(t, err)
-		s.onUpdatePod(before, aged)
-	}
-	age(stale, now.Add(-6*time.Minute))
-	age(fresh, now.Add(-time.Minute))
-
-	require.Equal(t, 1, s.expireReservationsLocked(now))
-	_, held := s.podManager.GetPod(stale)
-	require.False(t, held, "older than the TTL")
-	_, held = s.podManager.GetPod(fresh)
-	require.True(t, held, "younger than the TTL")
-	_, held = s.podManager.GetPod(bound)
-	require.True(t, held, "bound pods are never released")
-	age(fresh, now.Add(-6*time.Minute))
-	require.Zero(t, s.expireReservationsLocked(now.Add(time.Second)), "the sweep is rate limited")
-	_, held = s.podManager.GetPod(fresh)
-	require.True(t, held, "a rate-limited call must not scan")
-	require.Equal(t, 1, s.expireReservationsLocked(now.Add(reservationSweepInterval(config.UnboundReservationTTL))))
-	_, held = s.podManager.GetPod(fresh)
-	require.False(t, held, "the next sweep releases it")
-	staleLive := livePod(t, kubeClient, stale)
-	relabeled := staleLive.DeepCopy()
-	relabeled.Labels["touched"] = "true"
-	s.onUpdatePod(staleLive, relabeled)
-	_, held = s.podManager.GetPod(stale)
-	require.False(t, held, "the next informer event must not add the TTL release back")
-}
-
-// TestBindClaimKeepsReservation checks that neither the TTL nor a failure
-// report releases a reservation while Bind commits it, so another pod cannot
-// be given the same devices, and that a failed Bind gives the claim up.
-func TestBindClaimKeepsReservation(t *testing.T) {
-	old := config.UnboundReservationTTL
-	t.Cleanup(func() { config.UnboundReservationTTL = old })
-	config.UnboundReservationTTL = time.Minute
-
-	pod, other := gangPod("job", 1), gangPod("other", 1)
-	s, kubeClient := gangScheduler(t, 1, pod, other)
-	require.True(t, gangFilter(t, s, pod))
-	patched := livePod(t, kubeClient, pod)
-	s.onUpdatePod(pod, patched)
-
-	claimed, err := s.claimBind(patched)
-	require.NoError(t, err)
-	require.True(t, claimed)
-
-	s.allocLock.Lock()
-	expired := s.expireReservationsLocked(time.Now().Add(time.Hour))
-	s.allocLock.Unlock()
-	require.Zero(t, expired, "the TTL must not release a claimed reservation")
-	s.onUpdatePod(patched, withSchedulingFailure(patched, "stale failure"))
-	_, held := s.podManager.GetPod(pod)
-	require.True(t, held, "a failure report must not release a claimed reservation")
-	require.False(t, gangFilter(t, s, other), "the claimed GPU must stay taken")
-
-	s.dropBindClaim(pod.UID)
-	s.allocLock.Lock()
-	s.lastReservationSweep = time.Time{}
-	expired = s.expireReservationsLocked(time.Now().Add(time.Hour))
-	s.allocLock.Unlock()
-	require.Equal(t, 1, expired, "a failed Bind gives the reservation back to the TTL")
-}
-
-// TestBoundPodEndsBindClaim checks that the claim ends once the informer
-// shows the pod bound, so the map does not grow.
-func TestBoundPodEndsBindClaim(t *testing.T) {
-	pod := gangPod("job", 1)
-	s, kubeClient := gangScheduler(t, 1, pod)
-	require.True(t, gangFilter(t, s, pod))
-	patched := livePod(t, kubeClient, pod)
-	s.onUpdatePod(pod, patched)
-	_, err := s.claimBind(patched)
-	require.NoError(t, err)
-
-	bound := patched.DeepCopy()
-	bound.Spec.NodeName = gangNode
-	s.onUpdatePod(patched, bound)
-	require.Empty(t, s.bindClaims)
 }
 
 // TestFailureBeforeNewerFilterKeepsReservation checks that a failure report
@@ -449,6 +318,7 @@ func TestReleaseClearsAllocationForRestart(t *testing.T) {
 	pod := gangPod("job", 1)
 	s, kubeClient := gangScheduler(t, 1, pod)
 	require.True(t, gangFilter(t, s, pod))
+	storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "2")
 	permitTimeout(t, s, kubeClient, pod)
 	s.allocationCleanups.Wait()
 
@@ -477,15 +347,14 @@ func TestClearReleasedAllocationKeepsNewerAllocation(t *testing.T) {
 	pod := gangPod("job", 1)
 	s, kubeClient := gangScheduler(t, 1, pod)
 	require.True(t, gangFilter(t, s, pod))
-	newer := livePod(t, kubeClient, pod)
+	failed := withSchedulingFailure(storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "2"), "timeout")
 
-	released := maps.Clone(newer.Annotations)
-	released[util.AssignedTimeAnnotations] = "1"
-	s.allocLock.Lock()
-	s.clearReleasedAllocation(newer, released)
-	s.allocLock.Unlock()
+	// A later Filter in the same second writes the same node and time, so
+	// only the resourceVersion tells the allocations apart.
+	newer := storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "3")
+
+	s.clearReleasedAllocation(failed)
 	s.allocationCleanups.Wait()
-
 	require.Equal(t, newer.Annotations, livePod(t, kubeClient, pod).Annotations)
 }
 
@@ -505,12 +374,21 @@ func TestStandbyDoesNotClearReleasedAllocation(t *testing.T) {
 }
 
 func TestReleasedAllocationPatch(t *testing.T) {
-	patch, err := releasedAllocationPatch("node-1", "100", []string{util.AssignedNodeAnnotations, util.AssignedTimeAnnotations})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{ResourceVersion: "7", Annotations: map[string]string{
+		util.AssignedNodeAnnotations: "node-1",
+		util.AssignedTimeAnnotations: "100",
+	}}}
+	patch, err := releasedAllocationPatch(pod)
 	require.NoError(t, err)
 	require.JSONEq(t, `[
+		{"op":"test","path":"/metadata/resourceVersion","value":"7"},
 		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-node","value":"node-1"},
 		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-time","value":"100"},
 		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-node"},
 		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-time"}
 	]`, string(patch))
+
+	patch, err = releasedAllocationPatch(&corev1.Pod{})
+	require.NoError(t, err)
+	require.Nil(t, patch, "nothing to clear without an allocation")
 }
