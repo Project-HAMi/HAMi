@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -24,6 +25,8 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -93,9 +96,38 @@ func reservationReleasable(pod *corev1.Pod) bool {
 		pod.Annotations[util.DeviceBindPhase] != util.DeviceBindAllocating
 }
 
+// releaseOnSchedulingFailureLocked releases pod's reservation when an update
+// reports that kube-scheduler gave up the cycle it was made for. It reports
+// whether it handled the update. Callers hold allocLock.
+func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod) bool {
+	if !schedulingFailureReported(oldPod, newPod) || !reservationReleasable(newPod) {
+		return false
+	}
+	if _, binding := s.bindClaims[newPod.UID]; binding {
+		// Bind is committing this reservation, so the failure is from an
+		// earlier cycle.
+		return false
+	}
+	if write, pending := s.filterWrites[newPod.UID]; pending && !write.shownBy(newPod) {
+		// The update does not show this replica's newer Filter yet, so the
+		// failure it reports is from an earlier cycle.
+		return false
+	}
+	if !s.releaseReservationLocked(newPod, "SchedulingFailed") {
+		// Not cached, as on a replica that started after the Filter: the
+		// allocation is just as dead, so do not add it.
+		s.markReservationReleased(newPod.UID, reservationKey(newPod))
+	}
+	return true
+}
+
 // releaseReservationLocked drops pod's Filter reservation and remembers the
-// allocation so informer events do not add it back. Callers hold allocLock.
+// allocation so informer events do not add it back. A reservation that Bind
+// has claimed is kept. Callers hold allocLock.
 func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) bool {
+	if _, binding := s.bindClaims[pod.UID]; binding {
+		return false
+	}
 	pi, ok := s.podManager.TakeAndDeletePod(pod)
 	if !ok {
 		return false
@@ -110,6 +142,11 @@ func (s *Scheduler) releaseReservationLocked(pod *corev1.Pod, reason string) boo
 		}
 	}
 	s.quotaManager.RmUsage(pod, pi.Devices)
+	// Give back RemoteGPU cards booked for the attempt now, as a Filter whose
+	// patch failed does, instead of after the booking's TTL.
+	if remote, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
+		_ = remote.ReleaseNodeLock(nil, pod)
+	}
 	delete(s.refitWrites, pod.UID)
 	delete(s.filterWrites, pod.UID)
 	s.markReservationReleased(pod.UID, key)
@@ -144,6 +181,45 @@ func (s *Scheduler) reservationReleased(pod *corev1.Pod) bool {
 	defer s.releasedMu.Unlock()
 	released, ok := s.releasedReservations[pod.UID]
 	return ok && released == reservationKey(pod)
+}
+
+// claimBind is called by Bind before it acts on pod's reservation. A reserved
+// pod is claimed, and no release touches a claimed reservation until the
+// informer shows the pod bound or Bind drops the claim on failure. An
+// unreserved, unbound pod whose reservation was released is refused: its
+// devices may belong to another pod by now. The check and the claim happen
+// under allocLock, like every release. It reports whether pod was claimed.
+func (s *Scheduler) claimBind(pod *corev1.Pod) (bool, error) {
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
+	if _, reserved := s.podManager.GetPod(pod); reserved {
+		if s.bindClaims == nil {
+			s.bindClaims = make(map[k8stypes.UID]struct{})
+		}
+		s.bindClaims[pod.UID] = struct{}{}
+		return true, nil
+	}
+	if pod.Spec.NodeName == "" && s.hasReleasedReservation(pod.UID) {
+		return false, fmt.Errorf("device reservation of pod %s/%s was released after a failed scheduling cycle",
+			pod.Namespace, pod.Name)
+	}
+	return false, nil
+}
+
+// dropBindClaim ends a claim of a Bind that failed.
+func (s *Scheduler) dropBindClaim(uid k8stypes.UID) {
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
+	delete(s.bindClaims, uid)
+}
+
+// hasReleasedReservation reports whether any reservation of the pod was
+// released since its last Filter.
+func (s *Scheduler) hasReleasedReservation(uid k8stypes.UID) bool {
+	s.releasedMu.Lock()
+	defer s.releasedMu.Unlock()
+	_, ok := s.releasedReservations[uid]
+	return ok
 }
 
 // reservationTime returns when pod's reservation was made. A Filter on this

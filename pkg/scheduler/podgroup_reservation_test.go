@@ -231,9 +231,9 @@ func TestRefilterAfterReleaseReservesAgain(t *testing.T) {
 	_, held = s.podManager.GetPod(pod)
 	require.True(t, held, "a resync after the new Filter must keep it")
 	require.False(t, s.reservationReleased(refiltered))
-	require.NoError(t, s.verifyBindTarget(extenderv1.ExtenderBindingArgs{
-		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: gangNode,
-	}, refiltered))
+	claimed, err := s.claimBind(refiltered)
+	require.NoError(t, err)
+	require.True(t, claimed)
 
 	other := gangPod("other", 1)
 	seedPods(t, s, other)
@@ -249,9 +249,12 @@ func TestBindRejectsReleasedReservation(t *testing.T) {
 	require.True(t, gangFilter(t, s, pod))
 	permitTimeout(t, s, kubeClient, pod)
 
-	err := s.verifyBindTarget(extenderv1.ExtenderBindingArgs{
-		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: gangNode,
-	}, livePod(t, kubeClient, pod))
+	_, err := s.claimBind(livePod(t, kubeClient, pod))
+	require.ErrorContains(t, err, "was released")
+
+	// The pod lister can lag behind the Filter patch, so the pod Bind sees
+	// may still carry an older allocation than the one released.
+	_, err = s.claimBind(pod)
 	require.ErrorContains(t, err, "was released")
 }
 
@@ -260,10 +263,9 @@ func TestBindRejectsReleasedReservation(t *testing.T) {
 func TestUnreservedPodWithoutReleaseStillBinds(t *testing.T) {
 	pod := gangPod("job", 1)
 	s, kubeClient := gangScheduler(t, 1, pod)
-	err := s.verifyBindTarget(extenderv1.ExtenderBindingArgs{
-		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: gangNode,
-	}, livePod(t, kubeClient, pod))
+	claimed, err := s.claimBind(livePod(t, kubeClient, pod))
 	require.NoError(t, err)
+	require.False(t, claimed, "nothing to claim without a reservation")
 }
 
 // TestDeletedPodForgetsRelease checks that the release marker does not
@@ -339,11 +341,101 @@ func TestUnboundReservationTTL(t *testing.T) {
 	require.True(t, held, "younger than the TTL")
 	_, held = s.podManager.GetPod(bound)
 	require.True(t, held, "bound pods are never released")
+	age(fresh, now.Add(-6*time.Minute))
 	require.Zero(t, s.expireReservationsLocked(now.Add(time.Second)), "the sweep is rate limited")
+	_, held = s.podManager.GetPod(fresh)
+	require.True(t, held, "a rate-limited call must not scan")
+	require.Equal(t, 1, s.expireReservationsLocked(now.Add(reservationSweepInterval(config.UnboundReservationTTL))))
+	_, held = s.podManager.GetPod(fresh)
+	require.False(t, held, "the next sweep releases it")
 	staleLive := livePod(t, kubeClient, stale)
 	relabeled := staleLive.DeepCopy()
 	relabeled.Labels["touched"] = "true"
 	s.onUpdatePod(staleLive, relabeled)
 	_, held = s.podManager.GetPod(stale)
 	require.False(t, held, "the next informer event must not add the TTL release back")
+}
+
+// TestBindClaimKeepsReservation checks that neither the TTL nor a failure
+// report releases a reservation while Bind commits it, so another pod cannot
+// be given the same devices, and that a failed Bind gives the claim up.
+func TestBindClaimKeepsReservation(t *testing.T) {
+	old := config.UnboundReservationTTL
+	t.Cleanup(func() { config.UnboundReservationTTL = old })
+	config.UnboundReservationTTL = time.Minute
+
+	pod, other := gangPod("job", 1), gangPod("other", 1)
+	s, kubeClient := gangScheduler(t, 1, pod, other)
+	require.True(t, gangFilter(t, s, pod))
+	patched := livePod(t, kubeClient, pod)
+	s.onUpdatePod(pod, patched)
+
+	claimed, err := s.claimBind(patched)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	s.allocLock.Lock()
+	expired := s.expireReservationsLocked(time.Now().Add(time.Hour))
+	s.allocLock.Unlock()
+	require.Zero(t, expired, "the TTL must not release a claimed reservation")
+	s.onUpdatePod(patched, withSchedulingFailure(patched, "stale failure"))
+	_, held := s.podManager.GetPod(pod)
+	require.True(t, held, "a failure report must not release a claimed reservation")
+	require.False(t, gangFilter(t, s, other), "the claimed GPU must stay taken")
+
+	s.dropBindClaim(pod.UID)
+	s.allocLock.Lock()
+	s.lastReservationSweep = time.Time{}
+	expired = s.expireReservationsLocked(time.Now().Add(time.Hour))
+	s.allocLock.Unlock()
+	require.Equal(t, 1, expired, "a failed Bind gives the reservation back to the TTL")
+}
+
+// TestBoundPodEndsBindClaim checks that the claim ends once the informer
+// shows the pod bound, so the map does not grow.
+func TestBoundPodEndsBindClaim(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	patched := livePod(t, kubeClient, pod)
+	s.onUpdatePod(pod, patched)
+	_, err := s.claimBind(patched)
+	require.NoError(t, err)
+
+	bound := patched.DeepCopy()
+	bound.Spec.NodeName = gangNode
+	s.onUpdatePod(patched, bound)
+	require.Empty(t, s.bindClaims)
+}
+
+// TestFailureBeforeNewerFilterKeepsReservation checks that a failure report
+// for an earlier cycle, delivered after a newer Filter on this replica that
+// the informer does not show yet, does not release the newer reservation.
+func TestFailureBeforeNewerFilterKeepsReservation(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+
+	// Cycle A: Filter, and the informer shows its patch.
+	require.True(t, gangFilter(t, s, pod))
+	cycleA := livePod(t, kubeClient, pod)
+	cycleA.Annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)
+	_, err := kubeClient.CoreV1().Pods(cycleA.Namespace).Update(context.Background(), cycleA, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	s.onUpdatePod(pod, cycleA)
+
+	// Cycle B: a newer Filter whose patch the informer has not shown yet.
+	require.True(t, gangFilter(t, s, pod))
+
+	// The informer now delivers cycle A's failure.
+	s.onUpdatePod(cycleA, withSchedulingFailure(cycleA, "cycle A failed"))
+	_, held := s.podManager.GetPod(pod)
+	require.True(t, held, "cycle B's reservation must survive cycle A's failure")
+	require.Empty(t, s.releasedReservations)
+
+	// Cycle B's own failure, which shows its patch, still releases it.
+	cycleB := livePod(t, kubeClient, pod)
+	s.onUpdatePod(cycleA, cycleB)
+	s.onUpdatePod(cycleB, withSchedulingFailure(cycleB, "cycle B failed"))
+	_, held = s.podManager.GetPod(pod)
+	require.False(t, held)
 }
