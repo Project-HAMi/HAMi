@@ -36,8 +36,7 @@ func preemptorPod() *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "high", Namespace: "default", UID: "preemptor-uid"}}
 }
 
-// preemptScheduler returns a scheduler that can resolve pod, which Preempt
-// does before it answers a request.
+// preemptScheduler returns a scheduler that knows pod.
 func preemptScheduler(t *testing.T, pod *corev1.Pod) *Scheduler {
 	t.Helper()
 	s := NewScheduler()
@@ -45,11 +44,9 @@ func preemptScheduler(t *testing.T, pod *corev1.Pod) *Scheduler {
 	return s
 }
 
-// For a pod that asks for no device of HAMi, the preempt verb must be
-// invisible to kube-scheduler: every candidate node goes back with the victims
-// it came with. A node that carries no victim is a candidate too. It is how
-// kube-scheduler 1.38 and later hands over a node whose in-tree filters
-// already fit, and leaving it out of the answer would reject the node.
+// A pod that asks for no HAMi device gets every candidate node back with the
+// victims it came with. That includes a node without victims, which is how
+// kube-scheduler 1.38 and later hands over a node that fits by its own count.
 func Test_Preempt_ReturnsCandidatesUnchanged(t *testing.T) {
 	tests := []struct {
 		name string
@@ -180,8 +177,7 @@ func Test_Preempt_RejectsRequestWithoutPod(t *testing.T) {
 	assert.Assert(t, res == nil)
 }
 
-// Victim selection adds to the answer, and must not write into the request
-// while doing so.
+// Victim selection must not write into the request.
 func Test_Preempt_AnswerDoesNotAliasRequest(t *testing.T) {
 	requested := &extenderv1.MetaVictims{Pods: []*extenderv1.MetaPod{{UID: "victim-a"}}}
 	pod := preemptorPod()
@@ -227,8 +223,7 @@ func Test_Preempt_WireFormat(t *testing.T) {
 	assert.Equal(t, string(answer), want)
 }
 
-// trackedOn returns what the pod cache holds for a pod that is bound to
-// nodeName and has 1000 MiB of its first GPU.
+// trackedOn returns a pod bound to nodeName that holds 1000 MiB of one GPU.
 func trackedOn(nodeName, uid string, priority int32) *device.PodInfo {
 	return &device.PodInfo{
 		Pod: &corev1.Pod{
@@ -242,9 +237,7 @@ func trackedOn(nodeName, uid string, priority int32) *device.PodInfo {
 	}
 }
 
-// Only a pod kube-scheduler can evict from this node for this pod is a
-// candidate, and the candidates come out most important first, which is the
-// order they are spared in.
+// Only pods that may be evicted are candidates, most important first.
 func Test_victimCandidates(t *testing.T) {
 	preemptor := preemptorPod()
 	high := int32(1000)
@@ -285,8 +278,7 @@ func Test_victimCandidates(t *testing.T) {
 	assert.DeepEqual(t, got, []string{"mid", "low-old", "low-new", "low-not-started"})
 }
 
-// The fit check answers for the node as it would be with some pods gone, and
-// leaves the caches alone.
+// The fit check works without the given pods and leaves the caches alone.
 func Test_fitsWithout(t *testing.T) {
 	pod := movePod()
 	s, _ := filterLeader(t, pod, 1)
@@ -316,8 +308,7 @@ func Test_fitsWithout(t *testing.T) {
 }
 
 // devicePreemptor returns a pod of priority 1000 that asks for 1000 MiB of one
-// GPU, and a scheduler that can resolve it, with node-x and node-y holding one
-// GPU of 8192 MiB each.
+// GPU, and its scheduler. node-x and node-y have one GPU of 8192 MiB each.
 func devicePreemptor(t *testing.T) (*Scheduler, *corev1.Pod) {
 	t.Helper()
 	pod := movePod()
@@ -333,8 +324,7 @@ func holding(pi *device.PodInfo, mem int64) *device.PodInfo {
 	return pi
 }
 
-// notBound turns a pod of trackedOn into one a Filter has assigned to its
-// node and nothing has bound yet.
+// notBound makes a pod of trackedOn assigned by Filter but not bound yet.
 func notBound(pi *device.PodInfo) *device.PodInfo {
 	pi.Spec.NodeName = ""
 	return pi
@@ -348,10 +338,8 @@ func track(t *testing.T, s *Scheduler, pods ...*device.PodInfo) {
 	}
 }
 
-// kube-scheduler does not count the devices HAMi shares, so a candidate node
-// comes with the victims its own resources need, or with none at all. Preempt
-// adds the pods the devices need, and leaves out a node the devices do not fit
-// on whoever is evicted.
+// Preempt adds the pods the devices need to the victims of a candidate node,
+// and leaves out a node where the devices cannot fit.
 func Test_Preempt_SelectsVictims(t *testing.T) {
 	victims := func(uids ...string) *extenderv1.MetaVictims {
 		meta := &extenderv1.MetaVictims{Pods: []*extenderv1.MetaPod{}}
@@ -387,8 +375,6 @@ func Test_Preempt_SelectsVictims(t *testing.T) {
 			want:    map[string]*extenderv1.MetaVictims{moveNodeX: victims("low-a", "low-b")},
 		},
 		{
-			// kube-scheduler drops a node no extender names a victim on, and
-			// the pod is scheduled there on its next attempt.
 			name: "no pod is added where the devices fit already",
 			tracked: []*device.PodInfo{
 				holding(trackedOn(moveNodeX, "low", 10), 4000),
@@ -437,8 +423,6 @@ func Test_Preempt_SelectsVictims(t *testing.T) {
 			want:    map[string]*extenderv1.MetaVictims{},
 		},
 		{
-			// kube-scheduler would not find the pod on the node, and that
-			// fails the preemption on every node.
 			name: "a pod that is not bound yet is not offered as a victim",
 			tracked: []*device.PodInfo{
 				notBound(holding(trackedOn(moveNodeX, "assigned", 10), 8000)),
@@ -468,8 +452,7 @@ func Test_Preempt_SelectsVictims(t *testing.T) {
 	}
 }
 
-// Preempt only answers. It assigns nothing to the pod, keeps the pods it names
-// in the pod cache, and writes nothing to the API server.
+// Preempt only answers: it changes no cache and writes nothing to the API.
 func Test_Preempt_OnlyAnswers(t *testing.T) {
 	pod := movePod()
 	priority := int32(1000)
@@ -498,8 +481,7 @@ func Test_Preempt_OnlyAnswers(t *testing.T) {
 	}
 }
 
-// The pod in a request is input, as it is for Filter. Preempt answers for the
-// live pod, and for nothing if the request is not about that pod.
+// Preempt rejects a request whose pod is not the live pod.
 func Test_Preempt_RejectsRequestForAnotherPod(t *testing.T) {
 	s, pod := devicePreemptor(t)
 	track(t, s, holding(trackedOn(moveNodeX, "low", 10), 8000))
@@ -514,8 +496,7 @@ func Test_Preempt_RejectsRequestForAnotherPod(t *testing.T) {
 	assert.Assert(t, res == nil)
 }
 
-// Filter rejects a pod with an invalid device request on every node, so no pod
-// is evicted for it.
+// No pod is evicted for a pod with an invalid device request.
 func Test_Preempt_RejectsInvalidDeviceRequest(t *testing.T) {
 	pod := movePod()
 	pod.Spec.Containers[0].Resources.Limits["hami.io/gpucores"] = *resource.NewQuantity(200, resource.DecimalSI)

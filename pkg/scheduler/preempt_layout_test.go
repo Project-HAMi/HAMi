@@ -35,7 +35,7 @@ import (
 const migNode = "mig-node"
 
 // addMigCard gives s a node with one MIG card of four slices. A 1g instance
-// takes one slice, a 2g instance takes two slices that are next to each other.
+// takes one slice, a 2g instance takes two neighboring slices.
 func addMigCard(s *Scheduler) {
 	s.addNode(migNode, &device.NodeInfo{
 		ID: migNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: migNode}},
@@ -54,8 +54,7 @@ func addMigCard(s *Scheduler) {
 	})
 }
 
-// onMigSlice returns what the pod cache holds for a pod that is bound to the
-// node of addMigCard and has the 1g instance at slice start.
+// onMigSlice returns a pod bound to the MIG node with a 1g instance at start.
 func onMigSlice(uid string, priority int32, start int) *device.PodInfo {
 	pi := trackedOn(migNode, uid, priority)
 	pi.Annotations = map[string]string{nvidia.MigAllocationsAnnotation: fmt.Sprintf(
@@ -66,12 +65,8 @@ func onMigSlice(uid string, priority int32, start int) *device.PodInfo {
 	return pi
 }
 
-// What a MIG card has free is a set of placements, not an amount of memory.
-// Two of the four slices of this card are free, and so is the memory the pod
-// asks for, but the two slices are not next to each other and a 2g instance
-// needs them to be. Counting what is free would find room and name no victim.
-// The fit is done on the card as it is without each candidate, so the less
-// important of the two pods goes, and the other one keeps its slice.
+// Slices 1 and 3 are free, but a 2g instance needs two neighboring slices.
+// The less important pod is the victim.
 func Test_Preempt_FreesMigPlacement(t *testing.T) {
 	pod := movePod()
 	high := int32(1000)
@@ -91,12 +86,8 @@ func Test_Preempt_FreesMigPlacement(t *testing.T) {
 	})
 }
 
-// What is held back for a nominated pod on a MIG card is the placement that
-// was planned for it, and the plan is the fit with the pods that stay. Here
-// the pod on slice 2 stays, so the 2g instance goes to slices 0 and 1. Those
-// are held back: a second 2g instance has nowhere to go, while slice 3 is
-// still there for a 1g instance. The card stays in use only because the
-// placement is known: a pod without one takes a MIG card out of scheduling.
+// The planned placement, slices 0 and 1, is held back for the nominated pod.
+// A second 2g instance does not fit, and a 1g instance still fits on slice 3.
 func Test_Preempt_HoldsMigPlacementForNominatedPod(t *testing.T) {
 	high := asking("high", 1000, 12000)
 	twoSlices := asking("two-slices", 10, 12000)
@@ -118,10 +109,8 @@ func Test_Preempt_HoldsMigPlacementForNominatedPod(t *testing.T) {
 	assert.Assert(t, filterOn(t, s, oneSlice, migNode), "slice 3 is free, and the card is still in use")
 }
 
-// What an AWS Neuron device has free is a set of cores, not a number of them,
-// and a pod gets cores that are next to each other. Two of the four cores of
-// this device are free, which is what the pod asks for, but there is a pod on
-// the core between them. That pod is the victim.
+// Cores 1 and 3 are free, but a pod gets neighboring cores. The pod on core 2
+// is the victim.
 func Test_Preempt_FreesCoreMask(t *testing.T) {
 	oldDevices, oldSupport := device.DevicesMap, maps.Clone(device.SupportDevices)
 	t.Cleanup(func() { device.DevicesMap, device.SupportDevices = oldDevices, oldSupport })

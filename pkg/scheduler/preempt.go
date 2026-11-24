@@ -32,24 +32,18 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// preemptionPlanTimeout is how long a plan lasts after Preempt made it. It
-// covers the time the victims take to terminate and the next scheduling
-// attempt of the pod. A pod that is still nominated after that holds nothing
-// back any more, so a preemption that never completes cannot keep devices from
-// other pods for good. A later Preempt for the pod makes a new plan.
+// preemptionPlanTimeout is how long a plan holds devices back, so that a
+// preemption that never completes cannot hold them for good.
 const preemptionPlanTimeout = 5 * time.Minute
 
-// preemptionPlan is what Preempt worked out for one pod: what the pod gets on
-// each node of the answer once the victims are gone, and when that was.
+// preemptionPlan holds the devices Preempt planned for one pod, by node.
 type preemptionPlan struct {
 	pod   *corev1.Pod
 	nodes map[string]plannedDevices
 	at    time.Time
 }
 
-// plannedDevices are the devices of a preemptionPlan on one node, as the pod
-// cache would hold them, and the MIG placements among them, as the pod would
-// carry them in its annotation.
+// plannedDevices are the planned devices and MIG placements on one node.
 type plannedDevices struct {
 	devices       device.PodDevices
 	migPlacements string
@@ -61,22 +55,14 @@ type plannedDevices struct {
 // the victims of every node from the answer, and stops considering a node the
 // answer leaves out.
 //
-// kube-scheduler does not see the devices HAMi shares, so its victims free
-// what it counts itself and nothing more. On every candidate node Preempt adds
-// the pods that have to go for the devices of the pod as well, and leaves out
-// a node those devices do not fit on even then. The victims kube-scheduler
-// proposed stay in the answer as they came.
-//
-// kube-scheduler picks one node of the answer, evicts the victims on it and
-// nominates the pod to it. Preempt keeps the devices it planned on every node
-// of the answer, so that the ones on the nominated node can be held back until
-// the pod gets there. See nominatedReservations.
+// On each candidate node Preempt adds the victims that the devices of the pod
+// need, and leaves out a node where the devices cannot fit. The devices it
+// planned are kept for nominatedReservations.
 func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1.ExtenderPreemptionResult, error) {
 	if args.Pod == nil {
 		return nil, errors.New("extender preemption args missing pod")
 	}
-	// The pod in the request is input, as it is for Filter: its priority and
-	// its requests are taken from the live object.
+	// Like Filter, trust the live pod, not the pod in the request.
 	pod, err := s.authoritativePod(args.Pod)
 	if err != nil {
 		klog.ErrorS(err, "Rejecting preemption request", "pod", klog.KObj(args.Pod))
@@ -84,8 +70,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	}
 	resourceReqs, err := device.Resourcereqs(pod)
 	if err != nil {
-		// Filter rejects this pod on every node, so evicting for it frees
-		// nothing it can use.
+		// Filter rejects this pod anyway, so evicting for it helps nothing.
 		return nil, fmt.Errorf("invalid device request for pod %s: %w", klog.KObj(pod), err)
 	}
 
@@ -103,8 +88,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	for _, pi := range s.podManager.ListPodsInfo() {
 		podsByNode[pi.NodeID] = append(podsByNode[pi.NodeID], pi)
 	}
-	// What is held back for another nominated pod is not this pod's to plan
-	// with either, unless this pod has the higher priority.
+	// Devices held back for other nominated pods count as taken here too.
 	for _, reservation := range s.nominatedReservations(pod) {
 		podsByNode[reservation.NodeID] = append(podsByNode[reservation.NodeID], reservation)
 	}
@@ -120,8 +104,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 		for _, victim := range victims {
 			proposed.Pods = append(proposed.Pods, &extenderv1.MetaPod{UID: string(victim.UID)})
 		}
-		// kube-scheduler drops a node nobody names a victim on, so the pod is
-		// never nominated to one.
+		// kube-scheduler drops a node without victims, so it needs no plan.
 		if len(proposed.Pods) > 0 {
 			migPlacements, _ := nvidia.EncodeMigAllocations(planned[nvidia.NvidiaGPUDevice])
 			plan.nodes[nodeName] = plannedDevices{
@@ -132,7 +115,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 		klog.V(4).InfoS("Selected preemption victims for devices",
 			"pod", klog.KObj(pod), "node", nodeName, "added", len(victims), "victims", len(proposed.Pods))
 	}
-	// This answer replaces what an earlier one planned for the pod.
+	// A new answer replaces the earlier plan of the pod.
 	delete(s.preemptionPlans, pod.UID)
 	if len(plan.nodes) > 0 {
 		if s.preemptionPlans == nil {
@@ -143,8 +126,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	return &extenderv1.ExtenderPreemptionResult{NodeNameToMetaVictims: candidates}, nil
 }
 
-// hasDeviceRequest reports whether a container of the pod asks for a device
-// HAMi schedules.
+// hasDeviceRequest reports whether the pod asks for a HAMi device.
 func hasDeviceRequest(resourceReqs device.PodDeviceRequests) bool {
 	for _, containerReqs := range resourceReqs {
 		if len(containerReqs) > 0 {
@@ -154,17 +136,12 @@ func hasDeviceRequest(resourceReqs device.PodDeviceRequests) bool {
 	return false
 }
 
-// selectVictims returns the pods that have to leave nodeName for the devices
-// of pod to fit there, on top of the victims kube-scheduler proposed, and the
-// devices pod gets once they are all gone. It reports false if the devices do
-// not fit even with every candidate gone.
-//
-// It picks them the way kube-scheduler picks its own: all candidates are taken
-// away, and then put back one at a time, most important first. A candidate
-// that pod no longer fits with is a victim. Callers hold allocLock.
+// selectVictims returns the extra pods that must leave nodeName so that pod
+// fits, and the devices pod gets then. It reports false if pod cannot fit.
+// Like kube-scheduler, it removes all candidates and puts them back one by
+// one. Callers hold allocLock.
 func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodeName string, nodePods []*device.PodInfo, proposed *extenderv1.MetaVictims) ([]*device.PodInfo, device.PodDevices, bool) {
-	// Filter drops what the pod holds from an earlier attempt before it looks
-	// for a fit, so that does not count here either.
+	// Like Filter, ignore what the pod holds from an earlier attempt.
 	gone := map[k8stypes.UID]struct{}{pod.UID: {}}
 	taken := make(map[k8stypes.UID]struct{}, len(proposed.Pods))
 	for _, victim := range proposed.Pods {
@@ -193,13 +170,11 @@ func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDevice
 	return victims, planned, true
 }
 
-// reservationFor returns what the pod cache would hold for pod if a Filter had
-// given it the planned devices on nodeName. Usage is built from entries of
-// this form, so adding one to the pods of a node holds those devices back.
+// reservationFor returns a pod cache entry that holds the planned devices for
+// pod on nodeName.
 func reservationFor(pod *corev1.Pod, nodeName string, planned plannedDevices) *device.PodInfo {
 	holder := pod.DeepCopy()
-	// Usage reads the MIG placements of a pod from this annotation. What the
-	// pod carries there from an earlier attempt is not what is planned now.
+	// Usage reads MIG placements from this annotation.
 	delete(holder.Annotations, nvidia.MigAllocationsAnnotation)
 	if planned.migPlacements != "" {
 		if holder.Annotations == nil {
@@ -210,20 +185,9 @@ func reservationFor(pod *corev1.Pod, nodeName string, planned plannedDevices) *d
 	return &device.PodInfo{Pod: holder, NodeID: nodeName, Devices: planned.devices}
 }
 
-// nominatedReservations returns the devices that are held back for the pods
-// kube-scheduler has nominated to a node, as entries of the pod cache.
-//
-// While the victims of a preemption terminate, kube-scheduler counts what the
-// pod it nominated asks for as taken on that node, for every pod of the same
-// or a lower priority. It cannot do that for the devices HAMi shares, so a pod
-// of a lower priority could take them the moment a victim is gone. Filter and
-// Preempt add these entries to the pods they build usage from, which holds the
-// devices back from task unless task has a higher priority than their pod.
-//
-// A plan is held back only once the nomination shows in the pod lister, and
-// only on the node it names. A plan goes when its pod gets devices from a
-// Filter, when a later Preempt answers for the pod again, and here, once the
-// pod is no longer waiting for a node or the plan is older than
+// nominatedReservations returns pod cache entries that hold the planned
+// devices of nominated pods back from task, unless task has a higher priority.
+// It drops a plan whose pod no longer waits for a node, and a plan older than
 // preemptionPlanTimeout. Callers hold allocLock.
 func (s *Scheduler) nominatedReservations(task *corev1.Pod) []*device.PodInfo {
 	if s.podLister == nil {
@@ -240,9 +204,7 @@ func (s *Scheduler) nominatedReservations(task *corev1.Pod) []*device.PodInfo {
 			delete(s.preemptionPlans, uid)
 			continue
 		}
-		// Without a nomination kube-scheduler has not picked a node, or its
-		// pick does not show yet. A nomination to a node that is not in the
-		// plan is one from before this plan, which the lister still shows.
+		// Held back only once the pod is nominated to a node of the plan.
 		nominated := live.Status.NominatedNodeName
 		planned, ok := plan.nodes[nominated]
 		if !ok || uid == task.UID || podPriority(live) < podPriority(task) {
@@ -290,8 +252,7 @@ func preemptionCandidates(args extenderv1.ExtenderPreemptionArgs) map[string]*ex
 	return candidates
 }
 
-// podPriority returns the priority admission resolved from the pod's
-// PriorityClass, or 0 for a pod that has none.
+// podPriority returns the priority of the pod, or 0 if it has none.
 func podPriority(pod *corev1.Pod) int32 {
 	if pod.Spec.Priority != nil {
 		return *pod.Spec.Priority
@@ -299,10 +260,8 @@ func podPriority(pod *corev1.Pod) int32 {
 	return 0
 }
 
-// moreImportantPod orders pods the way kube-scheduler does when it decides
-// which victims to spare first: the higher priority wins, then the pod that
-// started earlier. A pod that has not started yet is the newest, and the UID
-// settles what is left, so the order is the same on every call.
+// moreImportantPod orders pods like kube-scheduler does for victims: higher
+// priority first, then earlier start time, then UID.
 func moreImportantPod(a, b *corev1.Pod) bool {
 	if pa, pb := podPriority(a), podPriority(b); pa != pb {
 		return pa > pb
@@ -317,14 +276,9 @@ func moreImportantPod(a, b *corev1.Pod) bool {
 	return a.UID < b.UID
 }
 
-// victimCandidates returns the pods among nodePods that preemptor may evict
-// from nodeName, most important first: pods that hold devices there, are bound
-// to the node, are not terminating, have a lower priority than preemptor, and
-// are not in taken.
-//
-// kube-scheduler looks every victim it gets back up among the pods it has on
-// that node, and fails the whole preemption on a miss. A pod Filter has
-// assigned but that is not bound yet is one it does not have there.
+// victimCandidates returns the pods preemptor may evict from nodeName, most
+// important first. Only bound pods count, because kube-scheduler fails the
+// whole preemption on a victim it does not know.
 func victimCandidates(nodePods []*device.PodInfo, nodeName string, preemptor *corev1.Pod, taken map[k8stypes.UID]struct{}) []*device.PodInfo {
 	var candidates []*device.PodInfo
 	for _, pi := range nodePods {
@@ -345,10 +299,8 @@ func victimCandidates(nodePods []*device.PodInfo, nodeName string, preemptor *co
 	return candidates
 }
 
-// fitsWithout reports whether pod fits nodeName once the pods in gone hold no
-// devices there, and which devices it would get. nodePods are the pods the pod
-// cache has on that node. It takes the path filterSimulation takes, which
-// scores the node and writes nothing. Callers hold allocLock.
+// fitsWithout reports whether pod fits nodeName without the pods in gone, and
+// the devices it would get. It writes nothing. Callers hold allocLock.
 func (s *Scheduler) fitsWithout(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodeName string, nodePods []*device.PodInfo, gone map[k8stypes.UID]struct{}) (device.PodDevices, bool) {
 	nodeNames := []string{nodeName}
 	usage, _, failedNodes, err := s.nodesUsageFrom(&nodeNames, pod, nodePods, gone)

@@ -113,10 +113,7 @@ type Scheduler struct {
 	// to each pod, until the informer shows it. Guarded by allocLock.
 	filterWrites map[k8stypes.UID]filterWrite
 
-	// preemptionPlans keeps, for each pod Preempt answered with victims, the
-	// devices that pod gets on every node of the answer once the victims are
-	// gone. The plan for the node kube-scheduler then nominates the pod to is
-	// held back from the pods that must leave it alone, see
+	// preemptionPlans keeps the devices Preempt planned for each pod, see
 	// nominatedReservations. Guarded by allocLock.
 	preemptionPlans map[k8stypes.UID]*preemptionPlan
 
@@ -1311,12 +1308,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	return s.nodesUsageFrom(nodes, task, s.podManager.ListPodsInfo(), nil)
 }
 
-// nodesUsageFrom builds the snapshot getNodesUsage builds, from podsInfo in
-// place of the pod cache and as if the pods in without held no devices.
-// Preemption uses it to ask whether a pod fits on a node once its victims are
-// gone, and passes only the pods of that node. The usage is rebuilt from the
-// pods that remain rather than subtracted from a full snapshot, because a core
-// mask and a MIG placement cannot be subtracted.
+// nodesUsageFrom builds the snapshot of getNodesUsage from podsInfo, as if
+// the pods in without held no devices. Usage is rebuilt, not subtracted,
+// because a core mask or a MIG placement cannot be subtracted.
 func (s *Scheduler) nodesUsageFrom(nodes *[]string, task *corev1.Pod, podsInfo []*device.PodInfo, without map[k8stypes.UID]struct{}) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
@@ -1833,8 +1827,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		delete(s.refitWrites, pod.UID)
 		delete(s.filterWrites, pod.UID)
 	}
-	// What is held back for a pod nominated to a node counts as taken there,
-	// unless this pod has a higher priority than that one.
+	// Devices held back for nominated pods count as taken.
 	podsInfo := append(s.podManager.ListPodsInfo(), s.nominatedReservations(pod)...)
 	nodeUsage, _, failedNodes, err := s.nodesUsageFrom(args.NodeNames, pod, podsInfo, nil)
 	if err != nil {
@@ -1905,7 +1898,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			return nil, err
 		}
 		s.recordFilterWrite(pod.UID, annotations)
-		// The pod has devices now, so nothing is held back for it any more.
+		// The pod got devices, so drop its plan.
 		delete(s.preemptionPlans, pod.UID)
 	}
 

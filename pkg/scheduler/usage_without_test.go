@@ -31,14 +31,12 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-// usagePod returns a pod for the pod cache. Only its identity matters to a
-// usage snapshot.
+// usagePod returns a pod for the pod cache.
 func usagePod(uid string) *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: k8stypes.UID(uid), Name: uid, Namespace: "default"}}
 }
 
-// onlyDeviceWithout returns what s accounts on the only device of node1 once
-// the given pods are left out.
+// onlyDeviceWithout returns the device usage of node1 without the given pods.
 func onlyDeviceWithout(t *testing.T, s *Scheduler, without ...k8stypes.UID) *device.DeviceUsage {
 	t.Helper()
 	gone := make(map[k8stypes.UID]struct{}, len(without))
@@ -51,9 +49,7 @@ func onlyDeviceWithout(t *testing.T, s *Scheduler, without ...k8stypes.UID) *dev
 	return (*usage)["node1"].Devices.DeviceLists[0].Device
 }
 
-// A pod that is left out stops counting on its device, and the pods that stay
-// are counted as before. The pod cache is not touched: the snapshot only
-// answers what the node would look like with those pods gone.
+// A pod that is left out stops counting, and the pod cache is not touched.
 func Test_nodesUsageFrom_LeavesOutPods(t *testing.T) {
 	nodes := newNodeManager()
 	nodes.addNode("node1", testNodeInfo("node1", 1))
@@ -85,9 +81,7 @@ func Test_nodesUsageFrom_LeavesOutPods(t *testing.T) {
 	assert.Assert(t, tracked, "leaving a pod out of a snapshot must not drop it from the pod cache")
 }
 
-// A MIG placement is a slot, not a number, so it cannot be subtracted. The
-// snapshot is rebuilt from the pods that stay: the slot of the pod left out is
-// free again and the other one is still taken.
+// The MIG slot of a pod that is left out is free again.
 func Test_nodesUsageFrom_FreesMigPlacement(t *testing.T) {
 	nodes := newNodeManager()
 	nodes.addNode("node1", &device.NodeInfo{
@@ -121,8 +115,7 @@ func Test_nodesUsageFrom_FreesMigPlacement(t *testing.T) {
 	assert.Equal(t, withoutLow.MigAllocationsInUse[0].Placement, device.MigPlacement{Start: 6, Size: 1})
 }
 
-// A core mask cannot be subtracted either. What a device has in use is the
-// union of the masks of the pods on it, rebuilt from the pods that stay.
+// The core mask in use is rebuilt from the pods that stay.
 func Test_nodesUsageFrom_RebuildsCoreMask(t *testing.T) {
 	oldDevices, oldSupport := device.DevicesMap, maps.Clone(device.SupportDevices)
 	t.Cleanup(func() { device.DevicesMap, device.SupportDevices = oldDevices, oldSupport })

@@ -41,10 +41,8 @@ func asking(name string, priority int32, mem int64) *corev1.Pod {
 	return pod
 }
 
-// nominationScheduler returns a scheduler that resolves pods through its
-// lister, which is where a nomination shows, with node-x holding one GPU of
-// 8192 MiB. The lister holds the given pods themselves, so a test nominates
-// one by setting its status.
+// nominationScheduler returns a scheduler whose lister holds the given pods,
+// so a test nominates one by setting its status. node-x has one 8192 MiB GPU.
 func nominationScheduler(t *testing.T, pods ...*corev1.Pod) *Scheduler {
 	t.Helper()
 	initMoveDevices(t)
@@ -80,14 +78,11 @@ func filterOn(t *testing.T, s *Scheduler, pod *corev1.Pod, node string) bool {
 	return res.NodeNames != nil && len(*res.NodeNames) == 1 && (*res.NodeNames)[0] == node
 }
 
-// kube-scheduler evicts the victims of a preemption and nominates the pod to
-// the node. Until the pod gets there, what it was planned to get is held back
-// from every pod that kube-scheduler would not let take its other resources
-// either: the ones of the same or a lower priority.
+// Until a nominated pod gets its node, its planned devices are held back from
+// pods of the same or a lower priority.
 func Test_Preempt_HoldsDevicesForNominatedPod(t *testing.T) {
-	// The pod asks for 4500 MiB of the only GPU of node-x, and the pod that
-	// has 8000 of its 8192 MiB is evicted for it. What stays free next to
-	// the 4500 MiB that are held back is 3692 MiB.
+	// high asks for 4500 of 8192 MiB, and low is evicted for it. 3692 MiB stay
+	// free next to what is held back.
 	evicted := func(t *testing.T, others ...*corev1.Pod) (*Scheduler, *corev1.Pod) {
 		t.Helper()
 		high := asking("high", 1000, 4500)
@@ -183,8 +178,7 @@ func Test_Preempt_HoldsDevicesForNominatedPod(t *testing.T) {
 
 	t.Run("an answer that names no victim leaves no plan behind", func(t *testing.T) {
 		s, high := evicted(t)
-		// The victim is gone, so the pod fits and nobody has to go. That is
-		// a node kube-scheduler drops, so the pod is not nominated to it.
+		// The victim is gone, so the pod fits and nobody has to go.
 		preemptOn(t, s, high, moveNodeX)
 		assert.Equal(t, len(s.preemptionPlans), 0)
 	})
@@ -193,8 +187,7 @@ func Test_Preempt_HoldsDevicesForNominatedPod(t *testing.T) {
 		mid := asking("mid", 500, 3500)
 		s, high := evicted(t, mid)
 		high.Status.NominatedNodeName = moveNodeX
-		// 2692 MiB are free for mid next to this pod, 3692 without it. Were
-		// nothing held back, mid would fit with nobody evicted.
+		// 2692 MiB are free next to small, and mid asks for 3500.
 		track(t, s, holding(trackedOn(moveNodeX, "small", 10), 1000))
 		preemptOn(t, s, mid, moveNodeX, "small")
 	})
@@ -208,10 +201,8 @@ func Test_Preempt_HoldsDevicesForNominatedPod(t *testing.T) {
 	})
 }
 
-// The entry that holds devices back is the pod as a Filter would leave it in
-// the pod cache with the planned devices. A MIG placement the pod still
-// carries from an earlier attempt is not part of the plan, and would be read
-// as one more placement the pod has.
+// The entry holds the planned devices. A MIG placement the pod carries from an
+// earlier attempt is not part of it.
 func Test_reservationFor(t *testing.T) {
 	pod := movePod()
 	pod.Annotations = map[string]string{
