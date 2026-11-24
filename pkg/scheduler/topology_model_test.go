@@ -120,3 +120,51 @@ func TestOnUpdateNodeNotifiesTopologyChange(t *testing.T) {
 		})
 	}
 }
+
+func TestOnUpdateNodeNotifiesBeforeFirstTopologyView(t *testing.T) {
+	original := config.TopologyTierLabels
+	t.Cleanup(func() { config.TopologyTierLabels = original })
+	config.TopologyTierLabels = util.RackIDLabel + "," + util.SuperPodIDLabel
+
+	scheduler := NewScheduler()
+	require.Nil(t, scheduler.topologySnapshot())
+
+	oldNode := topologyLabeledNode("n0", map[string]string{util.RackIDLabel: "r1", util.SuperPodIDLabel: "s1"})
+	newNode := topologyLabeledNode("n0", map[string]string{util.RackIDLabel: "r2", util.SuperPodIDLabel: "s1"})
+
+	select {
+	case <-scheduler.nodeNotify:
+	default:
+	}
+	scheduler.onUpdateNode(oldNode, newNode)
+
+	notified := false
+	select {
+	case <-scheduler.nodeNotify:
+		notified = true
+	default:
+	}
+	assert.True(t, notified, "a tier-label change before the first view should notify register")
+}
+
+func TestOnUpdateNodeIgnoresTopologyWhenFlagEmpty(t *testing.T) {
+	original := config.TopologyTierLabels
+	t.Cleanup(func() { config.TopologyTierLabels = original })
+	config.TopologyTierLabels = ""
+
+	scheduler := NewScheduler()
+	oldNode := topologyLabeledNode("n0", map[string]string{util.RackIDLabel: "r1"})
+	newNode := topologyLabeledNode("n0", map[string]string{util.RackIDLabel: "r2"})
+
+	select {
+	case <-scheduler.nodeNotify:
+	default:
+	}
+	scheduler.onUpdateNode(oldNode, newNode)
+
+	select {
+	case <-scheduler.nodeNotify:
+		t.Fatal("empty topology configuration must not notify on label changes")
+	default:
+	}
+}

@@ -37,12 +37,18 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
 	// NodeTier is the tier of a node in its own right: the deepest level of the
 	// hierarchy. The lowest common ancestor of a node with itself sits here.
 	NodeTier = 0
+
+	// MaxTierLevel is the highest tier level ParseTiers accepts. Explicit levels
+	// above this are rejected so a mistyped value cannot allocate a per-node
+	// chain of unbounded length or overflow when Build sizes that chain.
+	MaxTierLevel = 64
 
 	// domainIDSeparator joins the parts of a domain identity. It cannot appear
 	// in a label key, so identities stay unambiguous.
@@ -67,9 +73,11 @@ func (t Tier) String() string {
 // label keys given on the command line. Entries are numbered from 1 in the
 // order given: the most local tier first, the whole fabric last. An entry may
 // also carry an explicit level, as in "hami.io/rackid=1". Annotation keys
-// (prefixed with "@") are rejected. Duplicate keys and duplicate levels are
-// rejected instead of being collapsed, so a mistyped level cannot silently
-// leave a gap in the hierarchy. An empty specification disables the feature.
+// (prefixed with "@") are rejected. Keys must be valid Kubernetes qualified
+// names. Explicit levels must be in [1, MaxTierLevel]. Duplicate keys and
+// duplicate levels are rejected instead of being collapsed, so a mistyped
+// level cannot silently leave a gap in the hierarchy. An empty specification
+// disables the feature.
 func ParseTiers(spec string) ([]Tier, error) {
 	type entry struct {
 		tier  Tier
@@ -95,11 +103,17 @@ func ParseTiers(spec string) ([]Tier, error) {
 			if err != nil || parsed < 1 {
 				return nil, fmt.Errorf("invalid topology tier level in %q: want a positive integer", raw)
 			}
+			if parsed > MaxTierLevel {
+				return nil, fmt.Errorf("topology tier level in %q exceeds the maximum of %d", raw, MaxTierLevel)
+			}
 			level = parsed
 			key = strings.TrimSpace(key[:idx])
 		}
 		if key == "" {
 			return nil, fmt.Errorf("empty topology tier key in %q", raw)
+		}
+		if reasons := validation.IsQualifiedName(key); len(reasons) > 0 {
+			return nil, fmt.Errorf("invalid topology tier key %q: %s", key, strings.Join(reasons, "; "))
 		}
 
 		if seenKey[key] {
@@ -128,6 +142,9 @@ func ParseTiers(spec string) ([]Tier, error) {
 		}
 		for seenLevel[next] {
 			next++
+		}
+		if next > MaxTierLevel {
+			return nil, fmt.Errorf("topology tier levels exceed the maximum of %d", MaxTierLevel)
 		}
 		e.tier.Level = next
 		seenLevel[next] = true

@@ -57,12 +57,16 @@ func (s *Scheduler) topologySnapshot() *topologyView {
 
 // notifyIfTopologyChanged asks register to rebuild the hierarchy when a node's
 // configured tier labels change. Other node updates still wait for the ticker.
+//
+// The configured tiers are consulted even before the first topology view is
+// published, so a label update that races the first register still triggers a
+// refresh instead of waiting for the next ticker.
 func (s *Scheduler) notifyIfTopologyChanged(oldNode, newNode *corev1.Node) {
-	view := s.topologySnapshot()
-	if view == nil {
+	tiers := s.configuredTopologyTiers()
+	if len(tiers) == 0 {
 		return
 	}
-	for _, tier := range view.tiers {
+	for _, tier := range tiers {
 		if tier.Value(oldNode) == tier.Value(newNode) {
 			continue
 		}
@@ -72,4 +76,18 @@ func (s *Scheduler) notifyIfTopologyChanged(oldNode, newNode *corev1.Node) {
 		s.doNodeNotify()
 		return
 	}
+}
+
+// configuredTopologyTiers returns the tiers named by --topology-tier-labels,
+// preferring the cached view when it is already built. An empty or invalid
+// configuration disables notifications.
+func (s *Scheduler) configuredTopologyTiers() []topology.Tier {
+	if view := s.topologySnapshot(); view != nil {
+		return view.tiers
+	}
+	tiers, err := topology.ParseTiers(config.TopologyTierLabels)
+	if err != nil || len(tiers) == 0 {
+		return nil
+	}
+	return tiers
 }

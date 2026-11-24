@@ -17,6 +17,7 @@ limitations under the License.
 package topology
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -129,6 +130,9 @@ func TestParseTiersRejectsAmbiguousSpecs(t *testing.T) {
 		{name: "zero level", spec: "rack-id=0"},
 		{name: "annotation key", spec: "@hami.io/superpodid"},
 		{name: "annotation key among labels", spec: util.RackIDLabel + ",@hami.io/superpodid"},
+		{name: "key with spaces", spec: "rack id," + util.SuperPodIDLabel},
+		{name: "level above the maximum", spec: "rack-id=" + strconv.Itoa(MaxTierLevel+1)},
+		{name: "max int64 level", spec: "rack-id=9223372036854775807"},
 	}
 
 	for _, tc := range tests {
@@ -137,6 +141,19 @@ func TestParseTiersRejectsAmbiguousSpecs(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestParseTiersAcceptsBoundaryLevels(t *testing.T) {
+	got, err := ParseTiers("tor-id=3,rack-id=1")
+	require.NoError(t, err)
+	assert.Equal(t, []Tier{
+		{Level: 3, Key: "tor-id"},
+		{Level: 1, Key: "rack-id"},
+	}, got)
+
+	got, err = ParseTiers("fabric-id=" + strconv.Itoa(MaxTierLevel))
+	require.NoError(t, err)
+	assert.Equal(t, []Tier{{Level: MaxTierLevel, Key: "fabric-id"}}, got)
 }
 
 func TestBuildTreeShape(t *testing.T) {

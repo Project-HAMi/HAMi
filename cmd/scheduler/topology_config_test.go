@@ -64,6 +64,8 @@ func TestValidateTopologyConfigRejects(t *testing.T) {
 		{name: "zero tier level", labels: "leaf=0"},
 		{name: "duplicate tier level", labels: "leaf=1,spine=1"},
 		{name: "annotation key", labels: "@hami.io/superpodid"},
+		{name: "key with spaces", labels: "rack id"},
+		{name: "level above the maximum", labels: "leaf=65"},
 	}
 
 	for _, tc := range tests {
