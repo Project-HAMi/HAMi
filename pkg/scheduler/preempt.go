@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -31,11 +32,19 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
+// preemptionPlanTimeout is how long a plan lasts after Preempt made it. It
+// covers the time the victims take to terminate and the next scheduling
+// attempt of the pod. A pod that is still nominated after that holds nothing
+// back any more, so a preemption that never completes cannot keep devices from
+// other pods for good. A later Preempt for the pod makes a new plan.
+const preemptionPlanTimeout = 5 * time.Minute
+
 // preemptionPlan is what Preempt worked out for one pod: what the pod gets on
-// each node of the answer once the victims are gone.
+// each node of the answer once the victims are gone, and when that was.
 type preemptionPlan struct {
 	pod   *corev1.Pod
 	nodes map[string]plannedDevices
+	at    time.Time
 }
 
 // plannedDevices are the devices of a preemptionPlan on one node, as the pod
@@ -99,7 +108,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	for _, reservation := range s.nominatedReservations(pod) {
 		podsByNode[reservation.NodeID] = append(podsByNode[reservation.NodeID], reservation)
 	}
-	plan := &preemptionPlan{pod: pod, nodes: make(map[string]plannedDevices)}
+	plan := &preemptionPlan{pod: pod, nodes: make(map[string]plannedDevices), at: time.Now()}
 	for nodeName, proposed := range candidates {
 		victims, planned, fits := s.selectVictims(pod, resourceReqs, nodeName, podsByNode[nodeName], proposed)
 		if !fits {
@@ -214,13 +223,18 @@ func reservationFor(pod *corev1.Pod, nodeName string, planned plannedDevices) *d
 // A plan is held back only once the nomination shows in the pod lister, and
 // only on the node it names. A plan goes when its pod gets devices from a
 // Filter, when a later Preempt answers for the pod again, and here, once the
-// pod is no longer waiting for a node. Callers hold allocLock.
+// pod is no longer waiting for a node or the plan is older than
+// preemptionPlanTimeout. Callers hold allocLock.
 func (s *Scheduler) nominatedReservations(task *corev1.Pod) []*device.PodInfo {
 	if s.podLister == nil {
 		return nil
 	}
 	var held []*device.PodInfo
 	for uid, plan := range s.preemptionPlans {
+		if time.Since(plan.at) > preemptionPlanTimeout {
+			delete(s.preemptionPlans, uid)
+			continue
+		}
 		live, err := s.podLister.Pods(plan.pod.Namespace).Get(plan.pod.Name)
 		if err != nil || live.UID != uid || live.Spec.NodeName != "" || util.IsPodTerminating(live) || util.IsPodInTerminatedState(live) {
 			delete(s.preemptionPlans, uid)

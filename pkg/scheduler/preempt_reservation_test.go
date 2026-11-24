@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -167,6 +168,18 @@ func Test_Preempt_HoldsDevicesForNominatedPod(t *testing.T) {
 			assert.Equal(t, len(s.preemptionPlans), 0)
 		})
 	}
+
+	t.Run("a plan that has timed out holds nothing back, and goes", func(t *testing.T) {
+		other := asking("other", 10, 5000)
+		s, high := evicted(t, other)
+		high.Status.NominatedNodeName = moveNodeX
+		plan := s.preemptionPlans[high.UID]
+		plan.at = time.Now().Add(-preemptionPlanTimeout + time.Minute)
+		assert.Assert(t, !filterOn(t, s, other, moveNodeX), "a plan that is not that old yet is still held back")
+		plan.at = time.Now().Add(-preemptionPlanTimeout - time.Second)
+		assert.Assert(t, filterOn(t, s, other, moveNodeX))
+		assert.Equal(t, len(s.preemptionPlans), 0)
+	})
 
 	t.Run("an answer that names no victim leaves no plan behind", func(t *testing.T) {
 		s, high := evicted(t)
