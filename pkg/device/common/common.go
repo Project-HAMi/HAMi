@@ -65,6 +65,10 @@ const (
 	NodeFitPod                        = "NodeFitPod"
 	ResourceQuotaNotFit               = "ResourceQuotaNotFit"
 	ModeNotFit                        = "ModeNotFit"
+	SuperpodNodeOutside               = "SuperpodNodeOutside"
+	SuperpodMismatch                  = "SuperpodMismatch"
+	SuperpodInsufficientCapacity      = "SuperpodInsufficientCapacity"
+	SuperpodNotBestFit                = "SuperpodNotBestFit"
 )
 
 func GenReason(reasons map[string]int, cards int) string {

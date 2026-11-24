@@ -169,6 +169,20 @@ func TestAddNodeAffinityScore(t *testing.T) {
 			weight: 100, base: 9, want: -91,
 		},
 		{
+			name:   "superpod then spread subtracts the whole weight",
+			pref:   mustParse(t, twoTerms),
+			node:   labelledNode(map[string]string{"rack": "r1", "disk": "nvme"}),
+			policy: "superpod,spread",
+			weight: 100, base: 9, want: -91,
+		},
+		{
+			name:   "binpack then spread adds the whole weight",
+			pref:   mustParse(t, twoTerms),
+			node:   labelledNode(map[string]string{"rack": "r1", "disk": "nvme"}),
+			policy: "binpack,spread",
+			weight: 100, base: 9, want: 109,
+		},
+		{
 			name:   "partial match follows the weight ratio (70/100)",
 			pref:   mustParse(t, twoTerms),
 			node:   labelledNode(map[string]string{"rack": "r1"}),

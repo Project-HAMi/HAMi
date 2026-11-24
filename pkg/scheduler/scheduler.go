@@ -38,6 +38,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
+	batchlisters "k8s.io/client-go/listers/batch/v1"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -60,8 +62,10 @@ import (
 )
 
 const (
-	defaultResync    = 1 * time.Hour
-	syncedPollPeriod = 100 * time.Millisecond
+	defaultResync                  = 1 * time.Hour
+	syncedPollPeriod               = 100 * time.Millisecond
+	superpodInformerSyncTimeout    = 30 * time.Second
+	superpodInformerSyncPollPeriod = 100 * time.Millisecond
 
 	// sessionReconcileTimeout caps how long the lupine session stub reconcile
 	// may hold the scheduler lock it runs under.
@@ -79,11 +83,18 @@ type Scheduler struct {
 	nodeNotify   chan struct{}
 	leaderNotify chan struct{}
 
-	kubeClient  kubernetes.Interface
-	podLister   listerscorev1.PodLister
-	nodeLister  listerscorev1.NodeLister
-	quotaLister listerscorev1.ResourceQuotaLister
-	leaseLister coordinationv1.LeaseLister
+	kubeClient              kubernetes.Interface
+	informerFactory         informers.SharedInformerFactory
+	podLister               listerscorev1.PodLister
+	nodeLister              listerscorev1.NodeLister
+	quotaLister             listerscorev1.ResourceQuotaLister
+	leaseLister             coordinationv1.LeaseLister
+	replicaSetLister        appslisters.ReplicaSetLister
+	statefulSetLister       appslisters.StatefulSetLister
+	jobLister               batchlisters.JobLister
+	superpodInformerMu      sync.Mutex
+	superpodInformersSynced bool
+	superpodInformerTimeout time.Duration
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -126,13 +137,14 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:            make(chan struct{}),
-		overviewstatus:    make(map[string]*NodeUsage),
-		printedLog:        make(map[string]bool),
-		nodeNotify:        make(chan struct{}, 1),
-		leaderNotify:      make(chan struct{}, 1),
-		started:           0,
-		allocationMetrics: metrics.NewSchedulerOutcomeMetrics(),
+		stopCh:                  make(chan struct{}),
+		overviewstatus:          make(map[string]*NodeUsage),
+		printedLog:              make(map[string]bool),
+		nodeNotify:              make(chan struct{}, 1),
+		leaderNotify:            make(chan struct{}, 1),
+		started:                 0,
+		superpodInformerTimeout: superpodInformerSyncTimeout,
+		allocationMetrics:       metrics.NewSchedulerOutcomeMetrics(),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -845,6 +857,7 @@ func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
+	s.informerFactory = informerFactory
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
@@ -893,6 +906,51 @@ func (s *Scheduler) Start() error {
 	}
 
 	atomic.StoreUint32(&s.started, 1)
+	return nil
+}
+
+func (s *Scheduler) ensureSuperpodInformers() error {
+	s.superpodInformerMu.Lock()
+	defer s.superpodInformerMu.Unlock()
+
+	if s.superpodInformersSynced {
+		return nil
+	}
+	if s.informerFactory == nil {
+		return fmt.Errorf("shared informer factory is unavailable")
+	}
+
+	replicaSetInformer := s.informerFactory.Apps().V1().ReplicaSets().Informer()
+	statefulSetInformer := s.informerFactory.Apps().V1().StatefulSets().Informer()
+	jobInformer := s.informerFactory.Batch().V1().Jobs().Informer()
+	s.replicaSetLister = s.informerFactory.Apps().V1().ReplicaSets().Lister()
+	s.statefulSetLister = s.informerFactory.Apps().V1().StatefulSets().Lister()
+	s.jobLister = s.informerFactory.Batch().V1().Jobs().Lister()
+
+	s.informerFactory.Start(s.stopCh)
+	timeout := s.superpodInformerTimeout
+	if timeout <= 0 {
+		timeout = superpodInformerSyncTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := wait.PollUntilContextTimeout(ctx, superpodInformerSyncPollPeriod, timeout, true,
+		func(context.Context) (bool, error) {
+			if s.stopCh != nil {
+				select {
+				case <-s.stopCh:
+					return false, context.Canceled
+				default:
+				}
+			}
+			return replicaSetInformer.HasSynced() &&
+				statefulSetInformer.HasSynced() &&
+				jobInformer.HasSynced(), nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to sync SuperPod controller informer caches within %s: %w", timeout, err)
+	}
+	s.superpodInformersSynced = true
 	return nil
 }
 
@@ -1751,6 +1809,18 @@ func matchesClaimedPod(claimed, live *corev1.Pod) (*corev1.Pod, error) {
 	return live, nil
 }
 
+func (s *Scheduler) ensureSuperpodInformersForPod(pod *corev1.Pod) error {
+	if pod == nil ||
+		pod.Labels[util.TaskIDLabel] == "" ||
+		!util.PolicyContains(resolveNodeSchedulerPolicy(pod), util.NodeSchedulerPolicySuperpod) {
+		return nil
+	}
+	if err := s.ensureSuperpodInformers(); err != nil {
+		return fmt.Errorf("failed to initialize SuperPod informers: %w", err)
+	}
+	return nil
+}
+
 // Filter selects a node and reserves devices for a scheduler extender request.
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
@@ -1801,6 +1871,14 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			FailedNodes: nil,
 			Error:       "",
 		}, nil
+	}
+	if err := s.ensureSuperpodInformersForPod(pod); err != nil {
+		err = fmt.Errorf("calcScore failed %v for pod %v", err, pod.Name)
+		if args.Nodes == nil {
+			s.GetAllocationMetrics().ObserveAllocationFailure("filter", deviceTypeForRequests(resourceReqs), metrics.FailureReasonInternal)
+			s.recordScheduleFilterResultEvent(pod, EventReasonFilteringFailed, "", err)
+		}
+		return nil, err
 	}
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
