@@ -105,6 +105,26 @@ func TestEnsureSuperpodInformers(t *testing.T) {
 	}
 }
 
+func TestEnsureSuperpodInformersBoundsSyncWait(t *testing.T) {
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("list", "*", func(k8stesting.Action) (bool, runtime.Object, error) {
+		<-stopCh
+		return true, nil, errors.New("informer stopped")
+	})
+	s := &Scheduler{
+		informerFactory:         informers.NewSharedInformerFactory(clientset, 0),
+		stopCh:                  stopCh,
+		superpodInformerTimeout: 30 * time.Millisecond,
+	}
+
+	err := s.ensureSuperpodInformers()
+	assert.ErrorContains(t, err, "within 30ms")
+	assert.Assert(t, !s.superpodInformersSynced)
+}
+
 func TestFilterSyncsSuperpodInformersOutsideAllocLock(t *testing.T) {
 	resetSuperpodTestDevices(t)
 

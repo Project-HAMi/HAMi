@@ -62,8 +62,10 @@ import (
 )
 
 const (
-	defaultResync    = 1 * time.Hour
-	syncedPollPeriod = 100 * time.Millisecond
+	defaultResync                  = 1 * time.Hour
+	syncedPollPeriod               = 100 * time.Millisecond
+	superpodInformerSyncTimeout    = 30 * time.Second
+	superpodInformerSyncPollPeriod = 100 * time.Millisecond
 
 	// sessionReconcileTimeout caps how long the lupine session stub reconcile
 	// may hold the scheduler lock it runs under.
@@ -92,6 +94,7 @@ type Scheduler struct {
 	jobLister               batchlisters.JobLister
 	superpodInformerMu      sync.Mutex
 	superpodInformersSynced bool
+	superpodInformerTimeout time.Duration
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -134,13 +137,14 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:            make(chan struct{}),
-		overviewstatus:    make(map[string]*NodeUsage),
-		printedLog:        make(map[string]bool),
-		nodeNotify:        make(chan struct{}, 1),
-		leaderNotify:      make(chan struct{}, 1),
-		started:           0,
-		allocationMetrics: metrics.NewSchedulerOutcomeMetrics(),
+		stopCh:                  make(chan struct{}),
+		overviewstatus:          make(map[string]*NodeUsage),
+		printedLog:              make(map[string]bool),
+		nodeNotify:              make(chan struct{}, 1),
+		leaderNotify:            make(chan struct{}, 1),
+		started:                 0,
+		superpodInformerTimeout: superpodInformerSyncTimeout,
+		allocationMetrics:       metrics.NewSchedulerOutcomeMetrics(),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -924,12 +928,27 @@ func (s *Scheduler) ensureSuperpodInformers() error {
 	s.jobLister = s.informerFactory.Batch().V1().Jobs().Lister()
 
 	s.informerFactory.Start(s.stopCh)
-	if !cache.WaitForCacheSync(s.stopCh,
-		replicaSetInformer.HasSynced,
-		statefulSetInformer.HasSynced,
-		jobInformer.HasSynced,
-	) {
-		return fmt.Errorf("failed to sync SuperPod controller informer caches")
+	timeout := s.superpodInformerTimeout
+	if timeout <= 0 {
+		timeout = superpodInformerSyncTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := wait.PollUntilContextTimeout(ctx, superpodInformerSyncPollPeriod, timeout, true,
+		func(context.Context) (bool, error) {
+			if s.stopCh != nil {
+				select {
+				case <-s.stopCh:
+					return false, context.Canceled
+				default:
+				}
+			}
+			return replicaSetInformer.HasSynced() &&
+				statefulSetInformer.HasSynced() &&
+				jobInformer.HasSynced(), nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to sync SuperPod controller informer caches within %s: %w", timeout, err)
 	}
 	s.superpodInformersSynced = true
 	return nil
