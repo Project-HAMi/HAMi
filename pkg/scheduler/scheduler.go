@@ -95,6 +95,10 @@ type Scheduler struct {
 	superpodInformerMu      sync.Mutex
 	superpodInformersSynced bool
 	superpodInformerTimeout time.Duration
+	// topology caches the interconnect hierarchy rebuilt from node labels.
+	// Placement that consumes it lands in later PRs; this field only keeps the
+	// model warm.
+	topology atomic.Pointer[topologyView]
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -174,6 +178,7 @@ func (s *Scheduler) onStoppedLeading() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.overviewstatus = make(map[string]*NodeUsage)
+	s.topology.Store(nil)
 	s.synced.Store(false)
 }
 
@@ -776,9 +781,9 @@ func (s *Scheduler) onDelNode(obj any) {
 }
 
 // onUpdateNode notifies register promptly when the hami.io/device-cordon
-// annotation changes, instead of waiting up to 15s for
-// RegisterFromNodeAnnotations' ticker. It ignores every other node change;
-// those still reach register on the ticker, same as before.
+// annotation or a configured topology tier label changes, instead of waiting
+// up to 15s for RegisterFromNodeAnnotations' ticker. It ignores every other
+// node change; those still reach register on the ticker, same as before.
 func (s *Scheduler) onUpdateNode(oldObj, newObj any) {
 	oldNode, ok := oldObj.(*corev1.Node)
 	if !ok {
@@ -790,7 +795,9 @@ func (s *Scheduler) onUpdateNode(oldObj, newObj any) {
 	}
 	if oldNode.Annotations[common.DeviceCordonAnnotation] != newNode.Annotations[common.DeviceCordonAnnotation] {
 		s.doNodeNotify()
+		return
 	}
+	s.notifyIfTopologyChanged(oldNode, newNode)
 }
 
 // cleanupNodeUsage removes the node from the overviewstatus and printedLog maps
@@ -1123,6 +1130,8 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 		dev.ReconcileSessionStubs(ctx)
 		cancel()
 	}
+
+	s.rebuildTopology(rawNodes)
 
 	s.lastSyncSuccessTime.Store(time.Now().Unix())
 	s.synced.Store(true)

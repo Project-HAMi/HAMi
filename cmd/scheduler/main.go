@@ -84,6 +84,7 @@ func init() {
 	rootCmd.Flags().Float32Var(&config.TaintTolerationScoreWeight, "taint-toleration-score-weight", 0.0, "Penalty applied to the node score for PreferNoSchedule taints the pod does not tolerate, scaled by the node's untolerated taint count over the highest count among candidate nodes (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
+	rootCmd.Flags().StringVar(&config.TopologyTierLabels, "topology-tier-labels", "", "comma-separated node label keys describing the interconnect hierarchy, from the smallest domain to the largest, e.g. 'kubernetes.io/hostname,hami.io/rackid,hami.io/superpodid'. Only node labels are accepted. Empty disables the topology model (placement wiring lands in later PRs).")
 
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
