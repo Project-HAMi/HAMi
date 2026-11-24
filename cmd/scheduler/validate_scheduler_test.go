@@ -54,6 +54,8 @@ func TestValidateSchedulerConfig(t *testing.T) {
 		{name: "finite taint penalty", args: []string{"--taint-toleration-score-weight=2.5"}},
 		{name: "negative taint penalty", args: []string{"--taint-toleration-score-weight=-1"}, wantError: "--taint-toleration-score-weight must be a finite number >= 0"},
 		{name: "NaN taint penalty", args: []string{"--taint-toleration-score-weight=NaN"}, wantError: "--taint-toleration-score-weight must be a finite number >= 0"},
+		{name: "unbound reservation TTL", args: []string{"--unbound-reservation-ttl=10m"}},
+		{name: "negative unbound reservation TTL", args: []string{"--unbound-reservation-ttl=-1s"}, wantError: "--unbound-reservation-ttl must not be negative"},
 		{name: "invalid flag value", args: []string{"--node-lock-timeout=invalid"}, wantError: "invalid argument", wantUsage: true},
 		{name: "unknown option", args: []string{"--unknown-option=true"}, wantError: "unknown flag", wantUsage: true},
 		{name: "unexpected path", args: []string{"config.yaml"}, wantError: "unknown command", wantUsage: true},

@@ -257,6 +257,22 @@ func (m *PodManager) ListPodsUID() ([]*corev1.Pod, error) {
 	return pods, nil
 }
 
+// UnboundPods returns the cached pods that are not bound to a node yet. It
+// scans under the read lock without copying the bound majority, so it stays
+// cheap on large clusters. Callers must not modify the returned pods.
+func (m *PodManager) UnboundPods() []*corev1.Pod {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	var pods []*corev1.Pod
+	for _, pi := range m.pods {
+		if pi.Pod != nil && pi.Spec.NodeName == "" {
+			pods = append(pods, pi.Pod)
+		}
+	}
+	return pods
+}
+
 func (m *PodManager) ListPodsInfo() []*PodInfo {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()

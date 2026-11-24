@@ -97,6 +97,12 @@ var (
 	// another PodGroup member. Zero disables retry (fail-fast).
 	NodeLockRetryTimeout time.Duration
 
+	// UnboundReservationTTL releases a Filter reservation of a pod that is
+	// still not bound after this long. Set it above the longest time a pod
+	// may wait at Permit, such as a gang's scheduling timeout. Zero (the
+	// default) disables it.
+	UnboundReservationTTL time.Duration
+
 	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
 	ForceOverwriteDefaultScheduler bool
 

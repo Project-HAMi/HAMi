@@ -35,6 +35,9 @@ func validateSchedulerOptions() error {
 	if err := validateTopologyConfig(); err != nil {
 		return err
 	}
+	if config.UnboundReservationTTL < 0 {
+		return fmt.Errorf("--unbound-reservation-ttl must not be negative, got %v", config.UnboundReservationTTL)
+	}
 	return validateDevicePluginIdentity(config.DevicePluginNamespace, config.DevicePluginServiceAccount)
 }
 

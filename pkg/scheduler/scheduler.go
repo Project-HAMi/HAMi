@@ -134,6 +134,16 @@ type Scheduler struct {
 	// nominatedReservations. Guarded by allocLock.
 	preemptionPlans map[k8stypes.UID]*preemptionPlan
 
+	// releasedReservations keeps, for each unbound pod whose reservation was
+	// released after a failed scheduling cycle, the allocation released, so
+	// informer events do not add it back (#3484). Guarded by releasedMu.
+	releasedReservations map[k8stypes.UID]releasedReservation
+	releasedMu           sync.Mutex
+
+	// lastReservationSweep is when Filter last looked for reservations older
+	// than config.UnboundReservationTTL. Guarded by allocLock.
+	lastReservationSweep time.Time
+
 	// timedOutPods keeps the bind-time of each pod counted as an allocate
 	// timeout, so a bind is counted once. Guarded by timeoutLock.
 	timeoutLock  sync.Mutex
@@ -333,6 +343,16 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 		}
 	}
 
+	if s.reservationReleased(pod) {
+		// A failed scheduling cycle released this allocation (#3484); the
+		// pod only keeps its annotations until a new Filter rewrites them.
+		klog.V(5).InfoS("Skipping a released reservation", "pod", klog.KObj(pod))
+		return
+	}
+	if pod.Spec.NodeName != "" {
+		s.forgetReleasedReservation(pod.UID)
+	}
+
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
 		if pod.Spec.NodeName != "" {
@@ -358,7 +378,8 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !ok {
 		return
 	}
-	if oldPod, ok := oldObj.(*corev1.Pod); ok {
+	oldPod, _ := oldObj.(*corev1.Pod)
+	if oldPod != nil {
 		s.observeAllocateResult(oldPod, newPod)
 	}
 
@@ -393,6 +414,18 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	// stale pre-release snapshot after this handler records steady-state usage.
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
+
+	// kube-scheduler gave up this cycle after HAMi's Filter reserved
+	// devices, for example at a gang's Permit timeout. The extender API has
+	// no Unreserve, so release the reservation here (#3484).
+	if schedulingFailureReported(oldPod, newPod) && reservationReleasable(newPod) {
+		if !s.releaseReservationLocked(newPod, "SchedulingFailed") {
+			// Not cached, as on a replica that started after the Filter:
+			// the allocation is just as dead, so do not add it.
+			s.markReservationReleased(newPod.UID, reservationKey(newPod))
+		}
+		return
+	}
 
 	pi, exists := s.podManager.GetPod(newPod)
 	if !exists {
@@ -741,6 +774,7 @@ func (s *Scheduler) onDelPod(obj any) {
 // twice and eat into other pods' usage in the namespace (#3027). Pods the
 // scheduler does not track return without waiting for the lock.
 func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
+	s.forgetReleasedReservation(pod.UID)
 	if _, tracked := s.podManager.GetPod(pod); !tracked {
 		return
 	}
@@ -1684,6 +1718,12 @@ func (s *Scheduler) verifyBindTarget(args extenderv1.ExtenderBindingArgs, curren
 	// node while the pod consumes devices on another.
 	pi, reserved := s.podManager.GetPod(current)
 	if !reserved {
+		if s.reservationReleased(current) {
+			// The devices Filter picked were released after a failed
+			// cycle and may be in use by another pod by now.
+			return fmt.Errorf("device reservation of pod %s/%s was released after a failed scheduling cycle",
+				args.PodNamespace, args.PodName)
+		}
 		if remotegpu.PodRequestsRemoteGPU(current) {
 			if _, selected := current.Annotations[remotegpu.LupineServerSelectorAnno]; selected {
 				return fmt.Errorf("RemoteGPU pod %s/%s has no scheduler reservation", args.PodNamespace, args.PodName)
@@ -1948,6 +1988,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
+	s.expireReservationsLocked(time.Now())
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 		delete(s.refitWrites, pod.UID)
@@ -2042,6 +2083,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		s.recordFilterWrite(pod.UID, annotations)
 		// The pod got devices, so drop its plan.
 		delete(s.preemptionPlans, pod.UID)
+		s.forgetReleasedReservation(pod.UID)
 	}
 
 	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))
