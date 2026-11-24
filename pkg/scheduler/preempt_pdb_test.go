@@ -108,9 +108,11 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 		budgets []*policyv1.PodDisruptionBudget
 		tracked []*device.PodInfo
 		// others are pods that hold no HAMi device.
-		others  []*corev1.Pod
-		request *extenderv1.MetaVictims
-		want    *extenderv1.MetaVictims
+		others []*corev1.Pod
+		// unlisted are tracked pods the lister has dropped already.
+		unlisted []*device.PodInfo
+		request  *extenderv1.MetaVictims
+		want     *extenderv1.MetaVictims
 	}{
 		{
 			// By importance alone the pod of priority 500 would be spared.
@@ -179,6 +181,27 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 			want:    victims(1, "cpu-only", "gpu"),
 		},
 		{
+			name:    "a proposed victim only the pod cache knows uses the budget too",
+			budgets: []*policyv1.PodDisruptionBudget{budgetFor("db", 1)},
+			tracked: []*device.PodInfo{
+				labeled(holding(trackedOn(moveNodeX, "other", 10), 8000), "db"),
+			},
+			unlisted: []*device.PodInfo{
+				labeled(holding(trackedOn(moveNodeX, "proposed", 10), 100), "db"),
+			},
+			request: victims(0, "proposed"),
+			want:    victims(1, "proposed", "other"),
+		},
+		{
+			name:    "a proposed victim nobody knows uses no budget",
+			budgets: []*policyv1.PodDisruptionBudget{budgetFor("db", 1)},
+			tracked: []*device.PodInfo{
+				labeled(holding(trackedOn(moveNodeX, "protected", 10), 8000), "db"),
+			},
+			request: victims(0, "unknown"),
+			want:    victims(0, "unknown", "protected"),
+		},
+		{
 			name:    "a budget of another namespace does not cover the pod",
 			budgets: []*policyv1.PodDisruptionBudget{otherNamespace},
 			tracked: []*device.PodInfo{
@@ -221,6 +244,7 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 			s, pod := devicePreemptor(t)
 			withBudgets(t, s, tt.budgets...)
 			track(t, s, tt.tracked...)
+			track(t, s, tt.unlisted...)
 			withPods(t, s, tt.tracked, tt.others...)
 
 			res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
@@ -256,7 +280,7 @@ func Test_disruptionBudgets_split_CountsEveryBudget(t *testing.T) {
 			budgets := newDisruptionBudgets(pdbs)
 			budgets.proposed = map[k8stypes.UID]*corev1.Pod{proposed.UID: proposed}
 
-			protected, others := budgets.split([]*extenderv1.MetaPod{{UID: "proposed"}}, []*device.PodInfo{candidate})
+			protected, others := budgets.split(nil, []*extenderv1.MetaPod{{UID: "proposed"}}, []*device.PodInfo{candidate})
 			assert.Equal(t, len(protected), 1)
 			assert.Assert(t, protected[0] == candidate)
 			assert.Equal(t, len(others), 0)

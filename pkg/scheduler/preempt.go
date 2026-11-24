@@ -183,7 +183,7 @@ func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDevice
 		victims = append(victims, candidate)
 		return false
 	}
-	protected, others := budgets.split(proposed.Pods, candidates)
+	protected, others := budgets.split(nodePods, proposed.Pods, candidates)
 	var violations int64
 	for _, candidate := range protected {
 		if !spare(candidate) {
@@ -272,7 +272,7 @@ func (s *Scheduler) proposedVictims(candidates map[string]*extenderv1.MetaVictim
 // others, in their order. A budget allows status.disruptionsAllowed more
 // evictions, and a pod uses one from every budget that covers it. The proposed
 // victims go anyway, so they are counted first.
-func (b *disruptionBudgets) split(proposed []*extenderv1.MetaPod, candidates []*device.PodInfo) (protected, others []*device.PodInfo) {
+func (b *disruptionBudgets) split(nodePods []*device.PodInfo, proposed []*extenderv1.MetaPod, candidates []*device.PodInfo) (protected, others []*device.PodInfo) {
 	if len(b.pdbs) == 0 {
 		return nil, candidates
 	}
@@ -300,7 +300,13 @@ func (b *disruptionBudgets) split(proposed []*extenderv1.MetaPod, candidates []*
 		return broken
 	}
 	for _, victim := range proposed {
-		if pod, ok := b.proposed[k8stypes.UID(victim.UID)]; ok {
+		uid := k8stypes.UID(victim.UID)
+		pod, ok := b.proposed[uid]
+		if !ok {
+			// The lister can have dropped a pod the pod cache still has.
+			pod = podWithUID(nodePods, uid)
+		}
+		if pod != nil {
 			breaksBudget(pod)
 		}
 	}
@@ -312,6 +318,16 @@ func (b *disruptionBudgets) split(proposed []*extenderv1.MetaPod, candidates []*
 		}
 	}
 	return protected, others
+}
+
+// podWithUID returns the pod with uid among nodePods, or nil.
+func podWithUID(nodePods []*device.PodInfo, uid k8stypes.UID) *corev1.Pod {
+	for _, pi := range nodePods {
+		if pi != nil && pi.Pod != nil && pi.UID == uid {
+			return pi.Pod
+		}
+	}
+	return nil
 }
 
 // reservationFor returns a pod cache entry that holds the planned devices for
