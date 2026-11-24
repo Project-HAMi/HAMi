@@ -341,6 +341,29 @@ func TestReleaseClearsAllocationForRestart(t *testing.T) {
 	require.True(t, gangFilter(t, restarted, other), "the released GPU must be free after a restart")
 }
 
+// TestClearReleasedAllocationAfterUnrelatedUpdate checks that an update of the
+// pod between the failure report and the cleanup, such as a label change, does
+// not leave the released allocation on the pod for a restart to count again.
+func TestClearReleasedAllocationAfterUnrelatedUpdate(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	patched := storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "2")
+	s.onUpdatePod(pod, patched)
+
+	relabeled := patched.DeepCopy()
+	relabeled.Labels["touched"] = "true"
+	storeVersion(t, kubeClient, relabeled, "3")
+	// The informer delivers the failure before it shows the label update.
+	s.onUpdatePod(patched, withSchedulingFailure(patched, "timeout"))
+	s.allocationCleanups.Wait()
+
+	live := livePod(t, kubeClient, pod)
+	require.NotContains(t, live.Annotations, util.AssignedNodeAnnotations)
+	require.NotContains(t, live.Annotations, util.AssignedTimeAnnotations)
+	require.Equal(t, "true", live.Labels["touched"])
+}
+
 // TestClearReleasedAllocationKeepsNewerAllocation checks that the cleanup of a
 // released allocation does not remove one that a later Filter wrote.
 func TestClearReleasedAllocationKeepsNewerAllocation(t *testing.T) {

@@ -116,15 +116,22 @@ func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod)
 	return true
 }
 
-// releasedAllocationPatchTimeout bounds the API call that clears a released
-// allocation from its pod.
-const releasedAllocationPatchTimeout = 30 * time.Second
+const (
+	// releasedAllocationPatchTimeout bounds the API calls that clear a
+	// released allocation from its pod.
+	releasedAllocationPatchTimeout = 30 * time.Second
+	// releasedAllocationPatchAttempts bounds how often the patch is tried
+	// again after the pod changed for another reason.
+	releasedAllocationPatchAttempts = 3
+)
 
 // clearReleasedAllocation removes the released allocation's annotations from
 // pod in the background, so that a restarted scheduler or a new leader, which
 // do not have the in-memory marker, do not count it again. The patch applies
-// only while the pod is unchanged since the failure was reported, so it never
-// clears an allocation that a later Filter wrote. Only the leader patches.
+// only while the pod is unchanged, so it never clears an allocation that a
+// later Filter wrote. When the pod did change, for example a label update, it
+// is read again and patched again while it still carries the released
+// allocation. Only the leader patches.
 func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 	if s.kubeClient == nil || (s.leaderManager != nil && !s.leaderManager.IsLeader()) {
 		return
@@ -141,18 +148,50 @@ func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 	s.allocationCleanups.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), releasedAllocationPatchTimeout)
 		defer cancel()
-		_, err := s.kubeClient.CoreV1().Pods(namespace).Patch(ctx, name, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
-		switch {
-		case err == nil:
-			klog.V(4).InfoS("Cleared a released allocation from the pod", "pod", klog.KRef(namespace, name))
-		case apierrors.IsNotFound(err):
-		default:
-			// Most often the pod changed since, for example a new Filter
-			// wrote another allocation, which the test operations protect.
-			// The in-memory marker still keeps the released one out.
-			klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
+		pods := s.kubeClient.CoreV1().Pods(namespace)
+		for attempt := 1; ; attempt++ {
+			_, err := pods.Patch(ctx, name, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+			if err == nil {
+				klog.V(4).InfoS("Cleared a released allocation from the pod", "pod", klog.KRef(namespace, name))
+				return
+			}
+			if apierrors.IsNotFound(err) {
+				return
+			}
+			if attempt == releasedAllocationPatchAttempts {
+				// The in-memory marker still keeps the allocation out until
+				// this process exits.
+				klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
+				return
+			}
+			live, err := pods.Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
+				}
+				return
+			}
+			if !s.allocationStillReleased(live) {
+				// A later Filter wrote a new allocation, which must stay.
+				return
+			}
+			if patch, err = releasedAllocationPatch(live); err != nil || patch == nil {
+				return
+			}
 		}
 	})
+}
+
+// allocationStillReleased reports whether pod still carries the allocation
+// that was released, and no Filter has reserved devices for it since: Filter
+// adds the pod back to the cache and forgets the marker.
+func (s *Scheduler) allocationStillReleased(pod *corev1.Pod) bool {
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
+	if _, reserved := s.podManager.GetPod(pod); reserved {
+		return false
+	}
+	return s.reservationReleased(pod)
 }
 
 // releasedAllocationPatch returns a JSON patch that removes pod's allocation
