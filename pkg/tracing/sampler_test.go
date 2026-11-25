@@ -90,6 +90,31 @@ func TestNewSamplerChildFollowsParent(t *testing.T) {
 	}
 }
 
+func TestNewSamplerAlwaysOffDropsEverySpan(t *testing.T) {
+	sampled := testSpanContext(t, trace.FlagsSampled)
+	tests := []struct {
+		name   string
+		parent trace.SpanContext
+		links  []trace.Link
+	}{
+		// Allocate in a device plugin set to always_off, under a sampled Bind.
+		{name: "drops child of sampled parent", parent: sampled},
+		// Filter in a scheduler set to always_off, linked to a sampled admission span.
+		{name: "drops span with sampled link", links: []trace.Link{{SpanContext: sampled}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tracesSamplerEnvName, "always_off")
+			got := newSampler().ShouldSample(sdktrace.SamplingParameters{
+				ParentContext: trace.ContextWithRemoteSpanContext(context.Background(), tt.parent),
+				TraceID:       sampled.TraceID(),
+				Links:         tt.links,
+			})
+			assert.Equal(t, got.Decision, sdktrace.Drop)
+		})
+	}
+}
+
 func TestLinksBasedSampler(t *testing.T) {
 	sampled := testSpanContext(t, trace.FlagsSampled)
 	notSampled := testSpanContext(t, 0)
@@ -138,6 +163,18 @@ func TestLinksBasedSamplerSameDecisionPerPod(t *testing.T) {
 		got := s.ShouldSample(sdktrace.SamplingParameters{ParentContext: context.Background(), TraceID: traceID, Attributes: attrs})
 		assert.Equal(t, got.Decision, want)
 	}
+}
+
+func TestLinksBasedSamplerIgnoresEmptyPodUID(t *testing.T) {
+	s := linksBasedSampler{root: sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.5))}
+	got := s.ShouldSample(sdktrace.SamplingParameters{
+		ParentContext: context.Background(),
+		// TraceIDRatioBased(0.5) keeps this trace ID: bytes 8 to 15 are all 0.
+		// It drops the hash of an empty UID: its bytes 8 to 15 are 9afbf4c8996fb924.
+		TraceID:    trace.TraceID{},
+		Attributes: []attribute.KeyValue{semconv.K8SPodUIDKey.String("")},
+	})
+	assert.Equal(t, got.Decision, sdktrace.RecordAndSample)
 }
 
 func TestLinksBasedSamplerPodUIDRatio(t *testing.T) {

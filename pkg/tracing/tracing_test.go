@@ -38,6 +38,7 @@ func TestSetup(t *testing.T) {
 		tracesEndpoint string
 		disabled       string
 		wantOn         bool
+		wantErr        string
 	}{
 		{name: "no endpoint"},
 		{name: "disabled", endpoint: "http://localhost:4317", disabled: "true"},
@@ -45,6 +46,10 @@ func TestSetup(t *testing.T) {
 		{name: "endpoint", endpoint: "http://localhost:4317", wantOn: true},
 		{name: "traces endpoint", tracesEndpoint: "http://localhost:4317", wantOn: true},
 		{name: "disabled set to 1 is not true", endpoint: "http://localhost:4317", disabled: "1", wantOn: true},
+		{name: "IP address without scheme", endpoint: "10.0.0.1:4317", wantErr: endpointEnvName},
+		{name: "host without scheme", endpoint: "otel-collector:4317", wantErr: endpointEnvName},
+		{name: "traces endpoint without scheme", tracesEndpoint: "otel-collector:4317", wantErr: tracesEndpointEnvName},
+		{name: "https endpoint", endpoint: "https://otel-collector:4317", wantOn: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,6 +64,11 @@ func TestSetup(t *testing.T) {
 			})
 
 			shutdown, err := Setup(context.Background(), "hami-scheduler")
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Assert(t, otel.GetTracerProvider() == global)
+				return
+			}
 			assert.NilError(t, err)
 			assert.Equal(t, otel.GetTracerProvider() != global, tt.wantOn)
 			assert.NilError(t, shutdown(context.Background()))

@@ -62,9 +62,14 @@ func samplerFromEnv() sdktrace.Sampler {
 
 // newSampler makes every span with a parent follow the parent's decision, so a
 // trace is kept or dropped as a whole. Spans without a parent go to
-// linksBasedSampler.
+// linksBasedSampler. always_off drops every span, even under a sampled parent
+// or link.
 func newSampler() sdktrace.Sampler {
-	return sdktrace.ParentBased(linksBasedSampler{root: samplerFromEnv()})
+	root := samplerFromEnv()
+	if root.Description() == sdktrace.NeverSample().Description() {
+		return root
+	}
+	return sdktrace.ParentBased(linksBasedSampler{root: root})
 }
 
 // traceIDRatioFromEnv returns OTEL_TRACES_SAMPLER_ARG, or 1 when it is unset or invalid.
@@ -124,7 +129,8 @@ func (s linksBasedSampler) Description() string {
 func podUID(attrs []attribute.KeyValue) (string, bool) {
 	for _, kv := range attrs {
 		if kv.Key == semconv.K8SPodUIDKey {
-			return kv.Value.AsString(), true
+			uid := kv.Value.AsString()
+			return uid, uid != ""
 		}
 	}
 	return "", false

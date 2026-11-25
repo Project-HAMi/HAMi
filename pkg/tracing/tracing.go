@@ -18,6 +18,8 @@ package tracing
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -34,6 +36,8 @@ const (
 	sdkDisabledEnvName    = "OTEL_SDK_DISABLED"
 	endpointEnvName       = "OTEL_EXPORTER_OTLP_ENDPOINT"
 	tracesEndpointEnvName = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+	protocolEnvName       = "OTEL_EXPORTER_OTLP_PROTOCOL"
+	tracesProtocolEnvName = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"
 
 	// tracerName is the instrumentation scope of every HAMi span.
 	tracerName = "github.com/Project-HAMi/HAMi/pkg/tracing"
@@ -43,18 +47,29 @@ const (
 )
 
 // Setup turns tracing on when an OTLP endpoint is set and OTEL_SDK_DISABLED is
-// not true. It returns a shutdown function: call it before the process exits to
+// not true. It returns an error when the endpoint is not an http or https URL.
+// It returns a shutdown function: call it before the process exits to
 // send the spans still waiting in memory and close the connection to the
 // collector. When tracing is off, it leaves the global TracerProvider unset, so
 // Tracer returns a no-op tracer, and the shutdown function does nothing.
 func Setup(ctx context.Context, serviceName string) (func(context.Context) error, error) {
-	endpoint := os.Getenv(tracesEndpointEnvName)
+	envName, endpoint := tracesEndpointEnvName, os.Getenv(tracesEndpointEnvName)
 	if endpoint == "" {
-		endpoint = os.Getenv(endpointEnvName)
+		envName, endpoint = endpointEnvName, os.Getenv(endpointEnvName)
 	}
 	if endpoint == "" || sdkDisabled() {
 		return func(context.Context) error { return nil }, nil
 	}
+	if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("invalid %s %q: it must be a URL starting with http:// or https://", envName, endpoint)
+	}
+	checkProtocol()
+	// Send OpenTelemetry logs and export errors to klog. Export errors go to the
+	// error handler, which writes to the standard logger by default.
+	otel.SetLogger(klog.NewKlogr())
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		klog.ErrorS(err, "OpenTelemetry error")
+	}))
 	exporter, err := otlptracegrpc.New(ctx)
 	if err != nil {
 		return nil, err
@@ -85,6 +100,20 @@ func sdkDisabled() bool {
 		klog.Errorf("Invalid %s value %q, using default %v", sdkDisabledEnvName, raw, false)
 	}
 	return false
+}
+
+// checkProtocol logs an error when OTEL_EXPORTER_OTLP_TRACES_PROTOCOL or
+// OTEL_EXPORTER_OTLP_PROTOCOL asks for a protocol other than grpc, the only one
+// the exporter uses.
+func checkProtocol() {
+	envName, raw := tracesProtocolEnvName, os.Getenv(tracesProtocolEnvName)
+	if raw == "" {
+		envName, raw = protocolEnvName, os.Getenv(protocolEnvName)
+	}
+	value := strings.TrimSpace(raw)
+	if value != "" && !strings.EqualFold(value, "grpc") {
+		klog.Errorf("Unsupported %s value %q, using %v", envName, raw, "grpc")
+	}
 }
 
 // newResource sets service.name to serviceName unless OTEL_SERVICE_NAME or

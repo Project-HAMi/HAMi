@@ -45,8 +45,7 @@ func TestInjectExtractRoundTrip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sc := testSpanContext(t, tt.flags)
-			annotations := map[string]string{}
-			Inject(trace.ContextWithSpanContext(context.Background(), sc), annotations)
+			annotations := Inject(trace.ContextWithSpanContext(context.Background(), sc), map[string]string{})
 			assert.Equal(t, annotations[TraceparentAnnotation], tt.want)
 
 			got := trace.SpanContextFromContext(Extract(context.Background(), annotations))
@@ -55,10 +54,28 @@ func TestInjectExtractRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInjectNilAnnotations(t *testing.T) {
+	sc := testSpanContext(t, trace.FlagsSampled)
+	got := Inject(trace.ContextWithSpanContext(context.Background(), sc), nil)
+	assert.DeepEqual(t, got, map[string]string{
+		TraceparentAnnotation: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+	})
+}
+
 func TestInjectNoSpanContext(t *testing.T) {
-	annotations := map[string]string{}
-	Inject(context.Background(), annotations)
-	assert.Equal(t, len(annotations), 0)
+	tests := []struct {
+		name        string
+		annotations map[string]string
+	}{
+		{name: "nil annotations", annotations: nil},
+		{name: "empty annotations", annotations: map[string]string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Inject(context.Background(), tt.annotations)
+			assert.DeepEqual(t, got, tt.annotations)
+		})
+	}
 }
 
 func TestInjectDropsTracestate(t *testing.T) {
@@ -66,8 +83,7 @@ func TestInjectDropsTracestate(t *testing.T) {
 	assert.NilError(t, err)
 	sc := testSpanContext(t, trace.FlagsSampled).WithTraceState(ts)
 
-	annotations := map[string]string{}
-	Inject(trace.ContextWithSpanContext(context.Background(), sc), annotations)
+	annotations := Inject(trace.ContextWithSpanContext(context.Background(), sc), map[string]string{})
 	assert.DeepEqual(t, annotations, map[string]string{
 		TraceparentAnnotation: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 	})

@@ -29,14 +29,21 @@ const TraceparentAnnotation = "hami.io/traceparent"
 // traceparentHeader is the carrier key that propagation.TraceContext reads and writes.
 const traceparentHeader = "traceparent"
 
-// Inject writes the span context in ctx to annotations. It writes nothing when
-// ctx has no valid span context, so callers never store an empty trace.
-func Inject(ctx context.Context, annotations map[string]string) {
+// Inject writes the span context in ctx to annotations and returns the map,
+// creating it when annotations is nil. It writes nothing when ctx has no valid
+// span context, so callers never store an empty trace.
+func Inject(ctx context.Context, annotations map[string]string) map[string]string {
 	carrier := propagation.MapCarrier{}
 	propagation.TraceContext{}.Inject(ctx, carrier)
-	if traceparent, ok := carrier[traceparentHeader]; ok {
-		annotations[TraceparentAnnotation] = traceparent
+	traceparent, ok := carrier[traceparentHeader]
+	if !ok {
+		return annotations
 	}
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[TraceparentAnnotation] = traceparent
+	return annotations
 }
 
 // Extract returns ctx with the remote span context stored in annotations.
