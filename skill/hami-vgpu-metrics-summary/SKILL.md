@@ -781,7 +781,7 @@ If the user asks in English, answer in English.
 | `hami_host_gpu_memory_controller_utilization_ratio` | Runtime GPU memory controller utilization from vGPU monitor | runtime/device |
 | `hami_vgpu_memory_used_bytes` / `vGPU_device_memory_usage_in_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_limit_bytes` / `vGPU_device_memory_limit_in_bytes` | Runtime per-container vGPU memory limit from vGPU monitor | runtime/container |
-| `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor | runtime/container |
+| legacy `Device_memory_desc_of_container` | Container device memory usage from vGPU monitor (only with `--legacy-metrics=true`) | runtime/container |
 | `hami_container_device_utilization_ratio` / `Device_utilization_desc_of_container` | Container device SM utilization from vGPU monitor | runtime/container |
 | `hami_container_last_kernel_elapsed_seconds` / `Device_last_kernel_of_container` | Seconds since last kernel execution from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_context_bytes` | Memory context size from vGPU monitor | runtime/container |
