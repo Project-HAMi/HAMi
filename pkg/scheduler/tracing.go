@@ -54,6 +54,7 @@ func startAdmissionSpan(ctx context.Context, start time.Time, namespace string, 
 func startFilterSpan(start time.Time, pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodes int, failedNodes map[string]string) (context.Context, trace.Span) {
 	ctx, span := tracing.Tracer().Start(context.Background(), "filter",
 		trace.WithTimestamp(start),
+		trace.WithLinks(traceparentLinks(pod)...),
 		trace.WithAttributes(
 			tracing.PodUIDKey.String(string(pod.UID)),
 			tracing.PodNameKey.String(pod.Name),
@@ -76,6 +77,16 @@ func startFilterSpan(start time.Time, pod *corev1.Pod, resourceReqs device.PodDe
 		}
 	}
 	return ctx, span
+}
+
+// traceparentLinks links to the span context on the pod: the webhook's, or
+// after a failed bind the last Filter's. A pod without one gets no link.
+func traceparentLinks(pod *corev1.Pod) []trace.Link {
+	sc := trace.SpanContextFromContext(tracing.Extract(context.Background(), pod.Annotations))
+	if !sc.IsValid() {
+		return nil
+	}
+	return []trace.Link{{SpanContext: sc}}
 }
 
 // filterFailure is the last recorded failed Filter of a pod and the number of

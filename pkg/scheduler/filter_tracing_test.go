@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -254,6 +255,59 @@ func TestFilterFailureForgottenOnPodDelete(t *testing.T) {
 
 	s.onDelPod(pod)
 	assert.Equal(t, len(s.filterFailures), 0)
+}
+
+func TestFilterSpanLinksToAdmission(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantLink    bool
+	}{
+		{name: "webhook annotation", annotations: map[string]string{tracing.TraceparentAnnotation: sampledTraceparent}, wantLink: true},
+		{name: "no annotation"},
+		{name: "malformed annotation", annotations: map[string]string{tracing.TraceparentAnnotation: "not-a-traceparent"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := movePod()
+			pod.Annotations = tt.annotations
+			s, kubeClient := filterLeader(t, pod, 1)
+			exporter := recordSpans(t)
+
+			filterTo(t, s, kubeClient, pod, moveNodeX)
+
+			span := spanNamed(t, exporter.GetSpans(), "filter")
+			// Each attempt starts a new trace, not one long trace for the wait.
+			assert.Assert(t, !span.Parent.IsValid())
+			if !tt.wantLink {
+				assert.Equal(t, len(span.Links), 0)
+				return
+			}
+			assert.Equal(t, len(span.Links), 1)
+			assert.Equal(t, span.Links[0].SpanContext.TraceID().String(), "4bf92f3577b34da6a3ce929d0e0e4736")
+			assert.Equal(t, span.Links[0].SpanContext.SpanID().String(), "00f067aa0ba902b7")
+			assert.Assert(t, span.SpanContext.TraceID() != span.Links[0].SpanContext.TraceID())
+		})
+	}
+}
+
+// An unsampled Filter still writes its context, so Bind and the device plugin
+// follow its decision instead of sampling on their own.
+func TestFilterWritesUnsampledTraceparent(t *testing.T) {
+	pod := movePod()
+	s, kubeClient := filterLeader(t, pod, 1)
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.NeverSample()))
+	global := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(global)
+		assert.NilError(t, tp.Shutdown(context.Background()))
+	})
+
+	live := filterTo(t, s, kubeClient, pod, moveNodeX)
+
+	got := live.Annotations[tracing.TraceparentAnnotation]
+	assert.Assert(t, strings.HasSuffix(got, "-00"), "traceparent %q", got)
 }
 
 func TestFilterFailureNotKeptWithoutTracing(t *testing.T) {
