@@ -400,6 +400,12 @@ func sameMPSRequest(a, b mpsV3Allocation) bool {
 	b.CleanupPending = false
 	return reflect.DeepEqual(a, b)
 }
+
+type mpsV3AllocationConflict struct {
+	error
+	allocations []mpsV3Allocation
+}
+
 func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -424,20 +430,28 @@ func (m *mpsV3Manager) ensure(ctx context.Context, a mpsV3Allocation) (bool, err
 		return false, m.publish(old)
 	}
 	shared := false
+	var conflict mpsV3AllocationConflict
 	for _, other := range m.allocations {
 		if other.Server == a.Server && other.Prepared && a.ComputeMode == nvidia.MPSV3NamespaceCap {
 			shared = true
 		}
 		for _, gpu := range a.GPUs {
-			if slices.Contains(other.GPUs, gpu) {
-				if a.ComputeMode != other.ComputeMode || (a.SMCount > 0) != (other.SMCount > 0) {
-					return false, fmt.Errorf("cannot mix static SM and percentage sharing on GPU %s", gpu)
-				}
-				if !slices.Equal(a.GPUs, other.GPUs) {
-					return false, fmt.Errorf("GPU %s already belongs to another GPU set", gpu)
-				}
+			if !slices.Contains(other.GPUs, gpu) {
+				continue
 			}
+			switch {
+			case a.ComputeMode != other.ComputeMode || (a.SMCount > 0) != (other.SMCount > 0):
+				conflict.error = fmt.Errorf("cannot mix static SM and percentage sharing on GPU %s", gpu)
+				conflict.allocations = append(conflict.allocations, other)
+			case !slices.Equal(a.GPUs, other.GPUs):
+				conflict.error = fmt.Errorf("GPU %s already belongs to another GPU set", gpu)
+				conflict.allocations = append(conflict.allocations, other)
+			}
+			break
 		}
+	}
+	if conflict.error != nil {
+		return false, &conflict
 	}
 	if len(filepath.Join(m.root, "pipe", a.Server, a.Namespace, "control")) >= 104 {
 		return false, fmt.Errorf("MPS namespace socket path too long; shorten HAMI_MPS_V3_ROOT")
@@ -1026,11 +1040,6 @@ func (m *mpsV3Manager) deviceInfo(gpu string) map[string]any {
 	}
 	for _, a := range *snapshot {
 		if slices.Contains(a.GPUs, gpu) {
-			mode := "percentage"
-			if a.SMCount > 0 {
-				mode = "sm"
-			}
-			info[nvidia.MPSV3ModeKey] = mode
 			info[nvidia.MPSV3GPUSetKey] = slices.Clone(a.GPUs)
 			break
 		}
@@ -1082,6 +1091,36 @@ func mpsV3AllocationFor(pod *corev1.Pod, ctr *corev1.Container, devs device.Cont
 	return a, nvidia.ValidateMPSV3Environment(ctr)
 }
 
+// ensureMPSV3Allocation runs under applyMutex, which also serializes background cleanup.
+func (plugin *NvidiaDevicePlugin) ensureMPSV3Allocation(ctx context.Context, a mpsV3Allocation) (bool, error) {
+	m := plugin.mpsV3
+	created, err := m.ensure(ctx, a)
+	var conflict *mpsV3AllocationConflict
+	if !errors.As(err, &conflict) {
+		return created, err
+	}
+
+	pods, listErr := plugin.listLiveNodePodSnapshot()
+	if listErr != nil {
+		return false, fmt.Errorf("%w: cannot confirm conflicting Pods: %w", err, listErr)
+	}
+	live := liveMPSV3PodUIDs(pods)
+	for _, old := range conflict.allocations {
+		if old.PodUID == a.PodUID || live[old.PodUID] {
+			return false, err
+		}
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for _, old := range conflict.allocations {
+		if releaseErr := m.release(cleanupCtx, old.Namespace); releaseErr != nil {
+			return false, fmt.Errorf("%w: release stale MPS namespace %s: %w", err, old.Namespace, releaseErr)
+		}
+	}
+	return m.ensure(ctx, a)
+}
+
 func (plugin *NvidiaDevicePlugin) allocateMPSV3(ctx context.Context, pod *corev1.Pod, ctr *corev1.Container, devs device.ContainerDevices, response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) (string, bool, error) {
 	if plugin.mpsV3 == nil {
 		return "", false, fmt.Errorf("MPS v3 manager is not initialized")
@@ -1096,7 +1135,7 @@ func (plugin *NvidiaDevicePlugin) allocateMPSV3(ctx context.Context, pod *corev1
 			return "", false, fmt.Errorf("MPS allocation exceeds physical GPU memory")
 		}
 	}
-	created, err := plugin.mpsV3.ensure(ctx, a)
+	created, err := plugin.ensureMPSV3Allocation(ctx, a)
 	if err != nil {
 		return a.Namespace, created, err
 	}

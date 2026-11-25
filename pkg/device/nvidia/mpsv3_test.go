@@ -92,10 +92,11 @@ func TestMPSV3Scheduling(t *testing.T) {
 	_, ok = mpsV3Fits(pod, dev, 1, nil, 0, nil)
 	require.False(t, ok)
 	dev.Mode = MpsV3Mode
-	info[MPSV3ModeKey] = "percentage"
+	// Node ownership can outlast the Pod. Let Allocate reclaim a stale owner
+	// of the same GPU set, while still rejecting live incompatible Pods.
+	info[MPSV3GPUSetKey] = []string{"GPU-a"}
 	_, ok = mpsV3Fits(pod, dev, 1, nil, 0, nil)
-	require.False(t, ok)
-	delete(info, MPSV3ModeKey)
+	require.True(t, ok)
 	dev.PodInfos = []*device.PodInfo{{Pod: &corev1.Pod{}}}
 	_, ok = mpsV3Fits(pod, dev, 1, nil, 0, nil)
 	require.False(t, ok)

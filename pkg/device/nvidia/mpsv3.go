@@ -28,7 +28,6 @@ func MatchesOperatingMode(requested, mode string) bool {
 // in the Pod use the same SM count; absence selects percentage provisioning.
 const MPSV3SMCountAnnotation = "hami.io/mps-sm-count"
 const MPSV3GeometryKey = "mpsV3Geometry"
-const MPSV3ModeKey = "mpsV3ComputeMode"
 const MPSV3GPUSetKey = "mpsV3GPUSet"
 
 const (
@@ -225,13 +224,6 @@ func mpsV3Fits(pod *corev1.Pod, dev *device.DeviceUsage, count int64, selected d
 	}
 	nodeStrategy, ok := dev.CustomInfo[MPSV3ComputeModeKey].(string)
 	if !ok || strategy != nodeStrategy {
-		return 0, false
-	}
-	wanted := "percentage"
-	if sms > 0 {
-		wanted = "sm"
-	}
-	if mode, _ := dev.CustomInfo[MPSV3ModeKey].(string); mode != "" && mode != wanted {
 		return 0, false
 	}
 	if allocated != nil && !mpsV3FitsPreviousSets((*allocated)[NvidiaGPUDevice], dev.ID, count, selected) {

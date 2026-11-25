@@ -899,7 +899,6 @@ func TestRegisterMPSV3SchedulingMetadata(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, manager.geometry["GPU-a"], geometry)
 			require.Equal(t, []any{"GPU-a"}, decoded[0].CustomInfo[nvidia.MPSV3GPUSetKey])
-			require.Equal(t, "percentage", decoded[0].CustomInfo[nvidia.MPSV3ModeKey])
 
 			// Other modes continue to use the existing registration projection.
 			plugin.operatingMode = nvidia.HamiCoreMode

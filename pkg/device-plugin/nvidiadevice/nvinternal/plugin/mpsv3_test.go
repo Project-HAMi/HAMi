@@ -295,6 +295,58 @@ func TestMPSV3Rollback(t *testing.T) {
 		})
 	}
 }
+func TestMPSV3AllocateReclaimsConflictingStaleAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		live      bool
+		listErr   error
+		busy      bool
+		wantError string
+	}{
+		{name: "deleted Pod"},
+		{name: "live Pod", live: true, wantError: "cannot mix"},
+		{name: "API unavailable", listErr: fmt.Errorf("API unavailable"), wantError: "cannot confirm conflicting Pods"},
+		{name: "client still attached", busy: true, wantError: "active client"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, f := testMPSV3(t)
+			ctx := context.Background()
+			old := testMPSAllocation(t, 2)
+			_, err := m.ensure(ctx, old)
+			require.NoError(t, err)
+			f.busy = tc.busy
+
+			plugin := &NvidiaDevicePlugin{mpsV3: m}
+			queries := 0
+			plugin.listLiveNodePods = func() ([]*corev1.Pod, error) {
+				queries++
+				if tc.live {
+					return []*corev1.Pod{{ObjectMeta: metav1.ObjectMeta{UID: "test-pod"}}}, nil
+				}
+				return nil, tc.listErr
+			}
+			next := testMPSAllocation(t, 0)
+			next.PodUID = "next-pod"
+			next.Namespace = mpsV3Name("ns", next.PodUID+"/"+next.Container)
+			created, err := plugin.ensureMPSV3Allocation(ctx, next)
+			require.Equal(t, 1, queries)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				require.False(t, created)
+				require.Contains(t, m.allocations, old.Namespace)
+				require.Contains(t, f.partitions, "GPU-a/"+m.partitionName(old, "GPU-a"))
+				require.NotContains(t, f.namespaces, next.Namespace)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, created)
+			require.NotContains(t, m.allocations, old.Namespace)
+			require.Empty(t, f.partitions)
+			require.Contains(t, f.namespaces, next.Namespace)
+		})
+	}
+}
+
 func TestMPSV3RejectsConflicts(t *testing.T) {
 	m, f := testMPSV3(t)
 	a := testMPSAllocation(t, 2)
