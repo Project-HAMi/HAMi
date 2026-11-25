@@ -38,6 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -178,6 +179,20 @@ func start(ctx context.Context) error {
 	if config.HostName == "" {
 		return fmt.Errorf("empty hostname returned")
 	}
+
+	shutdownTracing, err := tracing.Setup(ctx, "hami-scheduler")
+	if err != nil {
+		klog.ErrorS(err, "Failed to set up tracing, running without it")
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer func() {
+		// ctx is canceled by now, so the last spans get their own deadline.
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(flush); err != nil {
+			klog.ErrorS(err, "Failed to shut down tracing")
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -31,6 +31,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -374,6 +375,73 @@ func TestStartMetricsLifecycle(t *testing.T) {
 				continue
 			}
 			rebound.Close()
+		}
+	})
+
+	t.Run("tracing endpoint", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			endpoint   string
+			wantTracer bool
+		}{
+			{name: "valid endpoint turns tracing on", endpoint: "http://127.0.0.1:4317", wantTracer: true},
+			// A tracing typo must not stop the scheduler from placing pods.
+			{name: "invalid endpoint keeps the scheduler running", endpoint: "otel-collector:4317"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", tt.endpoint)
+				t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+				t.Setenv("OTEL_SDK_DISABLED", "")
+				global := otel.GetTracerProvider()
+				t.Cleanup(func() {
+					if otel.GetTracerProvider() != global {
+						otel.SetTracerProvider(global)
+					}
+				})
+				clientpkg.KubeClient = k8sfake.NewSimpleClientset()
+				config.MetricsBindAddress = "127.0.0.1:0"
+				acquired := make(chan net.Listener, 3)
+				listenTCP = func(network, address string) (net.Listener, error) {
+					listener, err := net.Listen(network, address)
+					if err == nil {
+						acquired <- listener
+					}
+					return listener, err
+				}
+
+				ctx, cancel := context.WithCancel(t.Context())
+				result := make(chan error, 1)
+				done := make(chan struct{})
+				t.Cleanup(func() {
+					cancel()
+					<-done
+				})
+				go func() {
+					result <- start(ctx)
+					close(done)
+				}()
+
+				for started := range cap(acquired) {
+					select {
+					case <-acquired:
+					case <-time.After(5 * time.Second):
+						t.Fatalf("startup acquired %d listeners, want 3", started)
+					}
+				}
+				cancel()
+				select {
+				case err := <-result:
+					if err != nil {
+						t.Fatalf("expected a clean shutdown, got %v", err)
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("startup did not return after its context was canceled")
+				}
+				if got := otel.GetTracerProvider() != global; got != tt.wantTracer {
+					t.Fatalf("tracing on = %v, want %v", got, tt.wantTracer)
+				}
+			})
 		}
 	})
 
