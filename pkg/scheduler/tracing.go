@@ -34,6 +34,21 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/tracing"
 )
 
+// startAdmissionSpan starts the span of a pod's admission, dated back to
+// start, when the request arrived.
+func startAdmissionSpan(ctx context.Context, start time.Time, namespace string, pod *corev1.Pod) (context.Context, trace.Span) {
+	name := pod.Name
+	if name == "" {
+		name = pod.GenerateName
+	}
+	return tracing.Tracer().Start(ctx, "admission",
+		trace.WithTimestamp(start),
+		trace.WithAttributes(
+			tracing.NamespaceKey.String(namespace),
+			tracing.PodNameKey.String(name),
+		))
+}
+
 // startFilterSpan starts the span of one Filter call once its result is
 // known, dated back to start, when the call began.
 func startFilterSpan(start time.Time, pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodes int, failedNodes map[string]string) (context.Context, trace.Span) {

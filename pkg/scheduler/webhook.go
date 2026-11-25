@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -36,6 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -54,10 +57,12 @@ func NewWebHook() (*admission.Webhook, error) {
 	}
 	decoder := admission.NewDecoder(schema)
 	wh := &admission.Webhook{Handler: &webhook{decoder: decoder}}
+	wh.WithContextFunc = tracing.ExtractRequest
 	return wh, nil
 }
 
 func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.Response {
+	start := time.Now()
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
@@ -130,12 +135,18 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 	// Delivery must precede GPU-using init containers. Reorder only after all
 	// mutations, when no pointers into the init-container slice remain live.
 	remotegpu.FinalizeAdmission(pod)
+	span := trace.SpanFromContext(ctx)
+	if hasResource {
+		ctx, span = startAdmissionSpan(ctx, start, req.Namespace, pod)
+		defer span.End()
+	}
 	// Validate device-scoring weights for HAMi workloads so malformed input is
 	// reported before scheduling. The scheduler retains the same validation as
 	// a defense-in-depth check.
 	if hasResource {
 		if _, err := util.GetDeviceScoringWeightsByPod(pod); err != nil {
 			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			tracing.SetError(span, err.Error())
 			return admission.Denied(err.Error())
 		}
 		// The scheduler ignores an unrecognized scheduler-policy value and
@@ -143,11 +154,13 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		// unexpected packing (#2767). Deny it here instead.
 		if err := util.SchedulerPolicyAnnotationError(pod); err != nil {
 			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			tracing.SetError(span, err.Error())
 			return admission.Denied(err.Error())
 		}
 	}
 	if hasPrivileged && hasResource {
 		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, privilegedName)
+		tracing.SetError(span, fmt.Sprintf("container %s is privileged", privilegedName))
 		return admission.Denied(fmt.Sprintf("container %s is privileged", privilegedName))
 	}
 
@@ -158,10 +171,12 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		pod.Spec.SchedulerName = config.SchedulerName
 		if pod.Spec.NodeName != "" {
 			klog.Infof(template+" - Pod already has node assigned", pod.Namespace, pod.Name, pod.UID)
+			tracing.SetError(span, "pod has node assigned")
 			return admission.Denied("pod has node assigned")
 		}
 	}
 	if err := fitResourceQuota(pod); err != nil {
+		tracing.SetError(span, err.Error())
 		return admission.Denied(err.Error())
 	}
 
@@ -169,9 +184,14 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		injectSuperpodAffinity(pod)
 	}
 
+	delete(pod.Annotations, tracing.TraceparentAnnotation)
+	if hasResource {
+		pod.Annotations = tracing.Inject(ctx, pod.Annotations)
+	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
+		tracing.SetError(span, err.Error())
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
@@ -297,6 +317,11 @@ func changedSchedulerOwnedAnnotation(oldPod, newPod *corev1.Pod) (string, bool) 
 		if oldPod.Annotations[key] != newPod.Annotations[key] {
 			return key, true
 		}
+	}
+	// Not in schedulerOwnedAnnotationKeys, so a pod created with this one is
+	// not denied: the webhook drops it unless the pod goes to another scheduler.
+	if oldPod.Annotations[tracing.TraceparentAnnotation] != newPod.Annotations[tracing.TraceparentAnnotation] {
+		return tracing.TraceparentAnnotation, true
 	}
 	return "", false
 }
