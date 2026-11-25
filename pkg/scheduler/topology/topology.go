@@ -158,7 +158,9 @@ func ParseTiers(spec string) ([]Tier, error) {
 type HyperNode struct {
 	// Level is the tier this domain represents.
 	Level int
-	// Key identifies the domain within its tier, as "<tier key>/<value>".
+	// Key identifies the domain for logs, as
+	// "<parent key>/<parent value>/.../<tier key>/<value>" when parents are
+	// present, otherwise "<tier key>/<value>".
 	Key string
 	// Nodes are the nodes inside this domain, sorted by name.
 	Nodes []string
@@ -229,19 +231,47 @@ func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 
 // domain returns the canonical domain of a tier value under its higher-tier
 // parents, creating it the first time some node carries that combination and
-// recording node.Name as a member.
+// recording node.Name as a member. Key embeds higher-tier parents so two local
+// domains that share a label value still print differently in logs.
 func (t *Tree) domain(registry map[string]*HyperNode, node *corev1.Node, tier Tier, value string) *HyperNode {
-	id := strconv.Itoa(tier.Level) + domainIDSeparator + tier.Key + domainIDSeparator + value
-	for _, ancestor := range t.tiers {
+	var id, key strings.Builder
+	id.Grow(64)
+	key.Grow(64)
+	id.WriteString(strconv.Itoa(tier.Level))
+	id.WriteString(domainIDSeparator)
+	id.WriteString(tier.Key)
+	id.WriteString(domainIDSeparator)
+	id.WriteString(value)
+	// Parents first in Key (highest tier down) so logs show the owning domain.
+	for i := len(t.tiers) - 1; i >= 0; i-- {
+		ancestor := t.tiers[i]
 		if ancestor.Level <= tier.Level {
 			continue
 		}
-		id += domainIDSeparator + ancestor.Key + domainIDSeparator + ancestor.Value(node)
+		ancestorValue := ancestor.Value(node)
+		id.WriteString(domainIDSeparator)
+		id.WriteString(ancestor.Key)
+		id.WriteString(domainIDSeparator)
+		id.WriteString(ancestorValue)
+		if key.Len() > 0 {
+			key.WriteByte('/')
+		}
+		key.WriteString(ancestor.Key)
+		key.WriteByte('/')
+		key.WriteString(ancestorValue)
 	}
-	domain, ok := registry[id]
+	if key.Len() > 0 {
+		key.WriteByte('/')
+	}
+	key.WriteString(tier.Key)
+	key.WriteByte('/')
+	key.WriteString(value)
+
+	domainID := id.String()
+	domain, ok := registry[domainID]
 	if !ok {
-		domain = &HyperNode{Level: tier.Level, Key: tier.Key + "/" + value}
-		registry[id] = domain
+		domain = &HyperNode{Level: tier.Level, Key: key.String()}
+		registry[domainID] = domain
 		t.fabric = append(t.fabric, domain)
 	}
 	domain.Nodes = append(domain.Nodes, node.Name)

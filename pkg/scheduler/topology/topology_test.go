@@ -258,21 +258,29 @@ func TestBuildKeysLocalDomainsByParent(t *testing.T) {
 	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "node1"))
 	assert.Equal(t, 2, tree.TierOf("node0", "node2"))
 	assert.NotEqual(t, tree.Chain("node0")[1], tree.Chain("node1")[1])
+	assert.Equal(t, util.SuperPodIDLabel+"/sp-1/"+util.RackIDLabel+"/rack-a", tree.Chain("node0")[1].Key)
+	assert.Equal(t, util.SuperPodIDLabel+"/sp-2/"+util.RackIDLabel+"/rack-a", tree.Chain("node1")[1].Key)
 }
 
 func TestLCAUsesTheDeepestSharedDomain(t *testing.T) {
 	nodes := []*corev1.Node{
 		labeledNode("node0", map[string]string{"test-tier-1": "HyperNode0", "test-tier-2": "HyperNode4"}),
-		labeledNode("node1", map[string]string{"test-tier-1": "HyperNode0", "test-tier-2": "HyperNode5"}),
+		labeledNode("node1", map[string]string{"test-tier-1": "HyperNode0", "test-tier-2": "HyperNode4"}),
+		labeledNode("node2", map[string]string{"test-tier-1": "HyperNode0", "test-tier-2": "HyperNode5"}),
 	}
 	tiers, err := ParseTiers("test-tier-1,test-tier-2")
 	require.NoError(t, err)
 	tree := Build(nodes, tiers)
 
 	assert.Equal(t, 1, tree.TierOf("node0", "node1"))
-	assert.Equal(t, "tier1/test-tier-1/HyperNode0", tree.LCA("node0", "node1").String())
+	assert.Equal(t, "tier1/test-tier-2/HyperNode4/test-tier-1/HyperNode0", tree.LCA("node0", "node1").String())
+	assert.Equal(t, []string{"node0", "node1"}, tree.LCA("node0", "node1").Nodes)
 	assert.Equal(t, 0, tree.TierOf("node0", "node0"))
-	assert.Equal(t, []string{"node0", "node1"}, tree.HyperNodes()[0].Nodes)
+
+	// Parent-keyed racks: the same local label under a different parent does not merge.
+	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "node2"))
+	assert.Nil(t, tree.LCA("node0", "node2"))
+	assert.NotEqual(t, tree.Chain("node0")[1].Key, tree.Chain("node2")[1].Key)
 }
 
 func TestDisjointDomainsHaveNoLCA(t *testing.T) {
