@@ -47,7 +47,8 @@ const (
 )
 
 // Setup turns tracing on when an OTLP endpoint is set and OTEL_SDK_DISABLED is
-// not true. It returns an error when the endpoint is not an http or https URL.
+// not true. It returns an error when the endpoint is not an http or https URL
+// with a host.
 // It returns a shutdown function: call it before the process exits to
 // send the spans still waiting in memory and close the connection to the
 // collector. When tracing is off, it leaves the global TracerProvider unset, so
@@ -60,8 +61,8 @@ func Setup(ctx context.Context, serviceName string) (func(context.Context) error
 	if endpoint == "" || sdkDisabled() {
 		return func(context.Context) error { return nil }, nil
 	}
-	if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("invalid %s %q: it must be a URL starting with http:// or https://", envName, endpoint)
+	if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil, fmt.Errorf("invalid %s %q: it must be an http or https URL with a host, such as http://otel-collector:4317", envName, endpoint)
 	}
 	checkProtocol()
 	// Send OpenTelemetry logs and export errors to klog. Export errors go to the

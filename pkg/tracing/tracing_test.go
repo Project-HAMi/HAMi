@@ -49,6 +49,7 @@ func TestSetup(t *testing.T) {
 		{name: "IP address without scheme", endpoint: "10.0.0.1:4317", wantErr: endpointEnvName},
 		{name: "host without scheme", endpoint: "otel-collector:4317", wantErr: endpointEnvName},
 		{name: "traces endpoint without scheme", tracesEndpoint: "otel-collector:4317", wantErr: tracesEndpointEnvName},
+		{name: "empty host", endpoint: "http://:4317", wantErr: endpointEnvName},
 		{name: "https endpoint", endpoint: "https://otel-collector:4317", wantOn: true},
 	}
 	for _, tt := range tests {
