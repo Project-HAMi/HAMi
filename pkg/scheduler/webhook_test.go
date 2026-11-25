@@ -1957,10 +1957,6 @@ func remoteGPUWebhookPod(resourceName string, annotations map[string]string) *co
 	}
 }
 
-// privilegedContainerName must report the privileged container wherever it sits
-// in the pod spec. Written as a regression test for the loop-variable aliasing
-// bug: taking &ctr inside a range loop hand the compiler a single reused
-// variable, so the check below used to inspect a copy that could go stale.
 func TestPrivilegedContainerName(t *testing.T) {
 	privileged := true
 	plain := corev1.Container{Name: "plain"}
