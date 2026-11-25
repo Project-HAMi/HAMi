@@ -32,6 +32,7 @@ package topology
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,7 +65,8 @@ type Tier struct {
 	Key string
 }
 
-// String renders the tier the way it is written in the tier labels flag.
+// String returns the tier's label key. An explicit =N level from the flag is
+// not included.
 func (t Tier) String() string {
 	return t.Key
 }
@@ -159,15 +161,13 @@ type HyperNode struct {
 	// Level is the tier this domain represents.
 	Level int
 	// Key identifies the domain for logs, as
-	// "<parent key>/<parent value>/.../<tier key>/<value>" when parents are
-	// present, otherwise "<tier key>/<value>".
+	// "<parent key>/<parent value>/.../<tier key>/<value>" when non-empty
+	// parents are present, otherwise "<tier key>/<value>". Empty parent
+	// values are omitted so logs do not contain "//".
 	Key string
 	// Nodes are the nodes inside this domain, sorted by name.
 	Nodes []string
 }
-
-// Tier is the level this domain represents.
-func (h *HyperNode) Tier() int { return h.Level }
 
 // String renders the domain identity for logs.
 func (h *HyperNode) String() string {
@@ -195,7 +195,9 @@ type Tree struct {
 //
 // Domains are keyed by their tier value together with every higher-tier value
 // on the same node, so the same local label under different parents (for
-// example rack-A in two superpods) does not merge.
+// example rack-A in two superpods) does not merge. A missing parent tier is
+// part of that identity too: nodes that omit a higher label are not merged
+// with nodes that carry one, even when the local label matches.
 func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 	tree := &Tree{
 		tiers:  append([]Tier(nil), tiers...),
@@ -231,8 +233,10 @@ func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 
 // domain returns the canonical domain of a tier value under its higher-tier
 // parents, creating it the first time some node carries that combination and
-// recording node.Name as a member. Key embeds higher-tier parents so two local
-// domains that share a label value still print differently in logs.
+// recording node.Name as a member. Every higher-tier value, including empty
+// ones, is part of the identity so a missing parent splits lower domains.
+// Key embeds only non-empty parents so two local domains that share a label
+// still print differently without "//" gaps in logs.
 func (t *Tree) domain(registry map[string]*HyperNode, node *corev1.Node, tier Tier, value string) *HyperNode {
 	var id, key strings.Builder
 	id.Grow(64)
@@ -243,8 +247,7 @@ func (t *Tree) domain(registry map[string]*HyperNode, node *corev1.Node, tier Ti
 	id.WriteString(domainIDSeparator)
 	id.WriteString(value)
 	// Parents first in Key (highest tier down) so logs show the owning domain.
-	for i := len(t.tiers) - 1; i >= 0; i-- {
-		ancestor := t.tiers[i]
+	for _, ancestor := range slices.Backward(t.tiers) {
 		if ancestor.Level <= tier.Level {
 			continue
 		}
@@ -253,6 +256,9 @@ func (t *Tree) domain(registry map[string]*HyperNode, node *corev1.Node, tier Ti
 		id.WriteString(ancestor.Key)
 		id.WriteString(domainIDSeparator)
 		id.WriteString(ancestorValue)
+		if ancestorValue == "" {
+			continue
+		}
 		if key.Len() > 0 {
 			key.WriteByte('/')
 		}
