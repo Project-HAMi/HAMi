@@ -67,7 +67,6 @@ const (
 	syncedPollPeriod               = 100 * time.Millisecond
 	superpodInformerSyncTimeout    = 30 * time.Second
 	superpodInformerSyncPollPeriod = 100 * time.Millisecond
-	pdbInformerSyncTimeout         = 5 * time.Second
 
 	// sessionReconcileTimeout caps how long the lupine session stub reconcile
 	// may hold the scheduler lock it runs under.
@@ -97,11 +96,10 @@ type Scheduler struct {
 	superpodInformerMu      sync.Mutex
 	superpodInformersSynced bool
 	superpodInformerTimeout time.Duration
-	// Only Preempt reads PodDisruptionBudgets, see ensurePDBInformer.
-	pdbLister          policylisters.PodDisruptionBudgetLister
-	pdbInformerMu      sync.Mutex
-	pdbInformerSynced  bool
-	pdbInformerTimeout time.Duration
+	// Preempt reads PodDisruptionBudgets, and looks up pods by UID.
+	pdbLister  policylisters.PodDisruptionBudgetLister
+	pdbSynced  cache.InformerSynced
+	podIndexer cache.Indexer
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	// printedLog records the nodes whose devices have already been logged at
@@ -873,6 +871,13 @@ func (s *Scheduler) Start() error {
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
 
+	// Preempt looks up the victims of a request by UID.
+	podInformer := informerFactory.Core().V1().Pods().Informer()
+	if err := podInformer.AddIndexers(cache.Indexers{podUIDIndex: indexPodByUID}); err != nil {
+		return fmt.Errorf("failed to index pods by UID: %w", err)
+	}
+	s.podIndexer = podInformer.GetIndexer()
+
 	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
@@ -902,6 +907,14 @@ func (s *Scheduler) Start() error {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
+
+	// Only Preempt reads PodDisruptionBudgets. Their informer starts here and
+	// is not waited for: without the RBAC rule it never syncs, and then only
+	// preemption fails, not the start of the scheduler.
+	pdbInformer := informerFactory.Policy().V1().PodDisruptionBudgets()
+	s.pdbLister = pdbInformer.Lister()
+	s.pdbSynced = pdbInformer.Informer().HasSynced
+	informerFactory.Start(s.stopCh)
 
 	if config.LeaderElect {
 		leaseInformerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync, informers.WithNamespace(config.LeaderElectResourceNamespace))
@@ -962,38 +975,6 @@ func (s *Scheduler) ensureSuperpodInformers() error {
 		return fmt.Errorf("failed to sync SuperPod controller informer caches within %s: %w", timeout, err)
 	}
 	s.superpodInformersSynced = true
-	return nil
-}
-
-// ensurePDBInformer starts the PodDisruptionBudget informer on first use and
-// waits for its cache, like ensureSuperpodInformers. A scheduler that never
-// preempts does not watch PodDisruptionBudgets.
-func (s *Scheduler) ensurePDBInformer() error {
-	s.pdbInformerMu.Lock()
-	defer s.pdbInformerMu.Unlock()
-
-	if s.pdbInformerSynced {
-		return nil
-	}
-	if s.informerFactory == nil {
-		return errors.New("shared informer factory is unavailable")
-	}
-
-	pdbInformer := s.informerFactory.Policy().V1().PodDisruptionBudgets()
-	hasSynced := pdbInformer.Informer().HasSynced
-	s.pdbLister = pdbInformer.Lister()
-	s.informerFactory.Start(s.stopCh)
-
-	timeout := s.pdbInformerTimeout
-	if timeout <= 0 {
-		timeout = pdbInformerSyncTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if !cache.WaitForCacheSync(ctx.Done(), hasSynced) {
-		return fmt.Errorf("failed to sync PodDisruptionBudget informer cache within %s", timeout)
-	}
-	s.pdbInformerSynced = true
 	return nil
 }
 

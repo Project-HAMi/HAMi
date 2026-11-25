@@ -85,7 +85,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 		return &extenderv1.ExtenderPreemptionResult{NodeNameToMetaVictims: candidates}, nil
 	}
 
-	// The first call waits for the informer, so do this without allocLock.
+	// This reads informer caches only, so it is done without allocLock.
 	budgets, err := s.podDisruptionBudgets(candidates)
 	if err != nil {
 		klog.ErrorS(err, "Rejecting preemption request", "pod", klog.KObj(pod))
@@ -223,10 +223,11 @@ func newDisruptionBudgets(pdbs []*policyv1.PodDisruptionBudget) *disruptionBudge
 }
 
 // podDisruptionBudgets returns the PodDisruptionBudgets for one preemption.
-// It fails if they cannot be read, so that no victim is picked without them.
+// Their informer starts with the scheduler. If its cache is not synced, this
+// fails at once, so that no victim is picked without them.
 func (s *Scheduler) podDisruptionBudgets(candidates map[string]*extenderv1.MetaVictims) (*disruptionBudgets, error) {
-	if err := s.ensurePDBInformer(); err != nil {
-		return nil, err
+	if s.pdbLister == nil || s.pdbSynced == nil || !s.pdbSynced() {
+		return nil, errors.New("the PodDisruptionBudget cache is not synced, check the RBAC of the scheduler for poddisruptionbudgets")
 	}
 	pdbs, err := s.pdbLister.List(labels.Everything())
 	if err != nil {
@@ -242,27 +243,37 @@ func (s *Scheduler) podDisruptionBudgets(candidates map[string]*extenderv1.MetaV
 	return budgets, nil
 }
 
-// proposedVictims returns the pods the request proposes as victims, by UID.
-// The request has only UIDs, and a victim without a HAMi device is not in the
-// pod cache, so they are looked up in the pod lister.
-func (s *Scheduler) proposedVictims(candidates map[string]*extenderv1.MetaVictims) (map[k8stypes.UID]*corev1.Pod, error) {
-	wanted := make(map[k8stypes.UID]struct{})
-	for _, victims := range candidates {
-		for _, victim := range victims.Pods {
-			wanted[k8stypes.UID(victim.UID)] = struct{}{}
-		}
-	}
-	if len(wanted) == 0 || s.podLister == nil {
+// podUIDIndex is the index of the pod informer by pod UID.
+const podUIDIndex = "uid"
+
+// indexPodByUID is the index function of podUIDIndex.
+func indexPodByUID(obj any) ([]string, error) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
 		return nil, nil
 	}
-	pods, err := s.podLister.List(labels.Everything())
-	if err != nil {
-		return nil, err
+	return []string{string(pod.UID)}, nil
+}
+
+// proposedVictims returns the pods the request proposes as victims, by UID.
+// The request has only UIDs, and a victim without a HAMi device is not in the
+// pod cache, so they come from the UID index of the pod informer.
+func (s *Scheduler) proposedVictims(candidates map[string]*extenderv1.MetaVictims) (map[k8stypes.UID]*corev1.Pod, error) {
+	if s.podIndexer == nil {
+		return nil, nil
 	}
-	found := make(map[k8stypes.UID]*corev1.Pod, len(wanted))
-	for _, pod := range pods {
-		if _, ok := wanted[pod.UID]; ok {
-			found[pod.UID] = pod
+	found := make(map[k8stypes.UID]*corev1.Pod)
+	for _, victims := range candidates {
+		for _, victim := range victims.Pods {
+			objs, err := s.podIndexer.ByIndex(podUIDIndex, victim.UID)
+			if err != nil {
+				return nil, err
+			}
+			for _, obj := range objs {
+				if pod, ok := obj.(*corev1.Pod); ok {
+					found[pod.UID] = pod
+				}
+			}
 		}
 	}
 	return found, nil

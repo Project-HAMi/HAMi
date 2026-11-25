@@ -17,7 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
-	"errors"
+	"context"
 	"testing"
 	"time"
 
@@ -25,18 +25,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
-	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	policylisters "k8s.io/client-go/listers/policy/v1"
-	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // budgetFor returns a PodDisruptionBudget for the pods labeled app in the
@@ -59,21 +56,21 @@ func withBudgets(t *testing.T, s *Scheduler, pdbs ...*policyv1.PodDisruptionBudg
 		assert.NilError(t, indexer.Add(pdb))
 	}
 	s.pdbLister = policylisters.NewPodDisruptionBudgetLister(indexer)
-	s.pdbInformerSynced = true
+	s.pdbSynced = func() bool { return true }
 }
 
-// withPods gives s a pod lister that holds the tracked pods and others, as
-// its informer would.
+// withPods gives s the index of pods by UID that its informer would hold,
+// with the tracked pods and others.
 func withPods(t *testing.T, s *Scheduler, tracked []*device.PodInfo, others ...*corev1.Pod) {
 	t.Helper()
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{podUIDIndex: indexPodByUID})
 	for _, pi := range tracked {
 		assert.NilError(t, indexer.Add(pi.Pod))
 	}
 	for _, pod := range others {
 		assert.NilError(t, indexer.Add(pod))
 	}
-	s.podLister = listerscorev1.NewPodLister(indexer)
+	s.podIndexer = indexer
 }
 
 // labeled gives a pod of trackedOn the label a budget of budgetFor selects.
@@ -109,7 +106,7 @@ func Test_Preempt_CountsDisruptionBudgets(t *testing.T) {
 		tracked []*device.PodInfo
 		// others are pods that hold no HAMi device.
 		others []*corev1.Pod
-		// unlisted are tracked pods the lister has dropped already.
+		// unlisted are tracked pods the informer has dropped already.
 		unlisted []*device.PodInfo
 		request  *extenderv1.MetaVictims
 		want     *extenderv1.MetaVictims
@@ -288,7 +285,7 @@ func Test_disruptionBudgets_split_CountsEveryBudget(t *testing.T) {
 	}
 }
 
-// Proposed victims are looked up by UID in the pod lister, which also holds
+// Proposed victims are looked up in the index of pods by UID, which also holds
 // the pods without a HAMi device.
 func Test_proposedVictims(t *testing.T) {
 	request := map[string]*extenderv1.MetaVictims{
@@ -306,20 +303,33 @@ func Test_proposedVictims(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(found), 1)
 	assert.Assert(t, found["cpu-only"] == cpuOnly)
+
+	// Without the index the lookup fails, and Preempt with it.
+	s.podIndexer = cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	_, err = s.proposedVictims(request)
+	assert.Assert(t, err != nil)
 }
 
-// Without PodDisruptionBudgets Preempt picks no victim. A pod that asks for
-// no HAMi device needs none, and is still answered.
+// Preempt does not wait for PodDisruptionBudgets. While their cache is not
+// synced it picks no victim and fails at once. A pod that asks for no HAMi
+// device needs none, and is still answered.
 func Test_Preempt_NeedsDisruptionBudgets(t *testing.T) {
 	s, pod := devicePreemptor(t)
-	s.pdbLister, s.pdbInformerSynced = nil, false
 	track(t, s, holding(trackedOn(moveNodeX, "low", 10), 8000))
-
-	res, err := s.Preempt(extenderv1.ExtenderPreemptionArgs{
+	request := extenderv1.ExtenderPreemptionArgs{
 		Pod:                   pod,
 		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{moveNodeX: {}},
-	})
-	assert.ErrorContains(t, err, "informer factory is unavailable")
+	}
+
+	s.pdbSynced = func() bool { return false }
+	res, err := s.Preempt(request)
+	assert.ErrorContains(t, err, "not synced")
+	assert.Assert(t, res == nil)
+
+	// A scheduler that was not started has no informer at all.
+	s.pdbLister, s.pdbSynced = nil, nil
+	res, err = s.Preempt(request)
+	assert.ErrorContains(t, err, "not synced")
 	assert.Assert(t, res == nil)
 
 	other := preemptorPod()
@@ -333,43 +343,31 @@ func Test_Preempt_NeedsDisruptionBudgets(t *testing.T) {
 	assert.Equal(t, len(res.NodeNameToMetaVictims), 1)
 }
 
-// The informer starts on first use and lists what the API server has.
-func Test_ensurePDBInformer(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
+// Start prepares what Preempt reads: the PodDisruptionBudget informer, which
+// it does not wait for, and the index of pods by UID.
+func Test_Start_PreparesPreemptionCaches(t *testing.T) {
+	victim := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "victim", Namespace: "default", UID: "victim-uid"}}
+	previousClient := client.KubeClient
+	client.KubeClient = fake.NewClientset(victim, budgetFor("db", 1))
+	t.Cleanup(func() { client.KubeClient = previousClient })
+	previousLeaderElect := config.LeaderElect
+	config.LeaderElect = false
+	t.Cleanup(func() { config.LeaderElect = previousLeaderElect })
 
-	s := &Scheduler{
-		informerFactory: informers.NewSharedInformerFactory(fake.NewClientset(budgetFor("db", 1)), 0),
-		stopCh:          stopCh,
-	}
-	assert.Assert(t, s.pdbLister == nil, "the lister must not exist before Preempt needs it")
+	s := NewScheduler()
+	assert.NilError(t, s.Start())
+	t.Cleanup(s.Stop)
 
-	assert.NilError(t, s.ensurePDBInformer())
-	pdbs, err := s.pdbLister.List(labels.Everything())
-	assert.NilError(t, err)
-	assert.Equal(t, len(pdbs), 1)
-	assert.Equal(t, pdbs[0].Name, "db")
-	assert.NilError(t, s.ensurePDBInformer())
-}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	assert.Assert(t, cache.WaitForCacheSync(ctx.Done(), s.pdbSynced), "the PodDisruptionBudget cache did not sync")
 
-// A cache that cannot sync, for example without the RBAC rule, fails the call
-// after the timeout and does not block it for good.
-func Test_ensurePDBInformer_BoundsSyncWait(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
-	clientset := fake.NewClientset()
-	clientset.PrependReactor("list", "*", func(k8stesting.Action) (bool, runtime.Object, error) {
-		<-stopCh
-		return true, nil, errors.New("informer stopped")
+	budgets, err := s.podDisruptionBudgets(map[string]*extenderv1.MetaVictims{
+		moveNodeX: {Pods: []*extenderv1.MetaPod{{UID: "victim-uid"}}},
 	})
-	s := &Scheduler{
-		informerFactory:    informers.NewSharedInformerFactory(clientset, 0),
-		stopCh:             stopCh,
-		pdbInformerTimeout: 30 * time.Millisecond,
-	}
-
-	err := s.ensurePDBInformer()
-	assert.ErrorContains(t, err, "within 30ms")
-	assert.Assert(t, !s.pdbInformerSynced)
+	assert.NilError(t, err)
+	assert.Equal(t, len(budgets.pdbs), 1)
+	found := budgets.proposed["victim-uid"]
+	assert.Assert(t, found != nil, "the proposed victim was not found by its UID")
+	assert.Equal(t, found.Name, "victim")
 }
