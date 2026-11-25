@@ -179,7 +179,6 @@ spec:
             {{- if ne (toString .Values.scheduler.nodeLockRetryTimeout) "" }}
             - --node-lock-retry-timeout={{ .Values.scheduler.nodeLockRetryTimeout }}
             {{- end }}
-            {{- /* Topology model (#3397 PR-1): pass --topology-tier-labels via scheduler.extender.extraArgs, e.g. --topology-tier-labels=kubernetes.io/hostname,hami.io/rackid,hami.io/superpodid. Labels only; soft/hard/gang land in later PRs. Omit to keep the model off. */}}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}

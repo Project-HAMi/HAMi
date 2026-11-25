@@ -84,11 +84,10 @@ func TestParseTiers(t *testing.T) {
 		},
 		{
 			name: "canonical superpod labels",
-			spec: "kubernetes.io/hostname," + util.RackIDLabel + "," + util.SuperPodIDLabel,
+			spec: util.RackIDLabel + "," + util.SuperPodIDLabel,
 			want: []Tier{
-				{Level: 1, Key: "kubernetes.io/hostname"},
-				{Level: 2, Key: util.RackIDLabel},
-				{Level: 3, Key: util.SuperPodIDLabel},
+				{Level: 1, Key: util.RackIDLabel},
+				{Level: 2, Key: util.SuperPodIDLabel},
 			},
 		},
 		{
@@ -200,21 +199,33 @@ func TestTierOf(t *testing.T) {
 	}
 }
 
-func TestBuildTruncatesMissingLevels(t *testing.T) {
+func TestBuildSkipsMissingLevels(t *testing.T) {
 	nodes := append(exampleFabric(),
-		labeledNode("leaf-only", map[string]string{"test-tier-1": "HyperNode2"}),
+		labeledNode("leaf-a", map[string]string{"test-tier-1": "HyperNode2"}),
+		labeledNode("leaf-b", map[string]string{"test-tier-1": "HyperNode2"}),
+		labeledNode("mid-missing", map[string]string{"test-tier-1": "HyperNode0", "test-tier-3": "HyperNode6"}),
+		labeledNode("fabric-only", map[string]string{"test-tier-3": "HyperNode6"}),
 		labeledNode("unlabeled", nil),
 	)
 	tiers, err := ParseTiers("test-tier-1,test-tier-2,test-tier-3")
 	require.NoError(t, err)
 	tree := Build(nodes, tiers)
 
-	assert.True(t, tree.InModel("leaf-only"))
+	assert.True(t, tree.InModel("leaf-a"))
 	assert.False(t, tree.InModel("unlabeled"))
-	assert.Equal(t, 1, tree.TierOf("leaf-only", "node4"))
-	assert.Equal(t, tree.UnknownTier(), tree.TierOf("leaf-only", "node0"))
+	// Same local label with the same (empty) parent path still shares a domain.
+	assert.Equal(t, 1, tree.TierOf("leaf-a", "leaf-b"))
+	// A local-only node does not merge with a fully labeled node that carries
+	// different higher-tier parents, even when the local label matches.
+	assert.Equal(t, tree.UnknownTier(), tree.TierOf("leaf-a", "node4"))
 	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "unlabeled"))
 	assert.Equal(t, 0, tree.TierOf("unlabeled", "unlabeled"))
+
+	// A missing mid-tier is skipped, so the node still joins the fabric above.
+	assert.True(t, tree.InModel("mid-missing"))
+	assert.Nil(t, tree.Chain("mid-missing")[2])
+	assert.Equal(t, 3, tree.TierOf("mid-missing", "node4"))
+	assert.Equal(t, 3, tree.TierOf("fabric-only", "node0"))
 }
 
 func TestBuildReadsCanonicalSuperpodLabels(t *testing.T) {
@@ -233,6 +244,22 @@ func TestBuildReadsCanonicalSuperpodLabels(t *testing.T) {
 	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "node3"))
 }
 
+func TestBuildKeysLocalDomainsByParent(t *testing.T) {
+	nodes := []*corev1.Node{
+		labeledNode("node0", map[string]string{util.RackIDLabel: "rack-a", util.SuperPodIDLabel: "sp-1"}),
+		labeledNode("node1", map[string]string{util.RackIDLabel: "rack-a", util.SuperPodIDLabel: "sp-2"}),
+		labeledNode("node2", map[string]string{util.SuperPodIDLabel: "sp-1"}),
+	}
+	tiers, err := ParseTiers(util.RackIDLabel + "," + util.SuperPodIDLabel)
+	require.NoError(t, err)
+	tree := Build(nodes, tiers)
+
+	// Same rack label under different superpods must not merge.
+	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "node1"))
+	assert.Equal(t, 2, tree.TierOf("node0", "node2"))
+	assert.NotEqual(t, tree.Chain("node0")[1], tree.Chain("node1")[1])
+}
+
 func TestLCAUsesTheDeepestSharedDomain(t *testing.T) {
 	nodes := []*corev1.Node{
 		labeledNode("node0", map[string]string{"test-tier-1": "HyperNode0", "test-tier-2": "HyperNode4"}),
@@ -248,92 +275,7 @@ func TestLCAUsesTheDeepestSharedDomain(t *testing.T) {
 	assert.Equal(t, []string{"node0", "node1"}, tree.HyperNodes()[0].Nodes)
 }
 
-func TestCheckCandidate(t *testing.T) {
-	tree := exampleTree(t)
-
-	tests := []struct {
-		name      string
-		candidate string
-		placed    []string
-		highest   int
-		want      *Violation
-	}{
-		{
-			name:      "no placed member leaves the first pod free",
-			candidate: "node4",
-			placed:    nil,
-			highest:   1,
-		},
-		{
-			name:      "same tier 1 domain is accepted at tier 1",
-			candidate: "node1",
-			placed:    []string{"node0"},
-			highest:   1,
-		},
-		{
-			name:      "one tier too far",
-			candidate: "node2",
-			placed:    []string{"node1"},
-			highest:   1,
-			want:      &Violation{Tier: 2, Peer: "node1"},
-		},
-		{
-			name:      "the same pair is accepted once the limit is raised",
-			candidate: "node2",
-			placed:    []string{"node1"},
-			highest:   2,
-		},
-		{
-			name:      "sharing only the whole fabric is one tier too far",
-			candidate: "node4",
-			placed:    []string{"node0"},
-			highest:   2,
-			want:      &Violation{Tier: 3, Peer: "node0"},
-		},
-		{
-			name:      "the worst placed member is reported",
-			candidate: "node1",
-			placed:    []string{"node0", "node2"},
-			highest:   1,
-			want:      &Violation{Tier: 2, Peer: "node2"},
-		},
-		{
-			name:      "a candidate on a node the group already uses is accepted",
-			candidate: "node0",
-			placed:    []string{"node0"},
-			highest:   0,
-		},
-		{
-			name:      "a group already spread too far rejects every node",
-			candidate: "node0",
-			placed:    []string{"node0", "node4"},
-			highest:   0,
-			want:      &Violation{Tier: 3, Peer: "node4"},
-		},
-		{
-			name:      "a candidate outside the described fabric is unknown and rejected",
-			candidate: "unlabeled",
-			placed:    []string{"node0"},
-			highest:   0,
-			want:      &Violation{Tier: 4, Peer: "node0", Unknown: true},
-		},
-		{
-			name:      "a placed member outside the described fabric rejects a labeled candidate",
-			candidate: "node1",
-			placed:    []string{"unlabeled"},
-			highest:   0,
-			want:      &Violation{Tier: 4, Peer: "unlabeled", Unknown: true},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tree.CheckCandidate(tc.candidate, tc.placed, tc.highest))
-		})
-	}
-}
-
-func TestCheckCandidateWithoutCommonDomain(t *testing.T) {
+func TestDisjointDomainsHaveNoLCA(t *testing.T) {
 	tiers, err := ParseTiers("test-tier-1,test-tier-2,test-tier-3")
 	require.NoError(t, err)
 	tree := Build(disjointFabric(), tiers)
@@ -341,46 +283,7 @@ func TestCheckCandidateWithoutCommonDomain(t *testing.T) {
 	assert.True(t, tree.InModel("node0"))
 	assert.True(t, tree.InModel("node8"))
 	assert.Equal(t, tree.UnknownTier(), tree.TierOf("node0", "node8"))
-	assert.Equal(t, &Violation{Tier: 4, Peer: "node8", Unknown: true},
-		tree.CheckCandidate("node0", []string{"node8"}, 3))
-	assert.Nil(t, tree.CheckCandidate("node0", []string{"node8"}, tree.UnknownTier()))
-	assert.Zero(t, tree.Locality("node0", []string{"node8"}))
-}
-
-func TestLocality(t *testing.T) {
-	tree := exampleTree(t)
-
-	tests := []struct {
-		name      string
-		candidate string
-		placed    []string
-		want      float64
-	}{
-		{name: "no placed member scores nothing", candidate: "node1", placed: nil, want: 0},
-		{name: "same node", candidate: "node1", placed: []string{"node1"}, want: 1},
-		{name: "same tier 1 domain", candidate: "node1", placed: []string{"node0"}, want: 0.75},
-		{name: "same tier 2 domain", candidate: "node1", placed: []string{"node2"}, want: 0.5},
-		{name: "whole fabric in common", candidate: "node1", placed: []string{"node4"}, want: 0.25},
-		{name: "outside the described fabric", candidate: "unlabeled", placed: []string{"node0"}, want: 0},
-		{
-			name:      "unknown members contribute zero to the mean",
-			candidate: "node1",
-			placed:    []string{"node0", "unlabeled"},
-			want:      0.375,
-		},
-		{
-			name:      "the mean rewards the domain holding most of the group",
-			candidate: "node1",
-			placed:    []string{"node0", "node1"},
-			want:      0.875,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.InDelta(t, tc.want, tree.Locality(tc.candidate, tc.placed), 0.0001)
-		})
-	}
+	assert.Nil(t, tree.LCA("node0", "node8"))
 }
 
 func TestNilTreeIsInert(t *testing.T) {
@@ -390,6 +293,5 @@ func TestNilTreeIsInert(t *testing.T) {
 	assert.Equal(t, 1, tree.UnknownTier())
 	assert.False(t, tree.InModel("node0"))
 	assert.Nil(t, tree.LCA("node0", "node1"))
-	assert.Zero(t, tree.Locality("node0", []string{"node1"}))
-	assert.Nil(t, tree.CheckCandidate("node0", []string{"node1"}, 0))
+	assert.Equal(t, 1, tree.TierOf("node0", "node1"))
 }

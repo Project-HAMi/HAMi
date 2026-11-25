@@ -84,11 +84,9 @@ var (
 	// TopologyTierLabels describes the interconnect hierarchy the scheduler
 	// models from node labels, from the smallest domain to the largest, as a
 	// comma-separated list of label keys (for example
-	// "kubernetes.io/hostname,hami.io/rackid,hami.io/superpodid"). "key=N" pins
-	// the tier level of a key explicitly. Annotation keys are not supported.
-	// Empty, the default, disables the topology model. Later PRs wire this
-	// model into soft scoring, hard filtering, and gang admission; this flag
-	// only builds and refreshes the in-memory hierarchy.
+	// "hami.io/rackid,hami.io/superpodid"). "key=N" pins the tier level of a
+	// key explicitly. Annotation keys are not supported. Empty, the default,
+	// disables the topology model.
 	TopologyTierLabels string
 
 	// NodeLockTimeout is the timeout for node locks.

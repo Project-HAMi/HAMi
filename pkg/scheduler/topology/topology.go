@@ -87,7 +87,7 @@ func ParseTiers(spec string) ([]Tier, error) {
 	entries := make([]entry, 0, 4)
 	seenKey := make(map[string]bool)
 	seenLevel := make(map[int]bool)
-	for _, raw := range strings.Split(spec, ",") {
+	for raw := range strings.SplitSeq(spec, ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -186,13 +186,14 @@ type Tree struct {
 // Build constructs the hierarchy of nodes for tiers. Nodes that carry no tier
 // value at all still get a chain holding only themselves, so that a pod pair on
 // one such node is still recognized as sharing a node; they belong to no domain
-// above it, and pairs involving them are reported at UnknownTier. A node that
-// carries some tier values but not all of them belongs to the levels below the
-// first missing value: the chain is truncated, never guessed.
+// above it, and pairs involving them are reported at UnknownTier. A missing
+// mid-tier value is skipped rather than truncating the chain, so an optional
+// local label (for example rackid) does not drop membership in a larger domain
+// the node still carries.
 //
-// Domains are registered by the value they are built from, so two nodes share a
-// domain exactly when they carry the same value for its tier, whatever order the
-// nodes are visited in.
+// Domains are keyed by their tier value together with every higher-tier value
+// on the same node, so the same local label under different parents (for
+// example rack-A in two superpods) does not merge.
 func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 	tree := &Tree{
 		tiers:  append([]Tier(nil), tiers...),
@@ -214,9 +215,9 @@ func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 		for _, tier := range tree.tiers {
 			value := tier.Value(node)
 			if value == "" {
-				break
+				continue
 			}
-			chain[tier.Level] = tree.domain(registry, node.Name, tier, value)
+			chain[tier.Level] = tree.domain(registry, node, tier, value)
 		}
 		tree.chains[node.Name] = chain
 	}
@@ -226,17 +227,24 @@ func Build(nodes []*corev1.Node, tiers []Tier) *Tree {
 	return tree
 }
 
-// domain returns the canonical domain of a tier value, creating it the first
-// time some node carries that value and recording nodeName as a member.
-func (t *Tree) domain(registry map[string]*HyperNode, nodeName string, tier Tier, value string) *HyperNode {
+// domain returns the canonical domain of a tier value under its higher-tier
+// parents, creating it the first time some node carries that combination and
+// recording node.Name as a member.
+func (t *Tree) domain(registry map[string]*HyperNode, node *corev1.Node, tier Tier, value string) *HyperNode {
 	id := strconv.Itoa(tier.Level) + domainIDSeparator + tier.Key + domainIDSeparator + value
+	for _, ancestor := range t.tiers {
+		if ancestor.Level <= tier.Level {
+			continue
+		}
+		id += domainIDSeparator + ancestor.Key + domainIDSeparator + ancestor.Value(node)
+	}
 	domain, ok := registry[id]
 	if !ok {
 		domain = &HyperNode{Level: tier.Level, Key: tier.Key + "/" + value}
 		registry[id] = domain
 		t.fabric = append(t.fabric, domain)
 	}
-	domain.Nodes = append(domain.Nodes, nodeName)
+	domain.Nodes = append(domain.Nodes, node.Name)
 	return domain
 }
 
@@ -334,7 +342,7 @@ func (t *Tree) LCA(a, b string) *HyperNode {
 	if !ok {
 		return nil
 	}
-	for level := 0; level < min(len(left), len(right)); level++ {
+	for level := range min(len(left), len(right)) {
 		if left[level] == nil || right[level] == nil {
 			continue
 		}
@@ -353,73 +361,4 @@ func (t *Tree) TierOf(a, b string) int {
 		return t.UnknownTier()
 	}
 	return lca.Level
-}
-
-// Violation is a placement that would stretch a group of pods over more of the
-// fabric than it allows. Later PRs use it for hard filtering; this package only
-// computes it.
-type Violation struct {
-	// Tier is the tier of the lowest common ancestor of the candidate and Peer.
-	Tier int
-	// Peer is the placed node the candidate is too far away from.
-	Peer string
-	// Unknown is set when Tier is UnknownTier.
-	Unknown bool
-}
-
-// String renders a rejection for scheduler logs and failed-node messages.
-func (v *Violation) String() string {
-	if v == nil {
-		return ""
-	}
-	if v.Unknown {
-		return fmt.Sprintf("no common topology domain with node %s", v.Peer)
-	}
-	return fmt.Sprintf("lowest common topology tier with node %s is %d", v.Peer, v.Tier)
-}
-
-// CheckCandidate reports why candidate cannot host another member of a group
-// whose other members sit on placed nodes, or nil when it can. A pair is
-// rejected when its lowest common ancestor is deeper in the hierarchy than
-// highestTierAllowed, which includes pairs that share no configured domain.
-func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllowed int) *Violation {
-	if t == nil {
-		return nil
-	}
-
-	worst := (*Violation)(nil)
-	for _, peer := range placed {
-		if peer == candidate {
-			continue
-		}
-		tier := t.TierOf(candidate, peer)
-		if tier <= highestTierAllowed {
-			continue
-		}
-		if worst == nil || tier > worst.Tier {
-			worst = &Violation{Tier: tier, Peer: peer, Unknown: tier == t.UnknownTier()}
-		}
-	}
-	return worst
-}
-
-// Locality reports how close candidate is wired to the placed nodes, as a mean
-// over them: 1 when candidate is one of them, and 0 when it is outside the
-// described fabric or shares no domain with any of them. Later PRs use it for
-// soft scoring; this package only computes it.
-func (t *Tree) Locality(candidate string, placed []string) float64 {
-	if t == nil || len(placed) == 0 {
-		return 0
-	}
-
-	unknown := float64(t.UnknownTier())
-	total, peers := 0.0, 0
-	for _, peer := range placed {
-		peers++
-		total += (unknown - float64(t.TierOf(candidate, peer))) / unknown
-	}
-	if peers == 0 {
-		return 0
-	}
-	return total / float64(peers)
 }

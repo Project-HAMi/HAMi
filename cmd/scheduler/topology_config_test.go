@@ -39,7 +39,7 @@ func TestValidateTopologyConfigAccepts(t *testing.T) {
 		labels string
 	}{
 		{name: "empty disables the feature", labels: ""},
-		{name: "canonical superpod labels", labels: "kubernetes.io/hostname," + util.RackIDLabel + "," + util.SuperPodIDLabel},
+		{name: "canonical superpod labels", labels: util.RackIDLabel + "," + util.SuperPodIDLabel},
 		{name: "explicit levels", labels: util.RackIDLabel + "=1," + util.SuperPodIDLabel + "=2"},
 	}
 
