@@ -1718,7 +1718,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		))
 	defer span.End()
 	if err != nil {
-		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
+		klog.ErrorS(err, "Failed to get pod from cache", tracing.WithTraceID(span, "pod", args.PodName, "namespace", args.PodNamespace)...)
 		s.cleanupStalePodAllocation(&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				UID:       args.PodUID,
@@ -1735,7 +1735,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 
 	if err := s.verifyBindTarget(args, current); err != nil {
-		klog.ErrorS(err, "Rejecting bind request", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+		klog.ErrorS(err, "Rejecting bind request", tracing.WithTraceID(span, "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)...)
 		s.GetAllocationMetrics().ObserveAllocationFailure("bind", s.podAllocationType(current), metrics.FailureReasonIdentity)
 		tracing.SetFailure(span, string(metrics.FailureReasonIdentity), err.Error())
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
@@ -1745,7 +1745,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 	node, err := s.nodeLister.Get(args.Node)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
+		klog.ErrorS(err, "Failed to get node from cache", tracing.WithTraceID(span, "node", args.Node)...)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
 		deviceType := s.podAllocationType(current)
 		s.cleanupStalePodAllocation(current)
@@ -1761,7 +1761,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 
 	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
-		klog.InfoS("Release node locks", "node", args.Node)
+		klog.InfoS("Release node locks", tracing.WithTraceID(span, "node", args.Node)...)
 		s.releaseAllDevices(node, current)
 		span.AddEvent("reservation released")
 		reason := metrics.FailureReasonBind
@@ -1821,7 +1821,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 	s.GetAllocationMetrics().ObserveAllocation("bind", s.podAllocationType(current))
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
-	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+	klog.InfoS("Successfully bound pod to node", tracing.WithTraceID(span, "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)...)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
 }
 
@@ -2003,11 +2003,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			span.SetAttributes(tracing.FilterSkippedAttemptsKey.Int(skipped))
 		}
 	}
-	klog.InfoS("Scheduling pod to node",
+	klog.InfoS("Scheduling pod to node", tracing.WithTraceID(span,
 		"podNamespace", pod.Namespace,
 		"podName", pod.Name,
 		"nodeID", m.NodeID,
-		"devices", m.Devices)
+		"devices", m.Devices)...)
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)

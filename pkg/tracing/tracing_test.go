@@ -149,3 +149,31 @@ func TestNewTracerProviderAttributeValueLengthLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestWithTraceID(t *testing.T) {
+	spanWith := func(sc trace.SpanContext) trace.Span {
+		return trace.SpanFromContext(trace.ContextWithSpanContext(context.Background(), sc))
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	_, recorded := tp.Tracer(tracerName).Start(context.Background(), "bind")
+	tests := []struct {
+		name string
+		span trace.Span
+		want []any
+	}{
+		{name: "sampled span", span: recorded,
+			want: []any{"pod", "train-1", "traceID", recorded.SpanContext().TraceID().String()}},
+		{name: "unsampled span", span: spanWith(testSpanContext(t, 0)), want: []any{"pod", "train-1"}},
+		// Tracing is off, but the parent from the pod annotation was sampled.
+		{name: "tracing off, sampled parent", span: spanWith(testSpanContext(t, trace.FlagsSampled)), want: []any{"pod", "train-1"}},
+		// Tracing is off and there is no parent.
+		{name: "no-op span", span: trace.SpanFromContext(context.Background()), want: []any{"pod", "train-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.DeepEqual(t, WithTraceID(tt.span, "pod", "train-1"), tt.want)
+		})
+	}
+	recorded.End()
+	assert.NilError(t, tp.Shutdown(context.Background()))
+}
