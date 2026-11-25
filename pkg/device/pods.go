@@ -30,6 +30,7 @@ type PodInfo struct {
 	*corev1.Pod
 	NodeID                        string
 	Devices                       PodDevices
+	RawDevices                    PodDevices
 	InitContainerResourceReleased bool
 }
 
@@ -55,6 +56,11 @@ func NewPodManager() *PodManager {
 // AddPod stores the effective (collapsed) device usage for the pod.
 // The devices parameter must already be collapsed (caller's responsibility).
 func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
+	return m.AddPodWithRawDevices(pod, nodeID, devices, nil)
+}
+
+// AddPodWithRawDevices retains per-container allocations alongside effective usage.
+func (m *PodManager) AddPodWithRawDevices(pod *corev1.Pod, nodeID string, devices, rawDevices PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -64,6 +70,7 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			Pod:                           pod,
 			NodeID:                        nodeID,
 			Devices:                       devices,
+			RawDevices:                    rawDevices,
 			InitContainerResourceReleased: false,
 		}
 		m.pods[pod.UID] = pi
@@ -76,6 +83,9 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 		pi := m.pods[pod.UID]
 		pi.Pod = pod
 		pi.NodeID = nodeID
+		if rawDevices != nil {
+			pi.RawDevices = rawDevices
+		}
 		if pi.InitContainerResourceReleased {
 			// Usage was already shrunk after init containers finished; a re-add
 			// (e.g. an informer resync decoding the full annotation) must not
@@ -119,6 +129,7 @@ func (p *PodInfo) Snapshot() *PodInfo {
 		Pod:                           p.Pod,
 		NodeID:                        p.NodeID,
 		Devices:                       p.Devices.DeepCopy(),
+		RawDevices:                    p.RawDevices.DeepCopy(),
 		InitContainerResourceReleased: p.InitContainerResourceReleased,
 	}
 }

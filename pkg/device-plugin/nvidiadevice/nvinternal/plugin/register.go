@@ -205,6 +205,10 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error)
 			Mode:    plugin.operatingMode,
 			Health:  health,
 		}
+		if plugin.mpsV3 != nil {
+			info.Health = info.Health && plugin.mpsV3.gpuHealthy(UUID)
+			info.CustomInfo = plugin.mpsV3.deviceInfo(UUID)
+		}
 		if isMigMode {
 			info.MIGProfiles = plugin.discoverMigProfiles(ndev, Model)
 			if len(info.MIGProfiles) == 0 {
@@ -318,7 +322,16 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		}
 	}
 
-	encodeddevices := device.MarshalNodeDevices(*devices)
+	var encodeddevices string
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		data, err := json.Marshal(*devices)
+		if err != nil {
+			return false, fmt.Errorf("marshal MPS v3 device registration: %w", err)
+		}
+		encodeddevices = string(data)
+	} else {
+		encodeddevices = device.MarshalNodeDevices(*devices)
+	}
 	if encodeddevices == plugin.deviceCache {
 		klog.V(3).Info("Device info unchanged, skipping annotation update")
 		return false, nil

@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +34,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -842,5 +844,71 @@ func TestRemoteRegistrationWithInactiveMIGManager(t *testing.T) {
 	_, _, err = plugin.topologyScore(nil)
 	if !scored || err != nil {
 		t.Fatalf("remote topology must not use an inactive MIG session: called=%v, err=%v", scored, err)
+	}
+}
+
+func TestRegisterMPSV3SchedulingMetadata(t *testing.T) {
+	originalInit, originalShutdown := nvmlInit, nvml.Shutdown
+	originalHandle := nvml.DeviceGetHandleByUUID
+	originalClient, originalNode := client.KubeClient, util.NodeName
+	t.Cleanup(func() {
+		nvmlInit, nvml.Shutdown = originalInit, originalShutdown
+		nvml.DeviceGetHandleByUUID = originalHandle
+		client.KubeClient, util.NodeName = originalClient, originalNode
+	})
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	nvml.DeviceGetHandleByUUID = func(string) (nvml.Device, nvml.Return) {
+		return &nvmlmock.Device{
+			GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+			GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+				return nvml.Memory{Total: 24 * 1024 * 1024 * 1024}, nvml.SUCCESS
+			},
+			GetNameFunc:    func() (string, nvml.Return) { return "NVIDIA A10", nvml.SUCCESS },
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) { return nvml.PciInfo{}, nvml.ERROR_NOT_SUPPORTED },
+		}, nvml.SUCCESS
+	}
+	t.Setenv("ENABLE_TOPOLOGY_SCORE", "false")
+	util.NodeName = "test-node"
+	for _, mode := range []string{nvidia.MPSV3NamespaceCap, nvidia.MPSV3ServerTimeslice} {
+		t.Run(mode, func(t *testing.T) {
+			client.KubeClient = fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: util.NodeName}})
+			manager, _ := testMPSV3(t)
+			manager.policy.ComputeMode = mode
+			a := testMPSAllocation(t, 0)
+			a.ComputeMode = mode
+			manager.allocations[a.Namespace] = a
+			require.NoError(t, manager.save())
+			plugin := &NvidiaDevicePlugin{
+				operatingMode: nvidia.MpsV3Mode, mpsV3: manager,
+				rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
+					return rm.Devices{"GPU-a": &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "GPU-a", Health: "Healthy"}}}
+				}},
+			}
+			changed, err := plugin.RegisterInAnnotation()
+			require.NoError(t, err)
+			require.True(t, changed)
+			node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), util.NodeName, metav1.GetOptions{})
+			require.NoError(t, err)
+			decoded, err := (&nvidia.NvidiaGPUDevices{}).GetNodeDevices(*node)
+			require.NoError(t, err)
+			require.Len(t, decoded, 1)
+			require.True(t, decoded[0].Health)
+			require.Equal(t, mode, decoded[0].CustomInfo[nvidia.MPSV3ComputeModeKey])
+			geometry, err := nvidia.MPSV3DeviceGeometry(decoded[0].CustomInfo)
+			require.NoError(t, err)
+			require.Equal(t, manager.geometry["GPU-a"], geometry)
+			require.Equal(t, []any{"GPU-a"}, decoded[0].CustomInfo[nvidia.MPSV3GPUSetKey])
+
+			// Other modes continue to use the existing registration projection.
+			plugin.operatingMode = nvidia.HamiCoreMode
+			changed, err = plugin.RegisterInAnnotation()
+			require.NoError(t, err)
+			require.True(t, changed)
+			registered, err := device.UnMarshalNodeDevices(plugin.deviceCache)
+			require.NoError(t, err)
+			require.Len(t, registered, 1)
+			require.Nil(t, registered[0].CustomInfo)
+		})
 	}
 }

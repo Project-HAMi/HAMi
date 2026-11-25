@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path"
@@ -120,6 +121,7 @@ type NvidiaDevicePlugin struct {
 	cdiAnnotationPrefix string
 
 	operatingMode string
+	mpsV3         *mpsV3Manager
 	// Protected by applyMutex; only UUIDs of successfully destroyed instances.
 	pendingCDIRemovals          map[string]struct{}
 	pendingMIGOwnershipRemovals map[string]struct{}
@@ -176,7 +178,14 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string, nodeLabels ma
 		if val.Name != "" {
 			klog.Infof("Reading config from file %s", val.Name)
 		}
-		if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
+		defaults := val.NodeDefaultConfig
+		// Select the MPS policy as a unit so omitted options in an override
+		// do not inherit options from a different compute mode.
+		if defaults.MPSV3 != nil {
+			sConfig.MPSV3 = defaults.MPSV3
+			defaults.MPSV3 = nil
+		}
+		if err := mergo.Merge(&sConfig.NodeDefaultConfig, defaults, mergo.WithOverride); err != nil {
 			return "", err
 		}
 		if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
@@ -501,6 +510,12 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 		return err
 	}
 
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		if err := plugin.startMPSV3(); err != nil {
+			return err
+		}
+	}
+
 	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
@@ -540,6 +555,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) (resultErr error) 
 		}()
 	}
 
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		plugin.workers.Add(1)
+		go func() { defer plugin.workers.Done(); plugin.runMPSV3Reconciler() }()
+	}
 	return nil
 }
 
@@ -957,6 +976,9 @@ func (plugin *NvidiaDevicePlugin) applyStartupMigMode(deviceNumbers int, deviceN
 	if !needsDisable {
 		return nil
 	}
+	if plugin.operatingMode == nvidia.MpsV3Mode {
+		return fmt.Errorf("mps-v3 requires MIG disabled with no pending MIG transition; drain and configure the node before enabling this backend")
+	}
 	pods, detectErr := plugin.listLiveNodePodSnapshot()
 	var inUse map[int]struct{}
 	if detectErr == nil {
@@ -1022,6 +1044,10 @@ func (plugin *NvidiaDevicePlugin) stopLocked() error {
 		plugin.server.Stop()
 	}
 	plugin.workers.Wait()
+	if plugin.mpsV3 != nil {
+		plugin.mpsV3.close()
+		plugin.mpsV3 = nil
+	}
 	if plugin.migMgr != nil {
 		plugin.migMgr.Shutdown()
 	}
@@ -1139,21 +1165,44 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
-	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	lastHealth := make(map[string]string)
+	send := func(onlyChanged bool) error {
+		devices := plugin.apiDevices()
+		health := make(map[string]string, len(devices))
+		for _, d := range devices {
+			health[d.ID] = d.Health
+		}
+		if onlyChanged && maps.Equal(lastHealth, health) {
+			return nil
+		}
+		lastHealth = health
+		return s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: devices})
+	}
+	err := send(false)
 	if err != nil {
 		klog.Errorf("Failed to send ListAndWatch response: %v", err)
 		return err
 	}
 
+	var mpsTick <-chan time.Time
+	if plugin.mpsV3 != nil {
+		timer := time.NewTicker(5 * time.Second)
+		defer timer.Stop()
+		mpsTick = timer.C
+	}
 	for {
 		select {
 		case <-plugin.stop:
 			return nil
+		case <-mpsTick:
+			if err := send(true); err != nil {
+				return err
+			}
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+			if err := send(false); err != nil {
 				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
 				return nil
 			}
@@ -1377,6 +1426,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	defer plugin.applyMutex.Unlock()
 	plugin.migAllocationGeneration++
 	allocationCompleted := false
+	var mpsRollback []string
+	defer func() {
+		if !allocationCompleted && len(mpsRollback) > 0 {
+			plugin.rollbackMPSV3(mpsRollback)
+		}
+	}()
 	nodename := os.Getenv(util.NodeNameEnvName)
 
 	klog.InfoS("Allocate", "request", reqs)
@@ -1523,7 +1578,16 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			if plugin.operatingMode != "mig" {
+			if plugin.operatingMode == nvidia.MpsV3Mode {
+				key, created, err := plugin.allocateMPSV3(ctx, current, &currentCtr, devreq, response)
+				if created {
+					mpsRollback = append(mpsRollback, key)
+				}
+				if err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, err
+				}
+			} else if plugin.operatingMode != "mig" {
 				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
@@ -1885,7 +1949,15 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 	if plugin.schedulerConfig.DeviceSplitCount != nil {
 		deviceSplitCount = *plugin.schedulerConfig.DeviceSplitCount
 	}
-	return plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
+	devices := plugin.Devices().GetPluginDevices(deviceSplitCount, numaTopology)
+	if plugin.mpsV3 != nil {
+		for _, d := range devices {
+			if !plugin.mpsV3.gpuHealthy(physicalDeviceID(d.ID)) {
+				d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			}
+		}
+	}
+	return devices
 }
 
 // wholeGPUDisableHAMiCore turns on injecting CUDA_DISABLE_CONTROL=true
