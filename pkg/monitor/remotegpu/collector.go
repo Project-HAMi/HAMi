@@ -20,10 +20,13 @@ package remotegpu
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,10 +59,15 @@ var droppedSamples = prometheus.NewDesc("hami_remote_gpumonitor_dropped_samples"
 
 // Collector never stores previous samples: failures cannot replay stale usage.
 // Pods must be backed by a synchronized informer. Node is the GPU server node.
+// Each client pod placed on it has its own Lupine server there, reached at
+// Host on the port of the pod's endpoint.
 type Collector struct {
-	Node, URL string
-	Client    *http.Client
-	Pods      func() ([]*corev1.Pod, error)
+	Node, Host string
+	Client     *http.Client
+	Pods       func() ([]*corev1.Pod, error)
+	// Indices maps the node's GPU UUIDs to their NVML indices. A pod's server
+	// numbers only the cards it sees, so its own device_index is not the node's.
+	Indices func() (map[string]string, error)
 
 	mu          sync.Mutex
 	lastFailure string
@@ -107,9 +115,74 @@ func (c *Collector) recordSuccess() {
 }
 
 func (c *Collector) collect() ([]prometheus.Metric, error) {
+	pods, err := c.Pods()
+	if err != nil {
+		return nil, err
+	}
+	// A pod whose server cannot be read is left out, rather than reported
+	// with no usage, and the collection counts as failed.
+	byServer := map[string][]*corev1.Pod{}
+	for _, pod := range pods {
+		if url := c.serverURL(pod); url != "" {
+			byServer[url] = append(byServer[url], pod)
+		}
+	}
+	families := map[string]*dto.MetricFamily{}
+	var scraped []*corev1.Pod
+	var failed error
+	for url, served := range byServer {
+		fs, err := c.scrape(url)
+		if err != nil {
+			failed = errors.Join(failed, fmt.Errorf("%s: %w", url, err))
+			continue
+		}
+		merge(families, fs)
+		scraped = append(scraped, served...)
+	}
+	if c.Indices != nil && len(scraped) > 0 {
+		indices, err := c.Indices()
+		if err != nil {
+			return nil, err
+		}
+		for name, f := range families {
+			if !strings.HasPrefix(name, "lupine_host_") {
+				continue
+			}
+			for _, m := range f.Metric {
+				for _, l := range m.Label {
+					if l.GetName() == "device_index" {
+						if index, ok := indices[labels(m)["device_uuid"]]; ok {
+							l.Value = &index
+						}
+					}
+				}
+			}
+		}
+	}
+	samples, dropped := adapt(c.Node, families, scraped)
+	for reason, n := range dropped {
+		samples = append(samples, prometheus.MustNewConstMetric(droppedSamples, prometheus.GaugeValue, float64(n), c.Node, reason))
+	}
+	return samples, failed
+}
+
+// serverURL is the metrics endpoint of a pod's Lupine server, when the pod
+// has cards on this node.
+func (c *Collector) serverURL(pod *corev1.Pod) string {
+	if len(allocations(c.Node, []*corev1.Pod{pod})) == 0 {
+		return ""
+	}
+	_, port, err := net.SplitHostPort(pod.Annotations[remote.LupineServerAnno])
+	if err != nil {
+		return ""
+	}
+	return "http://" + net.JoinHostPort(c.Host, port) + "/metrics"
+}
+
+func (c *Collector) scrape(url string) (map[string]*dto.MetricFamily, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -141,15 +214,47 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 	if up == nil || len(up.Metric) != 1 || up.Metric[0].GetGauge().GetValue() != 1 {
 		return nil, fmt.Errorf("lupine NVML monitoring unavailable")
 	}
-	pods, err := c.Pods()
-	if err != nil {
-		return nil, err
+	return families, nil
+}
+
+// merge adds one server's families to the node's. Servers that share a card
+// each report it once. HAMi-core in a server that shares a card reports only
+// that server's memory, so theirs add up to the card's; utilization is the
+// card's own in every report.
+func merge(into, from map[string]*dto.MetricFamily) {
+	for name, f := range from {
+		dst := into[name]
+		if dst == nil {
+			dst = &dto.MetricFamily{Name: f.Name, Help: f.Help, Type: f.Type}
+			into[name] = dst
+		}
+		if !strings.HasPrefix(name, "lupine_host_") {
+			dst.Metric = append(dst.Metric, f.Metric...)
+			continue
+		}
+		for _, m := range f.Metric {
+			uuid := labels(m)["device_uuid"]
+			i := slices.IndexFunc(dst.Metric, func(o *dto.Metric) bool { return labels(o)["device_uuid"] == uuid })
+			if i < 0 {
+				dst.Metric = append(dst.Metric, m)
+				continue
+			}
+			have, add := dst.Metric[i].GetGauge(), m.GetGauge()
+			if have == nil || add == nil {
+				continue
+			}
+			v := add.GetValue()
+			switch name {
+			case "lupine_host_gpu_memory_used_bytes":
+				v += have.GetValue()
+			case "lupine_host_gpu_utilization_percent":
+				v = max(v, have.GetValue())
+			default:
+				continue
+			}
+			have.Value = &v
+		}
 	}
-	samples, dropped := adapt(c.Node, families, pods)
-	for reason, n := range dropped {
-		samples = append(samples, prometheus.MustNewConstMetric(droppedSamples, prometheus.GaugeValue, float64(n), c.Node, reason))
-	}
-	return samples, nil
 }
 
 func labels(m *dto.Metric) map[string]string {
@@ -209,14 +314,6 @@ func allocations(node string, pods []*corev1.Pod) map[string]map[string]allocati
 					out[id] = map[string]allocation{}
 				}
 				limit := float64(d.Usedmem) * 1024 * 1024
-				for _, env := range containers[i].Env {
-					if env.Name == "CUDA_DEVICE_MEMORY_LIMIT" && strings.HasSuffix(env.Value, "m") {
-						mib, err := strconv.ParseUint(strings.TrimSuffix(env.Value, "m"), 10, 64)
-						if err == nil && mib > 0 {
-							limit = math.Min(limit, float64(mib)*1024*1024)
-						}
-					}
-				}
 				out[id][uuid] = allocation{[]string{pod.Namespace, pod.Name, containers[i].Name, strconv.Itoa(index), uuid}, limit}
 			}
 		}

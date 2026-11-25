@@ -1,0 +1,32 @@
+suite: Lupine server pods
+templates:
+  - scheduler/device-configmap.yaml
+  - scheduler/role.yaml
+set:
+  devices.remotegpu.enabled: true
+tests:
+  - it: hands the scheduler the server pod settings by their Kubernetes names
+    template: scheduler/device-configmap.yaml
+    set:
+      devices.remotegpu.server.runtimeClassName: nvidia
+      devices.remotegpu.server.tolerations:
+        - key: gpu
+          operator: Exists
+      devices.remotegpu.server.securityContext:
+        privileged: true
+      devices.remotegpu.server.resources:
+        limits:
+          memory: 4Gi
+    asserts:
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '\n  server:\n    image: "ghcr\.io/lupinemachines/lupine-server:[^"]+"\n    imagePullPolicy: "IfNotPresent"\n    runtimeClassName: "nvidia"\n    tolerations:\n      - key: gpu\n        operator: Exists\n    securityContext:\n      privileged: true\n    resources:\n      limits:\n        memory: 4Gi\n'
+  - it: lets the scheduler start and remove server pods in its namespace
+    template: scheduler/role.yaml
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["pods"]
+            verbs: ["create", "delete"]

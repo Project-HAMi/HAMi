@@ -42,10 +42,28 @@ func remoteClientContainer(name string) corev1.Container {
 	}}}
 }
 
+// envOf returns a container's entry for one variable, if it has one.
+func envOf(ctr *corev1.Container, name string) *corev1.EnvVar {
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == name {
+			return &ctr.Env[i]
+		}
+	}
+	return nil
+}
+
+// envValue returns a container's literal value for one variable.
+func envValue(ctr *corev1.Container, name string) string {
+	if env := envOf(ctr, name); env != nil {
+		return env.Value
+	}
+	return ""
+}
+
 func TestClientDeliverySharedAndIdempotent(t *testing.T) {
 	d := clientTestDevice(t)
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("a"), remoteClientContainer("b"), {Name: "sidecar"}}}}
-	pod.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "LD_LIBRARY_PATH", Value: "/custom/lib"}, {Name: ldPreloadEnv, Value: "/custom/preload.so"}}
+	pod.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "LD_LIBRARY_PATH", Value: "/custom/lib"}, {Name: "LD_PRELOAD", Value: "/custom/preload.so"}}
 	pod.Spec.Containers[0].Resources.Limits["nvidia.com/remote-gpu-memory"] = resource.MustParse("3000")
 	for range 2 {
 		for i := range pod.Spec.Containers {
@@ -55,11 +73,13 @@ func TestClientDeliverySharedAndIdempotent(t *testing.T) {
 		}
 		FinalizeAdmission(pod)
 	}
-	if len(pod.Spec.InitContainers) != 2 || len(pod.Spec.Volumes) != 2 {
+	if len(pod.Spec.InitContainers) != 1 || len(pod.Spec.Volumes) != 1 {
 		t.Fatalf("delivery duplicated: %+v", pod.Spec)
 	}
-	if envValue(&pod.Spec.Containers[0], ldPreloadEnv) != libMountPath+"/libvgpu.so /custom/preload.so" {
-		t.Fatal("preload duplicated or lost")
+	// The pod's server holds it to its memory, so the client gets no
+	// HAMi-core of its own.
+	if envValue(&pod.Spec.Containers[0], "LD_PRELOAD") != "/custom/preload.so" || envOf(&pod.Spec.Containers[0], "CUDA_DEVICE_MEMORY_LIMIT") != nil {
+		t.Fatal("memory request armed the client")
 	}
 	if envValue(&pod.Spec.Containers[0], "LD_LIBRARY_PATH") != "/custom/lib" {
 		t.Fatal("lost workload library path")
@@ -85,16 +105,16 @@ func TestClientDeliveryBeforeGPUInitContainers(t *testing.T) {
 		}
 	}
 	FinalizeAdmission(pod)
-	if len(pod.Spec.InitContainers) != 4 {
+	if len(pod.Spec.InitContainers) != 3 {
 		t.Fatalf("missing delivery: %+v", pod.Spec.InitContainers)
 	}
 	for i, name := range []string{"warmup-a", "warmup-b"} {
-		c := pod.Spec.InitContainers[i+2]
+		c := pod.Spec.InitContainers[i+1]
 		if c.Name != name || envValue(&c, "LUPINE_LIBCUDA") == "" {
 			t.Fatalf("init lost or unwired: %+v", c)
 		}
 	}
-	if pod.Spec.InitContainers[0].Name != libVolumeName || pod.Spec.InitContainers[1].Name != clientVolumeName {
+	if pod.Spec.InitContainers[0].Name != clientVolumeName {
 		t.Fatal("delivery must precede workload init")
 	}
 }
@@ -119,12 +139,8 @@ func TestClientDeliveryPreservesExplicitLibraryMount(t *testing.T) {
 	}
 }
 
-// Library delivery must also work when enforcement is disabled globally.
-func TestClientDeliveryWithoutCore(t *testing.T) {
+func TestClientDeliveryMountsOnlyLupine(t *testing.T) {
 	d := clientTestDevice(t)
-	previous := RemoteGPULibImage
-	RemoteGPULibImage = ""
-	t.Cleanup(func() { RemoteGPULibImage = previous })
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{remoteClientContainer("app")}}}
 	ctr := &pod.Spec.Containers[0]
 	if _, err := d.MutateAdmission(ctr, pod); err != nil {
@@ -137,7 +153,7 @@ func TestClientDeliveryWithoutCore(t *testing.T) {
 	if !reflect.DeepEqual(ctr.VolumeMounts[len(ctr.VolumeMounts)-1], corev1.VolumeMount{Name: clientVolumeName, MountPath: clientSMIMountPath, SubPath: clientSMIWrapperName, ReadOnly: true}) {
 		t.Fatal("nvidia-smi not mounted from the client image")
 	}
-	if envOf(ctr, ldPreloadEnv) != nil {
+	if envOf(ctr, "LD_PRELOAD") != nil {
 		t.Fatal("client delivery must not preload Lupine")
 	}
 	if envOf(ctr, "LD_LIBRARY_PATH") != nil {
@@ -215,7 +231,7 @@ func TestClientDeliveryRejectsConflicts(t *testing.T) {
 
 func TestFinalizeAdmissionLeavesNonGPUInitOrderUnchanged(t *testing.T) {
 	clientTestDevice(t)
-	p := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{Name: "setup"}, {Name: libVolumeName}, {Name: clientVolumeName}}}}
+	p := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{Name: "setup"}, {Name: clientVolumeName}}}}
 	before := p.DeepCopy()
 	FinalizeAdmission(p)
 	if !reflect.DeepEqual(before, p) {
@@ -317,5 +333,41 @@ func TestClientDeliveryNVIDIASmiCopyFailure(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "cp nvidia-smi failed") {
 		t.Fatalf("nvidia-smi copy failure: %v: %s", err, output)
+	}
+}
+
+// Delivery holds the workload back until nvidia-smi reaches the pod's server,
+// which starts beside it on the GPU node.
+func TestClientDeliveryWaitsForTheServer(t *testing.T) {
+	delivery := clientDeliveryContainer()
+	server := envOf(&delivery, lupineServerEnv)
+	if server == nil || server.ValueFrom == nil || server.ValueFrom.FieldRef.FieldPath != "metadata.annotations['"+LupineServerAnno+"']" {
+		t.Fatalf("delivery is not given the server: %+v", delivery.Env)
+	}
+	root := t.TempDir()
+	source, target, libraries := filepath.Join(root, "driver"), filepath.Join(root, "delivered"), filepath.Join(root, "lib")
+	for _, path := range []string{source, target, libraries} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(libraries, "libnghttp2.so.14"), []byte("nghttp2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Fails until its second run, as nvidia-smi does until the server listens.
+	smi := filepath.Join(root, "nvidia-smi")
+	script := "#!/bin/sh\n" +
+		"[ \"$1\" = -L ] && [ \"$LD_LIBRARY_PATH\" = " + target + " ] || exit 2\n" +
+		"n=$(($(cat " + root + "/runs 2>/dev/null || echo 0) + 1)); echo $n > " + root + "/runs; [ $n -ge 2 ]\n"
+	if err := os.WriteFile(smi, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-ec", clientDeliveryScript, "delivery-test", source, target, libraries)
+	cmd.Env = append(os.Environ(), "NVIDIA_SMI_SOURCE="+smi, "LUPINE_SERVER=10.0.0.5:14834")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("delivery: %v: %s", err, output)
+	}
+	if runs, _ := os.ReadFile(filepath.Join(root, "runs")); strings.TrimSpace(string(runs)) != "2" {
+		t.Fatalf("nvidia-smi ran %q times, want 2", runs)
 	}
 }

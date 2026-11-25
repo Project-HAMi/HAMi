@@ -13,9 +13,12 @@
 #   export LUPINE_SERVER=127.0.0.1:14833
 #   LD_LIBRARY_PATH=/opt/lupine/lib nvidia-smi
 #
-# The forwarded port is the one that server listens on, which is the value of
-# its hami.io/lupine-server label (applied by the device plugin for
-# operatingmode: remote) when it carries one.
+# The forwarded port is the node's own one: the value of its
+# hami.io/lupine-server label (applied by the device plugin for
+# operatingmode: remote) when it carries one, devices.remotegpu.defaultPort
+# otherwise. The chart runs no server there. It starts a server for each client
+# pod only, on a port above the node's own, so a session needs a server you run
+# on that port yourself.
 #
 # A session is not accounted for. The stub holds no card, because a lupine node
 # reports no devices to the scheduler: it serves its GPUs rather than hosting

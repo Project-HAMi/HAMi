@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -36,6 +37,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -44,16 +47,16 @@ import (
 func main() {
 	klog.InitFlags(nil)
 	node := flag.String("node", os.Getenv("NODE_NAME"), "GPU server node name")
-	source := flag.String("lupine-metrics-url", "http://127.0.0.1:14833/metrics", "Lupine metrics endpoint")
+	host := flag.String("lupine-host", "127.0.0.1", "Address the node's Lupine servers are reached at")
 	bind := flag.String("metrics-bind-address", ":31993", "HAMi metrics listen address")
 	flag.Parse()
-	if err := run(*node, *source, *bind); err != nil {
+	if err := run(*node, *host, *bind); err != nil {
 		klog.ErrorS(err, "remote GPU monitor stopped")
 		os.Exit(1)
 	}
 }
 
-func run(node, source, bind string) error {
+func run(node, host, bind string) error {
 	if node == "" {
 		return fmt.Errorf("node name is required")
 	}
@@ -67,10 +70,10 @@ func run(node, source, bind string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, client, node, source, bind)
+	return serve(ctx, client, node, host, bind)
 }
 
-func serve(ctx context.Context, client kubernetes.Interface, node, source, bind string) error {
+func serve(ctx context.Context, client kubernetes.Interface, node, host, bind string) error {
 	factory := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.LabelSelector = remote.RemoteGPUPodLabel + "=true"
 	}))
@@ -87,11 +90,13 @@ func serve(ctx context.Context, client kubernetes.Interface, node, source, bind 
 	}
 	factory.Start(ctx.Done())
 	registry := prometheus.NewRegistry()
-	prometheus.WrapRegistererWith(prometheus.Labels{"zone": "vGPU"}, registry).MustRegister(&remotegpu.Collector{Node: node, URL: source, Pods: func() ([]*corev1.Pod, error) {
+	prometheus.WrapRegistererWith(prometheus.Labels{"zone": "vGPU"}, registry).MustRegister(&remotegpu.Collector{Node: node, Host: host, Pods: func() ([]*corev1.Pod, error) {
 		if !informer.HasSynced() {
 			return nil, fmt.Errorf("pod cache not synchronized")
 		}
 		return pods.Lister().List(labels.Everything())
+	}, Indices: func() (map[string]string, error) {
+		return nodeIndices(ctx, client, node)
 	}})
 	server := &http.Server{Addr: bind, Handler: newServeMux(informer.HasSynced, registry), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -122,6 +127,24 @@ func newServeMux(ready func() bool, registry *prometheus.Registry) *http.ServeMu
 	return mux
 }
 
+// nodeIndices reads the NVML index of each GPU on the node from the device
+// plugin's registration.
+func nodeIndices(ctx context.Context, client kubernetes.Interface, node string) (map[string]string, error) {
+	n, err := client.CoreV1().Nodes().Get(ctx, node, metav1.GetOptions{ResourceVersion: "0"})
+	if err != nil {
+		return nil, err
+	}
+	gpus, err := device.UnMarshalNodeDevices(n.Annotations[nvidia.RegisterAnnos])
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(gpus))
+	for _, gpu := range gpus {
+		out[gpu.ID] = strconv.Itoa(int(gpu.Index))
+	}
+	return out, nil
+}
+
 // trimPod keeps the fields the collector reads. The informer still receives
 // every labeled Pod; this only shrinks the local cache.
 func trimPod(pod *corev1.Pod) *corev1.Pod {
@@ -139,8 +162,10 @@ func trimPod(pod *corev1.Pod) *corev1.Pod {
 	if v := pod.Annotations[util.AssignedNodeAnnotations]; v != "" {
 		out.Annotations[util.AssignedNodeAnnotations] = v
 	}
-	if v := pod.Annotations[remote.AllocatedAnnos]; v != "" {
-		out.Annotations[remote.AllocatedAnnos] = v
+	for _, key := range []string{remote.AllocatedAnnos, remote.LupineServerAnno} {
+		if v := pod.Annotations[key]; v != "" {
+			out.Annotations[key] = v
+		}
 	}
 	out.Spec.InitContainers = trimContainers(pod.Spec.InitContainers)
 	out.Spec.Containers = trimContainers(pod.Spec.Containers)
@@ -161,11 +186,6 @@ func trimContainers(in []corev1.Container) []corev1.Container {
 	out := make([]corev1.Container, len(in))
 	for i, c := range in {
 		out[i] = corev1.Container{Name: c.Name, RestartPolicy: c.RestartPolicy}
-		for _, env := range c.Env {
-			if env.Name == "CUDA_DEVICE_MEMORY_LIMIT" {
-				out[i].Env = append(out[i].Env, corev1.EnvVar{Name: env.Name, Value: env.Value})
-			}
-		}
 	}
 	return out
 }

@@ -175,10 +175,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
 {{- end -}}
 
-{{- define "hami.remotegpu.server.imagePullSecrets" -}}
-{{ include "common.images.pullSecrets" (dict "images" (list .Values.devices.remotegpu.server.image .Values.devicePlugin.monitor.image) "global" .Values.global) }}
-{{- end -}}
-
 {{/*
 With an auto-detected driver root, the device plugin loads NVML from the driver
 injected by the NVIDIA Container Toolkit. The host root is mounted only when a

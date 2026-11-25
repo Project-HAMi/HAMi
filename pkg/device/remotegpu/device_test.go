@@ -744,9 +744,10 @@ func TestFit_DoesNotHandOutAServerTheForcedRefreshRemoved(t *testing.T) {
 // that slice while the pointer is live moves the array out from under it. An
 // init container that asks for a card must still come back wired up.
 func TestMutateAdmission_WiresAnInitContainerThatAsksForACard(t *testing.T) {
-	RemoteGPULibImage = "hami:latest"
-	t.Cleanup(func() { RemoteGPULibImage = "" })
-	dev := InitRemoteGPUDevice(testConfig())
+	cfg := testConfig()
+	cfg.ClientImage = "lupine-client:test"
+	dev := InitRemoteGPUDevice(cfg)
+	t.Cleanup(func() { RemoteGPUClientImage = "" })
 	pod := &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{
 		Name: "warmup",
 		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
@@ -761,61 +762,9 @@ func TestMutateAdmission_WiresAnInitContainerThatAsksForACard(t *testing.T) {
 
 	warmup := pod.Spec.InitContainers[0]
 	assert.Equal(t, warmup.Name, "warmup", "the delivery container is appended after it")
-	assert.Equal(t, envValue(&warmup, memoryLimitEnv), "2000m")
-	assert.Equal(t, envValue(&warmup, ldPreloadEnv), libMountPath+"/libvgpu.so")
-	assert.Equal(t, len(warmup.VolumeMounts), 1, "the library still gets mounted")
-	var server bool
-	for _, env := range warmup.Env {
-		if env.Name == lupineServerEnv {
-			server = env.ValueFrom != nil
-		}
-	}
-	assert.Assert(t, server, "LUPINE_SERVER must survive the append too")
+	assert.Assert(t, envOf(&warmup, lupineServerEnv).ValueFrom != nil, "LUPINE_SERVER must survive the append")
+	assert.Assert(t, envOf(&warmup, "LUPINE_LIBCUDA") != nil, "and so must the client libraries")
 	assert.Equal(t, len(pod.Spec.InitContainers), 2, "and the delivery container is there")
-}
-
-// A workload that sets its own LD_PRELOAD keeps it; HAMi-core goes in front.
-func TestMutateAdmission_KeepsAnExistingLdPreload(t *testing.T) {
-	RemoteGPULibImage = "hami:latest"
-	t.Cleanup(func() { RemoteGPULibImage = "" })
-	dev := InitRemoteGPUDevice(testConfig())
-	ctr := &corev1.Container{
-		Env: []corev1.EnvVar{{Name: ldPreloadEnv, Value: "/opt/theirs.so"}},
-		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-			corev1.ResourceName(RemoteGPUResourceCount):  resource.MustParse("1"),
-			corev1.ResourceName(RemoteGPUResourceMemory): resource.MustParse("2000"),
-		}},
-	}
-
-	_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
-	assert.NilError(t, err)
-	assert.Equal(t, envValue(ctr, ldPreloadEnv), libMountPath+"/libvgpu.so /opt/theirs.so")
-}
-
-// An env var carries a literal or a source, never both, so a sourced
-// LD_PRELOAD cannot be composed with HAMi-core's. Saying so beats replacing
-// the EnvVar and quietly losing the preload the workload asked for.
-func TestMutateAdmission_RefusesASourcedLdPreload(t *testing.T) {
-	RemoteGPULibImage = "hami:latest"
-	t.Cleanup(func() { RemoteGPULibImage = "" })
-	dev := InitRemoteGPUDevice(testConfig())
-	ctr := &corev1.Container{
-		Name: "app",
-		Env: []corev1.EnvVar{{Name: ldPreloadEnv, ValueFrom: &corev1.EnvVarSource{
-			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "preload"},
-		}}},
-		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-			corev1.ResourceName(RemoteGPUResourceCount):  resource.MustParse("1"),
-			corev1.ResourceName(RemoteGPUResourceMemory): resource.MustParse("2000"),
-		}},
-	}
-	pod := &corev1.Pod{}
-
-	_, err := dev.MutateAdmission(ctr, pod)
-	assert.ErrorContains(t, err, ldPreloadEnv)
-	assert.Assert(t, envOf(ctr, ldPreloadEnv).ValueFrom != nil, "the workload's source is left alone")
-	assert.Equal(t, len(ctr.VolumeMounts), 0, "and nothing was half-applied")
-	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
 
 // Cards are handed out one by one, so a card the forced refresh adds to a
@@ -984,6 +933,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 	assert.Equal(t, empty.Nums, int64(0))
 }
 
+// Each pod gets its own server, on a port above the node's own one.
 func TestPatchAnnotations_WritesResolvedEndpoint(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
 	dev.pool.mu.Lock()
@@ -999,10 +949,16 @@ func TestPatchAnnotations_WritesResolvedEndpoint(t *testing.T) {
 	}
 	annos := map[string]string{}
 
-	got := dev.PatchAnnotations(&corev1.Pod{}, &annos, pd)
-	assert.Equal(t, got[LupineServerAnno], "10.0.0.5:14833")
+	got := dev.PatchAnnotations(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-a"}}, &annos, pd)
+	assert.Equal(t, got[LupineServerAnno], "10.0.0.5:14834")
+	assert.Equal(t, got[ServerDevicesAnno], "GPU-1")
 	assert.Assert(t, got[InRequestAnnos] != "")
 	assert.Equal(t, got[AllocatedAnnos], got[InRequestAnnos])
+
+	// A second pod on the same card gets a server of its own.
+	other := map[string]string{}
+	got = dev.PatchAnnotations(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-b"}}, &other, pd)
+	assert.Equal(t, got[LupineServerAnno], "10.0.0.5:14835")
 }
 
 func TestPatchAnnotations_NoAllocation(t *testing.T) {
@@ -1020,79 +976,6 @@ func TestCheckHealth_AlwaysHealthy(t *testing.T) {
 	health, needUpdate := dev.CheckHealth(RemoteGPUDevice, &corev1.Node{})
 	assert.Equal(t, health, true)
 	assert.Equal(t, needUpdate, true)
-}
-
-// The memory request only means something once HAMi-core is in the container to
-// hold the workload to it, and on a GPU-less node no device plugin is there to
-// put it in. Verified on a real cluster: without this a pod asking for 2000MB
-// allocated 8GB unhindered.
-func TestMutateAdmission_ArmsTheMemoryLimit(t *testing.T) {
-	dev := InitRemoteGPUDevice(testConfig())
-	ctr := &corev1.Container{
-		Name: "app",
-		Env:  []corev1.EnvVar{{Name: memoryLimitEnv + "_1", Value: "99999m"}},
-		Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-			"nvidia.com/remote-gpu":        resource.MustParse("2"),
-			"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
-		}},
-	}
-	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{*ctr}}}
-
-	found, err := dev.MutateAdmission(ctr, pod)
-	assert.NilError(t, err)
-	assert.Equal(t, found, true)
-
-	env := map[string]string{}
-	for _, e := range ctr.Env {
-		env[e.Name] = e.Value
-	}
-	assert.Equal(t, env[memoryLimitEnv], "2000m")
-	assert.Equal(t, env[memoryLimitEnv+"_0"], "2000m", "a per-device limit is set too, so the workload cannot set its own")
-	assert.Equal(t, env[memoryLimitEnv+"_1"], "2000m", "one the workload set is replaced")
-	assert.Equal(t, env[ldPreloadEnv], libMountPath+"/libvgpu.so")
-	assert.Equal(t, env[sharedCacheEnv], libMountPath+"/app.cache", "each container keeps its own limit")
-
-	assert.Equal(t, len(pod.Spec.InitContainers), 1)
-	assert.Equal(t, pod.Spec.InitContainers[0].Image, "projecthami/hami:test")
-	assert.Equal(t, len(pod.Spec.Volumes), 1)
-	assert.Equal(t, len(ctr.VolumeMounts), 1)
-
-	// A second container asking for a remote GPU shares the one copy.
-	other := &corev1.Container{Name: "sidecar", Resources: ctr.Resources}
-	_, err = dev.MutateAdmission(other, pod)
-	assert.NilError(t, err)
-	assert.Equal(t, len(pod.Spec.InitContainers), 1)
-	assert.Equal(t, len(pod.Spec.Volumes), 1)
-	assert.Equal(t, len(other.VolumeMounts), 1)
-}
-
-// Without a memory request there is no limit to enforce, and without an image
-// there is nothing to enforce it with. Neither should drag HAMi-core in.
-func TestMutateAdmission_SkipsEnforcementWhenNotAsked(t *testing.T) {
-	countOnly := corev1.ResourceRequirements{Limits: corev1.ResourceList{
-		"nvidia.com/remote-gpu": resource.MustParse("1"),
-	}}
-	withMem := corev1.ResourceRequirements{Limits: corev1.ResourceList{
-		"nvidia.com/remote-gpu":        resource.MustParse("1"),
-		"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
-	}}
-
-	dev := InitRemoteGPUDevice(testConfig())
-	ctr := &corev1.Container{Name: "app", Resources: countOnly}
-	pod := &corev1.Pod{}
-	_, err := dev.MutateAdmission(ctr, pod)
-	assert.NilError(t, err)
-	assert.Equal(t, len(pod.Spec.InitContainers), 0)
-
-	cfg := testConfig()
-	cfg.LibImage = ""
-	dev = InitRemoteGPUDevice(cfg)
-	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
-	ctr = &corev1.Container{Name: "app", Resources: withMem}
-	pod = &corev1.Pod{}
-	_, err = dev.MutateAdmission(ctr, pod)
-	assert.NilError(t, err)
-	assert.Equal(t, len(pod.Spec.InitContainers), 0)
 }
 
 // CUDA_VISIBLE_DEVICES limits the pod to its own cards, so the rest of the
@@ -1470,12 +1353,13 @@ func TestFit_IgnoresThePodsOwnBooking(t *testing.T) {
 	assert.Equal(t, fit, false, "but it is for every other pod")
 }
 
-// The client applies CUDA_VISIBLE_DEVICES to the server's cards, which is what
-// keeps pods sharing a server out of each other's cards. Each container gets
-// its own list, keyed by name: the webhook may move containers around, and a
-// pod-wide list would show a container the cards its sibling was given.
+// The pod's server sees only the pod's cards, numbered in PCI bus order, and
+// each container sees its own among them. Lists are keyed by container name:
+// the webhook may move containers around, and a pod-wide list would show a
+// container the cards its sibling was given.
 func TestPatchAnnotations_ListsTheVisibleCards(t *testing.T) {
 	dev := InitRemoteGPUDevice(testConfig())
+	dev.pool.endpoints["gpu-a"] = "10.0.0.5:14833"
 	annos := map[string]string{}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-a"}, Spec: corev1.PodSpec{
 		InitContainers: []corev1.Container{{Name: "lib"}},
@@ -1489,8 +1373,9 @@ func TestPatchAnnotations_ListsTheVisibleCards(t *testing.T) {
 			device.ContainerDevices{},
 		},
 	})
-	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"a"], "2,1")
-	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"b"], "3")
+	assert.Equal(t, got[ServerDevicesAnno], "GPU-1,GPU-2,GPU-3")
+	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"a"], "1,0")
+	assert.Equal(t, got[VisibleDevicesAnnoPrefix+"b"], "2")
 	_, ok := got[VisibleDevicesAnnoPrefix+"lib"]
 	assert.Assert(t, !ok, "a container without cards gets no list")
 	_, ok = got[VisibleDevicesAnnoPrefix+"cpu"]

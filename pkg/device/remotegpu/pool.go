@@ -42,7 +42,8 @@ const (
 	// LupineServerLabel marks a GPU node as serving its GPUs through lupine.
 	// The NVIDIA device plugin applies it when the per-node ConfigMap sets
 	// operatingmode to remote (peer to hami-core / mig). The label value is the
-	// lupine listen port; an empty value means RemoteGPUConfig.DefaultPort.
+	// node's own port; an empty value means RemoteGPUConfig.DefaultPort.
+	// Client pods' servers listen above it.
 	LupineServerLabel = "hami.io/lupine-server"
 
 	// nvidiaRegisterAnnos is where the stock HAMi NVIDIA device plugin already
@@ -182,6 +183,17 @@ type pool struct {
 	held         map[string]map[string]booking // device ID -> pod key -> booked since the last refresh
 	busy         map[string][]string           // device ID -> client IDs the server reports on it
 	waiting      map[types.UID]waiter          // pods Fit refused since the fleet last changed
+	// taken holds the endpoints a placed client pod or a Lupine server pod
+	// holds, and heldEndpoints the ones booked since the last refresh, by pod
+	// key. Together they keep two server pods off one port.
+	taken         map[string]bool
+	heldEndpoints map[string]heldEndpoint
+}
+
+// heldEndpoint is an endpoint booked for a pod's server.
+type heldEndpoint struct {
+	endpoint string
+	at       time.Time
 }
 
 // share is what one pod holds of one card: how many of its containers use it,
@@ -225,13 +237,15 @@ func grantShare(d device.ContainerDevice) share {
 
 func newPool(defaultPort int) *pool {
 	return &pool{
-		defaultPort:  defaultPort,
-		endpoints:    map[string]string{},
-		serverLabels: map[string]labels.Set{},
-		inUse:        map[string]map[string]share{},
-		held:         map[string]map[string]booking{},
-		busy:         map[string][]string{},
-		waiting:      map[types.UID]waiter{},
+		defaultPort:   defaultPort,
+		endpoints:     map[string]string{},
+		serverLabels:  map[string]labels.Set{},
+		inUse:         map[string]map[string]share{},
+		held:          map[string]map[string]booking{},
+		busy:          map[string][]string{},
+		waiting:       map[types.UID]waiter{},
+		taken:         map[string]bool{},
+		heldEndpoints: map[string]heldEndpoint{},
 	}
 }
 
@@ -341,7 +355,7 @@ func (p *pool) refresh(ctx context.Context) {
 	p.refreshing = true
 	done := make(chan struct{})
 	p.refreshed = done
-	previousInUse := p.inUse
+	previousInUse, previousTaken := p.inUse, p.taken
 	previousBusy := p.busy
 	previousDevices, previousEndpoints, podsListed := p.devices, p.endpoints, p.podsListed
 	p.mu.Unlock()
@@ -402,14 +416,15 @@ func (p *pool) refresh(ctx context.Context) {
 	// none is currently eligible for new allocations. A NotReady server must
 	// not make the allocations of its running Pods appear released.
 	var inUse map[string]map[string]share
+	var taken map[string]bool
 	// listed says the pod list actually ran. A booking is only expired against
 	// a list that happened; expiring it against one that failed would hand a
 	// bound pod's card to a second pod.
 	listed := true
 	if len(nodes) == 0 {
-		inUse = map[string]map[string]share{}
+		inUse, taken = map[string]map[string]share{}, map[string]bool{}
 	} else {
-		inUse, listed = reservations(ctx, previousInUse)
+		inUse, taken, listed = reservations(ctx, previousInUse, previousTaken)
 	}
 	if !listed {
 		// Only unchanged servers covered by a successful Pod list can keep
@@ -464,6 +479,7 @@ func (p *pool) refresh(ctx context.Context) {
 	p.serverLabels = serverLabels
 	p.devices = devices
 	p.inUse = inUse
+	p.taken = taken
 	// An empty Node list skips reservations(); it is not a successful Pod list.
 	if listed && len(nodes) > 0 {
 		p.podsListed = true
@@ -486,6 +502,11 @@ func (p *pool) refresh(ctx context.Context) {
 			}
 			if len(pods) == 0 {
 				delete(p.held, id)
+			}
+		}
+		for pod, h := range p.heldEndpoints {
+			if p.taken[h.endpoint] || time.Since(h.at) > heldTTL {
+				delete(p.heldEndpoints, pod)
 			}
 		}
 	}
@@ -580,16 +601,18 @@ func decodeNodeGPUs(n *corev1.Node) ([]*device.DeviceInfo, error) {
 
 // reservations reads back every allocation the scheduler has already written
 // into a pod annotation, so a device booked for a pod on one client node is not
-// handed out again to a pod landing on another. previous is returned unchanged
-// on a list error, so a transient API error does not free every reservation,
-// and the second return says whether the list ran at all.
-func reservations(ctx context.Context, previous map[string]map[string]share) (map[string]map[string]share, bool) {
+// handed out again to a pod landing on another. It also collects the endpoints
+// that client pods and their Lupine servers hold. previous and previousTaken
+// are returned unchanged on a list error, so a transient API error does not
+// free every reservation, and the last return says whether the list ran at all.
+func reservations(ctx context.Context, previous map[string]map[string]share, previousTaken map[string]bool) (map[string]map[string]share, map[string]bool, bool) {
 	pods, err := listPods(ctx)
 	if err != nil {
 		klog.ErrorS(err, "remotegpu: failed to list pods, keeping previous reservations")
-		return previous, false
+		return previous, previousTaken, false
 	}
 	held := map[string]map[string]share{}
+	taken := map[string]bool{}
 	for i := range pods {
 		pod := &pods[i]
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
@@ -603,42 +626,12 @@ func reservations(ctx context.Context, previous map[string]map[string]share) (ma
 		if pod.Spec.NodeName == "" {
 			continue
 		}
-		raw, ok := pod.Annotations[AllocatedAnnos]
-		if !ok || raw == "" {
-			continue
+		// A server pod carries its endpoint too, and holds the port for as
+		// long as it runs, even after its client is gone.
+		if ep := pod.Annotations[LupineServerAnno]; ep != "" {
+			taken[ep] = true
 		}
-		// A pod holds each card at its peak for as long as it lives: an
-		// ordinary init container runs alone, beside the sidecars started
-		// before it, but kubelet runs it again when it recreates the sandbox,
-		// so its share is never given back to other pods.
-		running, sidecars, initPeak := map[string]share{}, map[string]share{}, map[string]share{}
-		for i, ctr := range strings.Split(raw, device.OnePodMultiContainerSplitSymbol) {
-			devs, err := device.DecodeContainerDevices(ctr)
-			if err != nil {
-				klog.V(4).InfoS("remotegpu: skipping undecodable allocation annotation",
-					"pod", klog.KObj(pod), "error", err)
-				continue
-			}
-			mine := map[string]share{}
-			for _, d := range devs {
-				mine[d.UUID] = mine[d.UUID].add(grantShare(d))
-			}
-			for id, g := range mine {
-				switch {
-				case ordinaryInit(pod, i):
-					initPeak[id] = maxShare(initPeak[id], sidecars[id].add(g))
-				case i < len(pod.Spec.InitContainers):
-					sidecars[id] = sidecars[id].add(g)
-					running[id] = running[id].add(g)
-				default:
-					running[id] = running[id].add(g)
-				}
-			}
-		}
-		for id, peak := range initPeak {
-			running[id] = maxShare(running[id], peak)
-		}
-		for id, g := range running {
+		for id, g := range podShares(pod) {
 			if held[id] == nil {
 				held[id] = map[string]share{}
 			}
@@ -646,7 +639,47 @@ func reservations(ctx context.Context, previous map[string]map[string]share) (ma
 			held[id][podKey(pod)] = g
 		}
 	}
-	return held, true
+	return held, taken, true
+}
+
+// podShares reads what a pod holds of each card from its allocation
+// annotation. A pod holds each card at its peak for as long as it lives: an
+// ordinary init container runs alone, beside the sidecars started before it,
+// but kubelet runs it again when it recreates the sandbox, so its share is
+// never given back to other pods.
+func podShares(pod *corev1.Pod) map[string]share {
+	raw := pod.Annotations[AllocatedAnnos]
+	if raw == "" {
+		return nil
+	}
+	running, sidecars, initPeak := map[string]share{}, map[string]share{}, map[string]share{}
+	for i, ctr := range strings.Split(raw, device.OnePodMultiContainerSplitSymbol) {
+		devs, err := device.DecodeContainerDevices(ctr)
+		if err != nil {
+			klog.V(4).InfoS("remotegpu: skipping undecodable allocation annotation",
+				"pod", klog.KObj(pod), "error", err)
+			continue
+		}
+		mine := map[string]share{}
+		for _, d := range devs {
+			mine[d.UUID] = mine[d.UUID].add(grantShare(d))
+		}
+		for id, g := range mine {
+			switch {
+			case ordinaryInit(pod, i):
+				initPeak[id] = maxShare(initPeak[id], sidecars[id].add(g))
+			case i < len(pod.Spec.InitContainers):
+				sidecars[id] = sidecars[id].add(g)
+				running[id] = running[id].add(g)
+			default:
+				running[id] = running[id].add(g)
+			}
+		}
+	}
+	for id, peak := range initPeak {
+		running[id] = maxShare(running[id], peak)
+	}
+	return running
 }
 
 // podKey names the pod a share belongs to. The UID is what identifies a pod;
@@ -826,6 +859,7 @@ func (p *pool) dropBookingLocked(pod string) {
 	if pod == "" {
 		return
 	}
+	delete(p.heldEndpoints, pod)
 	for id, pods := range p.held {
 		delete(pods, pod)
 		if len(pods) == 0 {
@@ -995,12 +1029,46 @@ func askServers(ctx context.Context, endpoints map[string]string, previous map[s
 	return busy
 }
 
-// endpoint returns the "host:port" a client should point LUPINE_SERVER at.
+// endpoint returns a server node's own "host:port", the one its label names.
 func (p *pool) endpoint(nodeName string) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	ep, ok := p.endpoints[nodeName]
 	return ep, ok
+}
+
+// assignEndpoint books the endpoint of a pod's own Lupine server on a server
+// node: the lowest port above the node's own that no other server holds. The
+// node's own port stays free for a server run outside the chart, which session
+// relays forward to. A pod has one booking, so this replaces its last one.
+func (p *pool) assignEndpoint(server, pod string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.heldEndpoints, pod)
+	base, ok := p.endpoints[server]
+	if !ok {
+		return "", false
+	}
+	host, raw, err := net.SplitHostPort(base)
+	if err != nil {
+		return "", false
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil {
+		return "", false
+	}
+	held := make(map[string]bool, len(p.heldEndpoints))
+	for _, h := range p.heldEndpoints {
+		held[h.endpoint] = true
+	}
+	for port++; port <= 65535; port++ {
+		ep := net.JoinHostPort(host, strconv.Itoa(port))
+		if !p.taken[ep] && !held[ep] {
+			p.heldEndpoints[pod] = heldEndpoint{endpoint: ep, at: time.Now()}
+			return ep, true
+		}
+	}
+	return "", false
 }
 
 // matchingServers returns only servers whose labels satisfy selector. Labels

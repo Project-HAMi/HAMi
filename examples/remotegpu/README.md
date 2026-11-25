@@ -1,14 +1,13 @@
 # Remote GPU examples
 
-Remote GPU lets a Pod on a node without a local GPU use NVIDIA GPUs on another node. The GPU node runs a [Lupine](https://github.com/lupinemachines) server. HAMi places the Pod on a separate client node, injects the Lupine client libraries, and sets `LUPINE_SERVER` to that server. The workload keeps an upstream CUDA or vLLM image, and the client node does not need an NVIDIA driver. 
+Remote GPU lets a Pod on a node without a local GPU use NVIDIA GPUs on another node. HAMi places the Pod on a separate client node, starts a [Lupine](https://github.com/lupinemachines) server Pod for it on the GPU node, injects the Lupine client libraries, and sets `LUPINE_SERVER` to that server. The workload keeps an upstream CUDA or vLLM image, and the client node does not need an NVIDIA driver. 
 
 Please note that:
 1. Client nodes must be separate from server nodes. 
 2. Only a limited set of images is supported: CUDA and vLLM 0.19 to 0.26. 
-3. A workload's GPUs come from one server. CUDA sees only the GPUs it was given,
-through `CUDA_VISIBLE_DEVICES`; `nvidia-smi` still lists every GPU of the server.
-With `nvidia.com/remote-gpu-memory` set, workloads share a GPU by memory.
-A server run outside the chart must set `CUDA_DEVICE_ORDER=PCI_BUS_ID`.
+3. A workload's server sees only the GPUs it was given, and is removed with the workload.
+With `nvidia.com/remote-gpu-memory` set, workloads share a GPU by memory, and the
+server holds each to its share.
 
 ## Configuration
 

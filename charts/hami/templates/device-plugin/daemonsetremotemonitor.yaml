@@ -1,0 +1,106 @@
+{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.monitor.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-remote-monitor
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-remote-monitor
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-remote-monitor
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: hami-remote-monitor
+        hami.io/webhook: ignore
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.monitor.image) "global" .Values.global) | nindent 6 }}
+      serviceAccountName: {{ include "hami-vgpu.fullname" . }}-remote-monitor
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      # The scheduler starts a Lupine server for each client pod on the
+      # node's network, and the monitor reads each of them on loopback.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              # The device plugin applies this label when operatingmode is
+              # remote. hami.io/lupine-server is a protocol constant shared
+              # with pkg/device/remotegpu, not something to configure here.
+              - matchExpressions:
+                  - key: hami.io/lupine-server
+                    operator: Exists
+      {{- with .Values.devices.remotegpu.server.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: remote-gpu-monitor
+          image: {{ include "hami.devicePlugin.monitor.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
+          command:
+            - remoteGPUmonitor
+            - --metrics-bind-address=:{{ .Values.devices.remotegpu.monitor.port }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: void
+          ports:
+            - name: remote-metrics
+              containerPort: {{ .Values.devices.remotegpu.monitor.port }}
+          volumeMounts:
+            - name: remote-monitor-kube-api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: remote-metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: remote-metrics
+          {{- with .Values.devices.remotegpu.monitor.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: remote-monitor-kube-api
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3607
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
+{{- end }}

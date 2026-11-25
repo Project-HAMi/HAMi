@@ -67,8 +67,8 @@ const (
 	superpodInformerSyncTimeout    = 30 * time.Second
 	superpodInformerSyncPollPeriod = 100 * time.Millisecond
 
-	// sessionReconcileTimeout caps how long the lupine session stub reconcile
-	// may hold the scheduler lock it runs under.
+	// sessionReconcileTimeout caps how long the Lupine server and session stub
+	// reconcile may hold the scheduler lock it runs under.
 	sessionReconcileTimeout = 30 * time.Second
 )
 
@@ -1120,6 +1120,7 @@ func (s *Scheduler) register(labelSelector labels.Selector) {
 
 	if dev, ok := device.GetDevices()[remotegpu.RemoteGPUDevice].(*remotegpu.RemoteGPUDevices); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), sessionReconcileTimeout)
+		dev.ReconcileServers(ctx)
 		dev.ReconcileSessionStubs(ctx)
 		cancel()
 	}
@@ -1749,13 +1750,14 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	// reservation (for example, following a pool refresh after a server label
 	// change). Validate it only after fail is available: rejection must release
 	// this Pod's short-lived pool booking just like every other bind failure.
-	if pi, reserved := s.podManager.GetPod(current); reserved {
-		if remote, ok := device.GetDevices()[remotegpu.RemoteGPUCommonWord].(*remotegpu.RemoteGPUDevices); ok {
-			if err := remote.ValidateReservedServer(current, pi.Devices); err != nil {
-				klog.ErrorS(err, "Reserved RemoteGPU server no longer matches pod selector", "pod", klog.KObj(current))
-				return fail(err)
-			}
+	remote, hasRemote := device.GetDevices()[remotegpu.RemoteGPUCommonWord].(*remotegpu.RemoteGPUDevices)
+	remoteReserved := false
+	if pi, reserved := s.podManager.GetPod(current); reserved && hasRemote {
+		if err := remote.ValidateReservedServer(current, pi.Devices); err != nil {
+			klog.ErrorS(err, "Reserved RemoteGPU server no longer matches pod selector", "pod", klog.KObj(current))
+			return fail(err)
 		}
+		remoteReserved = len(pi.Devices[remotegpu.RemoteGPUCommonWord]) > 0
 	}
 
 	if err = s.acquireNodeLocks(node, current); err != nil {
@@ -1768,8 +1770,19 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(fmt.Errorf("%w: %v", errBindAnnotationPatch, err))
 	}
 
+	// The pod's Lupine server starts while the pod does.
+	if remoteReserved {
+		if err = remote.StartServer(context.Background(), current); err != nil {
+			klog.ErrorS(err, "Failed to start the Lupine server", "pod", klog.KObj(current))
+			return fail(err)
+		}
+	}
+
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+		if remoteReserved {
+			remote.StopServer(context.Background(), current)
+		}
 		return fail(err)
 	}
 

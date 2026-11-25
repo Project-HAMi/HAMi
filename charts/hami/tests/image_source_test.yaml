@@ -6,7 +6,6 @@ templates:
   - scheduler/job-patch/job-patchWebhook.yaml
   - device-plugin/daemonsetnvidia.yaml
   - device-plugin/daemonsetmock.yaml
-  - device-plugin/daemonsetlupine.yaml
   - scheduler/device-configmap.yaml
 capabilities:
   majorVersion: 1
@@ -46,9 +45,9 @@ tests:
           value: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
         template: scheduler/job-patch/job-patchWebhook.yaml
       - matchRegex:
-          path: spec.template.spec.containers[0].image
-          pattern: '^ghcr\.io/lupinemachines/lupine-server:'
-        template: device-plugin/daemonsetlupine.yaml
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+image: "ghcr\.io/lupinemachines/lupine-server:'
+        template: scheduler/device-configmap.yaml
       - matchRegex:
           path: data["device-config.yaml"]
           pattern: '(?m)^\s+libImage: "docker\.io/projecthami/hami:'
@@ -98,9 +97,9 @@ tests:
       global.imageSource: cn
     asserts:
       - matchRegex:
-          path: spec.template.spec.containers[0].image
-          pattern: '^m\.daocloud\.io/ghcr\.io/lupinemachines/lupine-server:'
-        template: device-plugin/daemonsetlupine.yaml
+          path: data["device-config.yaml"]
+          pattern: '(?m)^\s+image: "m\.daocloud\.io/ghcr\.io/lupinemachines/lupine-server:'
+        template: scheduler/device-configmap.yaml
       - matchRegex:
           path: data["device-config.yaml"]
           pattern: '(?m)^\s+libImage: "m\.daocloud\.io/docker\.io/projecthami/hami:'

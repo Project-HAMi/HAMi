@@ -18,6 +18,7 @@ package remotegpu
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -152,11 +153,26 @@ func checkAttribution(t *testing.T, fixture string) {
 		t.Fatal("accepted failed Pod")
 	}
 }
+
+// servedPod is allocatedPod with its own Lupine server at the given test server.
+func servedPod(t *testing.T, server *httptest.Server, uid string) *corev1.Pod {
+	t.Helper()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := allocatedPod()
+	pod.UID, pod.Name = types.UID(uid), "worker-"+uid
+	pod.Annotations[remote.LupineServerAnno] = net.JoinHostPort("10.0.0.5", port)
+	return pod
+}
+
 func TestScrapeFailureDoesNotReplayUsage(t *testing.T) {
 	body, status := fixture, http.StatusOK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status); fmt.Fprint(w, body) }))
 	defer server.Close()
-	c := &Collector{Node: "gpu-node", URL: server.URL, Pods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{allocatedPod()}, nil }}
+	pod := servedPod(t, server, "uid-1")
+	c := &Collector{Node: "gpu-node", Host: "127.0.0.1", Pods: func() ([]*corev1.Pod, error) { return []*corev1.Pod{pod}, nil }}
 	fs := metricsFor(t, c)
 	if fs["hami_remote_gpumonitor_collect_success"].Metric[0].GetGauge().GetValue() != 1 {
 		t.Fatal("initial scrape failed")
@@ -184,10 +200,9 @@ func TestScrapeFailureDoesNotReplayUsage(t *testing.T) {
 
 func TestQuotaAndInitContainerAllocation(t *testing.T) {
 	pod := allocatedPod()
-	pod.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "CUDA_DEVICE_MEMORY_LIMIT", Value: "1024m"}}
 	got := allocations("gpu-node", []*corev1.Pod{pod})
-	if got["uid-1/a"]["GPU-a"].limit != 1024*1024*1024 {
-		t.Fatal("ignored HAMi-core quota")
+	if got["uid-1/a"]["GPU-a"].limit != 4096*1024*1024 {
+		t.Fatal("limit is not the container's grant")
 	}
 	pd := device.PodSingleDevice{{{UUID: "gpu-node/GPU-a", Type: remote.RemoteGPUDevice, Usedmem: 2048}}, {}, {}}
 	pod.Annotations[remote.AllocatedAnnos] = device.EncodePodSingleDevice(pd)
@@ -280,5 +295,49 @@ func TestAllocationsFollowSchedulerAccounting(t *testing.T) {
 	pod.Spec.InitContainers[0].RestartPolicy = &always
 	if _, ok := allocations("gpu-node", []*corev1.Pod{pod})["uid-1/setup"]; !ok {
 		t.Fatal("sidecar init container was released")
+	}
+}
+
+// Each pod on the node has its own server. A card two servers share is
+// reported once, with the memory each server's HAMi-core reports added up and
+// the node's index for the card, and a server that cannot be read leaves out
+// only its pod.
+func TestScrapesEveryServerOnTheNode(t *testing.T) {
+	other := strings.ReplaceAll(fixture, "uid-1/", "uid-2/")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fixture) }))
+	defer up.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, other) }))
+	defer second.Close()
+	pods := []*corev1.Pod{servedPod(t, up, "uid-1"), servedPod(t, second, "uid-2")}
+	c := &Collector{Node: "gpu-node", Host: "127.0.0.1", Pods: func() ([]*corev1.Pod, error) { return pods, nil },
+		Indices: func() (map[string]string, error) { return map[string]string{"GPU-a": "3"}, nil }}
+	fs := metricsFor(t, c)
+	if got := fs["hami_remote_gpumonitor_collect_success"].Metric[0].GetGauge().GetValue(); got != 1 {
+		t.Fatalf("success = %v", got)
+	}
+	if _, ok := fs["hami_remote_gpumonitor_dropped_samples"]; ok {
+		t.Fatal("a card two servers report was counted as a duplicate")
+	}
+	if n := len(fs["hami_host_gpu_memory_used_bytes"].GetMetric()); n != 1 {
+		t.Fatalf("host series = %d, want 1", n)
+	}
+	host := fs["hami_host_gpu_memory_used_bytes"].Metric[0]
+	if host.GetGauge().GetValue() != 2000 || labels(host)["device_index"] != "3" {
+		t.Fatalf("host memory = %v at index %q, want 2000 at 3", host.GetGauge().GetValue(), labels(host)["device_index"])
+	}
+	if got := fs["hami_host_gpu_utilization_ratio"].Metric[0].GetGauge().GetValue(); got != 70 {
+		t.Fatalf("host utilization = %v", got)
+	}
+	if n := len(fs["hami_vgpu_memory_used_bytes"].GetMetric()); n != 4 {
+		t.Fatalf("container series = %d, want 4", n)
+	}
+
+	second.Close()
+	fs = metricsFor(t, c)
+	if got := fs["hami_remote_gpumonitor_collect_success"].Metric[0].GetGauge().GetValue(); got != 0 {
+		t.Fatalf("success with a server down = %v", got)
+	}
+	if n := len(fs["hami_vgpu_memory_used_bytes"].GetMetric()); n != 2 {
+		t.Fatalf("container series with a server down = %d, want 2", n)
 	}
 }

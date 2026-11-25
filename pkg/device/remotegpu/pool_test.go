@@ -670,7 +670,7 @@ func TestPatchAnnotations_BooksCardBeforePodListCatchesUp(t *testing.T) {
 			device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
 		},
 	})
-	assert.Equal(t, annos[LupineServerAnno], "10.0.0.5:14833")
+	assert.Equal(t, annos[LupineServerAnno], "10.0.0.5:14834", "the pod's own server listens above the node's port")
 	assert.Assert(t, dev.pool.reserved("gpu-a/GPU-1"), "allocating the card books it right away")
 
 	// The pod list still does not show the pod, so the booking has to survive.
@@ -1153,4 +1153,63 @@ func TestPool_HolderWithAnFQDNHostnameIsMatched(t *testing.T) {
 	holders = map[string]share{"uid-p": {users: 1, host: podHostname(pod)}}
 	assert.Assert(t, accountedFor("10.0.0.9:gpu-client:4026531836:7", holders))
 	assert.Assert(t, !accountedFor("10.0.0.9:worker.svc.ns.svc.cluster.local:4026531836:7", holders))
+}
+
+// Each pod's server gets a port of its own above the node's one: not one a
+// placed client or a running server holds, nor one booked for another pod.
+func TestPool_AssignsEachServerAFreePort(t *testing.T) {
+	endpoint := func(name, ep, node string, phase corev1.PodPhase) corev1.Pod {
+		return corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name), Annotations: map[string]string{LupineServerAnno: ep}},
+			Spec:       corev1.PodSpec{NodeName: node},
+			Status:     corev1.PodStatus{Phase: phase},
+		}
+	}
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "24000", []*device.DeviceInfo{gpu("GPU-2", 40000)}),
+	}, []corev1.Pod{
+		endpoint("client", "10.0.0.5:14834", "cpu-1", corev1.PodRunning),
+		endpoint("server", "10.0.0.5:14835", "gpu-a", corev1.PodRunning),
+		endpoint("finished", "10.0.0.5:14836", "cpu-1", corev1.PodSucceeded),
+		endpoint("unbound", "10.0.0.5:14837", "", corev1.PodPending),
+	}, nil)
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assign := func(server, pod string) string {
+		ep, ok := p.assignEndpoint(server, pod)
+		assert.Assert(t, ok)
+		return ep
+	}
+	assert.Equal(t, assign("gpu-a", "x"), "10.0.0.5:14836", "a finished pod gives its port back")
+	assert.Equal(t, assign("gpu-a", "y"), "10.0.0.5:14837", "an unplaced pod holds none")
+	assert.Equal(t, assign("gpu-a", "x"), "10.0.0.5:14836", "a pod's new booking replaces its last")
+	p.release("x")
+	assert.Equal(t, assign("gpu-a", "z"), "10.0.0.5:14836", "a released booking frees its port")
+	assert.Equal(t, assign("gpu-b", "x"), "10.0.0.6:24001", "the node's label moves the range")
+	_, ok := p.assignEndpoint("gpu-c", "x")
+	assert.Assert(t, !ok, "an unknown server has no endpoint")
+}
+
+// A booking lasts until the pod list shows the port held, or heldTTL passes.
+func TestPool_EndpointBookingLastsUntilThePodListHasIt(t *testing.T) {
+	pods := []corev1.Pod{}
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	listPods = func(context.Context) ([]corev1.Pod, error) { return pods, nil }
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	ep, _ := p.assignEndpoint("gpu-a", "x")
+
+	p.refreshNow(context.Background())
+	assert.Equal(t, len(p.heldEndpoints), 1, "the pod list has not caught up")
+	pods = []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "x", Annotations: map[string]string{LupineServerAnno: ep}},
+		Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+	}}
+	p.forcedAt = time.Time{}
+	p.refreshNow(context.Background())
+	assert.Equal(t, len(p.heldEndpoints), 0)
+	other, _ := p.assignEndpoint("gpu-a", "y")
+	assert.Assert(t, other != ep, "the listed pod holds it")
 }

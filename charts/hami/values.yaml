@@ -829,16 +829,17 @@ devices:
     # An unknown value is ignored, and `file` is used when no valid value is set. Not applied in the `mig` operating mode.
     limitDelivery: file
   remotegpu:
-    # -- Schedule Pods onto GPUs served over the network by a lupine server.
+    # -- Schedule Pods onto GPUs served over the network by lupine. The scheduler starts one
+    # lupine server Pod per client Pod on the GPU node, which sees only that Pod's GPUs.
     # Mark lupine nodes with operatingmode: remote in devicePlugin.nodeConfiguration
-    # (peer to hami-core / mig). The device plugin applies hami.io/lupine-server;
-    # set that label's value to a custom port only when the server is managed
-    # outside the chart (empty value uses defaultPort below).
+    # (peer to hami-core / mig). The device plugin applies hami.io/lupine-server; its value
+    # may name the node's own port (empty value uses defaultPort below).
     # Keep resource names consistent with any `device-config.content` override.
     enabled: false
-    # -- Port (1-65535) used by the scheduler and the server DaemonSet's container and host ports.
-    # A valid port in the `hami.io/lupine-server` node label overrides the scheduler's connection
-    # port. Must match the server's listen port; the chart does not configure the server process.
+    # -- A server node's own port (1-65535), used when its `hami.io/lupine-server` label has no
+    # valid port. Each client Pod's lupine server listens on the first free host port above it.
+    # The node's own port is left to a server managed outside the chart, which session relays
+    # forward to.
     defaultPort: 14833
     # -- Resource name for an integer GPU count in a container's requests or limits.
     # A positive count reserves that many GPUs on one server; other Pods may use the rest of the
@@ -846,32 +847,35 @@ devices:
     resourceCountName: "nvidia.com/remote-gpu"
     # -- Resource name for optional per-GPU memory in a container's requests or limits, as integer
     # MiB (`1024` = 1 GiB). Used with a remote GPU count request. Missing or zero reserves whole GPUs.
-    # With library injection through `devices.remotegpu.libImage`, a memory request is enforced
-    # and GPUs are shared by memory, up to the device plugin's `deviceSplitCount` Pods per GPU;
-    # without it the request only filters GPUs, which are then reserved whole.
+    # With HAMi-core from `devices.remotegpu.libImage`, the Pod's lupine server enforces a memory
+    # request and GPUs are shared by memory, up to the device plugin's `deviceSplitCount` Pods per
+    # GPU; without it the request only filters GPUs, which are then reserved whole.
     resourceMemoryName: "nvidia.com/remote-gpu-memory"
-    # -- (string) HAMi-core image for the client's library-copy init container, used to enforce
-    # positive memory requests. Must provide `sh`, `cp`, and `/k8s-vgpu/lib/nvidia/libvgpu.so.*`.
-    # Leave unset or null to use the device plugin image, including its registry and tag overrides.
-    # Set to `""` to skip library injection and use memory requests only as placement filters.
-    # An explicit image reference is used unchanged.
+    # -- (string) HAMi-core image for the library-copy init container of lupine server Pods, used
+    # to enforce positive memory requests on the server. Must provide `sh`, `cp`, and
+    # `/k8s-vgpu/lib/nvidia/libvgpu.so.*`. Leave unset or null to use the device plugin image,
+    # including its registry and tag overrides. Set to `""` to skip HAMi-core and use memory
+    # requests only as placement filters. An explicit image reference is used unchanged.
     libImage:
     # -- Client image used to deliver Lupine libraries, libnghttp2, and nvidia-smi for the CUDA/vLLM examples; empty disables delivery.
     # It must contain `/opt/lupine/lib`, `sh`, `cp`, `libnghttp2.so.14`, and `nvidia-smi`. Injection fails when `nvidia-smi` is missing.
+    # Delivery then waits until nvidia-smi reaches the Pod's lupine server.
     # Match the server version and workload ABI; an empty string disables delivery.
     # `global.imageSource=cn` prefixes the upstream Lupine client reference with `m.daocloud.io/`; other repositories are unchanged.
     clientImage: "ghcr.io/lupinemachines/lupine-client:cuda-13.3.1-ubuntu24.04@sha256:fe0e8c283fe29b0c8bfb4bbe2a81fac4fabd3a477fe694f31b5a97a996fb028e"
     # -- Image for a relay Pod on each lupine server node, so users can port-forward to the relay.
-    # Requires `sh` and `socat`; global image overrides do not apply. Empty disables creation
-    # of relays without deleting existing ones.
+    # The relay forwards to the node's own port, where a server managed outside the chart must
+    # listen. Requires `sh` and `socat`; global image overrides do not apply. Empty disables
+    # creation of relays without deleting existing ones.
     sessionImage: ""
     # -- Names of existing image pull Secrets for the session relay Pods, added after
     # `global.imagePullSecrets`. The Secrets must exist in the HAMi namespace.
     sessionImagePullSecrets: []
     monitor:
-      # Independent container in the Lupine server Pod. Uses devicePlugin.monitor.image.
-      # The image must include remoteGPUmonitor; Lupine must expose LUPINE_WORKLOAD_ID as client_id.
-      # -- Enable the remote GPU monitor container in chart-managed Lupine server Pods
+      # A DaemonSet on lupine server nodes that reads each client Pod's lupine server.
+      # Uses devicePlugin.monitor.image, which must include remoteGPUmonitor; Lupine must expose
+      # LUPINE_WORKLOAD_ID as client_id.
+      # -- Enable the remote GPU monitor DaemonSet
       enabled: false
       # -- Remote GPU monitor HTTP port on the server node
       port: 31993
@@ -882,12 +886,8 @@ devices:
           memory: 64Mi
         limits:
           memory: 256Mi
+    # The lupine server Pod the scheduler starts in the HAMi namespace for each client Pod.
     server:
-      # -- Deploy a lupine server DaemonSet when `devices.remotegpu.enabled` is true.
-      # Selects only nodes with an empty `hami.io/lupine-server` label value. A node whose
-      # label names its own port is left to a server managed outside the chart.
-      # False leaves server deployment to the operator without disabling remote GPU scheduling.
-      enabled: true
       image:
         # -- Registry of the lupine server container image. `global.imageRegistry` overrides it.
         registry: "ghcr.io"
@@ -904,8 +904,8 @@ devices:
       # container runtime is not the cluster default.
       # Empty omits the field; independent of `devices.nvidia.runtimeClassName`.
       runtimeClassName: ""
-      # -- Kubernetes tolerations for lupine server Pods, as a list of objects with key,
-      # operator, value, effect, and optional tolerationSeconds.
+      # -- Kubernetes tolerations for lupine server Pods and the remote GPU monitor, as a list of
+      # objects with key, operator, value, effect, and optional tolerationSeconds.
       tolerations: []
       # -- Container securityContext of the lupine server. Set `privileged: true` on hosts where the
       # NVIDIA container toolkit has accept-nvidia-visible-devices-envvar-when-unprivileged=false,
