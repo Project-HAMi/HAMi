@@ -66,6 +66,7 @@ func TestValidateTopologyConfigRejects(t *testing.T) {
 		{name: "annotation key", labels: "@hami.io/superpodid"},
 		{name: "key with spaces", labels: "rack id"},
 		{name: "level above the maximum", labels: "leaf=65"},
+		{name: "mix explicit and plain keys", labels: "rack=2,superpodid"},
 	}
 
 	for _, tc := range tests {

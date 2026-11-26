@@ -98,14 +98,6 @@ func TestParseTiers(t *testing.T) {
 				{Level: 1, Key: "rack-id"},
 			},
 		},
-		{
-			name: "implicit levels skip the ones taken explicitly",
-			spec: "tor-id=1,rack-id",
-			want: []Tier{
-				{Level: 1, Key: "tor-id"},
-				{Level: 2, Key: "rack-id"},
-			},
-		},
 	}
 
 	for _, tc := range tests {
@@ -132,6 +124,8 @@ func TestParseTiersRejectsAmbiguousSpecs(t *testing.T) {
 		{name: "key with spaces", spec: "rack id," + util.SuperPodIDLabel},
 		{name: "level above the maximum", spec: "rack-id=" + strconv.Itoa(MaxTierLevel+1)},
 		{name: "max int64 level", spec: "rack-id=9223372036854775807"},
+		{name: "mix explicit and plain keys", spec: "rack-id=2," + util.SuperPodIDLabel},
+		{name: "mix plain then explicit", spec: util.RackIDLabel + ",tor-id=2"},
 	}
 
 	for _, tc := range tests {

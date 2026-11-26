@@ -85,7 +85,8 @@ var (
 	// models from node labels, from the smallest domain to the largest, as a
 	// comma-separated list of label keys (for example
 	// "hami.io/rackid,hami.io/superpodid"). "key=N" pins the tier level of a
-	// key explicitly. Annotation keys are not supported. Empty, the default,
+	// key explicitly; every entry must use the same style (all plain keys or
+	// all key=N). Annotation keys are not supported. Empty, the default,
 	// disables the topology model.
 	TopologyTierLabels string
 

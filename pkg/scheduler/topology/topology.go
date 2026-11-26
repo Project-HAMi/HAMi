@@ -74,12 +74,13 @@ func (t Tier) String() string {
 // ParseTiers reads the tier specification from the comma-separated list of
 // label keys given on the command line. Entries are numbered from 1 in the
 // order given: the most local tier first, the whole fabric last. An entry may
-// also carry an explicit level, as in "hami.io/rackid=1". Annotation keys
-// (prefixed with "@") are rejected. Keys must be valid Kubernetes qualified
-// names. Explicit levels must be in [1, MaxTierLevel]. Duplicate keys and
-// duplicate levels are rejected instead of being collapsed, so a mistyped
-// level cannot silently leave a gap in the hierarchy. An empty specification
-// disables the feature.
+// also carry an explicit level, as in "hami.io/rackid=1". Mixing explicit
+// key=N levels with plain keys is rejected, so a spec like "rack=2,superpodid"
+// cannot silently assign superpodid to tier 1. Annotation keys (prefixed with
+// "@") are rejected. Keys must be valid Kubernetes qualified names. Explicit
+// levels must be in [1, MaxTierLevel]. Duplicate keys and duplicate levels are
+// rejected instead of being collapsed, so a mistyped level cannot silently
+// leave a gap in the hierarchy. An empty specification disables the feature.
 func ParseTiers(spec string) ([]Tier, error) {
 	type entry struct {
 		tier  Tier
@@ -89,6 +90,7 @@ func ParseTiers(spec string) ([]Tier, error) {
 	entries := make([]entry, 0, 4)
 	seenKey := make(map[string]bool)
 	seenLevel := make(map[int]bool)
+	hasExplicit, hasPlain := false, false
 	for raw := range strings.SplitSeq(spec, ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -127,11 +129,17 @@ func ParseTiers(spec string) ([]Tier, error) {
 				return nil, fmt.Errorf("duplicate topology tier level %d", level)
 			}
 			seenLevel[level] = true
+			hasExplicit = true
+		} else {
+			hasPlain = true
 		}
 		entries = append(entries, entry{tier: Tier{Key: key}, level: level})
 	}
 	if len(entries) == 0 {
 		return nil, nil
+	}
+	if hasExplicit && hasPlain {
+		return nil, fmt.Errorf("topology tiers mix explicit key=N levels with plain keys; use one style for all entries")
 	}
 
 	tiers := make([]Tier, 0, len(entries))
@@ -139,17 +147,10 @@ func ParseTiers(spec string) ([]Tier, error) {
 	for _, e := range entries {
 		if e.level != 0 {
 			e.tier.Level = e.level
-			tiers = append(tiers, e.tier)
-			continue
-		}
-		for seenLevel[next] {
+		} else {
+			e.tier.Level = next
 			next++
 		}
-		if next > MaxTierLevel {
-			return nil, fmt.Errorf("topology tier levels exceed the maximum of %d", MaxTierLevel)
-		}
-		e.tier.Level = next
-		seenLevel[next] = true
 		tiers = append(tiers, e.tier)
 	}
 	return tiers, nil
