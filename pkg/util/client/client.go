@@ -18,8 +18,6 @@ package client
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"k8s.io/client-go/kubernetes"
@@ -30,8 +28,8 @@ import (
 
 // Variables for testing.
 var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
+	fileConfig      = loadFileConfig
+	inClusterConfig = rest.InClusterConfig
 )
 
 type Client struct {
@@ -91,16 +89,22 @@ func InitGlobalClient(opts ...Option) {
 	})
 }
 
+// loadFileConfig merges KUBECONFIG files, or loads the default home configuration.
+func loadFileConfig() (*rest.Config, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	config, err := rules.Load()
+	if err != nil {
+		return nil, err
+	}
+	// Use a direct client config so loadKubeConfig owns the in-cluster fallback.
+	return clientcmd.NewNonInteractiveClientConfig(*config, "", &clientcmd.ConfigOverrides{}, rules).ClientConfig()
+}
+
 // loadKubeConfig loads Kubernetes configuration from the environment or in-cluster.
 func loadKubeConfig() (*rest.Config, error) {
-	kubeConfigPath := os.Getenv("KUBECONFIG")
-	if kubeConfigPath == "" {
-		kubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	}
-
-	config, err := buildConfigFromFlags("", kubeConfigPath)
+	config, err := fileConfig()
 	if err != nil {
-		klog.Infof("BuildConfigFromFlags failed for file %s: %v. Using in-cluster config.", kubeConfigPath, err)
+		klog.Infof("Loading kubeconfig failed: %v. Using in-cluster config.", err)
 		return inClusterConfig()
 	}
 	return config, nil
