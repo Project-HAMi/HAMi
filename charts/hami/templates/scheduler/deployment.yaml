@@ -117,6 +117,13 @@ spec:
               value: "{{ $value }}"
           {{- end }}
           {{- end }}
+          {{- if .Values.tracing.otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.otlpEndpoint | quote }}
+          {{- with .Values.tracing.extraEnvs }}
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          {{- end }}
           command:
             - scheduler
             {{- if .Values.scheduler.admissionWebhook.enabled }}

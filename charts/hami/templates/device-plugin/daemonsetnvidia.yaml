@@ -213,6 +213,13 @@ spec:
             {{- end }}
             - name: DISABLE_HAMI_CORE_FOR_WHOLE_GPU
               value: {{ include "hami-vgpu.disableHAMiCoreForWholeGPU" . }}
+            {{- if .Values.tracing.otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.otlpEndpoint | quote }}
+            {{- with .Values.tracing.extraEnvs }}
+            {{- . | toYaml | nindent 12 }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}

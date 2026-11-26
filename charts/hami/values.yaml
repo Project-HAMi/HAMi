@@ -1209,6 +1209,15 @@ prometheus:
   # For local `helm template`, pass `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
   enabled: false
 
+tracing:
+  # -- OTLP gRPC endpoint that receives the spans of the scheduler and the NVIDIA device plugin, such as
+  # `http://jaeger-collector.tracing:4317`. Empty turns tracing off.
+  otlpEndpoint: ""
+  # -- Additional `OTEL_*` environment variables for the scheduler and the NVIDIA device plugin.
+  # Each entry specifies a name and either value or valueFrom.
+  # Used only when `otlpEndpoint` is set.
+  extraEnvs: []
+
 device-config:
   # -- Full replacement of device-config.yaml; takes precedence over a bundled file and values.
   # This is a complete document, not a merge; prefer `devices.<vendor>` fields for partial overrides.
