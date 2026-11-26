@@ -32,6 +32,7 @@ import (
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +41,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
@@ -146,7 +146,7 @@ func NewContainerLister() (*ContainerLister, error) {
 	if !ok {
 		return nil, fmt.Errorf("HOOK_PATH not set")
 	}
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	config, err := client.LoadKubeConfig()
 	if err != nil {
 		klog.Errorf("Failed to build kubeconfig: %v", err)
 		return nil, err

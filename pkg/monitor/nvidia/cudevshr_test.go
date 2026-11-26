@@ -40,6 +40,7 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
@@ -624,8 +625,10 @@ func TestNewContainerListerCacheRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name, root string
 		invalid    bool
+		multiFile  bool
 	}{
 		{name: "fallback"}, {name: "custom", root: t.TempDir()},
+		{name: "multi-file kubeconfig", multiFile: true},
 		{name: "relative", root: "relative", invalid: true}, {name: "filesystem root", root: "/", invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -657,7 +660,21 @@ func TestNewContainerListerCacheRoot(t *testing.T) {
 			hook := t.TempDir()
 			t.Setenv("HOOK_PATH", hook)
 			t.Setenv("HAMI_VGPU_CACHE_ROOT", tc.root)
-			t.Setenv("KUBECONFIG", writeKubeconfig(t, server.URL))
+			kubeconfig := writeKubeconfig(t, server.URL)
+			if tc.multiFile {
+				config, err := clientcmd.LoadFromFile(kubeconfig)
+				require.NoError(t, err)
+				resources := *config
+				resources.Contexts = nil
+				resources.CurrentContext = ""
+				config.Clusters = nil
+				config.AuthInfos = nil
+				resourcesPath := filepath.Join(t.TempDir(), "resources.yaml")
+				require.NoError(t, clientcmd.WriteToFile(*config, kubeconfig))
+				require.NoError(t, clientcmd.WriteToFile(resources, resourcesPath))
+				kubeconfig += string(os.PathListSeparator) + resourcesPath
+			}
+			t.Setenv("KUBECONFIG", kubeconfig)
 			t.Setenv(util.NodeNameEnvName, "test-node")
 			l, err := NewContainerLister()
 			if tc.invalid {
