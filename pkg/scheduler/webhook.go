@@ -302,14 +302,14 @@ func changedSchedulerOwnedAnnotation(oldPod, newPod *corev1.Pod) (string, bool) 
 }
 
 func privilegedContainerName(pod *corev1.Pod) (string, bool) {
-	for _, ctr := range pod.Spec.InitContainers {
-		if isPrivilegedContainer(&ctr) {
-			return ctr.Name, true
+	for i := range pod.Spec.InitContainers {
+		if isPrivilegedContainer(&pod.Spec.InitContainers[i]) {
+			return pod.Spec.InitContainers[i].Name, true
 		}
 	}
-	for _, ctr := range pod.Spec.Containers {
-		if isPrivilegedContainer(&ctr) {
-			return ctr.Name, true
+	for i := range pod.Spec.Containers {
+		if isPrivilegedContainer(&pod.Spec.Containers[i]) {
+			return pod.Spec.Containers[i].Name, true
 		}
 	}
 	return "", false
