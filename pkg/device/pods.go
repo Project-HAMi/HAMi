@@ -32,6 +32,9 @@ type PodInfo struct {
 	Devices                       PodDevices
 	RawDevices                    PodDevices
 	InitContainerResourceReleased bool
+	// Traceparent is the trace context Filter wrote to the pod, kept so Bind
+	// can read it before the informer shows Filter's patch.
+	Traceparent string
 }
 
 // PodUseDeviceStat counts pod use device info.
@@ -119,6 +122,16 @@ func (m *PodManager) UpdatePod(pod *corev1.Pod) {
 	}
 }
 
+// SetTraceparent stores the trace context Filter wrote to the pod.
+func (m *PodManager) SetTraceparent(pod *corev1.Pod, traceparent string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if pi, exists := m.pods[pod.UID]; exists {
+		pi.Traceparent = traceparent
+	}
+}
+
 // Snapshot copies manager-owned state and shares the read-only Pod.
 // Callers must not mutate the shared Pod.
 func (p *PodInfo) Snapshot() *PodInfo {
@@ -131,6 +144,7 @@ func (p *PodInfo) Snapshot() *PodInfo {
 		Devices:                       p.Devices.DeepCopy(),
 		RawDevices:                    p.RawDevices.DeepCopy(),
 		InitContainerResourceReleased: p.InitContainerResourceReleased,
+		Traceparent:                   p.Traceparent,
 	}
 }
 

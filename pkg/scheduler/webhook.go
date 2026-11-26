@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -36,6 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -54,10 +57,12 @@ func NewWebHook() (*admission.Webhook, error) {
 	}
 	decoder := admission.NewDecoder(schema)
 	wh := &admission.Webhook{Handler: &webhook{decoder: decoder}}
+	wh.WithContextFunc = tracing.ExtractRequest
 	return wh, nil
 }
 
 func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.Response {
+	start := time.Now()
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
@@ -130,12 +135,18 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 	// Delivery must precede GPU-using init containers. Reorder only after all
 	// mutations, when no pointers into the init-container slice remain live.
 	remotegpu.FinalizeAdmission(pod)
+	span := trace.SpanFromContext(ctx)
+	if hasResource {
+		ctx, span = startAdmissionSpan(ctx, start, req.Namespace, pod)
+		defer span.End()
+	}
 	// Validate device-scoring weights for HAMi workloads so malformed input is
 	// reported before scheduling. The scheduler retains the same validation as
 	// a defense-in-depth check.
 	if hasResource {
 		if _, err := util.GetDeviceScoringWeightsByPod(pod); err != nil {
 			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			tracing.SetError(span, err.Error())
 			return admission.Denied(err.Error())
 		}
 		// The scheduler ignores an unrecognized scheduler-policy value and
@@ -143,11 +154,13 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		// unexpected packing (#2767). Deny it here instead.
 		if err := util.SchedulerPolicyAnnotationError(pod); err != nil {
 			klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+			tracing.SetError(span, err.Error())
 			return admission.Denied(err.Error())
 		}
 	}
 	if hasPrivileged && hasResource {
 		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, privilegedName)
+		tracing.SetError(span, fmt.Sprintf("container %s is privileged", privilegedName))
 		return admission.Denied(fmt.Sprintf("container %s is privileged", privilegedName))
 	}
 
@@ -158,10 +171,12 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		pod.Spec.SchedulerName = config.SchedulerName
 		if pod.Spec.NodeName != "" {
 			klog.Infof(template+" - Pod already has node assigned", pod.Namespace, pod.Name, pod.UID)
+			tracing.SetError(span, "pod has node assigned")
 			return admission.Denied("pod has node assigned")
 		}
 	}
 	if err := fitResourceQuota(pod); err != nil {
+		tracing.SetError(span, err.Error())
 		return admission.Denied(err.Error())
 	}
 
@@ -169,9 +184,14 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 		injectSuperpodAffinity(pod)
 	}
 
+	delete(pod.Annotations, tracing.TraceparentAnnotation)
+	if hasResource {
+		pod.Annotations = tracing.Inject(ctx, pod.Annotations)
+	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
+		tracing.SetError(span, err.Error())
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
@@ -298,6 +318,11 @@ func changedSchedulerOwnedAnnotation(oldPod, newPod *corev1.Pod) (string, bool) 
 			return key, true
 		}
 	}
+	// Not in schedulerOwnedAnnotationKeys, so a pod created with this one is
+	// not denied: the webhook drops it unless the pod goes to another scheduler.
+	if oldPod.Annotations[tracing.TraceparentAnnotation] != newPod.Annotations[tracing.TraceparentAnnotation] {
+		return tracing.TraceparentAnnotation, true
+	}
 	return "", false
 }
 
@@ -332,52 +357,10 @@ func fitResourceQuota(pod *corev1.Pod) error {
 		// container spec here. It applies its own memory factor, defaults and
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
-		var appMemoryReq, appCoresReq int64
-		for i := range pod.Spec.Containers {
-			req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
-			if reqErr != nil {
-				return reqErr
-			}
-			if req.Nums == 0 {
-				continue
-			}
-			appMemoryReq += req.Memreq * req.Nums
-			if req.TotalCoresreq > 0 {
-				appCoresReq += req.TotalCoresreq
-			} else {
-				appCoresReq += req.Coresreq * req.Nums
-			}
+		memoryReq, coresReq, err := podDeviceRequestTotal(pod, dev)
+		if err != nil {
+			return err
 		}
-
-		var initPeakMemoryReq, initPeakCoresReq int64
-		var sidecarMemoryReq, sidecarCoresReq int64
-		for i := range pod.Spec.InitContainers {
-			c := &pod.Spec.InitContainers[i]
-			req, reqErr := dev.GenerateResourceRequests(c)
-			if reqErr != nil {
-				return reqErr
-			}
-			if req.Nums == 0 {
-				continue
-			}
-			mem := req.Memreq * req.Nums
-			cores := req.Coresreq * req.Nums
-			if req.TotalCoresreq > 0 {
-				cores = req.TotalCoresreq
-			}
-			if util.IsSidecarContainer(c) {
-				sidecarMemoryReq += mem
-				sidecarCoresReq += cores
-				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
-				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
-				continue
-			}
-			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
-			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
-		}
-
-		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
-		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}
@@ -430,4 +413,55 @@ func injectSuperpodAffinity(pod *corev1.Pod) {
 	pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
 		pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution, term)
 	klog.V(3).InfoS("Injected superpod podAffinity", "pod", klog.KObj(pod), "taskid", taskid)
+}
+
+// podDeviceRequestTotal returns the most device memory and cores pod requests
+// from dev at one time, over its init, sidecar and app containers.
+func podDeviceRequestTotal(pod *corev1.Pod, dev device.Devices) (memory, cores int64, err error) {
+	var appMemoryReq, appCoresReq int64
+	for i := range pod.Spec.Containers {
+		req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+		if reqErr != nil {
+			return 0, 0, reqErr
+		}
+		if req.Nums == 0 {
+			continue
+		}
+		appMemoryReq += req.Memreq * req.Nums
+		if req.TotalCoresreq > 0 {
+			appCoresReq += req.TotalCoresreq
+		} else {
+			appCoresReq += req.Coresreq * req.Nums
+		}
+	}
+
+	var initPeakMemoryReq, initPeakCoresReq int64
+	var sidecarMemoryReq, sidecarCoresReq int64
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		req, reqErr := dev.GenerateResourceRequests(c)
+		if reqErr != nil {
+			return 0, 0, reqErr
+		}
+		if req.Nums == 0 {
+			continue
+		}
+		mem := req.Memreq * req.Nums
+		cores := req.Coresreq * req.Nums
+		if req.TotalCoresreq > 0 {
+			cores = req.TotalCoresreq
+		}
+		if util.IsSidecarContainer(c) {
+			sidecarMemoryReq += mem
+			sidecarCoresReq += cores
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
+			continue
+		}
+		initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+		initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
+	}
+
+	return max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq),
+		max(initPeakCoresReq, sidecarCoresReq+appCoresReq), nil
 }

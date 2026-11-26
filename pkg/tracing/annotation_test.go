@@ -18,8 +18,12 @@ package tracing
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"gotest.tools/v3/assert"
 )
@@ -104,6 +108,39 @@ func TestExtractIgnoresBadAnnotation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := trace.ContextWithSpanContext(context.Background(), testSpanContext(t, trace.FlagsSampled))
 			assert.Assert(t, Extract(ctx, tt.annotations) == ctx)
+		})
+	}
+}
+
+func TestExtractRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		on   bool
+		want bool
+	}{
+		{name: "tracing on reads the header", on: true, want: true},
+		// The no-op tracer would carry the header's context into the span the
+		// webhook injects, so a pod would get an annotation with tracing off.
+		{name: "tracing off ignores the header"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			global := otel.GetTracerProvider()
+			t.Cleanup(func() {
+				if otel.GetTracerProvider() != global {
+					otel.SetTracerProvider(global)
+				}
+			})
+			if tt.on {
+				tp := sdktrace.NewTracerProvider()
+				otel.SetTracerProvider(tp)
+				t.Cleanup(func() { assert.NilError(t, tp.Shutdown(context.Background())) })
+			}
+			r := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+			r.Header.Set(traceparentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+
+			got := trace.SpanContextFromContext(ExtractRequest(context.Background(), r))
+			assert.Equal(t, got.IsValid(), tt.want)
 		})
 	}
 }

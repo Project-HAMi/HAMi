@@ -18,8 +18,11 @@ package tracing
 
 import (
 	"context"
+	"net/http"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // TraceparentAnnotation holds the W3C traceparent that links the spans of one
@@ -50,4 +53,15 @@ func Inject(ctx context.Context, annotations map[string]string) map[string]strin
 // A missing or malformed annotation leaves ctx unchanged.
 func Extract(ctx context.Context, annotations map[string]string) context.Context {
 	return propagation.TraceContext{}.Extract(ctx, propagation.MapCarrier{traceparentHeader: annotations[TraceparentAnnotation]})
+}
+
+// ExtractRequest returns ctx with the span context in the request's
+// traceparent header, when tracing is on. When tracing is off it returns ctx
+// unchanged: the no-op tracer would carry that span context into the spans it
+// starts, and from there into an annotation.
+func ExtractRequest(ctx context.Context, r *http.Request) context.Context {
+	if _, on := otel.GetTracerProvider().(*sdktrace.TracerProvider); !on {
+		return ctx
+	}
+	return propagation.TraceContext{}.Extract(ctx, propagation.HeaderCarrier(r.Header))
 }
