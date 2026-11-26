@@ -69,6 +69,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -1418,7 +1419,7 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 }
 
 // Allocate which return list of devices.
-func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
+func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (_ *kubeletdevicepluginv1beta1.AllocateResponse, err error) {
 	// Kubelet may issue Allocate calls concurrently. The pending-pod
 	// annotation protocol and dynamic MIG preparation are node-global, so keep
 	// pod selection, GI/CI creation, and annotation consumption atomic.
@@ -1442,6 +1443,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		return &responses, err
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+	ctx, span := startAllocateSpan(ctx, current, nodename)
+	defer func() {
+		if err != nil {
+			tracing.SetError(span, err.Error())
+		}
+		span.End()
+	}()
 
 	if plugin.operatingMode == nvidia.MigMode && plugin.migMgr != nil {
 		// Adopt existing instances before recording the rollback baseline;
@@ -1490,6 +1498,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		return &responses, err
 	}
 
+	var deviceIDs []string
 	for idx, req := range reqs.ContainerRequests {
 		if len(req.DevicesIds) == 0 {
 			PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -1528,6 +1537,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
+			for _, id := range req.DevicesIds {
+				deviceIDs = append(deviceIDs, rm.AnnotatedID(id).GetID())
+			}
 		} else {
 			currentCtr, devreq, err := popNextContainerDevices(current, podSingleDev)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
@@ -1687,6 +1699,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
+			deviceIDs = append(deviceIDs, requestIDs...)
 		}
 	}
 
@@ -1697,6 +1710,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	}
 
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
+	span.SetAttributes(tracing.DeviceUUIDsKey.StringSlice(deviceIDs))
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	allocationCompleted = true
 	return &responses, nil
