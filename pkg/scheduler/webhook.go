@@ -332,52 +332,10 @@ func fitResourceQuota(pod *corev1.Pod) error {
 		// container spec here. It applies its own memory factor, defaults and
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
-		var appMemoryReq, appCoresReq int64
-		for i := range pod.Spec.Containers {
-			req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
-			if reqErr != nil {
-				return reqErr
-			}
-			if req.Nums == 0 {
-				continue
-			}
-			appMemoryReq += req.Memreq * req.Nums
-			if req.TotalCoresreq > 0 {
-				appCoresReq += req.TotalCoresreq
-			} else {
-				appCoresReq += req.Coresreq * req.Nums
-			}
+		memoryReq, coresReq, err := podDeviceRequestTotal(pod, dev)
+		if err != nil {
+			return err
 		}
-
-		var initPeakMemoryReq, initPeakCoresReq int64
-		var sidecarMemoryReq, sidecarCoresReq int64
-		for i := range pod.Spec.InitContainers {
-			c := &pod.Spec.InitContainers[i]
-			req, reqErr := dev.GenerateResourceRequests(c)
-			if reqErr != nil {
-				return reqErr
-			}
-			if req.Nums == 0 {
-				continue
-			}
-			mem := req.Memreq * req.Nums
-			cores := req.Coresreq * req.Nums
-			if req.TotalCoresreq > 0 {
-				cores = req.TotalCoresreq
-			}
-			if util.IsSidecarContainer(c) {
-				sidecarMemoryReq += mem
-				sidecarCoresReq += cores
-				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
-				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
-				continue
-			}
-			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
-			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
-		}
-
-		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
-		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}
@@ -430,4 +388,55 @@ func injectSuperpodAffinity(pod *corev1.Pod) {
 	pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
 		pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution, term)
 	klog.V(3).InfoS("Injected superpod podAffinity", "pod", klog.KObj(pod), "taskid", taskid)
+}
+
+// podDeviceRequestTotal returns the most device memory and cores pod requests
+// from dev at one time, over its init, sidecar and app containers.
+func podDeviceRequestTotal(pod *corev1.Pod, dev device.Devices) (memory, cores int64, err error) {
+	var appMemoryReq, appCoresReq int64
+	for i := range pod.Spec.Containers {
+		req, reqErr := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+		if reqErr != nil {
+			return 0, 0, reqErr
+		}
+		if req.Nums == 0 {
+			continue
+		}
+		appMemoryReq += req.Memreq * req.Nums
+		if req.TotalCoresreq > 0 {
+			appCoresReq += req.TotalCoresreq
+		} else {
+			appCoresReq += req.Coresreq * req.Nums
+		}
+	}
+
+	var initPeakMemoryReq, initPeakCoresReq int64
+	var sidecarMemoryReq, sidecarCoresReq int64
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		req, reqErr := dev.GenerateResourceRequests(c)
+		if reqErr != nil {
+			return 0, 0, reqErr
+		}
+		if req.Nums == 0 {
+			continue
+		}
+		mem := req.Memreq * req.Nums
+		cores := req.Coresreq * req.Nums
+		if req.TotalCoresreq > 0 {
+			cores = req.TotalCoresreq
+		}
+		if util.IsSidecarContainer(c) {
+			sidecarMemoryReq += mem
+			sidecarCoresReq += cores
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
+			continue
+		}
+		initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+		initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
+	}
+
+	return max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq),
+		max(initPeakCoresReq, sidecarCoresReq+appCoresReq), nil
 }
