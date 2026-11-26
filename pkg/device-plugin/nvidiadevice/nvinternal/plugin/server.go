@@ -1709,7 +1709,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 
-	klog.Infoln("Allocate Response", responses.ContainerResponses)
+	klog.InfoS("Allocate Response", tracing.WithTraceID(span, "pod", klog.KObj(current), "responses", responses.ContainerResponses)...)
 	span.SetAttributes(tracing.DeviceUUIDsKey.StringSlice(deviceIDs))
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	allocationCompleted = true
