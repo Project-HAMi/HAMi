@@ -2098,6 +2098,86 @@ func remoteGPUWebhookPod(resourceName string, annotations map[string]string) *co
 	}
 }
 
+func TestPrivilegedContainerName(t *testing.T) {
+	privileged := true
+	plain := corev1.Container{Name: "plain"}
+
+	testCases := []struct {
+		name     string
+		pod      *corev1.Pod
+		wantName string
+		wantOK   bool
+	}{
+		{
+			name: "privileged init container is found",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "init-a"},
+					{Name: "init-priv", SecurityContext: &corev1.SecurityContext{Privileged: &privileged}},
+				},
+				Containers: []corev1.Container{plain},
+			}},
+			wantName: "init-priv",
+			wantOK:   true,
+		},
+		{
+			name: "privileged regular container is found",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "app-a"},
+					{Name: "app-priv", SecurityContext: &corev1.SecurityContext{Privileged: &privileged}},
+				},
+			}},
+			wantName: "app-priv",
+			wantOK:   true,
+		},
+		{
+			name: "first privileged container wins",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "init-priv", SecurityContext: &corev1.SecurityContext{Privileged: &privileged}},
+				},
+				Containers: []corev1.Container{
+					{Name: "app-priv", SecurityContext: &corev1.SecurityContext{Privileged: &privileged}},
+				},
+			}},
+			wantName: "init-priv",
+			wantOK:   true,
+		},
+		{
+			name: "no privileged containers",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-a"}},
+				Containers:     []corev1.Container{plain},
+			}},
+			wantName: "",
+			wantOK:   false,
+		},
+		{
+			name: "explicitly unprivileged security context is ignored",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "app", SecurityContext: &corev1.SecurityContext{Privileged: new(bool)}},
+				},
+			}},
+			wantName: "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotName, gotOK := privilegedContainerName(tc.pod)
+			if gotOK != tc.wantOK {
+				t.Fatalf("privilegedContainerName() ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotName != tc.wantName {
+				t.Errorf("privilegedContainerName() name = %q, want %q", gotName, tc.wantName)
+			}
+		})
+	}
+}
+
 // Unrelated annotations, including other hami.io keys the scheduler does not
 // own, must still be admitted.
 func TestUnrelatedAnnotationsStillAdmitted(t *testing.T) {

@@ -44,12 +44,6 @@ var (
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
-	ContainerDeviceMemory = prometheus.NewDesc(
-		"hami_container_device_memory_bytes",
-		`Container device memory usage in bytes (DEPRECATED: use hami_vgpu_memory_used_bytes, deprecated in v2.11.0, removed in v2.12.0)`,
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
-	)
-
 	ContainerUtilization = prometheus.NewDesc(
 		"hami_container_device_utilization_ratio",
 		"Container device SM utilization ratio",

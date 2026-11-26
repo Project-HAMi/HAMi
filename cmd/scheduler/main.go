@@ -38,6 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -84,6 +85,7 @@ func init() {
 	rootCmd.Flags().Float32Var(&config.TaintTolerationScoreWeight, "taint-toleration-score-weight", 0.0, "Penalty applied to the node score for PreferNoSchedule taints the pod does not tolerate, scaled by the node's untolerated taint count over the highest count among candidate nodes (0 disables). HAMi still returns a single node from Filter, so other kube-scheduler score plugins remain ignored.")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
+	rootCmd.Flags().StringVar(&config.TopologyTierLabels, "topology-tier-labels", "", "comma-separated node label keys describing the interconnect hierarchy, from the smallest domain to the largest, e.g. 'hami.io/rackid,hami.io/superpodid'. Use key=N to pin an explicit tier level. Only node labels are accepted. Empty disables the topology model.")
 
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
@@ -177,6 +179,20 @@ func start(ctx context.Context) error {
 	if config.HostName == "" {
 		return fmt.Errorf("empty hostname returned")
 	}
+
+	shutdownTracing, err := tracing.Setup(ctx, "hami-scheduler")
+	if err != nil {
+		klog.ErrorS(err, "Failed to set up tracing, running without it")
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer func() {
+		// ctx is canceled by now, so the last spans get their own deadline.
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(flush); err != nil {
+			klog.ErrorS(err, "Failed to shut down tracing")
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

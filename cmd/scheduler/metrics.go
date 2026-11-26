@@ -354,8 +354,8 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metric, legacy bool) {
 	quotaUsedDesc := prometheus.NewDesc(
 		"hami_resource_quota_used",
-		"resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)",
-		[]string{"namespace", "quota_name", "limit"}, nil,
+		"resourcequota usage for a certain device",
+		[]string{"namespace", "quota_name"}, nil,
 	)
 	quotaLimitDesc := prometheus.NewDesc(
 		"hami_resource_quota_limit",
@@ -366,13 +366,13 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 	if legacy {
 		legacyQuotaUsed = prometheus.NewDesc(
 			"QuotaUsed",
-			"resourcequota usage for a certain device (DEPRECATED: the limit label is deprecated in v2.11.0, removed in v2.12.0; use hami_resource_quota_limit instead)",
-			[]string{"quotanamespace", "quotaName", "limit"}, nil,
+			"resourcequota usage for a certain device",
+			[]string{"quotanamespace", "quotaName"}, nil,
 		)
 	}
 	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
-			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
+			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname); err != nil {
 				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
 			}
 			if q.LimitSet {
@@ -381,7 +381,7 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 				}
 			}
 			if legacy {
-				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))
+				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname)
 			}
 		}
 	}

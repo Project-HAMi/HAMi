@@ -89,6 +89,17 @@ func Tracer() trace.Tracer {
 	return otel.Tracer(tracerName)
 }
 
+// WithTraceID returns keysAndValues for a klog line, followed by "traceID" and
+// span's trace ID when span is recording and sampled, so the line leads to its
+// trace. With tracing off, a span still carries its parent's sampled flag.
+func WithTraceID(span trace.Span, keysAndValues ...any) []any {
+	sc := span.SpanContext()
+	if !span.IsRecording() || !sc.IsSampled() {
+		return keysAndValues
+	}
+	return append(keysAndValues, "traceID", sc.TraceID().String())
+}
+
 // sdkDisabled reports whether OTEL_SDK_DISABLED is "true", in any case. Any
 // other value is treated as false.
 func sdkDisabled() bool {
