@@ -46,6 +46,9 @@ import (
 type releasedReservation struct {
 	node string
 	time string
+	// id is unique for each Filter allocation. Pods filtered by an older
+	// scheduler have none, and are told apart by node and time only.
+	id string
 }
 
 // reservationKey returns the allocation pod's annotations describe.
@@ -53,6 +56,7 @@ func reservationKey(pod *corev1.Pod) releasedReservation {
 	return releasedReservation{
 		node: pod.Annotations[util.AssignedNodeAnnotations],
 		time: pod.Annotations[util.AssignedTimeAnnotations],
+		id:   pod.Annotations[util.AllocationIDAnnotation],
 	}
 }
 
@@ -117,23 +121,25 @@ func (s *Scheduler) releaseOnSchedulingFailureLocked(oldPod, newPod *corev1.Pod)
 }
 
 const (
-	// releasedAllocationPatchTimeout bounds the API calls that clear a
+	// releasedAllocationPatchTimeout bounds each API call that clears a
 	// released allocation from its pod.
 	releasedAllocationPatchTimeout = 30 * time.Second
-	// releasedAllocationPatchAttempts bounds how often the patch is tried
-	// again after the pod changed for another reason.
-	releasedAllocationPatchAttempts = 3
+	// releasedAllocationRetryInitial and releasedAllocationRetryMax bound
+	// the wait between attempts to clear a released allocation.
+	releasedAllocationRetryInitial = time.Second
+	releasedAllocationRetryMax     = time.Minute
 )
 
 // clearReleasedAllocation removes the released allocation's annotations from
 // pod in the background, so that a restarted scheduler or a new leader, which
 // do not have the in-memory marker, do not count it again. The patch applies
 // only while the pod is unchanged, so it never clears an allocation that a
-// later Filter wrote. When the pod did change, for example a label update, it
-// is read again and patched again while it still carries the released
-// allocation. Only the leader patches.
+// later Filter wrote. When the patch fails, for example because the pod got
+// a label update or the API server is unavailable, the pod is read again and
+// the patch is tried again with backoff, while this replica leads, the
+// scheduler runs, and the pod still carries the released allocation.
 func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
-	if s.kubeClient == nil || (s.leaderManager != nil && !s.leaderManager.IsLeader()) {
+	if s.kubeClient == nil || !s.isCleanupLeader() {
 		return
 	}
 	patch, err := releasedAllocationPatch(pod)
@@ -145,12 +151,16 @@ func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 		return
 	}
 	namespace, name := pod.Namespace, pod.Name
+	backoff := s.allocationCleanupBackoff
+	if backoff <= 0 {
+		backoff = releasedAllocationRetryInitial
+	}
 	s.allocationCleanups.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), releasedAllocationPatchTimeout)
-		defer cancel()
 		pods := s.kubeClient.CoreV1().Pods(namespace)
-		for attempt := 1; ; attempt++ {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), releasedAllocationPatchTimeout)
 			_, err := pods.Patch(ctx, name, k8stypes.JSONPatchType, patch, metav1.PatchOptions{})
+			cancel()
 			if err == nil {
 				klog.V(4).InfoS("Cleared a released allocation from the pod", "pod", klog.KRef(namespace, name))
 				return
@@ -158,18 +168,28 @@ func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 			if apierrors.IsNotFound(err) {
 				return
 			}
-			if attempt == releasedAllocationPatchAttempts {
-				// The in-memory marker still keeps the allocation out until
-				// this process exits.
-				klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
+			klog.V(2).InfoS("Will retry clearing a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err, "after", backoff)
+			select {
+			case <-s.stopCh:
+				// The in-memory marker kept the allocation out until now.
+				klog.InfoS("Did not clear a released allocation from the pod before stopping", "pod", klog.KRef(namespace, name))
+				return
+			case <-time.After(backoff):
+			}
+			backoff = min(2*backoff, releasedAllocationRetryMax)
+			if !s.isCleanupLeader() {
 				return
 			}
+			ctx, cancel = context.WithTimeout(context.Background(), releasedAllocationPatchTimeout)
 			live, err := pods.Get(ctx, name, metav1.GetOptions{})
-			if err != nil {
-				if !apierrors.IsNotFound(err) {
-					klog.InfoS("Did not clear a released allocation from the pod", "pod", klog.KRef(namespace, name), "err", err)
-				}
+			cancel()
+			if apierrors.IsNotFound(err) {
 				return
+			}
+			if err != nil {
+				// Try the same patch again: if the pod changed meanwhile, the
+				// patch fails and the next round reads it again.
+				continue
 			}
 			if !s.allocationStillReleased(live) {
 				// A later Filter wrote a new allocation, which must stay.
@@ -180,6 +200,12 @@ func (s *Scheduler) clearReleasedAllocation(pod *corev1.Pod) {
 			}
 		}
 	})
+}
+
+// isCleanupLeader reports whether this replica writes the cleanup patches:
+// only the leader does.
+func (s *Scheduler) isCleanupLeader() bool {
+	return s.leaderManager == nil || s.leaderManager.IsLeader()
 }
 
 // allocationStillReleased reports whether pod still carries the allocation
@@ -215,8 +241,17 @@ func releasedAllocationPatch(pod *corev1.Pod) ([]byte, error) {
 		{Op: "test", Path: "/metadata/resourceVersion", Value: pod.ResourceVersion},
 		{Op: "test", Path: annotation(util.AssignedNodeAnnotations), Value: node},
 		{Op: "test", Path: annotation(util.AssignedTimeAnnotations), Value: at},
-		{Op: "remove", Path: annotation(util.AssignedNodeAnnotations)},
-		{Op: "remove", Path: annotation(util.AssignedTimeAnnotations)},
+	}
+	id, hasID := pod.Annotations[util.AllocationIDAnnotation]
+	if hasID {
+		ops = append(ops, operation{Op: "test", Path: annotation(util.AllocationIDAnnotation), Value: id})
+	}
+	ops = append(ops,
+		operation{Op: "remove", Path: annotation(util.AssignedNodeAnnotations)},
+		operation{Op: "remove", Path: annotation(util.AssignedTimeAnnotations)},
+	)
+	if hasID {
+		ops = append(ops, operation{Op: "remove", Path: annotation(util.AllocationIDAnnotation)})
 	}
 	for _, key := range device.SupportDevices {
 		if _, ok := pod.Annotations[key]; ok {

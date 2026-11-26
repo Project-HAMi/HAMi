@@ -22,6 +22,11 @@ const (
 	BindTimeAnnotations     = "hami.io/bind-time"
 	DeviceBindPhase         = "hami.io/bind-phase"
 
+	// AllocationIDAnnotation is unique for each allocation Filter writes, so
+	// two allocations of a pod on the same node in the same second, which
+	// AssignedTimeAnnotations cannot tell apart, are not taken for each other.
+	AllocationIDAnnotation = "hami.io/vgpu-allocation-id"
+
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
 	DeviceBindSuccess    = "success"

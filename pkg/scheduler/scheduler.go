@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -143,6 +144,9 @@ type Scheduler struct {
 	// allocationCleanups tracks the patches that clear released allocations
 	// from their pods.
 	allocationCleanups sync.WaitGroup
+	// allocationCleanupBackoff is the first wait before such a patch is tried
+	// again; zero means releasedAllocationRetryInitial.
+	allocationCleanupBackoff time.Duration
 
 	// timedOutPods keeps the bind-time of each pod counted as an allocate
 	// timeout, so a bind is counted once. Guarded by timeoutLock.
@@ -469,6 +473,7 @@ func (s *Scheduler) recordFilterWrite(uid k8stypes.UID, patch map[string]string)
 	written := map[string]string{
 		util.AssignedNodeAnnotations: patch[util.AssignedNodeAnnotations],
 		util.AssignedTimeAnnotations: patch[util.AssignedTimeAnnotations],
+		util.AllocationIDAnnotation:  patch[util.AllocationIDAnnotation],
 	}
 	for _, key := range device.SupportDevices {
 		if value, ok := patch[key]; ok {
@@ -2041,6 +2046,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+	annotations[util.AllocationIDAnnotation] = uuid.NewString()
 
 	for _, val := range device.GetDevices() {
 		val.PatchAnnotations(pod, &annotations, m.Devices)

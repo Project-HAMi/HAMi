@@ -25,10 +25,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -72,6 +75,7 @@ func gangScheduler(t *testing.T, gpus int, pods ...*corev1.Pod) (*Scheduler, *fa
 	client.KubeClient = kubeClient
 	t.Cleanup(func() { client.KubeClient = oldClient })
 	s.kubeClient = kubeClient
+	s.allocationCleanupBackoff = time.Millisecond
 	s.addNode(gangNode, testNodeInfo(gangNode, gpus))
 	seedPods(t, s, pods...)
 	return s, kubeClient
@@ -311,6 +315,111 @@ func TestFailureBeforeNewerFilterKeepsReservation(t *testing.T) {
 	require.False(t, held)
 }
 
+// TestFailureInSameSecondKeepsNewerReservation checks that a delayed failure
+// of cycle A does not release cycle B's reservation when B picked the same
+// node and GPU in the same second, so that node, time and devices all match:
+// only the allocation ID tells them apart.
+func TestFailureInSameSecondKeepsNewerReservation(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+
+	// Cycle A: Filter, and the informer shows its patch.
+	require.True(t, gangFilter(t, s, pod))
+	cycleA := livePod(t, kubeClient, pod)
+	s.onUpdatePod(pod, cycleA)
+
+	// Cycle B: a newer Filter on the same node and GPU, not shown yet.
+	require.True(t, gangFilter(t, s, pod))
+	written := s.filterWrites[pod.UID].annotations
+	require.NotEqual(t, cycleA.Annotations[util.AllocationIDAnnotation], written[util.AllocationIDAnnotation])
+	// Make cycle A look the same as B in everything but the ID.
+	cycleA.Annotations[util.AssignedTimeAnnotations] = written[util.AssignedTimeAnnotations]
+	for key, value := range written {
+		if key != util.AllocationIDAnnotation {
+			require.Equal(t, value, cycleA.Annotations[key], key)
+		}
+	}
+
+	// The informer now delivers cycle A's failure.
+	s.onUpdatePod(cycleA, withSchedulingFailure(cycleA, "cycle A failed"))
+	_, held := s.podManager.GetPod(pod)
+	require.True(t, held, "cycle B's reservation must survive cycle A's failure")
+	require.Empty(t, s.releasedReservations)
+
+	// A marker for cycle A does not match cycle B either.
+	s.markReservationReleased(pod.UID, reservationKey(cycleA))
+	require.False(t, s.reservationReleased(livePod(t, kubeClient, pod)))
+	require.True(t, s.reservationReleased(cycleA))
+}
+
+// failPatches makes the first n pod patches fail as if the API server were
+// unavailable, and reports how many patches were tried.
+func failPatches(kubeClient *fake.Clientset, n int) *int {
+	tried := 0
+	kubeClient.PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		tried++
+		if tried <= n {
+			return true, nil, apierrors.NewServiceUnavailable("unavailable")
+		}
+		return false, nil, nil
+	})
+	return &tried
+}
+
+// TestClearReleasedAllocationRetriesUntilDone checks that the cleanup keeps
+// trying while the API server rejects it, more often than the three attempts
+// it used to give up after, so that a restart afterwards does not count the
+// released GPU again.
+func TestClearReleasedAllocationRetriesUntilDone(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "2")
+	tried := failPatches(kubeClient, 5)
+	permitTimeout(t, s, kubeClient, pod)
+	s.allocationCleanups.Wait()
+	require.Equal(t, 6, *tried)
+
+	live := livePod(t, kubeClient, pod)
+	require.NotContains(t, live.Annotations, util.AssignedNodeAnnotations)
+	require.NotContains(t, live.Annotations, util.AllocationIDAnnotation)
+
+	restarted := NewScheduler()
+	restarted.quotaManager = &device.QuotaManager{Quotas: map[string]*device.DeviceQuota{}}
+	restarted.kubeClient = kubeClient
+	restarted.addNode(gangNode, testNodeInfo(gangNode, 1))
+	restarted.onAddPod(live)
+	_, held := restarted.podManager.GetPod(pod)
+	require.False(t, held)
+	other := gangPod("other", 1)
+	seedPods(t, restarted, other)
+	require.True(t, gangFilter(t, restarted, other), "the released GPU must be free after a restart")
+}
+
+// TestClearReleasedAllocationStopsWithScheduler checks that a cleanup that
+// keeps failing ends when the scheduler stops.
+func TestClearReleasedAllocationStopsWithScheduler(t *testing.T) {
+	pod := gangPod("job", 1)
+	s, kubeClient := gangScheduler(t, 1, pod)
+	require.True(t, gangFilter(t, s, pod))
+	storeVersion(t, kubeClient, livePod(t, kubeClient, pod), "2")
+	failPatches(kubeClient, 1<<30)
+	permitTimeout(t, s, kubeClient, pod)
+
+	s.Stop()
+	done := make(chan struct{})
+	go func() {
+		s.allocationCleanups.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the cleanup did not stop with the scheduler")
+	}
+	require.Contains(t, livePod(t, kubeClient, pod).Annotations, util.AssignedNodeAnnotations)
+}
+
 // TestReleaseClearsAllocationForRestart checks that a release removes the
 // allocation from the pod, so that a restarted scheduler, which has no
 // in-memory marker, does not count the released GPU again.
@@ -409,6 +518,19 @@ func TestReleasedAllocationPatch(t *testing.T) {
 		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-time","value":"100"},
 		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-node"},
 		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-time"}
+	]`, string(patch))
+
+	pod.Annotations[util.AllocationIDAnnotation] = "id-1"
+	patch, err = releasedAllocationPatch(pod)
+	require.NoError(t, err)
+	require.JSONEq(t, `[
+		{"op":"test","path":"/metadata/resourceVersion","value":"7"},
+		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-node","value":"node-1"},
+		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-time","value":"100"},
+		{"op":"test","path":"/metadata/annotations/hami.io~1vgpu-allocation-id","value":"id-1"},
+		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-node"},
+		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-time"},
+		{"op":"remove","path":"/metadata/annotations/hami.io~1vgpu-allocation-id"}
 	]`, string(patch))
 
 	patch, err = releasedAllocationPatch(&corev1.Pod{})
