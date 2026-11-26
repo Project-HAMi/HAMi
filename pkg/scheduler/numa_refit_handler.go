@@ -294,7 +294,7 @@ func (s *Scheduler) RefitNumaAllocation(ctx context.Context, req device.NumaRefi
 			quotaCores += d.Usedcores
 		}
 	}
-	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, quotaCores, req.DeviceType) {
+	if !s.quotaManager.FitQuotaForPod(pod, quotaMem, quotaCores, req.DeviceType) {
 		return failWithQuotaRestore(metrics.FailureReasonNoFit, "refit would exceed the %s resource quota in namespace %s", req.DeviceType, pod.Namespace)
 	}
 

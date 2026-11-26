@@ -998,7 +998,7 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	}
 
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuotaForPod(pod, mem, core, NvidiaGPUDevice)
 }
 
 // fitQuotaForDevices verifies that the cumulative allocation of devs satisfies the namespace quota.

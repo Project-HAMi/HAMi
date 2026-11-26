@@ -422,7 +422,7 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns, devUUID string, memreq int64) bool {
 	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
 	cur = append(cur, device.ContainerDevice{UUID: devUUID, Type: AMDDevice, Usedmem: memreq})
-	return device.GetLocalCache().FitQuota(ns, quotaMemory(pod, allocated, cur), 0, AMDDevice)
+	return device.GetLocalCache().FitQuotaForPod(pod, quotaMemory(pod, allocated, cur), 0, AMDDevice)
 }
 
 func quotaMemory(pod *corev1.Pod, allocated *device.PodDevices, cur device.ContainerDevices) int64 {
@@ -628,7 +628,7 @@ func (amddevice *AMDDevices) fit(devices []*device.DeviceUsage, request device.C
 		var quota *combinationQuota
 		quotaRejected := false
 		fitsMemory := func(mem int64) bool {
-			return device.GetLocalCache().FitQuota(pod.Namespace, mem, 0, AMDDevice)
+			return device.GetLocalCache().FitQuotaForPod(pod, mem, 0, AMDDevice)
 		}
 		// If all candidates fit together, every subset fits and scoring needs no quota checks.
 		if !fitsMemory(quotaMemory(pod, allocated, tmpDevs[k.Type])) {

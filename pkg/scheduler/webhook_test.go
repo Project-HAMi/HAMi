@@ -559,6 +559,61 @@ func addQuota(t *testing.T, qm *device.QuotaManager, ns, resourceName, limit str
 	})
 }
 
+// A quota scoped to one PriorityClass used to be skipped, so admission let
+// pods of that class past its limit.
+func TestFitResourceQuotaScopedQuota(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	ns := "scoped-quota"
+	qm := device.NewQuotaManager()
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "high", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{"limits.nvidia.com/gpumem": resource.MustParse("2000")},
+			ScopeSelector: &corev1.ScopeSelector{MatchExpressions: []corev1.ScopedResourceSelectorRequirement{{
+				ScopeName: corev1.ResourceQuotaScopePriorityClass, Operator: corev1.ScopeSelectorOpIn, Values: []string{"high"},
+			}}},
+		},
+	}
+	qm.AddQuota(rq)
+	t.Cleanup(func() { qm.DelQuota(rq) })
+
+	pod := func(priorityClass string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: ns},
+			Spec: corev1.PodSpec{
+				PriorityClassName: priorityClass,
+				Containers: []corev1.Container{{
+					Name: "main",
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    resource.MustParse("1"),
+						"nvidia.com/gpumem": resource.MustParse("8000"),
+					}},
+				}},
+			},
+		}
+	}
+	if err := fitResourceQuota(pod("high")); err == nil {
+		t.Error("a high pod asking for 8000 MiB passed a 2000 MiB quota scoped to high")
+	}
+	if err := fitResourceQuota(pod("low")); err != nil {
+		t.Errorf("a low pod was denied by a quota scoped to high: %v", err)
+	}
+}
+
 // Quota used to be checked for NVIDIA only, so a namespace limit on any other
 // vendor's memory or cores was silently ignored.
 func TestFitResourceQuotaNonNvidia(t *testing.T) {
