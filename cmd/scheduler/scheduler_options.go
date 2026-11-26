@@ -22,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/topology"
 )
 
 func validateSchedulerOptions() error {
@@ -31,7 +32,17 @@ func validateSchedulerOptions() error {
 	if err := config.ValidateTaintTolerationScoreWeight(config.TaintTolerationScoreWeight); err != nil {
 		return err
 	}
+	if err := validateTopologyConfig(); err != nil {
+		return err
+	}
 	return validateDevicePluginIdentity(config.DevicePluginNamespace, config.DevicePluginServiceAccount)
+}
+
+func validateTopologyConfig() error {
+	if _, err := topology.ParseTiers(config.TopologyTierLabels); err != nil {
+		return fmt.Errorf("invalid --topology-tier-labels: %w", err)
+	}
+	return nil
 }
 
 func validateDevicePluginIdentity(namespace, serviceAccount string) error {
