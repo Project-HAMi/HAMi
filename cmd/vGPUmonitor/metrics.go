@@ -95,7 +95,6 @@ var (
 	)
 	ctrvGPUdesc              = metrics.ContainerMemory
 	ctrvGPUlimitdesc         = metrics.ContainerMemoryLimit
-	ctrDeviceMemorydesc      = metrics.ContainerDeviceMemory
 	ctrDeviceUtilizationdesc = metrics.ContainerUtilization
 	ctrDeviceLastKernelDesc  = prometheus.NewDesc(
 		"hami_container_last_kernel_elapsed_seconds",
@@ -203,7 +202,6 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUTemperaturedesc
 	ch <- hostGPUPowerUsagedesc
 	ch <- hostGPUEccErrorsdesc
-	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceLastKernelDesc
 	ch <- ctrDeviceMigInfo
@@ -611,10 +609,6 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		}
 		sendLegacyMetric(ch, legacyCtrvGPUlimitdesc, prometheus.GaugeValue, float64(memoryLimit), labels...)
 
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
-			klog.Errorf("Failed to send device memory desc: %v", err)
-			return err
-		}
 		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
 		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
 		sendLegacyMetric(ch, legacyCtrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...)
