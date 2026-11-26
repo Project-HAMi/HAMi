@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
@@ -86,6 +88,9 @@ func Test_loadWholeGPUDryRunKubeConfig(t *testing.T) {
 	t.Run("falls back to in-cluster when no home kubeconfig exists", func(t *testing.T) {
 		t.Setenv("KUBECONFIG", "")
 		t.Setenv("HOME", "")
+		previous := clientcmd.RecommendedHomeFile
+		clientcmd.RecommendedHomeFile = filepath.Join(t.TempDir(), "missing.yaml")
+		t.Cleanup(func() { clientcmd.RecommendedHomeFile = previous })
 		_, err := loadWholeGPUDryRunKubeConfig()
 		if err != nil {
 			assert.Assert(t, !strings.Contains(err.Error(), "explicit kubeconfig"),
@@ -100,8 +105,39 @@ func Test_loadWholeGPUDryRunKubeConfig(t *testing.T) {
 		assert.NilError(t, os.WriteFile(kubeconfig, []byte(""), 0o600))
 		t.Setenv("KUBECONFIG", "")
 		t.Setenv("HOME", dir)
+		previous := clientcmd.RecommendedHomeFile
+		clientcmd.RecommendedHomeFile = kubeconfig
+		t.Cleanup(func() { clientcmd.RecommendedHomeFile = previous })
 		_, err := loadWholeGPUDryRunKubeConfig()
 		assert.Assert(t, err != nil)
 		assert.Assert(t, strings.Contains(err.Error(), "explicit kubeconfig"))
 	})
+}
+
+func TestWholeGPUDryRunMultiFileKubeconfig(t *testing.T) {
+	contextPath := filepath.Join(t.TempDir(), "context.yaml")
+	resourcesPath := filepath.Join(t.TempDir(), "resources.yaml")
+	assert.NilError(t, clientcmd.WriteToFile(clientcmdapi.Config{
+		CurrentContext: "test",
+		Contexts:       map[string]*clientcmdapi.Context{"test": {Cluster: "test", AuthInfo: "test"}},
+	}, contextPath))
+	assert.NilError(t, clientcmd.WriteToFile(clientcmdapi.Config{
+		Clusters:  map[string]*clientcmdapi.Cluster{"test": {Server: "https://test.example.com"}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"test": {Token: "synthetic-token"}},
+	}, resourcesPath))
+	t.Setenv("KUBECONFIG", strings.Join([]string{contextPath, resourcesPath}, string(os.PathListSeparator)))
+	config, err := loadWholeGPUDryRunKubeConfig()
+	assert.NilError(t, err)
+	assert.Equal(t, config.Host, "https://test.example.com")
+	assert.Equal(t, config.BearerToken, "synthetic-token")
+}
+
+func TestWholeGPUDryRunRejectsInvalidExplicitKubeconfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.yaml")
+	assert.NilError(t, os.WriteFile(path, []byte("clusters: ["), 0600))
+	t.Setenv("KUBECONFIG", path)
+	_, err := loadWholeGPUDryRunKubeConfig()
+	assert.ErrorContains(t, err, "explicit kubeconfig")
+	assert.ErrorContains(t, err, "error loading config file")
+	assert.Assert(t, !strings.Contains(err.Error(), "in-cluster"))
 }

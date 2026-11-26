@@ -28,7 +28,7 @@ import (
 
 // Variables for testing.
 var (
-	fileConfig      = loadFileConfig
+	fileConfig      = LoadFileConfig
 	inClusterConfig = rest.InClusterConfig
 )
 
@@ -54,7 +54,7 @@ func GetClient() kubernetes.Interface {
 
 // NewClient creates a new Kubernetes client with the given options.
 func NewClient(opts ...Option) (*Client, error) {
-	restConfig, err := loadKubeConfig()
+	restConfig, err := LoadKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
@@ -89,23 +89,29 @@ func InitGlobalClient(opts ...Option) {
 	})
 }
 
-// loadFileConfig merges KUBECONFIG files, or loads the default home configuration.
-func loadFileConfig() (*rest.Config, error) {
+// LoadFileConfig merges KUBECONFIG files, or loads the default home configuration,
+// without falling back to in-cluster configuration.
+func LoadFileConfig() (*rest.Config, error) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	config, err := rules.Load()
 	if err != nil {
 		return nil, err
 	}
-	// Use a direct client config so loadKubeConfig owns the in-cluster fallback.
+	// Use a direct client config so LoadKubeConfig owns the in-cluster fallback.
 	return clientcmd.NewNonInteractiveClientConfig(*config, "", &clientcmd.ConfigOverrides{}, rules).ClientConfig()
 }
 
-// loadKubeConfig loads Kubernetes configuration from the environment or in-cluster.
-func loadKubeConfig() (*rest.Config, error) {
+// LoadKubeConfig loads Kubernetes configuration from files, falling back to
+// in-cluster configuration. If both sources fail, the error wraps both causes.
+func LoadKubeConfig() (*rest.Config, error) {
 	config, err := fileConfig()
 	if err != nil {
 		klog.Infof("Loading kubeconfig failed: %v. Using in-cluster config.", err)
-		return inClusterConfig()
+		inCluster, fallbackErr := inClusterConfig()
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("kubeconfig: %w; in-cluster config: %w", err, fallbackErr)
+		}
+		return inCluster, nil
 	}
 	return config, nil
 }

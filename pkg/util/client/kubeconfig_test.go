@@ -106,7 +106,7 @@ func TestLoadKubeconfigRelativePaths(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(filepath.Dir(resourcesPath), "ca.crt"), []byte("synthetic CA"), 0600))
 	t.Setenv("KUBECONFIG", strings.Join([]string{contextPath, resourcesPath}, string(os.PathListSeparator)))
 	calls := stubInClusterConfig(t, nil, errors.New("unexpected in-cluster fallback"))
-	config, err := loadKubeConfig()
+	config, err := LoadKubeConfig()
 	assert.NilError(t, err)
 	assert.Equal(t, config.CAFile, filepath.Join(filepath.Dir(resourcesPath), "ca.crt"))
 	assert.Equal(t, *calls, 0)
@@ -120,7 +120,7 @@ func TestLoadKubeconfigHome(t *testing.T) {
 	clientcmd.RecommendedHomeFile = path
 	t.Cleanup(func() { clientcmd.RecommendedHomeFile = previous })
 	calls := stubInClusterConfig(t, nil, errors.New("unexpected in-cluster fallback"))
-	config, err := loadKubeConfig()
+	config, err := LoadKubeConfig()
 	assert.NilError(t, err)
 	assert.Equal(t, config.Host, "https://selected.example.com")
 	assert.Equal(t, *calls, 0)
@@ -159,4 +159,19 @@ func TestNewClientKubeconfigFallback(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestNewClientKubeconfigFallbackPreservesErrors(t *testing.T) {
+	kubeconfigErr := errors.New("invalid kubeconfig context")
+	fallbackErr := errors.New("in-cluster configuration unavailable")
+	previous := fileConfig
+	fileConfig = func() (*rest.Config, error) { return nil, kubeconfigErr }
+	t.Cleanup(func() { fileConfig = previous })
+	calls := stubInClusterConfig(t, nil, fallbackErr)
+	_, err := NewClient()
+	assert.Assert(t, errors.Is(err, kubeconfigErr))
+	assert.Assert(t, errors.Is(err, fallbackErr))
+	assert.ErrorContains(t, err, kubeconfigErr.Error())
+	assert.ErrorContains(t, err, fallbackErr.Error())
+	assert.Equal(t, *calls, 1)
 }

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/spf13/cobra"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var newWholeGPUDryRunClient = newWholeGPUDryRunKubernetesClient
@@ -90,15 +90,14 @@ func newWholeGPUDryRunKubernetesClient() (kubernetes.Interface, error) {
 func loadWholeGPUDryRunKubeConfig() (*rest.Config, error) {
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
-		if home := os.Getenv("HOME"); home != "" {
-			candidate := filepath.Join(home, ".kube", "config")
-			if _, err := os.Stat(candidate); err == nil {
-				kubeconfig = candidate
-			}
+		if _, err := os.Stat(clientcmd.RecommendedHomeFile); err == nil {
+			kubeconfig = clientcmd.RecommendedHomeFile
 		}
 	}
 	if kubeconfig != "" {
-		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+		// Diagnostics must report invalid explicit configuration rather than
+		// silently selecting an in-cluster configuration for another cluster.
+		config, err := client.LoadFileConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load explicit kubeconfig %s: %w", kubeconfig, err)
 		}
