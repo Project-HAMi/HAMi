@@ -47,6 +47,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/vgpucache"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/watch"
+	"github.com/Project-HAMi/HAMi/pkg/tracing"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	flagutil "github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -293,6 +294,21 @@ func start(c *cli.Context, o *options) (resultErr error) {
 	client.InitGlobalClient()
 	processCtx, cancelProcess := context.WithCancel(c.Context)
 	defer cancelProcess()
+
+	shutdownTracing, err := tracing.Setup(processCtx, "hami-device-plugin")
+	if err != nil {
+		klog.ErrorS(err, "Failed to set up tracing, running without it")
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer func() {
+		// Use a separate timeout to flush the remaining spans without
+		// blocking shutdown if the Collector is unreachable.
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(flush); err != nil {
+			klog.ErrorS(err, "Failed to shut down tracing")
+		}
+	}()
 
 	nodePods, err := nodepodinformer.New(client.GetClient(), util.NodeName)
 	if err != nil {
