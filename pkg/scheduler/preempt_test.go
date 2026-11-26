@@ -312,6 +312,7 @@ func devicePreemptor(t *testing.T) (*Scheduler, *corev1.Pod) {
 	priority := int32(1000)
 	pod.Spec.Priority = &priority
 	s, _ := filterLeader(t, pod, 1)
+	withBudgets(t, s)
 	return s, pod
 }
 
@@ -479,6 +480,7 @@ func Test_Preempt_OnlyAnswers(t *testing.T) {
 	priority := int32(1000)
 	pod.Spec.Priority = &priority
 	s, kubeClient := filterLeader(t, pod, 1)
+	withBudgets(t, s)
 	low := holding(trackedOn(moveNodeX, "low", 10), 8000)
 	track(t, s, low)
 

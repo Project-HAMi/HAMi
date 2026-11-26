@@ -23,6 +23,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
@@ -57,7 +60,8 @@ type plannedDevices struct {
 //
 // On each candidate node Preempt adds the victims that the devices of the pod
 // need, and leaves out a node where the devices cannot fit. The devices it
-// planned are kept for nominatedReservations.
+// planned are kept for nominatedReservations. It adds the PodDisruptionBudget
+// violations of its victims to NumPDBViolations.
 func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1.ExtenderPreemptionResult, error) {
 	if args.Pod == nil {
 		return nil, errors.New("extender preemption args missing pod")
@@ -81,6 +85,13 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 		return &extenderv1.ExtenderPreemptionResult{NodeNameToMetaVictims: candidates}, nil
 	}
 
+	// This reads informer caches only, so it is done without allocLock.
+	budgets, err := s.podDisruptionBudgets(candidates)
+	if err != nil {
+		klog.ErrorS(err, "Rejecting preemption request", "pod", klog.KObj(pod))
+		return nil, err
+	}
+
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
 
@@ -94,7 +105,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 	}
 	plan := &preemptionPlan{pod: pod, nodes: make(map[string]plannedDevices), at: time.Now()}
 	for nodeName, proposed := range candidates {
-		victims, planned, fits := s.selectVictims(pod, resourceReqs, nodeName, podsByNode[nodeName], proposed)
+		victims, planned, violations, fits := s.selectVictims(pod, resourceReqs, nodeName, podsByNode[nodeName], proposed, budgets)
 		if !fits {
 			klog.V(4).InfoS("Leaving out preemption candidate, devices do not fit even without lower priority pods",
 				"pod", klog.KObj(pod), "node", nodeName)
@@ -104,6 +115,8 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 		for _, victim := range victims {
 			proposed.Pods = append(proposed.Pods, &extenderv1.MetaPod{UID: string(victim.UID)})
 		}
+		// kube-scheduler ranks the candidate nodes by this count first.
+		proposed.NumPDBViolations += violations
 		// kube-scheduler drops a node without victims, so it needs no plan.
 		if len(proposed.Pods) > 0 {
 			migPlacements, _ := nvidia.EncodeMigAllocations(planned[nvidia.NvidiaGPUDevice])
@@ -113,7 +126,7 @@ func (s *Scheduler) Preempt(args extenderv1.ExtenderPreemptionArgs) (*extenderv1
 			}
 		}
 		klog.V(4).InfoS("Selected preemption victims for devices",
-			"pod", klog.KObj(pod), "node", nodeName, "added", len(victims), "victims", len(proposed.Pods))
+			"pod", klog.KObj(pod), "node", nodeName, "added", len(victims), "victims", len(proposed.Pods), "pdbViolationsAdded", violations)
 	}
 	// A new answer replaces the earlier plan of the pod.
 	delete(s.preemptionPlans, pod.UID)
@@ -137,10 +150,11 @@ func hasDeviceRequest(resourceReqs device.PodDeviceRequests) bool {
 }
 
 // selectVictims returns the extra pods that must leave nodeName so that pod
-// fits, and the devices pod gets then. It reports false if pod cannot fit.
-// Like kube-scheduler, it removes all candidates and puts them back one by
-// one. Callers hold allocLock.
-func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodeName string, nodePods []*device.PodInfo, proposed *extenderv1.MetaVictims) ([]*device.PodInfo, device.PodDevices, bool) {
+// fits, the devices pod gets then, and how many of the extra pods break a
+// PodDisruptionBudget. It reports false if pod cannot fit. Like kube-scheduler,
+// it removes all candidates and puts them back one by one, first the ones a
+// budget protects. Callers hold allocLock.
+func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, nodeName string, nodePods []*device.PodInfo, proposed *extenderv1.MetaVictims, budgets *disruptionBudgets) ([]*device.PodInfo, device.PodDevices, int64, bool) {
 	// Like Filter, ignore what the pod holds from an earlier attempt.
 	gone := map[k8stypes.UID]struct{}{pod.UID: {}}
 	taken := make(map[k8stypes.UID]struct{}, len(proposed.Pods))
@@ -154,20 +168,177 @@ func (s *Scheduler) selectVictims(pod *corev1.Pod, resourceReqs device.PodDevice
 	}
 	planned, fits := s.fitsWithout(pod, resourceReqs, nodeName, nodePods, gone)
 	if !fits {
-		return nil, nil, false
+		return nil, nil, 0, false
 	}
 
 	var victims []*device.PodInfo
-	for _, candidate := range candidates {
+	// spare puts candidate back, or makes it a victim if pod no longer fits.
+	spare := func(candidate *device.PodInfo) bool {
 		delete(gone, candidate.UID)
 		if devices, stillFits := s.fitsWithout(pod, resourceReqs, nodeName, nodePods, gone); stillFits {
 			planned = devices
-			continue
+			return true
 		}
 		gone[candidate.UID] = struct{}{}
 		victims = append(victims, candidate)
+		return false
 	}
-	return victims, planned, true
+	protected, others := budgets.split(nodePods, proposed.Pods, candidates)
+	var violations int64
+	for _, candidate := range protected {
+		if !spare(candidate) {
+			violations++
+		}
+	}
+	for _, candidate := range others {
+		spare(candidate)
+	}
+	if len(protected) > 0 && len(others) > 0 {
+		sort.Slice(victims, func(i, j int) bool {
+			return moreImportantPod(victims[i].Pod, victims[j].Pod)
+		})
+	}
+	return victims, planned, violations, true
+}
+
+// disruptionBudgets are the PodDisruptionBudgets of the cluster with their
+// selectors parsed once, and the victims the request proposes, by UID.
+type disruptionBudgets struct {
+	pdbs      []*policyv1.PodDisruptionBudget
+	selectors []labels.Selector
+	proposed  map[k8stypes.UID]*corev1.Pod
+}
+
+func newDisruptionBudgets(pdbs []*policyv1.PodDisruptionBudget) *disruptionBudgets {
+	budgets := &disruptionBudgets{pdbs: pdbs, selectors: make([]labels.Selector, len(pdbs))}
+	for i, pdb := range pdbs {
+		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
+		if err != nil {
+			// An invalid selector matches no pod.
+			selector = labels.Nothing()
+		}
+		budgets.selectors[i] = selector
+	}
+	return budgets
+}
+
+// podDisruptionBudgets returns the PodDisruptionBudgets for one preemption.
+// Their informer starts with the scheduler. If its cache is not synced, this
+// fails at once, so that no victim is picked without them.
+func (s *Scheduler) podDisruptionBudgets(candidates map[string]*extenderv1.MetaVictims) (*disruptionBudgets, error) {
+	if s.pdbLister == nil || s.pdbSynced == nil || !s.pdbSynced() {
+		return nil, errors.New("the PodDisruptionBudget cache is not synced, check the RBAC of the scheduler for poddisruptionbudgets")
+	}
+	pdbs, err := s.pdbLister.List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+	budgets := newDisruptionBudgets(pdbs)
+	if len(pdbs) == 0 {
+		return budgets, nil
+	}
+	if budgets.proposed, err = s.proposedVictims(candidates); err != nil {
+		return nil, err
+	}
+	return budgets, nil
+}
+
+// podUIDIndex is the index of the pod informer by pod UID.
+const podUIDIndex = "uid"
+
+// indexPodByUID is the index function of podUIDIndex.
+func indexPodByUID(obj any) ([]string, error) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil, nil
+	}
+	return []string{string(pod.UID)}, nil
+}
+
+// proposedVictims returns the pods the request proposes as victims, by UID.
+// The request has only UIDs, and a victim without a HAMi device is not in the
+// pod cache, so they come from the UID index of the pod informer.
+func (s *Scheduler) proposedVictims(candidates map[string]*extenderv1.MetaVictims) (map[k8stypes.UID]*corev1.Pod, error) {
+	if s.podIndexer == nil {
+		return nil, nil
+	}
+	found := make(map[k8stypes.UID]*corev1.Pod)
+	for _, victims := range candidates {
+		for _, victim := range victims.Pods {
+			objs, err := s.podIndexer.ByIndex(podUIDIndex, victim.UID)
+			if err != nil {
+				return nil, err
+			}
+			for _, obj := range objs {
+				if pod, ok := obj.(*corev1.Pod); ok {
+					found[pod.UID] = pod
+				}
+			}
+		}
+	}
+	return found, nil
+}
+
+// split sorts candidates into the pods whose eviction breaks a budget and the
+// others, in their order. A budget allows status.disruptionsAllowed more
+// evictions, and a pod uses one from every budget that covers it. The proposed
+// victims go anyway, so they are counted first.
+func (b *disruptionBudgets) split(nodePods []*device.PodInfo, proposed []*extenderv1.MetaPod, candidates []*device.PodInfo) (protected, others []*device.PodInfo) {
+	if len(b.pdbs) == 0 {
+		return nil, candidates
+	}
+	allowed := make([]int32, len(b.pdbs))
+	for i, pdb := range b.pdbs {
+		allowed[i] = pdb.Status.DisruptionsAllowed
+	}
+	// Every budget that covers the pod is updated, so the result does not
+	// depend on the order of the budgets.
+	breaksBudget := func(pod *corev1.Pod) bool {
+		broken := false
+		for i, pdb := range b.pdbs {
+			if pdb.Namespace != pod.Namespace || !b.selectors[i].Matches(labels.Set(pod.Labels)) {
+				continue
+			}
+			// The API server has counted a pod in DisruptedPods already.
+			if _, disrupted := pdb.Status.DisruptedPods[pod.Name]; disrupted {
+				continue
+			}
+			allowed[i]--
+			if allowed[i] < 0 {
+				broken = true
+			}
+		}
+		return broken
+	}
+	for _, victim := range proposed {
+		uid := k8stypes.UID(victim.UID)
+		pod, ok := b.proposed[uid]
+		if !ok {
+			// The lister can have dropped a pod the pod cache still has.
+			pod = podWithUID(nodePods, uid)
+		}
+		if pod != nil {
+			breaksBudget(pod)
+		}
+	}
+	for _, candidate := range candidates {
+		if breaksBudget(candidate.Pod) {
+			protected = append(protected, candidate)
+		} else {
+			others = append(others, candidate)
+		}
+	}
+	return protected, others
+}
+
+// podWithUID returns the pod with uid among nodePods, or nil.
+func podWithUID(nodePods []*device.PodInfo, uid k8stypes.UID) *corev1.Pod {
+	for _, pi := range nodePods {
+		if pi != nil && pi.Pod != nil && pi.UID == uid {
+			return pi.Pod
+		}
+	}
+	return nil
 }
 
 // reservationFor returns a pod cache entry that holds the planned devices for
