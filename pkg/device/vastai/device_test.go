@@ -1091,3 +1091,134 @@ func TestComputeBestCombination(t *testing.T) {
 		})
 	}
 }
+
+func TestDevices_ScoreNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+
+	tests := []struct {
+		name       string
+		podDevices device.PodSingleDevice
+		want       float32
+	}{
+		{
+			name:       "empty pod devices",
+			podDevices: device.PodSingleDevice{},
+			want:       0,
+		},
+		{
+			name: "empty container slice is skipped",
+			podDevices: device.PodSingleDevice{
+				{},
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
+			},
+			want: 1.0,
+		},
+		{
+			name: "nil custom info returns 0",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: nil},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "non-die device strategy returns 0",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "card", "AIC": "1"}},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "missing AIC key returns 0",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die"}},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "non-string AIC value is ignored without dividing by zero",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": 1}},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "all dies on same AIC scores 1.0",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
+			},
+			want: 1.0,
+		},
+		{
+			name: "dies split across AICs scores maxCnt over totalCnt",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-2", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "2"}},
+				},
+			},
+			want: float32(2) / float32(3),
+		},
+		{
+			name: "omitted DeviceStrategy still scores by AIC",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"AIC": "2"}},
+				},
+			},
+			want: 0.5,
+		},
+		{
+			name: "multiple containers sum their scores",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
+				{
+					{UUID: "dev-2", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-3", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "2"}},
+				},
+			},
+			want: 1.5,
+		},
+		{
+			name: "later container with non-die strategy returns 0",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
+				{
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "card", "AIC": "1"}},
+				},
+			},
+			want: 0,
+		},
+	}
+
+	dev := &VastaiDevices{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dev.ScoreNode(node, tt.podDevices, nil, "")
+			assert.Equal(t, got, tt.want)
+		})
+	}
+}
