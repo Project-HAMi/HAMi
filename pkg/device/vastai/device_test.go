@@ -1123,7 +1123,8 @@ func TestDevices_ScoreNode(t *testing.T) {
 			name: "nil custom info returns 0",
 			podDevices: device.PodSingleDevice{
 				{
-					{UUID: "dev-0", CustomInfo: nil},
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: nil},
 				},
 			},
 			want: 0,
@@ -1141,7 +1142,8 @@ func TestDevices_ScoreNode(t *testing.T) {
 			name: "missing AIC key returns 0",
 			podDevices: device.PodSingleDevice{
 				{
-					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die"}},
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die"}},
 				},
 			},
 			want: 0,
@@ -1154,6 +1156,16 @@ func TestDevices_ScoreNode(t *testing.T) {
 				},
 			},
 			want: 0,
+		},
+		{
+			name: "non-string AIC value is ignored alongside valid AIC",
+			podDevices: device.PodSingleDevice{
+				{
+					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": 1}},
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
+			},
+			want: 1.0,
 		},
 		{
 			name: "all dies on same AIC scores 1.0",
