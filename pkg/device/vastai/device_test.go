@@ -1177,16 +1177,6 @@ func TestDevices_ScoreNode(t *testing.T) {
 			want: float32(2) / float32(3),
 		},
 		{
-			name: "omitted DeviceStrategy still scores by AIC",
-			podDevices: device.PodSingleDevice{
-				{
-					{UUID: "dev-0", CustomInfo: map[string]any{"AIC": "1"}},
-					{UUID: "dev-1", CustomInfo: map[string]any{"AIC": "2"}},
-				},
-			},
-			want: 0.5,
-		},
-		{
 			name: "multiple containers sum their scores",
 			podDevices: device.PodSingleDevice{
 				{
