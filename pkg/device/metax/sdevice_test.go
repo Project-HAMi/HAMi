@@ -3542,3 +3542,47 @@ func TestMetaxSDevices_PatchAnnotations(t *testing.T) {
 		assert.Equal(t, ok, false)
 	})
 }
+
+func TestMetaxSDevicesCheckHealth(t *testing.T) {
+	MetaxResourceNameVCount = "metax-tech.com/sgpu"
+	dev := &MetaxSDevices{}
+	oneCard := `[{"uuid": "GPU-123", "totalDevCount": 16, "totalCompute": 100, "totalVRam": 32768, "healthy": true}]`
+	twoCards := `[{"uuid": "GPU-123", "totalDevCount": 16, "totalCompute": 100, "totalVRam": 32768, "healthy": true},` +
+		`{"uuid": "GPU-456", "totalDevCount": 16, "totalCompute": 100, "totalVRam": 32768, "healthy": true}]`
+	node := func(name, anno string, allocatable int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
+			Status: corev1.NodeStatus{
+				Capacity:    corev1.ResourceList{"metax-tech.com/sgpu": *resource.NewQuantity(16, resource.DecimalSI)},
+				Allocatable: corev1.ResourceList{"metax-tech.com/sgpu": *resource.NewQuantity(allocatable, resource.DecimalSI)},
+			},
+		}
+		if anno != "" {
+			n.Annotations[MetaxSDeviceAnno] = anno
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(MetaxSGPUDevice, nil)
+	assert.Assert(t, !healthy && !needUpdate, "a nil node is not healthy")
+
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-noanno", "", 16))
+	assert.Assert(t, !healthy && !needUpdate, "a node without the device annotation is not healthy")
+
+	// The annotation stays after the device plugin stops; kubelet sets the
+	// count in Allocatable to 0.
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-gone", oneCard, 0))
+	assert.Assert(t, !healthy && !needUpdate, "a node with 0 allocatable sGPUs is not healthy")
+
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-up", oneCard, 16))
+	assert.Assert(t, healthy && needUpdate, "the first healthy check reads the devices")
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-up", oneCard, 16))
+	assert.Assert(t, healthy && !needUpdate, "an unchanged node is not read again")
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-up", twoCards, 32))
+	assert.Assert(t, healthy && needUpdate, "a changed annotation is read again")
+
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-up", twoCards, 0))
+	assert.Assert(t, !healthy && !needUpdate, "losing all sGPUs makes the node unhealthy")
+	healthy, needUpdate = dev.CheckHealth(MetaxSGPUDevice, node("sgpu-health-up", twoCards, 32))
+	assert.Assert(t, healthy && needUpdate, "recovered sGPUs are read again")
+}
