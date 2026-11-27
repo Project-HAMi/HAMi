@@ -18,16 +18,19 @@ package remotegpu
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apivalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -97,6 +100,70 @@ func TestReconcileSessionStubs_OnePerServer(t *testing.T) {
 
 	// A second pass changes nothing.
 	dev.ReconcileSessionStubs(context.Background())
+	assert.Equal(t, len(stubsIn(t, c)), 2)
+}
+
+// A node name may be longer than a label value, and with the prefix longer
+// than a pod name. Such a node still gets a valid stub, which the next passes
+// keep and which goes with its server. Short names keep their stub as it was.
+func TestReconcileSessionStubs_LongNodeNames(t *testing.T) {
+	label := strings.Repeat("a", 31) + "." + strings.Repeat("b", 32)                 // 64, over a label value
+	name := strings.Repeat(strings.Repeat("c", 62)+".", 3) + strings.Repeat("d", 50) // 239, over a pod name with the prefix
+	nodes := []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+		lupineNode(label, "10.0.0.6", "", []*device.DeviceInfo{gpu("GPU-2", 40000)}),
+		lupineNode(name, "10.0.0.7", "", []*device.DeviceInfo{gpu("GPU-3", 40000)}),
+	}
+	c := sessionScene(t, nodes)
+	cfg := testConfig()
+	cfg.SessionImage = "alpine/socat:test"
+	dev := InitRemoteGPUDevice(cfg)
+	t.Cleanup(func() { InitRemoteGPUDevice(testConfig()) })
+
+	dev.ReconcileSessionStubs(context.Background())
+	stubs := stubsIn(t, c)
+	assert.Equal(t, len(stubs), 3)
+	byNode := map[string]corev1.Pod{}
+	for _, s := range stubs {
+		errs := apivalidation.ValidateObjectMeta(&s.ObjectMeta, true, apivalidation.NameIsDNSSubdomain, field.NewPath("metadata"))
+		assert.Equal(t, len(errs), 0, "%s: %v", s.Name, errs)
+		byNode[stubNode(&s)] = s
+	}
+	short := byNode["gpu-a"]
+	assert.Equal(t, short.Name, sessionStubPrefix+"gpu-a", "a short name keeps its stub")
+	assert.Equal(t, short.Labels[sessionStubLabel], "gpu-a")
+	for node, ip := range map[string]string{label: "10.0.0.6", name: "10.0.0.7"} {
+		s, ok := byNode[node]
+		assert.Assert(t, ok, "no stub for %s", node)
+		assert.Equal(t, s.Spec.NodeName, node)
+		assert.Equal(t, stubEndpoint(&s), ip+":14833")
+	}
+	names := func() []string {
+		var out []string
+		for _, s := range stubsIn(t, c) {
+			out = append(out, s.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	before := names()
+
+	// The next pass keeps them.
+	dev.ReconcileSessionStubs(context.Background())
+	assert.DeepEqual(t, names(), before)
+
+	// A stub deleted by hand comes back under the same name.
+	long := byNode[name]
+	assert.NilError(t, c.CoreV1().Pods("kube-system").Delete(context.Background(), long.Name, metav1.DeleteOptions{}))
+	dev.ReconcileSessionStubs(context.Background())
+	assert.DeepEqual(t, names(), before)
+
+	// A server that goes takes its stub with it.
+	stubFleet(t, nodes[:2], nil, nil)
+	dev.ReconcileSessionStubs(context.Background())
+	for _, s := range stubsIn(t, c) {
+		assert.Assert(t, stubNode(&s) != name, "the stub of a removed server stayed")
+	}
 	assert.Equal(t, len(stubsIn(t, c)), 2)
 }
 

@@ -18,6 +18,8 @@ package remotegpu
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -26,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -37,6 +40,10 @@ const (
 	sessionStubLabel = "hami.io/lupine-session"
 
 	sessionStubPrefix = "lupine-session-"
+	// sessionNodeAnno names the stub's node in full. A node name can be longer
+	// than a label value or, with the prefix, a pod name may be, so a stub for
+	// such a node carries a hash of it in both, and its node only here.
+	sessionNodeAnno = "hami.io/lupine-session-node"
 	// sessionImageAnno records the requested image before admission can rewrite
 	// it, so reconciliation compares scheduler intent rather than the mutation.
 	sessionImageAnno = "hami.io/lupine-session-image"
@@ -96,7 +103,7 @@ func (dev *RemoteGPUDevices) ReconcileSessionStubs(ctx context.Context) {
 	}
 	for i := range existing.Items {
 		stub := &existing.Items[i]
-		node := stub.Labels[sessionStubLabel]
+		node := stubNode(stub)
 		if stub.DeletionTimestamp != nil {
 			// The fixed name cannot be reused until graceful deletion finishes.
 			delete(wanted, node)
@@ -164,6 +171,26 @@ func sessionStubMatches(stub *corev1.Pod, endpoint, image string, pullSecrets []
 	return false
 }
 
+// stubNode reports the node a stub was built for. Stubs made before
+// sessionNodeAnno name it only in their label.
+func stubNode(stub *corev1.Pod) string {
+	if node, ok := stub.Annotations[sessionNodeAnno]; ok {
+		return node
+	}
+	return stub.Labels[sessionStubLabel]
+}
+
+// stubKey is how a stub names its node in its label and pod name: the node
+// name itself while it fits both, unchanged from earlier stubs, and a hash of
+// it otherwise.
+func stubKey(node string) string {
+	if len(node) <= validation.LabelValueMaxLength && len(sessionStubPrefix)+len(node) <= validation.DNS1123SubdomainMaxLength {
+		return node
+	}
+	sum := sha256.Sum256([]byte(node))
+	return "node-" + hex.EncodeToString(sum[:8])
+}
+
 // stubEndpoint reports which server a stub was built to relay to.
 func stubEndpoint(stub *corev1.Pod) string {
 	for i := range stub.Spec.Containers {
@@ -211,17 +238,18 @@ func sessionStub(namespace, node, endpoint, image string, pullSecrets []string) 
 	for _, name := range pullSecrets {
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: name})
 	}
-	annotations := map[string]string{sessionImageAnno: image}
+	annotations := map[string]string{sessionImageAnno: image, sessionNodeAnno: node}
+	key := stubKey(node)
 	if len(pullSecrets) > 0 {
 		annotations[sessionPullSecretsAnno] = strings.Join(pullSecrets, ",")
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        sessionStubPrefix + node,
+			Name:        sessionStubPrefix + key,
 			Namespace:   namespace,
 			Annotations: annotations,
 			Labels: map[string]string{
-				sessionStubLabel:               node,
+				sessionStubLabel:               key,
 				"app.kubernetes.io/component":  "hami-lupine-session",
 				"app.kubernetes.io/managed-by": "hami-scheduler",
 				"hami.io/webhook":              "ignore",
