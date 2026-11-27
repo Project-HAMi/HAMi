@@ -61,12 +61,12 @@ func TestGetClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock the clientcmd.BuildConfigFromFlags function.
-			oldBuildConfigFromFlags := buildConfigFromFlags
-			buildConfigFromFlags = func(masterUrl, kubeconfigPath string) (*rest.Config, error) {
+			// Mock file configuration loading.
+			oldFileConfig := fileConfig
+			fileConfig = func() (*rest.Config, error) {
 				return tt.buildConfig, tt.buildConfigErr
 			}
-			defer func() { buildConfigFromFlags = oldBuildConfigFromFlags }()
+			defer func() { fileConfig = oldFileConfig }()
 
 			// Mock the rest.InClusterConfig function.
 			oldInClusterConfig := inClusterConfig
@@ -76,9 +76,7 @@ func TestGetClient(t *testing.T) {
 			defer func() { inClusterConfig = oldInClusterConfig }()
 
 			// Set the KUBECONFIG environment variable.
-			oldKubeConfig := os.Getenv("KUBECONFIG")
-			os.Setenv("KUBECONFIG", tt.kubeConfig)
-			defer os.Setenv("KUBECONFIG", oldKubeConfig)
+			t.Setenv("KUBECONFIG", tt.kubeConfig)
 
 			// Reset sync.Once and initialize the global client using the injected mocks
 			KubeClient = nil
@@ -100,11 +98,11 @@ func TestClientWithOptions(t *testing.T) {
 	once = sync.Once{}
 
 	// Mock the config loader to prevent failure on environments without kubeconfig
-	oldBuildConfigFromFlags := buildConfigFromFlags
-	buildConfigFromFlags = func(masterUrl, kubeconfigPath string) (*rest.Config, error) {
+	oldFileConfig := fileConfig
+	fileConfig = func() (*rest.Config, error) {
 		return &rest.Config{Host: "https://example.com"}, nil
 	}
-	defer func() { buildConfigFromFlags = oldBuildConfigFromFlags }()
+	defer func() { fileConfig = oldFileConfig }()
 
 	timeout := 1
 	client, _ := NewClient(WithTimeout(timeout))

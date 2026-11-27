@@ -18,8 +18,6 @@ package client
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"k8s.io/client-go/kubernetes"
@@ -30,8 +28,8 @@ import (
 
 // Variables for testing.
 var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
+	fileConfig      = LoadFileConfig
+	inClusterConfig = rest.InClusterConfig
 )
 
 type Client struct {
@@ -56,7 +54,7 @@ func GetClient() kubernetes.Interface {
 
 // NewClient creates a new Kubernetes client with the given options.
 func NewClient(opts ...Option) (*Client, error) {
-	restConfig, err := loadKubeConfig()
+	restConfig, err := LoadKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
@@ -91,17 +89,29 @@ func InitGlobalClient(opts ...Option) {
 	})
 }
 
-// loadKubeConfig loads Kubernetes configuration from the environment or in-cluster.
-func loadKubeConfig() (*rest.Config, error) {
-	kubeConfigPath := os.Getenv("KUBECONFIG")
-	if kubeConfigPath == "" {
-		kubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	}
-
-	config, err := buildConfigFromFlags("", kubeConfigPath)
+// LoadFileConfig merges KUBECONFIG files, or loads the default home configuration,
+// without falling back to in-cluster configuration.
+func LoadFileConfig() (*rest.Config, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	config, err := rules.Load()
 	if err != nil {
-		klog.Infof("BuildConfigFromFlags failed for file %s: %v. Using in-cluster config.", kubeConfigPath, err)
-		return inClusterConfig()
+		return nil, err
+	}
+	// Use a direct client config so LoadKubeConfig owns the in-cluster fallback.
+	return clientcmd.NewNonInteractiveClientConfig(*config, "", &clientcmd.ConfigOverrides{}, rules).ClientConfig()
+}
+
+// LoadKubeConfig loads Kubernetes configuration from files, falling back to
+// in-cluster configuration. If both sources fail, the error wraps both causes.
+func LoadKubeConfig() (*rest.Config, error) {
+	config, err := fileConfig()
+	if err != nil {
+		klog.Infof("Loading kubeconfig failed: %v. Using in-cluster config.", err)
+		inCluster, fallbackErr := inClusterConfig()
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("kubeconfig: %w; in-cluster config: %w", err, fallbackErr)
+		}
+		return inCluster, nil
 	}
 	return config, nil
 }
