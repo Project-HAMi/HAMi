@@ -208,6 +208,21 @@ true
 {{- end -}}
 {{- end -}}
 
+{{/*
+Tracing is on when tracing.otlpEndpoint is set. The endpoint can also be set
+through OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT in
+tracing.extraEnvs, so check those too.
+*/}}
+{{- define "hami.tracing.enabled" -}}
+{{- $names := list -}}
+{{- range .Values.tracing.extraEnvs -}}
+{{- $names = append $names (toString .name) -}}
+{{- end -}}
+{{- if or .Values.tracing.otlpEndpoint (has "OTEL_EXPORTER_OTLP_ENDPOINT" $names) (has "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" $names) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "hami.scheduler.patch.new.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.imageNew) "global" .Values.global) }}
 {{- end -}}

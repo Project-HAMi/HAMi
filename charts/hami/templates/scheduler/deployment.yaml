@@ -117,9 +117,15 @@ spec:
               value: "{{ $value }}"
           {{- end }}
           {{- end }}
-          {{- if .Values.tracing.otlpEndpoint }}
+          {{- if include "hami.tracing.enabled" . }}
+          {{- $tracingEnvNames := list }}
+          {{- range .Values.tracing.extraEnvs }}
+          {{- $tracingEnvNames = append $tracingEnvNames (toString .name) }}
+          {{- end }}
+          {{- if and .Values.tracing.otlpEndpoint (not (has "OTEL_EXPORTER_OTLP_ENDPOINT" $tracingEnvNames)) }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.tracing.otlpEndpoint | quote }}
+          {{- end }}
           {{- with .Values.tracing.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
           {{- end }}

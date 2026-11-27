@@ -29,6 +29,11 @@ tests:
       tracing.extraEnvs:
         - name: OTEL_TRACES_SAMPLER_ARG
           value: "0.1"
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: otel-auth
+              key: headers
     asserts:
       - contains:
           path: spec.template.spec.containers[1].env
@@ -53,6 +58,24 @@ tests:
           content:
             name: OTEL_TRACES_SAMPLER_ARG
             value: "0.1"
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                name: otel-auth
+                key: headers
+        template: scheduler/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                name: otel-auth
+                key: headers
         template: device-plugin/daemonsetnvidia.yaml
       - notContains:
           path: spec.template.spec.containers[1].env
@@ -61,21 +84,140 @@ tests:
             name: OTEL_EXPORTER_OTLP_ENDPOINT
         template: device-plugin/daemonsetnvidia.yaml
 
-  - it: ignores extra variables without an endpoint
+  - it: passes extra variables when they set the traces endpoint
     set:
       tracing.extraEnvs:
         - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
           value: http://jaeger.tracing:4317
     asserts:
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: scheduler/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: device-plugin/daemonsetnvidia.yaml
       - notContains:
           path: spec.template.spec.containers[1].env
           any: true
           content:
-            name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
         template: scheduler/deployment.yaml
       - notContains:
           path: spec.template.spec.containers[0].env
           any: true
           content:
-            name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
         template: device-plugin/daemonsetnvidia.yaml
+
+  - it: passes extra variables when they set the general endpoint
+    set:
+      tracing.extraEnvs:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://jaeger.tracing:4317
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: scheduler/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: skips otlpEndpoint when extra variables set the general endpoint
+    set:
+      tracing.otlpEndpoint: http://jaeger.tracing:4317
+      tracing.extraEnvs:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-agent.tracing:4317
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: scheduler/deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://otel-agent.tracing:4317
+        template: scheduler/deployment.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://otel-agent.tracing:4317
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: ignores extra variables without an endpoint
+    set:
+      tracing.extraEnvs:
+        - name: OTEL_TRACES_SAMPLER
+          value: parentbased_traceidratio
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[1].env
+          any: true
+          content:
+            name: OTEL_TRACES_SAMPLER
+        template: scheduler/deployment.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: OTEL_TRACES_SAMPLER
+        template: device-plugin/daemonsetnvidia.yaml
+
+  - it: skips tracing variables already set in devicePlugin.extraEnvs
+    set:
+      tracing.otlpEndpoint: http://jaeger.tracing:4317
+      tracing.extraEnvs:
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: "0.1"
+      devicePlugin.extraEnvs:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-agent.tracing:4317
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: "0.5"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://jaeger.tracing:4317
+        template: device-plugin/daemonsetnvidia.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_SAMPLER_ARG
+            value: "0.1"
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_TRACES_SAMPLER_ARG
+            value: "0.5"
+        template: device-plugin/daemonsetnvidia.yaml
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_TRACES_SAMPLER_ARG
+            value: "0.1"
+        template: scheduler/deployment.yaml

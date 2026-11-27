@@ -1210,12 +1210,15 @@ prometheus:
   enabled: false
 
 tracing:
-  # -- OTLP gRPC endpoint that receives the spans of the scheduler and the NVIDIA device plugin, such as
-  # `http://jaeger-collector.tracing:4317`. Empty turns tracing off.
+  # -- OTLP gRPC endpoint for the scheduler and the NVIDIA device plugin, as an HTTP(S) URL
+  # such as `http://jaeger-collector.tracing:4317`. Empty disables tracing unless `extraEnvs` sets
+  # `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
   otlpEndpoint: ""
   # -- Additional `OTEL_*` environment variables for the scheduler and the NVIDIA device plugin.
   # Each entry specifies a name and either value or valueFrom.
-  # Used only when `otlpEndpoint` is set.
+  # Used only when `otlpEndpoint` or this list sets an endpoint.
+  # `OTEL_EXPORTER_OTLP_ENDPOINT` here overrides `otlpEndpoint`.
+  # For the device plugin, `devicePlugin.extraEnvs` takes precedence for matching names.
   extraEnvs: []
 
 device-config:
