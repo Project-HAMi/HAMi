@@ -42,7 +42,13 @@ type DeviceQuota map[string]*Quota
 type QuotaManager struct {
 	Quotas       map[string]*DeviceQuota
 	objectLimits map[string]map[string]map[string]int64 // namespace -> quotaName -> resourceName -> limit
-	mutex        sync.RWMutex
+	// scoped holds the quotas with scopes, which limit only the pods they
+	// match: namespace -> quotaName -> quota.
+	scoped map[string]map[string]*scopedQuota
+	// podUsages holds each pod's usage, so a scoped quota added later can
+	// count the pods it matches: namespace -> pod -> usage.
+	podUsages map[string]map[string]*podUsage
+	mutex     sync.RWMutex
 }
 
 var localCache QuotaManager
@@ -88,20 +94,39 @@ func FitPodQuota(pod *corev1.Pod, allocated *PodDevices, devType string, tentati
 		}
 	}
 
-	return GetLocalCache().FitQuota(pod.Namespace, mem, core, devType)
+	return GetLocalCache().FitQuotaForPod(pod, mem, core, devType)
 }
 
+// FitQuota checks a request against the quotas without scopes of the
+// namespace. Use FitQuotaForPod when the pod is known, so that the quotas
+// with scopes that match it are checked too.
 func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceName string) bool {
 	devs, ok := GetDevices()[deviceName]
 	if !ok {
 		return true
 	}
 	resourceNames := devs.GetResourceNames()
-	memResourceName := resourceNames.ResourceMemoryName
-	coreResourceName := resourceNames.ResourceCoreName
-
 	q.mutex.RLock()
 	defer q.mutex.RUnlock()
+	return q.fitQuotaLocked(ns, resourceNames.ResourceMemoryName, resourceNames.ResourceCoreName, memreq, coresreq)
+}
+
+// FitQuotaForPod checks a request of pod against the quotas without scopes of
+// its namespace and against the quotas with scopes that match the pod.
+func (q *QuotaManager) FitQuotaForPod(pod *corev1.Pod, memreq int64, coresreq int64, deviceName string) bool {
+	devs, ok := GetDevices()[deviceName]
+	if !ok {
+		return true
+	}
+	resourceNames := devs.GetResourceNames()
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	return q.fitQuotaLocked(pod.Namespace, resourceNames.ResourceMemoryName, resourceNames.ResourceCoreName, memreq, coresreq) &&
+		q.fitScopedLocked(pod, resourceNames.ResourceMemoryName, resourceNames.ResourceCoreName, memreq, coresreq)
+}
+
+// fitQuotaLocked requires q.mutex to be held for reading.
+func (q *QuotaManager) fitQuotaLocked(ns, memResourceName, coreResourceName string, memreq, coresreq int64) bool {
 	dq := q.Quotas[ns]
 	if dq == nil {
 		return true
@@ -156,6 +181,7 @@ func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	q.addUsageLocked(pod.Namespace, usage)
+	q.trackPodUsageLocked(pod, nil, usage)
 	if klog.V(4).Enabled() {
 		for _, val := range q.Quotas {
 			for idx, val1 := range *val {
@@ -189,6 +215,7 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	q.rmUsageLocked(pod.Namespace, usage)
+	q.trackPodUsageLocked(pod, usage, nil)
 	if klog.V(4).Enabled() {
 		for _, val := range q.Quotas {
 			for idx, val1 := range *val {
@@ -223,6 +250,7 @@ func (q *QuotaManager) ReplaceUsage(pod *corev1.Pod, oldDevices, newDevices PodD
 	defer q.mutex.Unlock()
 	q.rmUsageLocked(pod.Namespace, oldUsage)
 	q.addUsageLocked(pod.Namespace, newUsage)
+	q.trackPodUsageLocked(pod, oldUsage, newUsage)
 }
 
 func IsManagedQuota(quotaName string) bool {
@@ -333,8 +361,8 @@ func (q *QuotaManager) recalcLimitLocked(namespace, resourceName string) {
 }
 
 // isScopedQuota returns true if the ResourceQuota defines scopes or non-empty scope selectors.
-// HAMi tracks usage at namespace granularity and does not evaluate pod scopes in FitQuota,
-// so scoped quotas are skipped to avoid over-restricting pods outside their scope.
+// Such a quota limits only the pods its scopes match, so it is kept apart from
+// the namespace limits and checked by FitQuotaForPod.
 func isScopedQuota(quota *corev1.ResourceQuota) bool {
 	if quota == nil {
 		return false
@@ -343,18 +371,10 @@ func isScopedQuota(quota *corev1.ResourceQuota) bool {
 	return len(quota.Spec.Scopes) > 0 || hasScopeSelector
 }
 
-// addQuotaLocked requires q.mutex to be held.
-func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota, logOverflow bool) {
-	if quota == nil || isScopedQuota(quota) {
-		return
-	}
-	if q.objectLimits == nil {
-		q.objectLimits = make(map[string]map[string]map[string]int64)
-	}
-
-	affectedResources := make(map[string]struct{})
-	newObjLimits := make(map[string]int64)
-
+// managedLimits returns the limits of the quota on resources HAMi manages,
+// in the unit usage is recorded in.
+func managedLimits(quota *corev1.ResourceQuota, logOverflow bool) map[string]int64 {
+	limits := make(map[string]int64)
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
 		if ok {
@@ -370,10 +390,30 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota, logOverflow b
 				}
 				continue
 			}
-			newObjLimits[dn] = scaled
-			affectedResources[dn] = struct{}{}
+			limits[dn] = scaled
 			klog.V(4).InfoS("quota set:", "quotaName", quota.Name, "idx=", idx, "val", value)
 		}
+	}
+	return limits
+}
+
+// addQuotaLocked requires q.mutex to be held.
+func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota, logOverflow bool) {
+	if quota == nil {
+		return
+	}
+	newObjLimits := managedLimits(quota, logOverflow)
+	if isScopedQuota(quota) {
+		q.addScopedQuotaLocked(quota, newObjLimits)
+		return
+	}
+	if q.objectLimits == nil {
+		q.objectLimits = make(map[string]map[string]map[string]int64)
+	}
+
+	affectedResources := make(map[string]struct{})
+	for dn := range newObjLimits {
+		affectedResources[dn] = struct{}{}
 	}
 
 	// If this quota object previously existed in state, track any resources it no longer specifies
@@ -406,7 +446,11 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota, logOverflow b
 
 // delQuotaLocked requires q.mutex to be held.
 func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
-	if quota == nil || q.objectLimits == nil {
+	if quota == nil {
+		return
+	}
+	q.delScopedQuotaLocked(quota)
+	if q.objectLimits == nil {
 		return
 	}
 
