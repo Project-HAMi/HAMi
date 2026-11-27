@@ -204,6 +204,29 @@ true
 {{- end -}}
 {{- end -}}
 
+{{/*
+Returns a YAML list; read it with fromYamlArray.
+*/}}
+{{- define "hami.tracing.extraEnvNames" -}}
+{{- $names := list -}}
+{{- range .Values.tracing.extraEnvs -}}
+{{- $names = append $names (toString .name) -}}
+{{- end -}}
+{{- toYaml $names -}}
+{{- end -}}
+
+{{/*
+Tracing is on when tracing.otlpEndpoint is set. The endpoint can also be set
+through OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT in
+tracing.extraEnvs, so check those too.
+*/}}
+{{- define "hami.tracing.enabled" -}}
+{{- $names := include "hami.tracing.extraEnvNames" . | fromYamlArray -}}
+{{- if or .Values.tracing.otlpEndpoint (has "OTEL_EXPORTER_OTLP_ENDPOINT" $names) (has "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" $names) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "hami.scheduler.patch.new.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.imageNew) "global" .Values.global) }}
 {{- end -}}
@@ -468,6 +491,19 @@ is not hcu. Any other explicit value is kept.
 {{- if or (ne (toString $maxHoldInteger) (toString $maxHold))
   (lt $maxHoldInteger 1) (gt $maxHoldInteger 3600) -}}
   {{- fail "devicePlugin.hostPIDBroker.driverAdmissionMaxHoldSeconds must be an integer from 1 through 3600" -}}
+{{- end -}}
+{{- with .Values.tracing.otlpEndpoint -}}
+  {{- if not (regexMatch "^https?://" (toString .)) -}}
+    {{- fail "tracing.otlpEndpoint must start with http:// or https://" -}}
+  {{- end -}}
+{{- end -}}
+{{/* An endpoint read with valueFrom is not known here, so only a value is checked. */}}
+{{- range .Values.tracing.extraEnvs -}}
+  {{- if and (has (toString .name) (list "OTEL_EXPORTER_OTLP_ENDPOINT" "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")) .value -}}
+    {{- if not (regexMatch "^https?://" (toString .value)) -}}
+      {{- fail (printf "%s in tracing.extraEnvs must start with http:// or https://" .name) -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 {{- $_ := include "hami-vgpu.hygon.prefix" . -}}
 {{- end -}}

@@ -117,6 +117,16 @@ spec:
               value: "{{ $value }}"
           {{- end }}
           {{- end }}
+          {{- if include "hami.tracing.enabled" . }}
+          {{- $tracingEnvNames := include "hami.tracing.extraEnvNames" . | fromYamlArray }}
+          {{- if and .Values.tracing.otlpEndpoint (not (has "OTEL_EXPORTER_OTLP_ENDPOINT" $tracingEnvNames)) }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.otlpEndpoint | quote }}
+          {{- end }}
+          {{- with .Values.tracing.extraEnvs }}
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          {{- end }}
           command:
             - scheduler
             {{- if .Values.scheduler.admissionWebhook.enabled }}

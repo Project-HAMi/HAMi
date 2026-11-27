@@ -213,6 +213,22 @@ spec:
             {{- end }}
             - name: DISABLE_HAMI_CORE_FOR_WHOLE_GPU
               value: {{ include "hami-vgpu.disableHAMiCoreForWholeGPU" . }}
+            {{- if include "hami.tracing.enabled" . }}
+            {{- $tracingEnvNames := include "hami.tracing.extraEnvNames" . | fromYamlArray }}
+            {{- $devicePluginEnvNames := list }}
+            {{- range .Values.devicePlugin.extraEnvs }}
+            {{- $devicePluginEnvNames = append $devicePluginEnvNames (toString .name) }}
+            {{- end }}
+            {{- if and .Values.tracing.otlpEndpoint (not (has "OTEL_EXPORTER_OTLP_ENDPOINT" (concat $tracingEnvNames $devicePluginEnvNames))) }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.otlpEndpoint | quote }}
+            {{- end }}
+            {{- range .Values.tracing.extraEnvs }}
+            {{- if not (has (toString .name) $devicePluginEnvNames) }}
+            {{- list . | toYaml | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
