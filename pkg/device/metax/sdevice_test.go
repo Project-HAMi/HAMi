@@ -3563,6 +3563,15 @@ func TestMetaxSDevicesCheckHealth(t *testing.T) {
 		return n
 	}
 
+	// The registration state is global, so -count=N must start clean.
+	reset := func() {
+		for _, name := range []string{"sgpu-health-noanno", "sgpu-health-gone", "sgpu-health-up"} {
+			device.ForgetRegisteredDevices(MetaxSGPUDevice, name)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+
 	healthy, needUpdate := dev.CheckHealth(MetaxSGPUDevice, nil)
 	assert.Assert(t, !healthy && !needUpdate, "a nil node is not healthy")
 

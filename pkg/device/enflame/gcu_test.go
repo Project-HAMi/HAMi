@@ -138,6 +138,15 @@ func TestGCUDevices_CheckHealth(t *testing.T) {
 		}
 	}
 
+	// The registration state is global, so -count=N must start clean.
+	reset := func() {
+		for _, name := range []string{"gcu-health-none", "gcu-health-gone", "gcu-health-up"} {
+			device.ForgetRegisteredDevices(EnflameGCUDevice, name)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+
 	healthy, needUpdate := dev.CheckHealth(EnflameGCUDevice, nil)
 	assert.Assert(t, !healthy && !needUpdate, "a nil node is not healthy")
 
