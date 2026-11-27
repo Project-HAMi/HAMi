@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -127,17 +128,26 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 			byServer[url] = append(byServer[url], pod)
 		}
 	}
+	// Servers are scraped in parallel, so a few slow ones cost one timeout,
+	// not one each, and the collection fits in the Prometheus scrape timeout.
+	urls := slices.Sorted(maps.Keys(byServer))
+	results := make([]map[string]*dto.MetricFamily, len(urls))
+	errs := make([]error, len(urls))
+	var wg sync.WaitGroup
+	for i, url := range urls {
+		wg.Go(func() { results[i], errs[i] = c.scrape(url) })
+	}
+	wg.Wait()
 	families := map[string]*dto.MetricFamily{}
 	var scraped []*corev1.Pod
 	var failed error
-	for url, served := range byServer {
-		fs, err := c.scrape(url)
-		if err != nil {
-			failed = errors.Join(failed, fmt.Errorf("%s: %w", url, err))
+	for i, url := range urls {
+		if errs[i] != nil {
+			failed = errors.Join(failed, fmt.Errorf("%s: %w", url, errs[i]))
 			continue
 		}
-		merge(families, fs)
-		scraped = append(scraped, served...)
+		merge(families, results[i])
+		scraped = append(scraped, byServer[url]...)
 	}
 	if c.Indices != nil && len(scraped) > 0 {
 		indices, err := c.Indices()

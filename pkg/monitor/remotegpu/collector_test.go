@@ -22,7 +22,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -339,5 +341,37 @@ func TestScrapesEveryServerOnTheNode(t *testing.T) {
 	}
 	if n := len(fs["hami_vgpu_memory_used_bytes"].GetMetric()); n != 2 {
 		t.Fatalf("container series with a server down = %d, want 2", n)
+	}
+}
+
+// Every server answers only once all of them are being scraped, so the
+// collection succeeds only if the scrapes run at the same time.
+func TestScrapesServersInParallel(t *testing.T) {
+	const n = 4
+	var arrived atomic.Int32
+	all := make(chan struct{})
+	var pods []*corev1.Pod
+	for i := range n {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if arrived.Add(1) == n {
+				close(all)
+			}
+			select {
+			case <-all:
+				fmt.Fprint(w, strings.ReplaceAll(fixture, "uid-1/", fmt.Sprintf("uid-%d/", i)))
+			case <-r.Context().Done():
+			}
+		}))
+		defer server.Close()
+		pods = append(pods, servedPod(t, server, fmt.Sprintf("uid-%d", i)))
+	}
+	c := &Collector{Node: "gpu-node", Host: "127.0.0.1", Client: &http.Client{Timeout: time.Second},
+		Pods: func() ([]*corev1.Pod, error) { return pods, nil }}
+	fs := metricsFor(t, c)
+	if got := fs["hami_remote_gpumonitor_collect_success"].Metric[0].GetGauge().GetValue(); got != 1 {
+		t.Fatalf("success = %v, the servers were not scraped in parallel", got)
+	}
+	if got := len(fs["hami_vgpu_memory_used_bytes"].GetMetric()); got != 2*n {
+		t.Fatalf("container series = %d, want %d", got, 2*n)
 	}
 }
