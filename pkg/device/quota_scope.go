@@ -185,8 +185,12 @@ func (m scopeMatcher) matches(s podScopes) bool {
 		if m.exists {
 			return s.priorityClass != ""
 		}
-		// The key is always present, possibly empty, as in kube-apiserver.
-		return m.requirement.Matches(labels.Set{string(corev1.ResourceQuotaScopePriorityClass): s.priorityClass})
+		// As in kube-apiserver, a pod without a class has no PriorityClass key.
+		set := labels.Set{}
+		if s.priorityClass != "" {
+			set[string(corev1.ResourceQuotaScopePriorityClass)] = s.priorityClass
+		}
+		return m.requirement.Matches(set)
 	}
 	// Other scopes, such as VolumeAttributesClass, never match a pod.
 	return false
@@ -275,6 +279,31 @@ func (q *QuotaManager) trackPodUsageLocked(pod *corev1.Pod, sub, add map[string]
 			sq.add(entry.usage, 1)
 		}
 	}
+}
+
+// RefreshPodScopes moves a tracked pod's usage between scoped quotas when
+// its scopes changed without a change in its devices, for example when a
+// running pod gets activeDeadlineSeconds. The usage itself is not changed.
+func (q *QuotaManager) RefreshPodScopes(pod *corev1.Pod) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	entry := q.podUsages[pod.Namespace][podKey(pod)]
+	if entry == nil {
+		return
+	}
+	scopes := scopesOf(pod)
+	if scopes == entry.scopes {
+		return
+	}
+	for _, sq := range q.scoped[pod.Namespace] {
+		if sq.matches(entry.scopes) {
+			sq.add(entry.usage, -1)
+		}
+		if sq.matches(scopes) {
+			sq.add(entry.usage, 1)
+		}
+	}
+	entry.scopes = scopes
 }
 
 // addScopedQuotaLocked stores a scoped quota and counts the usage of the

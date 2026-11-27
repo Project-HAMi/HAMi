@@ -110,8 +110,8 @@ func TestQuotaScopeMatching(t *testing.T) {
 		{"PriorityClass NotIn skips listed", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpNotIn, "high")), scopePod("p", "high"), false},
 		{"PriorityClass Exists needs a class", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpExists)), scopePod("p", ""), false},
 		{"PriorityClass Exists matches a class", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpExists)), scopePod("p", "low"), true},
-		// kube-apiserver always sets the key, so DoesNotExist never matches.
-		{"PriorityClass DoesNotExist", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpDoesNotExist)), scopePod("p", ""), false},
+		{"PriorityClass DoesNotExist matches no class", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpDoesNotExist)), scopePod("p", ""), true},
+		{"PriorityClass DoesNotExist skips a class", scopedMemQuota("q", "1", nil, op(corev1.ScopeSelectorOpDoesNotExist)), scopePod("p", "low"), false},
 		{"PriorityClass in scopes means Exists", scopedMemQuota("q", "1", []corev1.ResourceQuotaScope{corev1.ResourceQuotaScopePriorityClass}), scopePod("p", "low"), true},
 		{"invalid operator matches nothing", scopedMemQuota("q", "1", nil, op("Gt", "1")), scopePod("p", "1"), false},
 		{"BestEffort without requests", scopedMemQuota("q", "1", []corev1.ResourceQuotaScope{corev1.ResourceQuotaScopeBestEffort}), gpuOnly, true},
@@ -308,5 +308,37 @@ func TestScopedQuotaMemoryFactor(t *testing.T) {
 	}
 	if qm.FitQuotaForPod(scopePod("new", "high"), 1025, 0, "MLU") {
 		t.Error("1025 MiB fits 4 units of 256 MiB")
+	}
+}
+
+func TestRefreshPodScopes(t *testing.T) {
+	initTest()
+	qm := newScopeTestManager()
+	qm.AddQuota(scopedMemQuota("long", "10000", []corev1.ResourceQuotaScope{corev1.ResourceQuotaScopeNotTerminating}))
+	qm.AddQuota(scopedMemQuota("short", "2000", []corev1.ResourceQuotaScope{corev1.ResourceQuotaScopeTerminating}))
+	pod := scopePod("a", "")
+	qm.AddUsage(pod, gpuMem(1000))
+
+	// Same devices, new deadline: the usage moves once and is not added twice.
+	updated := pod.DeepCopy()
+	updated.Spec.ActiveDeadlineSeconds = new(int64(60))
+	qm.RefreshPodScopes(updated)
+	qm.RefreshPodScopes(updated)
+	if got := qm.scoped[scopeTestNS]["long"].used[scopeTestMem]; got != 0 {
+		t.Errorf("NotTerminating used = %d, want 0", got)
+	}
+	if got := qm.scoped[scopeTestNS]["short"].used[scopeTestMem]; got != 1000 {
+		t.Errorf("Terminating used = %d, want 1000", got)
+	}
+	short := scopePod("new", "")
+	short.Spec.ActiveDeadlineSeconds = new(int64(60))
+	if qm.FitQuotaForPod(short, 1500, 0, "NVIDIA") {
+		t.Error("a terminating pod fits the Terminating quota with 1000 + 1500 > 2000")
+	}
+
+	// A pod with no tracked usage is ignored.
+	qm.RefreshPodScopes(scopePod("untracked", "high"))
+	if len(qm.podUsages[scopeTestNS]) != 1 {
+		t.Errorf("tracked pods = %d, want 1", len(qm.podUsages[scopeTestNS]))
 	}
 }

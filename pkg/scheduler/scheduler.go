@@ -393,6 +393,8 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	s.podManager.UpdatePod(newPod)
+	// Scope fields such as activeDeadlineSeconds can change on a running pod.
+	s.quotaManager.RefreshPodScopes(newPod)
 	if s.syncNodeLocked(newPod, pi, assignedNodeName) {
 		return
 	}
