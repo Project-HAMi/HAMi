@@ -6,6 +6,8 @@ github.com/NVIDIA/go-dcgm v1.4712.2 h1:QMfi90QmKOZAllTb7F9hYM8PEeR+O7oPETxNIx7vw
 github.com/NVIDIA/go-dcgm v1.4712.2/go.mod h1:aKFXrbt1krIJVLJf5ze7fsygGhxNOBbEhK8UeJ3PEzg=
 github.com/NVIDIA/go-dcgm v1.4801.0 h1:9rqWfo5UTirRcXoWLPOokuHw4JP063vuDGxsNpn2/kE=
 github.com/NVIDIA/go-dcgm v1.4801.0/go.mod h1:4dGvdlwJmlBDpcvO2i/9w5A0KvTjFNDZlRL3lrjRmmg=
+github.com/NVIDIA/go-dcgm v1.4801.1 h1:biuRAncDSZlGmTLWmFUei5QoWwYT37tnyOqXRk/lDOM=
+github.com/NVIDIA/go-dcgm v1.4801.1/go.mod h1:kNbjAsDCz0OVUQYDo/WHGtDrkiPAFGix1hfmuU4kiOs=
 github.com/NVIDIA/go-gpuallocator v0.6.0 h1:2PA2swx59gJYREPkZNTGtyCP6Pnz3WEgnYsXlRkyvkk=
 github.com/NVIDIA/go-gpuallocator v0.6.0/go.mod h1:c+Yspg+/QxWOmoSQeuI48Z/7nS+mMPtxyj1NYUTwewY=
 github.com/NVIDIA/go-nvlib v0.13.0 h1:veqetT7p2m+u7yPVAtXQ/nLAqotTdZF1+RzpLd1Ycis=
@@ -20,6 +22,8 @@ github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bits-and-blooms/bitset v1.29.0 h1:xq4g46l2NlweICLMDJ8LiyrZJQJTeC2Q0b3CCnLCAbg=
 github.com/bits-and-blooms/bitset v1.29.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
+github.com/bits-and-blooms/bitset v1.30.0 h1:6hfTqCR1/asc49NZlk4RR/X+IFGcl75YlV2AvKesMCk=
+github.com/bits-and-blooms/bitset v1.30.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
 github.com/ccoveille/go-safecast/v2 v2.0.1 h1:2+mIu3gXtwmWelBia2kkxfB8eP4orTHDH7ClSlWkd6I=
 github.com/ccoveille/go-safecast/v2 v2.0.1/go.mod h1:JIYA4CAR33blIDuE6fSwCp2sz1oOBahXnvmdBhOAABs=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
