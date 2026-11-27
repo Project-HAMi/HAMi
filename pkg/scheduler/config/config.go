@@ -51,6 +51,11 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
+// DefaultTopologyScoreWeight is the default TopologyScoreWeight. At twice the
+// usual device-score step it outweighs a single packing dimension so locality
+// can move a job when both soft scoring and packing are active.
+const DefaultTopologyScoreWeight float32 = 20
+
 var (
 	QPS                float32
 	Burst              int
@@ -89,6 +94,16 @@ var (
 	// all key=N). Annotation keys are not supported. Empty, the default,
 	// disables the topology model.
 	TopologyTierLabels string
+
+	// TopologyMode is the mode Pods that opt into topology-aware scheduling get
+	// when they do not name one. See util.TopologyModeHard and
+	// util.TopologyModeSoft.
+	TopologyMode = util.TopologyModeSoft
+
+	// TopologyScoreWeight scales the locality bonus the topology scorer adds to
+	// a node's score. Soft scoring only; 0 disables the bonus. Defaults to
+	// DefaultTopologyScoreWeight when set from the command-line flag.
+	TopologyScoreWeight = DefaultTopologyScoreWeight
 
 	// NodeLockTimeout is the timeout for node locks.
 	NodeLockTimeout time.Duration

@@ -399,3 +399,71 @@ func (t *Tree) TierOf(a, b string) int {
 	}
 	return lca.Level
 }
+
+// Violation is a placement that would stretch a group of pods over more of the
+// fabric than it allows. Hard filtering uses it to reject candidates.
+type Violation struct {
+	// Tier is the tier of the lowest common ancestor of the candidate and Peer.
+	Tier int
+	// Peer is the placed node the candidate is too far away from.
+	Peer string
+	// Unknown is set when Tier is UnknownTier.
+	Unknown bool
+}
+
+// String renders a rejection for scheduler logs and failed-node messages.
+func (v *Violation) String() string {
+	if v == nil {
+		return ""
+	}
+	if v.Unknown {
+		return fmt.Sprintf("no common topology domain with node %s", v.Peer)
+	}
+	return fmt.Sprintf("lowest common topology tier with node %s is %d", v.Peer, v.Tier)
+}
+
+// CheckCandidate reports why candidate cannot host another member of a group
+// whose other members sit on placed nodes, or nil when it can. A pair is
+// rejected when its lowest common ancestor is deeper in the hierarchy than
+// highestTierAllowed, which includes pairs that share no configured domain.
+func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllowed int) *Violation {
+	if t == nil {
+		return nil
+	}
+
+	worst := (*Violation)(nil)
+	for _, peer := range placed {
+		if peer == candidate {
+			continue
+		}
+		tier := t.TierOf(candidate, peer)
+		if tier <= highestTierAllowed {
+			continue
+		}
+		if worst == nil || tier > worst.Tier {
+			worst = &Violation{Tier: tier, Peer: peer, Unknown: tier == t.UnknownTier()}
+		}
+	}
+	return worst
+}
+
+// Locality reports how close candidate is wired to the placed nodes, as a mean
+// over them: 1 when candidate is one of them, and 0 when it is outside the
+// described fabric or shares no domain with any of them. Soft scoring uses it
+// to prefer closer nodes.
+func (t *Tree) Locality(candidate string, placed []string) float64 {
+	if t == nil || len(placed) == 0 {
+		return 0
+	}
+
+	unknown := float64(t.UnknownTier())
+	total, peers := 0.0, 0
+	for _, peer := range placed {
+		peers++
+		total += (unknown - float64(t.TierOf(candidate, peer))) / unknown
+	}
+	if peers == 0 {
+		return 0
+	}
+	return total / float64(peers)
+}

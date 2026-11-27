@@ -106,6 +106,27 @@ const (
 	RackIDLabel = "hami.io/rackid"
 	// SuperpodTotalRequestLabel explicitly declares the task's total device request, overriding automatic aggregation.
 	SuperpodTotalRequestLabel = "hami.io/superpod-total-request"
+
+	// TopologyModeAnnotationKey opts a Pod into topology-aware scheduling.
+	// See TopologyModeHard and TopologyModeSoft.
+	TopologyModeAnnotationKey = "hami.io/topology-mode"
+	// TopologyHighestTierAnnotationKey caps how far up the interconnect
+	// hierarchy a hard-mode Pod may stretch from its group (LCA tier).
+	TopologyHighestTierAnnotationKey = "hami.io/topology-highest-tier-allowed"
+	// TopologyGroupAnnotationKey overrides how the co-located Pod group is
+	// identified; without it the scheduler derives the group from job labels
+	// or the controlling owner.
+	TopologyGroupAnnotationKey = "hami.io/topology-group"
+)
+
+// Topology modes accepted by TopologyModeAnnotationKey and --topology-mode.
+const (
+	// TopologyModeHard rejects every node that would place the Pod outside the
+	// allowed LCA tier of its group.
+	TopologyModeHard = "hard"
+	// TopologyModeSoft keeps every fitting node eligible and only ranks closer
+	// nodes higher.
+	TopologyModeSoft = "soft"
 )
 
 func (s SchedulerPolicyName) String() string {

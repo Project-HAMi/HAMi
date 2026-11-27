@@ -534,6 +534,11 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		return nil, err
 	}
 
+	// Soft/hard topology rules for this pod. The plan is nil, and both calls
+	// then do nothing, unless the pod opted in and belongs to a group.
+	topoPlan := s.topologyPlanFor(task)
+	s.applyTopologyFilter(topoPlan, task, nodes, failedNodes)
+
 	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
@@ -577,6 +582,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 	close(errCh)
 
 	s.applyTaintTolerationScore(&res, task)
+	s.applyTopologyScore(topoPlan, task, &res)
 
 	if recordEvents && len(res.NodeList) == 0 {
 		s.recordFilteringFailures(task, failureReason)

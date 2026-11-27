@@ -26,8 +26,12 @@ import (
 func restoreTopologyDefaults(t *testing.T) {
 	t.Helper()
 	labels := config.TopologyTierLabels
+	mode := config.TopologyMode
+	weight := config.TopologyScoreWeight
 	t.Cleanup(func() {
 		config.TopologyTierLabels = labels
+		config.TopologyMode = mode
+		config.TopologyScoreWeight = weight
 	})
 }
 
@@ -37,15 +41,19 @@ func TestValidateTopologyConfigAccepts(t *testing.T) {
 	tests := []struct {
 		name   string
 		labels string
+		mode   string
+		weight float32
 	}{
-		{name: "empty disables the feature", labels: ""},
-		{name: "canonical superpod labels", labels: util.RackIDLabel + "," + util.SuperPodIDLabel},
-		{name: "explicit levels", labels: util.RackIDLabel + "=1," + util.SuperPodIDLabel + "=2"},
+		{name: "empty disables the feature", labels: "", mode: util.TopologyModeSoft, weight: config.DefaultTopologyScoreWeight},
+		{name: "canonical superpod labels", labels: util.RackIDLabel + "," + util.SuperPodIDLabel, mode: util.TopologyModeSoft, weight: 20},
+		{name: "explicit levels", labels: util.RackIDLabel + "=1," + util.SuperPodIDLabel + "=2", mode: util.TopologyModeHard, weight: 0},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			config.TopologyTierLabels = tc.labels
+			config.TopologyMode = tc.mode
+			config.TopologyScoreWeight = tc.weight
 			if err := validateTopologyConfig(); err != nil {
 				t.Fatalf("validateTopologyConfig() = %v, want nil", err)
 			}
@@ -59,19 +67,25 @@ func TestValidateTopologyConfigRejects(t *testing.T) {
 	tests := []struct {
 		name   string
 		labels string
+		mode   string
+		weight float32
 	}{
-		{name: "duplicate tier key", labels: "leaf,leaf"},
-		{name: "zero tier level", labels: "leaf=0"},
-		{name: "duplicate tier level", labels: "leaf=1,spine=1"},
-		{name: "annotation key", labels: "@hami.io/superpodid"},
-		{name: "key with spaces", labels: "rack id"},
-		{name: "level above the maximum", labels: "leaf=65"},
-		{name: "mix explicit and plain keys", labels: "rack=2,superpodid"},
+		{name: "duplicate tier key", labels: "leaf,leaf", mode: util.TopologyModeSoft, weight: 20},
+		{name: "zero tier level", labels: "leaf=0", mode: util.TopologyModeSoft, weight: 20},
+		{name: "duplicate tier level", labels: "leaf=1,spine=1", mode: util.TopologyModeSoft, weight: 20},
+		{name: "annotation key", labels: "@hami.io/superpodid", mode: util.TopologyModeSoft, weight: 20},
+		{name: "key with spaces", labels: "rack id", mode: util.TopologyModeSoft, weight: 20},
+		{name: "level above the maximum", labels: "leaf=65", mode: util.TopologyModeSoft, weight: 20},
+		{name: "mix explicit and plain keys", labels: "rack=2,superpodid", mode: util.TopologyModeSoft, weight: 20},
+		{name: "invalid mode", labels: "", mode: "strict", weight: 20},
+		{name: "negative score weight", labels: "", mode: util.TopologyModeSoft, weight: -1},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			config.TopologyTierLabels = tc.labels
+			config.TopologyMode = tc.mode
+			config.TopologyScoreWeight = tc.weight
 			if err := validateTopologyConfig(); err == nil {
 				t.Fatal("validateTopologyConfig() = nil, want error")
 			}
