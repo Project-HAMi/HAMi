@@ -60,11 +60,20 @@ var success = prometheus.NewDesc("hami_remote_gpumonitor_collect_success", "Whet
 var droppedSamples = prometheus.NewDesc("hami_remote_gpumonitor_dropped_samples", "Lupine samples omitted from the last scrape", []string{"node", "reason"}, nil)
 
 var deviceLabels = []string{"node", "device_index", "device_uuid", "device_type"}
-var hostMemoryTotal = prometheus.NewDesc("hami_host_gpu_memory_total_bytes", "GPU device memory capacity in bytes", deviceLabels, nil)
+var hostMemoryTotal = prometheus.NewDesc("hami_host_gpu_memory_total_bytes", "GPU device memory capacity in bytes, as the device plugin registered it", deviceLabels, nil)
 var clients = prometheus.NewDesc("hami_remote_gpu_clients", "Lupine clients using memory on the GPU", deviceLabels, nil)
 var unattributedMemory = prometheus.NewDesc("hami_remote_gpu_unattributed_memory_used_bytes", "GPU memory used by Lupine clients that match no HAMi allocation", deviceLabels, nil)
 var unattributedUtilization = prometheus.NewDesc("hami_remote_gpu_unattributed_utilization_ratio", "GPU utilization of Lupine clients that match no HAMi allocation (0-100)", deviceLabels, nil)
 var connections = prometheus.NewDesc("hami_remote_gpu_server_connections", "Lupine clients connected to the server", []string{"node"}, nil)
+
+// Card is one GPU of the node as the device plugin registered it.
+type Card struct {
+	// Index is the card's NVML index on the node.
+	Index string
+	// Memory is the card's registered memory in MiB, which device memory
+	// scaling multiplies.
+	Memory int64
+}
 
 // Collector never stores previous samples: failures cannot replay stale usage.
 // Pods must be backed by a synchronized informer. Node is the GPU server node.
@@ -74,9 +83,11 @@ type Collector struct {
 	Node, Host string
 	Client     *http.Client
 	Pods       func() ([]*corev1.Pod, error)
-	// Indices maps the node's GPU UUIDs to their NVML indices. A pod's server
-	// numbers only the cards it sees, so its own device_index is not the node's.
-	Indices func() (map[string]string, error)
+	// Cards reads the node's GPUs, by UUID, from the device plugin's
+	// registration. A pod's server numbers only the cards it sees, so its
+	// device_index is not the node's, and HAMi-core in it reports the pod's
+	// share as the card's memory.
+	Cards func() (map[string]Card, error)
 
 	mu          sync.Mutex
 	lastFailure string
@@ -158,8 +169,8 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 		merge(families, results[i], url)
 		scraped = append(scraped, byServer[url]...)
 	}
-	if c.Indices != nil && len(scraped) > 0 {
-		indices, err := c.Indices()
+	if c.Cards != nil && len(scraped) > 0 {
+		cards, err := c.Cards()
 		if err != nil {
 			return nil, err
 		}
@@ -168,12 +179,17 @@ func (c *Collector) collect() ([]prometheus.Metric, error) {
 				continue
 			}
 			for _, m := range f.Metric {
+				card, ok := cards[labels(m)["device_uuid"]]
+				if !ok {
+					continue
+				}
 				for _, l := range m.Label {
 					if l.GetName() == "device_index" {
-						if index, ok := indices[labels(m)["device_uuid"]]; ok {
-							l.Value = &index
-						}
+						l.Value = new(card.Index)
 					}
+				}
+				if name == "lupine_host_gpu_memory_total_bytes" && card.Memory > 0 && m.Gauge != nil {
+					m.Gauge.Value = new(float64(card.Memory) * 1024 * 1024)
 				}
 			}
 		}

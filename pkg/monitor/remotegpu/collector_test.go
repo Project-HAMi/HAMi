@@ -487,14 +487,16 @@ func TestAllocationsFollowSchedulerAccounting(t *testing.T) {
 // the node's index for the card, and a server that cannot be read leaves out
 // only its pod.
 func TestScrapesEveryServerOnTheNode(t *testing.T) {
-	other := strings.ReplaceAll(fixture, "uid-1/", "uid-2/")
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fixture) }))
+	// HAMi-core in each server reports the pod's share as the card's memory.
+	first := fixture + "# TYPE lupine_host_gpu_memory_total_bytes gauge\nlupine_host_gpu_memory_total_bytes{device_index=\"0\",device_uuid=\"GPU-a\"} 1048576000\n"
+	other := strings.ReplaceAll(first, "uid-1/", "uid-2/")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, first) }))
 	defer up.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, other) }))
 	defer second.Close()
 	pods := []*corev1.Pod{servedPod(t, up, "uid-1"), servedPod(t, second, "uid-2")}
 	c := &Collector{Node: "gpu-node", Host: "127.0.0.1", Pods: func() ([]*corev1.Pod, error) { return pods, nil },
-		Indices: func() (map[string]string, error) { return map[string]string{"GPU-a": "3"}, nil }}
+		Cards: func() (map[string]Card, error) { return map[string]Card{"GPU-a": {Index: "3", Memory: 4000}}, nil }}
 	fs := metricsFor(t, c)
 	if got := fs["hami_remote_gpumonitor_collect_success"].Metric[0].GetGauge().GetValue(); got != 1 {
 		t.Fatalf("success = %v", got)
@@ -508,6 +510,9 @@ func TestScrapesEveryServerOnTheNode(t *testing.T) {
 	host := fs["hami_host_gpu_memory_used_bytes"].Metric[0]
 	if host.GetGauge().GetValue() != 2000 || labels(host)["device_index"] != "3" {
 		t.Fatalf("host memory = %v at index %q, want 2000 at 3", host.GetGauge().GetValue(), labels(host)["device_index"])
+	}
+	if total := fs["hami_host_gpu_memory_total_bytes"].Metric[0]; total.GetGauge().GetValue() != 4000*1024*1024 || labels(total)["device_index"] != "3" {
+		t.Fatalf("host total = %v at index %q, want the registered 4000 MiB at 3", total.GetGauge().GetValue(), labels(total)["device_index"])
 	}
 	if got := fs["hami_host_gpu_utilization_ratio"].Metric[0].GetGauge().GetValue(); got != 70 {
 		t.Fatalf("host utilization = %v", got)

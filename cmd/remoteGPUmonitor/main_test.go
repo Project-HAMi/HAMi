@@ -34,6 +34,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -189,9 +190,15 @@ func TestTrimPodKeepsCollectorFields(t *testing.T) {
 					Message:  "done",
 				}},
 			}},
-			PodIP: "10.0.0.1",
+			PodIP:   "10.0.0.1",
+			PodIPs:  []corev1.PodIP{{IP: "10.0.0.1"}},
+			HostIP:  "192.168.0.2",
+			HostIPs: []corev1.HostIP{{IP: "192.168.0.2"}},
+			Message: "drop",
 		},
 	}
+	fqdn := true
+	pod.Spec.Hostname, pod.Spec.Subdomain, pod.Spec.SetHostnameAsFQDN = "host", "sub", &fqdn
 	got := trimPod(pod)
 	if got.Name != "worker" || got.Namespace != "ns" || got.UID != "uid-1" || got.ResourceVersion != "7" {
 		t.Fatalf("identity: %+v", got.ObjectMeta)
@@ -199,8 +206,13 @@ func TestTrimPodKeepsCollectorFields(t *testing.T) {
 	if got.Annotations["unrelated"] != "" || got.Annotations[util.AssignedNodeAnnotations] != "cpu-node" || got.Annotations[remote.AllocatedAnnos] != "allocated" || got.Annotations[remote.LupineServerAnno] != "10.0.0.5:14834" {
 		t.Fatalf("annotations: %v", got.Annotations)
 	}
-	if len(got.Labels) != 0 || got.Spec.Containers[0].Image != "" || got.Status.PodIP != "" {
+	if len(got.Labels) != 0 || got.Spec.Containers[0].Image != "" || got.Status.Message != "" {
 		t.Fatal("kept fields the collector does not read")
+	}
+	// A Lupine server without LUPINE_WORKLOAD_ID names the client by these.
+	if got.Spec.Hostname != "host" || got.Spec.Subdomain != "sub" || got.Spec.SetHostnameAsFQDN == nil || !*got.Spec.SetHostnameAsFQDN ||
+		got.Status.PodIP != "10.0.0.1" || len(got.Status.PodIPs) != 1 || got.Status.HostIP != "192.168.0.2" || len(got.Status.HostIPs) != 1 {
+		t.Fatalf("client identity: %+v %+v", got.Spec, got.Status)
 	}
 	if got.Spec.NodeName != "cpu-node" || got.Status.Phase != corev1.PodRunning {
 		t.Fatalf("placement: %s %s", got.Spec.NodeName, got.Status.Phase)
@@ -213,15 +225,15 @@ func TestTrimPodKeepsCollectorFields(t *testing.T) {
 	}
 }
 
-func TestNodeIndicesReadTheRegistration(t *testing.T) {
+func TestNodeCardsReadTheRegistration(t *testing.T) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-a", Annotations: map[string]string{
-		nvidia.RegisterAnnos: device.MarshalNodeDevices([]*device.DeviceInfo{{ID: "GPU-1", Index: 0}, {ID: "GPU-2", Index: 3}}),
+		nvidia.RegisterAnnos: device.MarshalNodeDevices([]*device.DeviceInfo{{ID: "GPU-1", Index: 0, Devmem: 24576}, {ID: "GPU-2", Index: 3, Devmem: 81920}}),
 	}}}
-	got, err := nodeIndices(context.Background(), fake.NewSimpleClientset(node), "gpu-a")
-	if err != nil || got["GPU-1"] != "0" || got["GPU-2"] != "3" {
-		t.Fatalf("indices = %v, %v", got, err)
+	got, err := nodeCards(context.Background(), fake.NewSimpleClientset(node), "gpu-a")
+	if err != nil || got["GPU-1"] != (remotegpu.Card{Index: "0", Memory: 24576}) || got["GPU-2"] != (remotegpu.Card{Index: "3", Memory: 81920}) {
+		t.Fatalf("cards = %v, %v", got, err)
 	}
-	if _, err := nodeIndices(context.Background(), fake.NewSimpleClientset(), "gpu-a"); err == nil {
-		t.Fatal("a missing node gave indices")
+	if _, err := nodeCards(context.Background(), fake.NewSimpleClientset(), "gpu-a"); err == nil {
+		t.Fatal("a missing node gave cards")
 	}
 }

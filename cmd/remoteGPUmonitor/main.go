@@ -95,8 +95,8 @@ func serve(ctx context.Context, client kubernetes.Interface, node, host, bind st
 			return nil, fmt.Errorf("pod cache not synchronized")
 		}
 		return pods.Lister().List(labels.Everything())
-	}, Indices: func() (map[string]string, error) {
-		return nodeIndices(ctx, client, node)
+	}, Cards: func() (map[string]remotegpu.Card, error) {
+		return nodeCards(ctx, client, node)
 	}})
 	server := &http.Server{Addr: bind, Handler: newServeMux(informer.HasSynced, registry), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -127,9 +127,9 @@ func newServeMux(ready func() bool, registry *prometheus.Registry) *http.ServeMu
 	return mux
 }
 
-// nodeIndices reads the NVML index of each GPU on the node from the device
-// plugin's registration.
-func nodeIndices(ctx context.Context, client kubernetes.Interface, node string) (map[string]string, error) {
+// nodeCards reads the NVML index and memory of each GPU on the node from the
+// device plugin's registration.
+func nodeCards(ctx context.Context, client kubernetes.Interface, node string) (map[string]remotegpu.Card, error) {
 	n, err := client.CoreV1().Nodes().Get(ctx, node, metav1.GetOptions{ResourceVersion: "0"})
 	if err != nil {
 		return nil, err
@@ -138,9 +138,9 @@ func nodeIndices(ctx context.Context, client kubernetes.Interface, node string) 
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]string, len(gpus))
+	out := make(map[string]remotegpu.Card, len(gpus))
 	for _, gpu := range gpus {
-		out[gpu.ID] = strconv.Itoa(int(gpu.Index))
+		out[gpu.ID] = remotegpu.Card{Index: strconv.Itoa(int(gpu.Index)), Memory: gpu.Devmem}
 	}
 	return out, nil
 }
@@ -156,8 +156,23 @@ func trimPod(pod *corev1.Pod) *corev1.Pod {
 			ResourceVersion: pod.ResourceVersion,
 			Annotations:     map[string]string{},
 		},
-		Spec:   corev1.PodSpec{NodeName: pod.Spec.NodeName},
-		Status: corev1.PodStatus{Phase: pod.Status.Phase},
+		// The collector names a client by the pod's hostname and address when
+		// the Lupine server does not report LUPINE_WORKLOAD_ID.
+		Spec: corev1.PodSpec{
+			NodeName:          pod.Spec.NodeName,
+			HostNetwork:       pod.Spec.HostNetwork,
+			Hostname:          pod.Spec.Hostname,
+			HostnameOverride:  pod.Spec.HostnameOverride,
+			SetHostnameAsFQDN: pod.Spec.SetHostnameAsFQDN,
+			Subdomain:         pod.Spec.Subdomain,
+		},
+		Status: corev1.PodStatus{
+			Phase:   pod.Status.Phase,
+			PodIP:   pod.Status.PodIP,
+			PodIPs:  pod.Status.PodIPs,
+			HostIP:  pod.Status.HostIP,
+			HostIPs: pod.Status.HostIPs,
+		},
 	}
 	if v := pod.Annotations[util.AssignedNodeAnnotations]; v != "" {
 		out.Annotations[util.AssignedNodeAnnotations] = v
