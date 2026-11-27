@@ -788,6 +788,16 @@ func TestParseBusyDevicesReportsATruncatedBody(t *testing.T) {
 	assert.ErrorContains(t, err, "timeout")
 }
 
+// A server that cannot read its GPUs lists no clients. That is no answer, so
+// it reads as a failed scrape rather than a report that every card is free.
+func TestParseBusyDevicesRefusesAServerWithoutNVML(t *testing.T) {
+	_, err := parseBusyDevices(strings.NewReader("lupine_monitor_nvml_up 0\n"))
+	assert.ErrorIs(t, err, errNVMLDown)
+	busy, err := parseBusyDevices(strings.NewReader("lupine_monitor_nvml_up 1\nlupine_client_device_memory_used_bytes{device_uuid=\"GPU-1\"} 1\n"))
+	assert.NilError(t, err)
+	assert.Equal(t, len(busy), 1)
+}
+
 // A refresh whose metrics call fails must keep what the server last said.
 // Forgetting it would free a card an outside client is still holding and let
 // the scheduler put a pod on top of it.

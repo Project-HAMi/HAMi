@@ -914,6 +914,23 @@ devices:
       # -- Kubernetes resource requests and limits for the lupine server container, for example
       # `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`.
       resources: {}
+      # -- Liveness probe of the lupine server container. A TCP check, because a restart drops
+      # every client connection. Set to `null` to disable. Helm merges an override into this
+      # map, so set `tcpSocket: null` when replacing the handler, for example with `exec`.
+      livenessProbe:
+        tcpSocket:
+          port: lupine
+        periodSeconds: 10
+        failureThreshold: 6
+      # -- Readiness probe of the lupine server container, on its `/metrics` endpoint. Set to `null`
+      # to disable. Helm merges an override into this map, so set `httpGet: null` when replacing
+      # the handler, for example with `exec`.
+      readinessProbe:
+        httpGet:
+          path: /metrics
+          port: lupine
+        periodSeconds: 10
+        timeoutSeconds: 5
   ascend:
     # -- Per-chip objects shared with the separately deployed Ascend device plugin as `vnpus.configs`; overrides replace the whole list.
     # String `chipName` must match the detected chip name; string `commonWord` identifies the HAMi device type.

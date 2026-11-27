@@ -113,6 +113,9 @@ func serverPod(namespace string, clientPod *corev1.Pod, cfg ServerConfig) (*core
 		Ports:           []corev1.ContainerPort{{Name: "lupine", ContainerPort: int32(port), HostPort: int32(port)}},
 		SecurityContext: cfg.SecurityContext,
 		Resources:       cfg.Resources,
+		// Probes name the port "lupine", which is this pod's own endpoint.
+		LivenessProbe:  cfg.LivenessProbe,
+		ReadinessProbe: cfg.ReadinessProbe,
 	}
 	spec := corev1.PodSpec{
 		// Assigned rather than scheduled: the cards are on this node, and the

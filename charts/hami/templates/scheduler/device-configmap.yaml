@@ -107,6 +107,14 @@ data:
         resources:
 {{ toYaml . | indent 10 }}
         {{- end }}
+        {{- with $server.livenessProbe }}
+        livenessProbe:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.readinessProbe }}
+        readinessProbe:
+{{ toYaml . | indent 10 }}
+        {{- end }}
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
       {{- $sessionImagePullSecrets := concat (.Values.global.imagePullSecrets | default (list)) (.Values.devices.remotegpu.sessionImagePullSecrets | default (list)) }}
       {{- with $sessionImagePullSecrets }}

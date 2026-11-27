@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -191,6 +192,14 @@ server:
   resources:
     limits:
       memory: 4Gi
+  livenessProbe:
+    tcpSocket:
+      port: lupine
+    periodSeconds: 10
+  readinessProbe:
+    httpGet:
+      path: /metrics
+      port: lupine
 `), &cfg)
 	assert.NilError(t, err)
 	assert.Equal(t, cfg.Server.Image, "lupine-server:test")
@@ -198,9 +207,33 @@ server:
 	assert.Equal(t, cfg.Server.Tolerations[0].Operator, corev1.TolerationOpExists)
 	assert.Equal(t, cfg.Server.SecurityContext.Capabilities.Add[0], corev1.Capability("IPC_LOCK"))
 	assert.Assert(t, cfg.Server.Resources.Limits.Memory().Equal(resource.MustParse("4Gi")))
+	assert.Equal(t, cfg.Server.LivenessProbe.TCPSocket.Port.String(), "lupine")
+	assert.Equal(t, cfg.Server.LivenessProbe.PeriodSeconds, int32(10))
+	assert.Equal(t, cfg.Server.ReadinessProbe.HTTPGet.Path, "/metrics")
+	assert.Equal(t, cfg.Server.ReadinessProbe.HTTPGet.Port.String(), "lupine")
 
 	err = yamlv2.UnmarshalStrict([]byte("server:\n  imag: typo\n"), &cfg)
 	assert.ErrorContains(t, err, "imag")
+}
+
+// The server container carries the configured probes, and they reach its
+// endpoint through the port name.
+func TestServerPod_CarriesTheProbes(t *testing.T) {
+	InitRemoteGPUDevice(testConfig())
+	cfg := testServer
+	cfg.LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("lupine")}}}
+	cfg.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/metrics", Port: intstr.FromString("lupine")}}}
+	server, err := serverPod("hami", placedPod("uid-a"), cfg)
+	assert.NilError(t, err)
+	ctr := server.Spec.Containers[0]
+	assert.Equal(t, ctr.Ports[0].Name, "lupine")
+	assert.DeepEqual(t, ctr.LivenessProbe, cfg.LivenessProbe)
+	assert.DeepEqual(t, ctr.ReadinessProbe, cfg.ReadinessProbe)
+
+	server, err = serverPod("hami", placedPod("uid-a"), testServer)
+	assert.NilError(t, err)
+	assert.Assert(t, server.Spec.Containers[0].LivenessProbe == nil)
+	assert.Assert(t, server.Spec.Containers[0].ReadinessProbe == nil)
 }
 
 func serverScene(t *testing.T, objs ...runtime.Object) (*RemoteGPUDevices, *fake.Clientset) {
