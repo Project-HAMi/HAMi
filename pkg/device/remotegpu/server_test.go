@@ -192,6 +192,9 @@ server:
   resources:
     limits:
       memory: 4Gi
+  env:
+  - name: LD_LIBRARY_PATH
+    value: /usr/local/nvidia/lib64
   livenessProbe:
     tcpSocket:
       port: lupine
@@ -207,6 +210,7 @@ server:
 	assert.Equal(t, cfg.Server.Tolerations[0].Operator, corev1.TolerationOpExists)
 	assert.Equal(t, cfg.Server.SecurityContext.Capabilities.Add[0], corev1.Capability("IPC_LOCK"))
 	assert.Assert(t, cfg.Server.Resources.Limits.Memory().Equal(resource.MustParse("4Gi")))
+	assert.DeepEqual(t, cfg.Server.Env, []corev1.EnvVar{{Name: "LD_LIBRARY_PATH", Value: "/usr/local/nvidia/lib64"}})
 	assert.Equal(t, cfg.Server.LivenessProbe.TCPSocket.Port.String(), "lupine")
 	assert.Equal(t, cfg.Server.LivenessProbe.PeriodSeconds, int32(10))
 	assert.Equal(t, cfg.Server.ReadinessProbe.HTTPGet.Path, "/metrics")
@@ -214,6 +218,39 @@ server:
 
 	err = yamlv2.UnmarshalStrict([]byte("server:\n  imag: typo\n"), &cfg)
 	assert.ErrorContains(t, err, "imag")
+}
+
+// Configured variables reach the server, but none can undo the cards, port, or
+// memory limits HAMi set for it.
+func TestServerPod_AddsConfiguredEnv(t *testing.T) {
+	InitRemoteGPUDevice(testConfig())
+	cfg := testServer
+	cfg.Env = []corev1.EnvVar{
+		{Name: "LD_LIBRARY_PATH", Value: "/usr/local/nvidia/lib64"},
+		{Name: "NVIDIA_VISIBLE_DEVICES", Value: "all"},
+		{Name: "LUPINE_PORT", Value: "1"},
+		{Name: "CUDA_DEVICE_MEMORY_LIMIT_0", Value: "99999m"},
+		{Name: "CUDA_DEVICE_MEMORY_LIMIT_1", Value: "1m"},
+		{Name: "CUDA_DEVICE_MEMORY_LIMIT", Value: "1m"},
+	}
+	server, err := serverPod("hami", placedPod("uid-a"), cfg)
+	assert.NilError(t, err)
+	seen := map[string]int{}
+	for _, e := range server.Spec.Containers[0].Env {
+		seen[e.Name]++
+	}
+	for name, n := range seen {
+		assert.Equal(t, n, 1, "%s set twice", name)
+	}
+	env := serverEnv(t, server)
+	assert.Equal(t, env["LD_LIBRARY_PATH"], "/usr/local/nvidia/lib64")
+	assert.Equal(t, env["NVIDIA_VISIBLE_DEVICES"], "GPU-1,GPU-2")
+	assert.Equal(t, env["LUPINE_PORT"], "14834")
+	assert.Equal(t, env["CUDA_DEVICE_MEMORY_LIMIT_0"], "3000m")
+	_, limited := env["CUDA_DEVICE_MEMORY_LIMIT_1"]
+	assert.Assert(t, !limited, "a whole card is not limited")
+	_, fallback := env["CUDA_DEVICE_MEMORY_LIMIT"]
+	assert.Assert(t, !fallback)
 }
 
 // The server container carries the configured probes, and they reach its

@@ -107,6 +107,10 @@ data:
         resources:
 {{ toYaml . | indent 10 }}
         {{- end }}
+        {{- with $server.env }}
+        env:
+{{ toYaml . | indent 10 }}
+        {{- end }}
         {{- with $server.livenessProbe }}
         livenessProbe:
 {{ toYaml . | indent 10 }}

@@ -914,6 +914,12 @@ devices:
       # -- Kubernetes resource requests and limits for the lupine server container, for example
       # `{requests: {cpu: 100m, memory: 100Mi}, limits: {memory: 1Gi}}`.
       resources: {}
+      # -- Extra environment variables of the lupine server container, as a list of objects with
+      # name and value or valueFrom. Variables HAMi sets for the server's GPUs, port, and memory
+      # limits, and any `CUDA_DEVICE_MEMORY_LIMIT*`, are ignored here. For example, a server image whose CUDA forward-compatibility
+      # libraries are older than the node's driver fails with CUDA error 803; set `LD_LIBRARY_PATH`
+      # here without `/usr/local/cuda/compat` to use the driver's own library.
+      env: []
       # -- Liveness probe of the lupine server container. A TCP check, because a restart drops
       # every client connection. Set to `null` to disable. Helm merges an override into this
       # map, so set `tcpSocket: null` when replacing the handler, for example with `exec`.

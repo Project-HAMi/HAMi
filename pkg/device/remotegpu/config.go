@@ -60,8 +60,10 @@ type ServerConfig struct {
 	Tolerations      []corev1.Toleration         `json:"tolerations,omitempty"`
 	SecurityContext  *corev1.SecurityContext     `json:"securityContext,omitempty"`
 	Resources        corev1.ResourceRequirements `json:"resources,omitempty"`
-	LivenessProbe    *corev1.Probe               `json:"livenessProbe,omitempty"`
-	ReadinessProbe   *corev1.Probe               `json:"readinessProbe,omitempty"`
+	// Env adds to the variables serverPod sets, and cannot replace them.
+	Env            []corev1.EnvVar `json:"env,omitempty"`
+	LivenessProbe  *corev1.Probe   `json:"livenessProbe,omitempty"`
+	ReadinessProbe *corev1.Probe   `json:"readinessProbe,omitempty"`
 }
 
 // UnmarshalYAML reads the Kubernetes types by their JSON names, which the

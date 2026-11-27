@@ -23,6 +23,7 @@ import (
 	"hash/fnv"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -151,7 +152,7 @@ func serverPod(namespace string, clientPod *corev1.Pod, cfg ServerConfig) (*core
 			corev1.EnvVar{Name: "CUDA_DEVICE_MEMORY_SHARED_CACHE", Value: libMountPath + "/vgpu.cache"})
 		env = append(env, limits...)
 	}
-	ctr.Env = env
+	ctr.Env = append(configuredEnv(cfg.Env, env), env...)
 	spec.Containers = []corev1.Container{ctr}
 
 	h := fnv.New32a()
@@ -173,6 +174,21 @@ func serverPod(namespace string, clientPod *corev1.Pod, cfg ServerConfig) (*core
 		},
 		Spec: spec,
 	}, nil
+}
+
+// configuredEnv is the configured variables that set nothing serverPod does,
+// so they cannot undo the server's GPUs, port, or memory limits. A memory
+// limit for a card is left out even where serverPod sets none: it would cap a
+// card the pod holds whole.
+func configuredEnv(configured, set []corev1.EnvVar) []corev1.EnvVar {
+	var out []corev1.EnvVar
+	for _, e := range configured {
+		if strings.HasPrefix(e.Name, "CUDA_DEVICE_MEMORY_LIMIT") || slices.ContainsFunc(set, func(s corev1.EnvVar) bool { return s.Name == e.Name }) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // StartServer starts the Lupine server of a client pod Filter has placed.
