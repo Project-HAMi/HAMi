@@ -500,7 +500,7 @@ var (
 	)
 	remoteGPUServerUpDesc = prometheus.NewDesc(
 		"hami_remote_gpu_server_up",
-		"1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise",
+		"1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise; reported once the server has answered",
 		[]string{"server", "endpoint"}, nil,
 	)
 	remoteGPUServerLastSuccessDesc = prometheus.NewDesc(
@@ -532,15 +532,17 @@ func (cc ClusterManagerCollector) collectRemoteGPUMetrics(ch chan<- prometheus.M
 		}
 	}
 	for _, s := range remoteGPUServers() {
+		// A server node's own port is left to a server run outside the chart.
+		// Until one answers there, there is no server to call down.
+		if s.LastSuccess.IsZero() {
+			continue
+		}
 		up := 0.0
 		if s.Up {
 			up = 1
 		}
 		if err := sendMetric(ch, remoteGPUServerUpDesc, prometheus.GaugeValue, up, s.Server, s.Endpoint); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_server_up metric: %v", err)
-		}
-		if s.LastSuccess.IsZero() {
-			continue
 		}
 		if err := sendMetric(ch, remoteGPUServerLastSuccessDesc, prometheus.GaugeValue, float64(s.LastSuccess.Unix()), s.Server, s.Endpoint); err != nil {
 			klog.V(4).Infof("Failed to send hami_remote_gpu_server_last_scrape_success_timestamp_seconds metric: %v", err)
