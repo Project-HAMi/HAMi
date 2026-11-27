@@ -1,0 +1,36 @@
+suite: Lupine server probes
+templates:
+  - device-plugin/daemonsetlupine.yaml
+set:
+  devices.remotegpu.enabled: true
+tests:
+  - it: checks the server port for liveness and /metrics for readiness
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket.port
+          value: lupine
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /metrics
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: lupine
+  - it: drops a probe set to null
+    set:
+      devices.remotegpu.server.livenessProbe: null
+      devices.remotegpu.server.readinessProbe: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe
+  - it: replaces a handler set to null
+    set:
+      devices.remotegpu.server.livenessProbe.tcpSocket: null
+      devices.remotegpu.server.livenessProbe.exec.command: ["true"]
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          value: ["true"]

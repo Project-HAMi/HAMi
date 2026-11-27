@@ -1354,6 +1354,14 @@ func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { remoteGPUPool = prev })
+	prevServers := remoteGPUServers
+	remoteGPUServers = func() []remotegpu.PoolServer {
+		return []remotegpu.PoolServer{
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Up: true, LastSuccess: time.Unix(1700000000, 0)},
+			{Server: "gpu-b", Endpoint: "10.0.0.6:14833"},
+		}
+	}
+	t.Cleanup(func() { remoteGPUServers = prevServers })
 
 	cc := ClusterManagerCollector{
 		ClusterManager: &ClusterManager{Zone: "test-zone"},
@@ -1382,10 +1390,18 @@ hami_remote_gpu_memory_limit_bytes{device_index="1",device_type="RemoteGPU",devi
 # TYPE hami_remote_gpu_overview gauge
 hami_remote_gpu_overview{device_cores="100",device_index="0",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-1",endpoint="10.0.0.5:14833",server="gpu-a"} 1.073741824e+09
 hami_remote_gpu_overview{device_cores="100",device_index="1",device_memory_limit="1024",device_type="RemoteGPU",device_uuid="gpu-a/GPU-2",endpoint="10.0.0.5:14833",server="gpu-a"} 0
+# HELP hami_remote_gpu_server_last_scrape_success_timestamp_seconds Time of the scheduler's last successful read of a lupine server's /metrics
+# TYPE hami_remote_gpu_server_last_scrape_success_timestamp_seconds gauge
+hami_remote_gpu_server_last_scrape_success_timestamp_seconds{endpoint="10.0.0.5:14833",server="gpu-a"} 1.7e+09
+# HELP hami_remote_gpu_server_up 1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise
+# TYPE hami_remote_gpu_server_up gauge
+hami_remote_gpu_server_up{endpoint="10.0.0.5:14833",server="gpu-a"} 1
+hami_remote_gpu_server_up{endpoint="10.0.0.6:14833",server="gpu-b"} 0
 `
 	if err := promtestutil.CollectAndCompare(cc, strings.NewReader(want),
 		"hami_node_gpu_overview", "hami_gpu_memory_limit_bytes",
 		"hami_remote_gpu_allocated", "hami_remote_gpu_memory_limit_bytes", "hami_remote_gpu_overview",
+		"hami_remote_gpu_server_up", "hami_remote_gpu_server_last_scrape_success_timestamp_seconds",
 	); err != nil {
 		t.Errorf("unexpected metrics:\n%s", err)
 	}
@@ -1396,6 +1412,14 @@ hami_remote_gpu_overview{device_cores="100",device_index="1",device_memory_limit
 func TestRemoteGPUPoolAbsentWhenBackendNotConfigured(t *testing.T) {
 	if got := remoteGPUPool(); got != nil {
 		t.Errorf("expected no pool without the backend, got %v", got)
+	}
+	if got := remoteGPUServers(); got != nil {
+		t.Errorf("expected no servers without the backend, got %v", got)
+	}
+	// Every scheduler scrapes this, remote GPUs or not.
+	ch := make(chan prometheus.Metric, 1)
+	if allocs := testing.AllocsPerRun(10, func() { ClusterManagerCollector{}.collectRemoteGPUMetrics(ch) }); allocs != 0 {
+		t.Errorf("collecting without the backend allocated %v times", allocs)
 	}
 }
 

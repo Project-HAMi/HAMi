@@ -221,6 +221,188 @@ func TestDuplicateSourceSeriesDropped(t *testing.T) {
 	}
 }
 
+func TestServerSeries(t *testing.T) {
+	text := fixture + `# TYPE lupine_host_gpu_memory_total_bytes gauge
+lupine_host_gpu_memory_total_bytes{device_index="0",device_uuid="GPU-a",device_type="A100"} 4000
+lupine_host_gpu_memory_total_bytes{device_index="1",device_uuid="GPU-idle",device_type="A100"} 4000
+# TYPE lupine_server_connection_info gauge
+lupine_server_connection_info{client_id="uid-1/a",connection_kind="cuda"} 1
+lupine_server_connection_info{client_id="uid-1/a",connection_kind="nvml"} 1
+lupine_server_connection_info{client_id="7",connection_kind="cuda"} 1
+`
+	text = strings.Replace(text, `lupine_client_device_utilization_percent{client_id="uid-1/a",client_name="p2",device_uuid="GPU-a"} 50`,
+		`lupine_client_device_utilization_percent{client_id="uid-1/a",client_name="p2",device_uuid="GPU-a"} 50
+lupine_client_device_utilization_percent{client_id="7",device_uuid="GPU-a"} 30`, 1)
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms, dropped := adapt("gpu-node", families, []*corev1.Pod{allocatedPod()})
+	if len(dropped) != 0 {
+		t.Fatalf("dropped samples: %v", dropped)
+	}
+	values := map[string]float64{}
+	for _, m := range ms {
+		d := &dto.Metric{}
+		if err := m.Write(d); err != nil {
+			t.Fatal(err)
+		}
+		values[m.Desc().String()+"/"+labels(d)["device_uuid"]] = d.GetGauge().GetValue()
+	}
+	for _, c := range []struct {
+		desc *prometheus.Desc
+		uuid string
+		want float64
+	}{
+		{hostMemoryTotal, "GPU-a", 4000},
+		{hostMemoryTotal, "GPU-idle", 4000},
+		{clients, "GPU-a", 4},
+		{clients, "GPU-other", 1},
+		{clients, "GPU-idle", 0},
+		// The anonymous client and the Pod UID that no longer exists.
+		{unattributedMemory, "GPU-a", 2 * 9999},
+		// A known workload on a card it was not given.
+		{unattributedMemory, "GPU-other", 9999},
+		{unattributedMemory, "GPU-idle", 0},
+		{unattributedUtilization, "GPU-a", 30},
+		{connections, "", 2},
+	} {
+		got, ok := values[c.desc.String()+"/"+c.uuid]
+		if !ok || got != c.want {
+			t.Errorf("%s %s: got %v (present %v), want %v", c.desc, c.uuid, got, ok, c.want)
+		}
+	}
+}
+
+// A host series without device_type must not blank the type another host
+// series gave the card. Families are read in map order, so repeat the read.
+func TestServerSeriesKeepGPUTypeFromAnotherFamily(t *testing.T) {
+	text := fixture + `# TYPE lupine_host_gpu_memory_total_bytes gauge
+lupine_host_gpu_memory_total_bytes{device_index="0",device_uuid="GPU-a"} 4000
+`
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		ms, _ := adapt("gpu-node", families, []*corev1.Pod{allocatedPod()})
+		for _, m := range ms {
+			if m.Desc() != clients {
+				continue
+			}
+			d := &dto.Metric{}
+			if err := m.Write(d); err != nil {
+				t.Fatal(err)
+			}
+			if l := labels(d); l["device_uuid"] == "GPU-a" && l["device_type"] != "A100" {
+				t.Fatalf("device_type %q, want A100", l["device_type"])
+			}
+		}
+	}
+}
+
+// A released Lupine server names the client by hostname and address instead
+// of LUPINE_WORKLOAD_ID. The pod holding the card is not a stranger on it; a
+// client with another hostname is, and so is the pod on a card it lacks.
+// Pods in two namespaces can share a name, and then also the node's address
+// after SNAT, so a client either of them could be stays unattributed.
+func TestUnattributedSkipsTheHoldersAnonymousClient(t *testing.T) {
+	holder := allocatedPod()
+	holder.Status.PodIP, holder.Status.HostIP = "10.42.1.5", "10.0.0.9"
+	twin := holder.DeepCopy()
+	twin.UID, twin.Namespace, twin.Status.PodIP = "uid-twin", "other", "10.42.1.6"
+	twin.Annotations[remote.AllocatedAnnos] = device.EncodePodSingleDevice(device.PodSingleDevice{
+		{}, {{UUID: "gpu-node/GPU-other", Type: remote.RemoteGPUDevice, Usedmem: 4096}},
+	})
+	text := fixture + `lupine_client_device_memory_used_bytes{client_id="10.42.1.5:worker:4026531836:1",client_address="10.42.1.5",client_hostname="worker",device_uuid="GPU-a"} 300
+lupine_client_device_memory_used_bytes{client_id="10.0.0.9:worker:4026531836:4",client_address="10.0.0.9",client_hostname="worker",device_uuid="GPU-a"} 30
+lupine_client_device_memory_used_bytes{client_id="10.42.1.5:shell:4026531836:2",client_address="10.42.1.5",client_hostname="shell",device_uuid="GPU-a"} 50
+lupine_client_device_memory_used_bytes{client_id="10.42.1.5:worker:4026531836:3",client_address="10.42.1.5",client_hostname="worker",device_uuid="GPU-other"} 70
+lupine_client_device_memory_used_bytes{client_id="10.42.1.6:worker:4026531836:5",client_address="10.42.1.6",client_hostname="worker",device_uuid="GPU-a"} 7
+lupine_client_device_memory_used_bytes{client_id="gone-uid/a",client_address="10.42.1.5",client_hostname="worker",device_uuid="GPU-a"} 11
+`
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unattributedOn := func(pods ...*corev1.Pod) map[string]float64 {
+		ms, _ := adapt("gpu-node", families, pods)
+		got := map[string]float64{}
+		for _, m := range ms {
+			if m.Desc() != unattributedMemory {
+				continue
+			}
+			d := &dto.Metric{}
+			if err := m.Write(d); err != nil {
+				t.Fatal(err)
+			}
+			got[labels(d)["device_uuid"]] = d.GetGauge().GetValue()
+		}
+		return got
+	}
+	// The fixture's own strangers: client "7" and a Pod UID that is gone, and
+	// another gone Pod UID with the holder's hostname and address.
+	strangers := 2*9999.0 + 11
+	got := unattributedOn(holder)
+	if want := strangers + 50 + 7; got["GPU-a"] != want {
+		t.Errorf("GPU-a: got %v, want %v", got["GPU-a"], want)
+	}
+	if want := 9999.0 + 70; got["GPU-other"] != want {
+		t.Errorf("GPU-other: got %v, want %v", got["GPU-other"], want)
+	}
+	// The twin shares the hostname and, after SNAT, the node's address.
+	got = unattributedOn(holder, twin)
+	if want := strangers + 30 + 50 + 7; got["GPU-a"] != want {
+		t.Errorf("GPU-a with a same-named pod: got %v, want %v", got["GPU-a"], want)
+	}
+}
+
+// The client's hostname is whatever kubelet set: hostnameOverride first, or
+// with setHostnameAsFQDN the pod's FQDN, whose cluster domain at the end is
+// the kubelet's, not known here. A pod name may itself contain dots.
+func TestUnattributedMatchesTheHostnameKubeletSets(t *testing.T) {
+	yes := true
+	fqdn := allocatedPod()
+	fqdn.Name, fqdn.Spec.Subdomain, fqdn.Spec.SetHostnameAsFQDN = "worker.v1", "svc", &yes
+	override := allocatedPod()
+	name := "gpu-client"
+	override.Spec.HostnameOverride, override.Spec.Subdomain, override.Spec.SetHostnameAsFQDN = &name, "svc", &yes
+	for _, c := range []struct {
+		pod       *corev1.Pod
+		own, near string
+	}{
+		{fqdn, "worker.v1.svc.ns.svc.cluster.local", "worker.v1.svc.other.svc.cluster.local"},
+		{override, "gpu-client", "worker"},
+	} {
+		c.pod.Status.PodIP = "10.42.1.5"
+		text := fixture + `lupine_client_device_memory_used_bytes{client_id="10.42.1.5:` + c.own + `:4026531836:1",client_address="10.42.1.5",client_hostname="` + c.own + `",device_uuid="GPU-a"} 300
+lupine_client_device_memory_used_bytes{client_id="10.42.1.5:` + c.near + `:4026531836:2",client_address="10.42.1.5",client_hostname="` + c.near + `",device_uuid="GPU-a"} 50
+`
+		parser := expfmt.NewTextParser(model.UTF8Validation)
+		families, err := parser.TextToMetricFamilies(strings.NewReader(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms, _ := adapt("gpu-node", families, []*corev1.Pod{c.pod})
+		for _, m := range ms {
+			if m.Desc() != unattributedMemory {
+				continue
+			}
+			d := &dto.Metric{}
+			if err := m.Write(d); err != nil {
+				t.Fatal(err)
+			}
+			// The fixture's own strangers, and a hostname the pod does not have.
+			if want := 2*9999.0 + 50; labels(d)["device_uuid"] == "GPU-a" && d.GetGauge().GetValue() != want {
+				t.Errorf("%s: got %v, want %v", c.own, d.GetGauge().GetValue(), want)
+			}
+		}
+	}
+}
+
 func TestInvalidUtilizationDropped(t *testing.T) {
 	parser := expfmt.NewTextParser(model.UTF8Validation)
 	text := strings.Replace(fixture, `device_uuid="GPU-a"} 60`, `device_uuid="GPU-a"} 150`, 1)
