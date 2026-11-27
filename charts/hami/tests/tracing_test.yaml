@@ -4,6 +4,7 @@ templates:
   - scheduler/configmap.yaml
   - scheduler/device-configmap.yaml
   - device-plugin/daemonsetnvidia.yaml
+  - validate-values.yaml
 capabilities:
   majorVersion: 1
   minorVersion: 31
@@ -220,4 +221,41 @@ tests:
           content:
             name: OTEL_TRACES_SAMPLER_ARG
             value: "0.1"
+        template: scheduler/deployment.yaml
+
+  - it: rejects an otlpEndpoint without http:// or https://
+    set:
+      tracing.otlpEndpoint: jaeger.tracing:4317
+    asserts:
+      - failedTemplate:
+          errorMessage: tracing.otlpEndpoint must start with http:// or https://
+    template: validate-values.yaml
+
+  - it: rejects an endpoint in extraEnvs without http:// or https://
+    set:
+      tracing.extraEnvs:
+        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+          value: jaeger.tracing:4317
+    asserts:
+      - failedTemplate:
+          errorMessage: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT in tracing.extraEnvs must start with http:// or https://
+    template: validate-values.yaml
+
+  - it: does not check an endpoint read from a Secret
+    set:
+      tracing.extraEnvs:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: otel-endpoint
+              key: url
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OTEL_EXPORTER_OTLP_ENDPOINT
+            valueFrom:
+              secretKeyRef:
+                name: otel-endpoint
+                key: url
         template: scheduler/deployment.yaml

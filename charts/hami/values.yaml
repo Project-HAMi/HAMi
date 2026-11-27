@@ -1219,6 +1219,7 @@ tracing:
   # Used only when `otlpEndpoint` or this list sets an endpoint.
   # `OTEL_EXPORTER_OTLP_ENDPOINT` here overrides `otlpEndpoint`.
   # For the device plugin, `devicePlugin.extraEnvs` takes precedence for matching names.
+  # Setting `OTEL_SERVICE_NAME` here gives the scheduler and the device plugin the same name in traces.
   extraEnvs: []
 
 device-config:

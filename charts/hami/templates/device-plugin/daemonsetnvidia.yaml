@@ -214,10 +214,7 @@ spec:
             - name: DISABLE_HAMI_CORE_FOR_WHOLE_GPU
               value: {{ include "hami-vgpu.disableHAMiCoreForWholeGPU" . }}
             {{- if include "hami.tracing.enabled" . }}
-            {{- $tracingEnvNames := list }}
-            {{- range .Values.tracing.extraEnvs }}
-            {{- $tracingEnvNames = append $tracingEnvNames (toString .name) }}
-            {{- end }}
+            {{- $tracingEnvNames := include "hami.tracing.extraEnvNames" . | fromYamlArray }}
             {{- $devicePluginEnvNames := list }}
             {{- range .Values.devicePlugin.extraEnvs }}
             {{- $devicePluginEnvNames = append $devicePluginEnvNames (toString .name) }}
