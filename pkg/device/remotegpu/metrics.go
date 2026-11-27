@@ -42,6 +42,9 @@ const (
 	// registration annotation.
 	deviceUUIDLabel = "device_uuid"
 
+	// clientIDLabel names the client, as LUPINE_WORKLOAD_ID when it is set.
+	clientIDLabel = "client_id"
+
 	// metricsTimeout keeps one unresponsive server from holding up a
 	// scheduling decision for the whole fleet.
 	metricsTimeout = 2 * time.Second
@@ -55,13 +58,13 @@ var errNVMLDown = errors.New("lupine server cannot read its GPUs through NVML")
 var metricsClient = &http.Client{Timeout: metricsTimeout}
 
 // httpBusyDevices asks one lupine server which of its cards currently have a
-// client on them, and returns their GPU UUIDs.
+// client on them, and returns the clients on each, keyed by GPU UUID.
 //
 // The scheduler's own bookkeeping only covers pods it placed. A card can also
 // be busy with something it did not place, an interactive session or a client
 // configured by hand, and handing that card to a pod would put two workloads on
 // it. The server is the only party that can see those.
-func httpBusyDevices(ctx context.Context, endpoint string) (map[string]struct{}, error) {
+func httpBusyDevices(ctx context.Context, endpoint string) (map[string][]string, error) {
 	url := fmt.Sprintf("http://%s/metrics", endpoint)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -78,14 +81,14 @@ func httpBusyDevices(ctx context.Context, endpoint string) (map[string]struct{},
 	return parseBusyDevices(resp.Body)
 }
 
-// parseBusyDevices reads the UUID out of every client memory line. Prometheus
-// text is line oriented and only one metric is wanted, so it is scanned
-// directly rather than pulling in an exposition parser.
+// parseBusyDevices reads the UUID and client out of every client memory line.
+// Prometheus text is line oriented and only one metric is wanted, so it is
+// scanned directly rather than pulling in an exposition parser.
 //
 // A read that breaks part way through is an error, not a shorter answer: the
 // lines that never arrived are the cards this would otherwise report as free.
-func parseBusyDevices(r io.Reader) (map[string]struct{}, error) {
-	busy := map[string]struct{}{}
+func parseBusyDevices(r io.Reader) (map[string][]string, error) {
+	busy := map[string][]string{}
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -96,7 +99,7 @@ func parseBusyDevices(r io.Reader) (map[string]struct{}, error) {
 			continue
 		}
 		if uuid := labelValue(line, deviceUUIDLabel); uuid != "" {
-			busy[uuid] = struct{}{}
+			busy[uuid] = append(busy[uuid], labelValue(line, clientIDLabel))
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -47,6 +47,9 @@ func clientInjectionEnabled(pod *corev1.Pod) bool {
 // When client injection is enabled, the client image must provide /opt/lupine/lib,
 // sh, cp, libnghttp2.so.14, and nvidia-smi. A missing nvidia-smi fails delivery.
 // NVIDIA_SMI_SOURCE overrides the nvidia-smi search and is set only by tests.
+// The pod's Lupine server starts beside it on the GPU node, so delivery then
+// waits until nvidia-smi reaches the server: a workload that starts first
+// would find no GPU.
 const clientDeliveryScript = `
 source=$1
 target=$2
@@ -73,10 +76,18 @@ install_nvidia_smi() {
     chmod 755 "$target/` + clientSMIWrapperName + `"
 }
 [ "$#" -gt 0 ] || set -- /usr/lib/*-linux-gnu /lib/*-linux-gnu /usr/lib64 /lib64 /usr/lib /lib
+wait_for_server() {
+    [ -n "${LUPINE_SERVER:-}" ] || return 0
+    echo "waiting for Lupine server $LUPINE_SERVER"
+    until LD_LIBRARY_PATH="$target" "$target/` + clientSMIBinaryName + `" -L >/dev/null 2>&1; do
+        sleep 2
+    done
+}
 for directory in "$@"; do
     if [ -f "$directory/libnghttp2.so.14" ]; then
         cp -L "$directory/libnghttp2.so.14" "$target/libnghttp2.so.14"
         install_nvidia_smi
+        wait_for_server
         exit 0
     fi
 done
@@ -87,8 +98,13 @@ exit 1
 func clientDeliveryContainer() corev1.Container {
 	return corev1.Container{
 		Name: clientVolumeName, Image: RemoteGPUClientImage,
-		Command:      []string{"sh", "-ec", clientDeliveryScript, clientVolumeName, clientMountPath, "/lupine-lib"},
-		Env:          []corev1.EnvVar{{Name: "NVIDIA_VISIBLE_DEVICES", Value: "void"}},
+		Command: []string{"sh", "-ec", clientDeliveryScript, clientVolumeName, clientMountPath, "/lupine-lib"},
+		Env: []corev1.EnvVar{{Name: "NVIDIA_VISIBLE_DEVICES", Value: "void"}, {
+			Name: lupineServerEnv,
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{
+				APIVersion: "v1", FieldPath: fmt.Sprintf("metadata.annotations['%s']", LupineServerAnno),
+			}},
+		}},
 		VolumeMounts: []corev1.VolumeMount{{Name: clientVolumeName, MountPath: "/lupine-lib"}},
 	}
 }
@@ -180,7 +196,7 @@ func FinalizeAdmission(pod *corev1.Pod) {
 	}
 	var delivery, workload []corev1.Container
 	for _, c := range pod.Spec.InitContainers {
-		if (c.Name == clientVolumeName && clientInjectionEnabled(pod)) || (c.Name == libVolumeName && RemoteGPULibImage != "") {
+		if c.Name == clientVolumeName && clientInjectionEnabled(pod) {
 			delivery = append(delivery, c)
 		} else {
 			workload = append(workload, c)

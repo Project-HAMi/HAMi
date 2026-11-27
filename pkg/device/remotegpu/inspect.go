@@ -30,10 +30,14 @@ type PoolDevice struct {
 	Server   string
 	Endpoint string
 	Device   device.DeviceInfo
-	// Reserved is true when a pod anywhere in the cluster holds the card, or
-	// this scheduler booked it since the last refresh. It is the same answer
-	// Fit gets, so the metric agrees with what the next pod would be offered.
+	// Reserved is true when a pod anywhere in the cluster holds the card, this
+	// scheduler booked it since the last refresh, or the server reports a
+	// client nothing accounts for. It is the same answer Fit gets, so the
+	// metric agrees with what the next pod would be offered.
 	Reserved bool
+	// Usedmem is the memory, in MiB, given out on the card: the whole card
+	// when it is taken whole or held by an unaccounted client.
+	Usedmem int64
 }
 
 // Inspect reports the fleet as the pool last saw it, without refreshing it.
@@ -58,7 +62,12 @@ func (p *pool) inspect() []PoolDevice {
 	// reserved takes the lock itself; a card changing hands between the two
 	// reads is one scrape out of date, which the next scrape corrects.
 	for i := range out {
-		out[i].Reserved = p.reserved(out[i].Device.ID)
+		u := p.usage(out[i].Device.ID, "")
+		out[i].Reserved = u.users > 0 || u.foreign
+		out[i].Usedmem = min(u.mem, out[i].Device.Devmem)
+		if u.foreign {
+			out[i].Usedmem = out[i].Device.Devmem
+		}
 	}
 	return out
 }

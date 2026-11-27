@@ -17,13 +17,11 @@ limitations under the License.
 package scheduler
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
-	jsonpatch "github.com/evanphx/json-patch/v5"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -40,62 +38,51 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
-func TestRemoteGPUWebhookCopiesLibraryBeforeInitWorkload(t *testing.T) {
-	setupRemoteGPUScheduler(t)
-	previousImage := remotegpu.RemoteGPULibImage
-	previousScheduler := config.SchedulerName
-	remotegpu.RemoteGPULibImage = "projecthami/hami:test"
-	config.SchedulerName = "hami-scheduler"
-	t.Cleanup(func() {
-		remotegpu.RemoteGPULibImage = previousImage
-		config.SchedulerName = previousScheduler
+// Bind starts the pod's own Lupine server on the node serving its card, and
+// gives it back when the binding fails.
+func TestRemoteGPU_BindStartsThePodsServer(t *testing.T) {
+	gpuA := lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-a", 40000)})
+	clientNode := gpulessNode("cpu-1")
+	pod := remoteGPUPod("worker", 1, 0)
+	failing := remoteGPUPod("failing", 1, 0)
+	setupRemoteGPUScheduler(t, gpuA, clientNode, pod, failing)
+	t.Setenv("POD_NAMESPACE", "hami")
+	s := remoteGPUBindScheduler(t, []*corev1.Node{gpuA, clientNode}, pod, failing)
+	servers := func(p *corev1.Pod) []corev1.Pod {
+		list, err := client.KubeClient.CoreV1().Pods("hami").List(t.Context(), metav1.ListOptions{LabelSelector: remotegpu.ServerClientLabel + "=" + string(p.UID)})
+		assert.NilError(t, err)
+		return list.Items
+	}
+
+	_, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{clientNode.Name}})
+	assert.NilError(t, err)
+	bound, err := s.Bind(extenderv1.ExtenderBindingArgs{PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: clientNode.Name})
+	assert.NilError(t, err)
+	assert.Equal(t, bound.Error, "")
+	started := servers(pod)
+	assert.Equal(t, len(started), 1)
+	assert.Equal(t, started[0].Spec.NodeName, "gpu-a")
+	assert.Equal(t, started[0].Annotations[remotegpu.LupineServerAnno], "10.0.0.5:14834")
+	assert.DeepEqual(t, started[0].Spec.Containers[0].Env[0], corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: "GPU-a"})
+
+	fakeClient, ok := client.KubeClient.(*fake.Clientset)
+	assert.Assert(t, ok)
+	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() == "binding" {
+			return true, nil, fmt.Errorf("binding refused")
+		}
+		return false, nil, nil
 	})
-	pod := &corev1.Pod{Spec: corev1.PodSpec{
-		InitContainers: []corev1.Container{{
-			Name: "warmup",
-			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-				"nvidia.com/remote-gpu":        resource.MustParse("1"),
-				"nvidia.com/remote-gpu-memory": resource.MustParse("2000"),
-			}},
-		}},
-		Containers: []corev1.Container{{Name: "app"}},
-	}}
-	resp := admitPod(t, pod)
-	if !resp.Allowed {
-		t.Fatalf("admission rejected supported remote GPU pod: %+v", resp.Result)
-	}
-	rawPatch, err := json.Marshal(resp.Patches)
-	if err != nil {
-		t.Fatal(err)
-	}
-	patch, err := jsonpatch.DecodePatch(rawPatch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rawPod, err := json.Marshal(pod)
-	if err != nil {
-		t.Fatal(err)
-	}
-	patched, err := patch.Apply(rawPod)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var admitted corev1.Pod
-	if err := json.Unmarshal(patched, &admitted); err != nil {
-		t.Fatal(err)
-	}
-	init := admitted.Spec.InitContainers
-	if len(init) != 2 {
-		t.Fatalf("expected two init containers, got %d", len(init))
-	}
-	if init[0].Name != "hami-remote-gpu-lib" || init[1].Name != "warmup" {
-		t.Fatalf("library copy must precede requesting init container, got [%q, %q]", init[0].Name, init[1].Name)
-	}
+	_, err = s.Filter(extenderv1.ExtenderArgs{Pod: failing, NodeNames: &[]string{clientNode.Name}})
+	assert.NilError(t, err)
+	bound, err = s.Bind(extenderv1.ExtenderBindingArgs{PodName: failing.Name, PodNamespace: failing.Namespace, PodUID: failing.UID, Node: clientNode.Name})
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(bound.Error, "binding refused"), bound.Error)
+	assert.Equal(t, len(servers(failing)), 0, "the failed bind's server is removed")
 }
 
 // These tests drive the real scoring path (buildNodeUsage -> calcScore ->
@@ -132,6 +119,7 @@ func setupRemoteGPUScheduler(t *testing.T, objects ...runtime.Object) *remotegpu
 		ResourceCountName:  "nvidia.com/remote-gpu",
 		ResourceMemoryName: "nvidia.com/remote-gpu-memory",
 		DefaultPort:        remotegpu.DefaultLupinePort,
+		Server:             remotegpu.ServerConfig{Image: "lupine-server:test"},
 	})
 	device.DevicesMap = map[string]device.Devices{dev.CommonWord(): dev}
 	return dev
@@ -268,7 +256,7 @@ func TestRemoteGPU_GPUlessNodeFitsAndLupineNodeDoesNot(t *testing.T) {
 
 	annos := map[string]string{}
 	dev.PatchAnnotations(task, &annos, best.Devices)
-	assert.Equal(t, annos["hami.io/lupine-endpoint"], "10.0.0.5:14833")
+	assert.Equal(t, annos["hami.io/lupine-endpoint"], "10.0.0.5:14834")
 	assert.Assert(t, annos["hami.io/remote-gpu-devices-allocated"] != "")
 }
 
@@ -585,8 +573,8 @@ func TestRemoteGPU_ServerSelectionIncludesInitSidecarAndAppContainers(t *testing
 	}
 	allocated := scores.NodeList[0].Devices[remotegpu.RemoteGPUCommonWord]
 	assert.Equal(t, len(allocated), 4)
-	for _, ctrDevices := range allocated {
-		assert.Equal(t, len(ctrDevices), 3)
+	for i, ctrDevices := range allocated {
+		assert.Equal(t, len(ctrDevices), []int{1, 3, 2, 1}[i], "each container gets the cards it asked for")
 		for _, d := range ctrDevices {
 			assert.Assert(t, strings.HasPrefix(d.UUID, "gpu-d/"))
 		}
@@ -721,4 +709,40 @@ func TestRequestsDevice(t *testing.T) {
 	assert.Assert(t, requestsDevice(reqs, remotegpu.RemoteGPUCommonWord))
 	assert.Assert(t, !requestsDevice(reqs[:1], remotegpu.RemoteGPUCommonWord))
 	assert.Assert(t, !requestsDevice(nil, remotegpu.RemoteGPUCommonWord))
+}
+
+// A pod on one client node shares a card by memory, and a second pod on
+// another client node is placed on the same card for the memory left.
+func TestRemoteGPU_PodsOnTwoClientNodesShareACard(t *testing.T) {
+	held := device.EncodePodSingleDevice(device.PodSingleDevice{
+		device.ContainerDevices{{UUID: "gpu-a/GPU-aaa", Type: "RemoteGPU", Usedmem: 30000}},
+	})
+	running := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "first", Namespace: "default", UID: k8stypes.UID("uid-first"),
+			Annotations: map[string]string{"hami.io/remote-gpu-devices-allocated": held},
+		},
+		Spec:   corev1.PodSpec{NodeName: "cpu-1"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	dev := setupRemoteGPUScheduler(t,
+		lupineServerNode("gpu-a", "10.0.0.5", []*device.DeviceInfo{fleetGPU("GPU-aaa", 40000)}),
+		gpulessNode("cpu-1"), gpulessNode("cpu-2"), running,
+	)
+	// HAMi-core is delivered, so a memory request shares a card.
+	remotegpu.RemoteGPULibImage = "projecthami/hami:test"
+	t.Cleanup(func() { remotegpu.RemoteGPULibImage = "" })
+
+	for _, tc := range []struct {
+		mem  int64
+		fits bool
+	}{{8000, true}, {12000, false}} {
+		task := remoteGPUPod("second", 1, tc.mem)
+		nodes := map[string]*NodeUsage{"cpu-2": nodeUsageFor(t, dev, gpulessNode("cpu-2"), task)}
+		reqs, err := device.Resourcereqs(task)
+		assert.NilError(t, err)
+		scores, err := NewScheduler().calcScore(&nodes, reqs, task, map[string]string{})
+		assert.NilError(t, err)
+		assert.Equal(t, len(scores.NodeList) == 1, tc.fits, "request %d MiB next to 30000 MiB on a 40000 MiB card", tc.mem)
+	}
 }

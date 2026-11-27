@@ -1,4 +1,4 @@
-{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.server.enabled .Values.devices.remotegpu.monitor.enabled }}
+{{- if and .Values.devices.remotegpu.enabled .Values.devices.remotegpu.monitor.enabled }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -24,12 +24,12 @@ metadata:
   name: {{ include "hami-vgpu.fullname" . }}-remote-monitor
   namespace: {{ include "hami-vgpu.namespace" . }}
   labels:
-    app.kubernetes.io/component: hami-lupine-server
+    app.kubernetes.io/component: hami-remote-monitor
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/component: hami-lupine-server
+    app.kubernetes.io/component: hami-remote-monitor
     {{- include "hami-vgpu.selectorLabels" . | nindent 4 }}
   ports:
     - name: remote-metrics
@@ -51,7 +51,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: hami-lupine-server
+      app.kubernetes.io/component: hami-remote-monitor
       {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
   endpoints:
     - port: remote-metrics

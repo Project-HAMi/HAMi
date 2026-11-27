@@ -1,45 +1,59 @@
 suite: Remote GPU monitor deployment
 templates:
-  - device-plugin/daemonsetlupine.yaml
+  - device-plugin/daemonsetremotemonitor.yaml
   - device-plugin/daemonsetnvidia.yaml
   - scheduler/configmap.yaml
   - scheduler/device-configmap.yaml
 set:
   devices.remotegpu.enabled: true
 tests:
-  - it: omits the remote monitor sidecar by default
-    template: device-plugin/daemonsetlupine.yaml
+  - it: runs no monitor by default
+    template: device-plugin/daemonsetremotemonitor.yaml
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].name
-          value: lupine-server
-      - notExists:
-          path: spec.template.spec.containers[1]
+      - hasDocuments:
+          count: 0
   - it: gives the monitor its own token and a memory limit
-    template: device-plugin/daemonsetlupine.yaml
+    template: device-plugin/daemonsetremotemonitor.yaml
     set:
       devices.remotegpu.monitor.enabled: true
     asserts:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
-      - notExists:
-          path: spec.template.spec.containers[0].volumeMounts
       - equal:
-          path: spec.template.spec.containers[1].volumeMounts[0].mountPath
+          path: spec.template.spec.containers[0].name
+          value: remote-gpu-monitor
+      - notExists:
+          path: spec.template.spec.containers[1]
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
           value: /var/run/secrets/kubernetes.io/serviceaccount
       - equal:
           path: spec.template.spec.volumes[0].name
           value: remote-monitor-kube-api
       - equal:
-          path: spec.template.spec.containers[1].resources.requests.cpu
+          path: spec.template.spec.containers[0].resources.requests.cpu
           value: 50m
       - equal:
-          path: spec.template.spec.containers[1].resources.requests.memory
+          path: spec.template.spec.containers[0].resources.requests.memory
           value: 64Mi
       - equal:
-          path: spec.template.spec.containers[1].resources.limits.memory
+          path: spec.template.spec.containers[0].resources.limits.memory
           value: 256Mi
+  # Every lupine node runs client pods' servers, whatever port its label names.
+  - it: runs the monitor on every lupine node, on the node's network
+    template: device-plugin/daemonsetremotemonitor.yaml
+    set:
+      devices.remotegpu.monitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.hostNetwork
+          value: true
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0]
+          value:
+            key: hami.io/lupine-server
+            operator: Exists
   - it: keeps the device plugin pod when the remote monitor is enabled
     template: device-plugin/daemonsetnvidia.yaml
     set:

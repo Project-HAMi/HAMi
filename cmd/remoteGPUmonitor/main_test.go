@@ -31,7 +31,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	remote "github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -45,19 +48,13 @@ func TestRunRequiresNodeName(t *testing.T) {
 func TestRunOutsideCluster(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
-	err := run("node-a", "http://127.0.0.1:9/metrics", "127.0.0.1:0")
+	err := run("node-a", "127.0.0.1", "127.0.0.1:0")
 	if err == nil {
 		t.Fatal("expected in-cluster config to fail")
 	}
 }
 
 func TestServeScrapesAndShutsDown(t *testing.T) {
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = io.WriteString(w, "# EOF\n")
-	}))
-	defer source.Close()
-
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +68,7 @@ func TestServeScrapesAndShutsDown(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serve(ctx, fake.NewSimpleClientset(), "node-a", source.URL, addr)
+		errCh <- serve(ctx, fake.NewSimpleClientset(), "node-a", "127.0.0.1", addr)
 	}()
 
 	client := &http.Client{Timeout: time.Second}
@@ -167,6 +164,7 @@ func TestTrimPodKeepsCollectorFields(t *testing.T) {
 			Annotations: map[string]string{
 				util.AssignedNodeAnnotations: "cpu-node",
 				remote.AllocatedAnnos:        "allocated",
+				remote.LupineServerAnno:      "10.0.0.5:14834",
 				"unrelated":                  "drop",
 			},
 		},
@@ -192,26 +190,50 @@ func TestTrimPodKeepsCollectorFields(t *testing.T) {
 					Message:  "done",
 				}},
 			}},
-			PodIP: "10.0.0.1",
+			PodIP:   "10.0.0.1",
+			PodIPs:  []corev1.PodIP{{IP: "10.0.0.1"}},
+			HostIP:  "192.168.0.2",
+			HostIPs: []corev1.HostIP{{IP: "192.168.0.2"}},
+			Message: "drop",
 		},
 	}
+	fqdn := true
+	pod.Spec.Hostname, pod.Spec.Subdomain, pod.Spec.SetHostnameAsFQDN = "host", "sub", &fqdn
 	got := trimPod(pod)
 	if got.Name != "worker" || got.Namespace != "ns" || got.UID != "uid-1" || got.ResourceVersion != "7" {
 		t.Fatalf("identity: %+v", got.ObjectMeta)
 	}
-	if got.Annotations["unrelated"] != "" || got.Annotations[util.AssignedNodeAnnotations] != "cpu-node" || got.Annotations[remote.AllocatedAnnos] != "allocated" {
+	if got.Annotations["unrelated"] != "" || got.Annotations[util.AssignedNodeAnnotations] != "cpu-node" || got.Annotations[remote.AllocatedAnnos] != "allocated" || got.Annotations[remote.LupineServerAnno] != "10.0.0.5:14834" {
 		t.Fatalf("annotations: %v", got.Annotations)
 	}
-	if len(got.Labels) != 0 || got.Spec.Containers[0].Image != "" || got.Status.PodIP != "" {
+	if len(got.Labels) != 0 || got.Spec.Containers[0].Image != "" || got.Status.Message != "" {
 		t.Fatal("kept fields the collector does not read")
+	}
+	// A Lupine server without LUPINE_WORKLOAD_ID names the client by these.
+	if got.Spec.Hostname != "host" || got.Spec.Subdomain != "sub" || got.Spec.SetHostnameAsFQDN == nil || !*got.Spec.SetHostnameAsFQDN ||
+		got.Status.PodIP != "10.0.0.1" || len(got.Status.PodIPs) != 1 || got.Status.HostIP != "192.168.0.2" || len(got.Status.HostIPs) != 1 {
+		t.Fatalf("client identity: %+v %+v", got.Spec, got.Status)
 	}
 	if got.Spec.NodeName != "cpu-node" || got.Status.Phase != corev1.PodRunning {
 		t.Fatalf("placement: %s %s", got.Spec.NodeName, got.Status.Phase)
 	}
-	if len(got.Spec.InitContainers[0].Env) != 1 || got.Spec.InitContainers[0].Env[0].Value != "1024m" || got.Spec.InitContainers[0].RestartPolicy == nil {
+	if len(got.Spec.InitContainers[0].Env) != 0 || got.Spec.InitContainers[0].RestartPolicy == nil {
 		t.Fatalf("init container: %+v", got.Spec.InitContainers[0])
 	}
 	if got.Status.InitContainerStatuses[0].State.Terminated.ExitCode != 0 || got.Status.InitContainerStatuses[0].State.Terminated.Message != "" {
 		t.Fatalf("init status: %+v", got.Status.InitContainerStatuses[0])
+	}
+}
+
+func TestNodeCardsReadTheRegistration(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-a", Annotations: map[string]string{
+		nvidia.RegisterAnnos: device.MarshalNodeDevices([]*device.DeviceInfo{{ID: "GPU-1", Index: 0, Devmem: 24576}, {ID: "GPU-2", Index: 3, Devmem: 81920}}),
+	}}}
+	got, err := nodeCards(context.Background(), fake.NewSimpleClientset(node), "gpu-a")
+	if err != nil || got["GPU-1"] != (remotegpu.Card{Index: "0", Memory: 24576}) || got["GPU-2"] != (remotegpu.Card{Index: "3", Memory: 81920}) {
+		t.Fatalf("cards = %v, %v", got, err)
+	}
+	if _, err := nodeCards(context.Background(), fake.NewSimpleClientset(), "gpu-a"); err == nil {
+		t.Fatal("a missing node gave cards")
 	}
 }

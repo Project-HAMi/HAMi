@@ -84,6 +84,41 @@ data:
       libImage: {{ .Values.devices.remotegpu.libImage | quote }}
       {{- end }}
       clientImage: {{ include "common.images.source" (dict "image" .Values.devices.remotegpu.clientImage "global" .Values.global) | quote }}
+      {{- $server := .Values.devices.remotegpu.server }}
+      server:
+        image: {{ include "common.images.image" (dict "imageRoot" $server.image "global" .Values.global) | quote }}
+        imagePullPolicy: {{ $server.image.pullPolicy | quote }}
+        {{- with concat (.Values.global.imagePullSecrets | default (list)) ($server.image.pullSecrets | default (list)) }}
+        imagePullSecrets:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.runtimeClassName }}
+        runtimeClassName: {{ . | quote }}
+        {{- end }}
+        {{- with $server.tolerations }}
+        tolerations:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.securityContext }}
+        securityContext:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.resources }}
+        resources:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.env }}
+        env:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.livenessProbe }}
+        livenessProbe:
+{{ toYaml . | indent 10 }}
+        {{- end }}
+        {{- with $server.readinessProbe }}
+        readinessProbe:
+{{ toYaml . | indent 10 }}
+        {{- end }}
       sessionImage: {{ .Values.devices.remotegpu.sessionImage | quote }}
       {{- $sessionImagePullSecrets := concat (.Values.global.imagePullSecrets | default (list)) (.Values.devices.remotegpu.sessionImagePullSecrets | default (list)) }}
       {{- with $sessionImagePullSecrets }}

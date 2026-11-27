@@ -1347,7 +1347,7 @@ func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
 	prev := remoteGPUPool
 	remoteGPUPool = func() []remotegpu.PoolDevice {
 		return []remotegpu.PoolDevice{
-			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true,
+			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Reserved: true, Usedmem: 1024,
 				Device: device.DeviceInfo{ID: "gpu-a/GPU-1", Index: 0, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
 			{Server: "gpu-a", Endpoint: "10.0.0.5:14833",
 				Device: device.DeviceInfo{ID: "gpu-a/GPU-2", Index: 1, Devmem: 1024, Devcore: 100, Type: remotegpu.RemoteGPUCommonWord}},
@@ -1358,7 +1358,8 @@ func TestClusterManagerCollectorExportsRemoteGPUPoolOnce(t *testing.T) {
 	remoteGPUServers = func() []remotegpu.PoolServer {
 		return []remotegpu.PoolServer{
 			{Server: "gpu-a", Endpoint: "10.0.0.5:14833", Up: true, LastSuccess: time.Unix(1700000000, 0)},
-			{Server: "gpu-b", Endpoint: "10.0.0.6:14833"},
+			{Server: "gpu-b", Endpoint: "10.0.0.6:14833", LastSuccess: time.Unix(1700000100, 0)},
+			{Server: "gpu-c", Endpoint: "10.0.0.7:14833"},
 		}
 	}
 	t.Cleanup(func() { remoteGPUServers = prevServers })
@@ -1393,7 +1394,8 @@ hami_remote_gpu_overview{device_cores="100",device_index="1",device_memory_limit
 # HELP hami_remote_gpu_server_last_scrape_success_timestamp_seconds Time of the scheduler's last successful read of a lupine server's /metrics
 # TYPE hami_remote_gpu_server_last_scrape_success_timestamp_seconds gauge
 hami_remote_gpu_server_last_scrape_success_timestamp_seconds{endpoint="10.0.0.5:14833",server="gpu-a"} 1.7e+09
-# HELP hami_remote_gpu_server_up 1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise
+hami_remote_gpu_server_last_scrape_success_timestamp_seconds{endpoint="10.0.0.6:14833",server="gpu-b"} 1.7000001e+09
+# HELP hami_remote_gpu_server_up 1 if the scheduler's last read of a lupine server's /metrics succeeded with NVML up, 0 otherwise; reported once the server has answered
 # TYPE hami_remote_gpu_server_up gauge
 hami_remote_gpu_server_up{endpoint="10.0.0.5:14833",server="gpu-a"} 1
 hami_remote_gpu_server_up{endpoint="10.0.0.6:14833",server="gpu-b"} 0

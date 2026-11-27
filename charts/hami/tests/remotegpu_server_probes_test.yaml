@@ -1,36 +1,27 @@
 suite: Lupine server probes
 templates:
-  - device-plugin/daemonsetlupine.yaml
+  - scheduler/device-configmap.yaml
 set:
   devices.remotegpu.enabled: true
 tests:
   - it: checks the server port for liveness and /metrics for readiness
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.tcpSocket.port
-          value: lupine
-      - equal:
-          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
-          value: /metrics
-      - equal:
-          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
-          value: lupine
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '\n    livenessProbe:\n      failureThreshold: 6\n      periodSeconds: 10\n      tcpSocket:\n        port: lupine\n    readinessProbe:\n      httpGet:\n        path: /metrics\n        port: lupine\n      periodSeconds: 10\n      timeoutSeconds: 5\n'
   - it: drops a probe set to null
     set:
       devices.remotegpu.server.livenessProbe: null
       devices.remotegpu.server.readinessProbe: null
     asserts:
-      - notExists:
-          path: spec.template.spec.containers[0].livenessProbe
-      - notExists:
-          path: spec.template.spec.containers[0].readinessProbe
+      - notMatchRegex:
+          path: data["device-config.yaml"]
+          pattern: '(livenessProbe|readinessProbe):'
   - it: replaces a handler set to null
     set:
       devices.remotegpu.server.livenessProbe.tcpSocket: null
       devices.remotegpu.server.livenessProbe.exec.command: ["true"]
     asserts:
-      - notExists:
-          path: spec.template.spec.containers[0].livenessProbe.tcpSocket
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.exec.command
-          value: ["true"]
+      - matchRegex:
+          path: data["device-config.yaml"]
+          pattern: '\n    livenessProbe:\n      exec:\n        command:\n        - "true"\n      failureThreshold: 6\n      periodSeconds: 10\n    readinessProbe:'

@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -47,7 +48,7 @@ func stubFleet(t *testing.T, nodes []corev1.Node, pods []corev1.Pod, nodeErr err
 	// Servers report nothing unless a test says otherwise, so existing cases
 	// keep exercising the local bookkeeping on its own.
 	prevBusy := fetchBusyDevices
-	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) {
 		return nil, errNoServerMetrics
 	}
 	t.Cleanup(func() {
@@ -61,14 +62,15 @@ var errNoServerMetrics = errors.New("no metrics stubbed for this test")
 func stubServerUsage(t *testing.T, byEndpoint map[string][]string) {
 	t.Helper()
 	prev := fetchBusyDevices
-	fetchBusyDevices = func(_ context.Context, endpoint string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(_ context.Context, endpoint string) (map[string][]string, error) {
 		uuids, ok := byEndpoint[endpoint]
 		if !ok {
 			return nil, errNoServerMetrics
 		}
-		out := map[string]struct{}{}
+		out := map[string][]string{}
 		for _, u := range uuids {
-			out[u] = struct{}{}
+			// An anonymous client, as a session or a hand-run client reports.
+			out[u] = append(out[u], "10.0.0.9:host:4026531836:7")
 		}
 		return out, nil
 	}
@@ -118,8 +120,8 @@ func TestPool_BuildsFleetFromNvidiaRegistration(t *testing.T) {
 	for _, d := range devices {
 		ids[d.ID] = true
 		assert.Equal(t, d.DeviceVendor, RemoteGPUCommonWord)
-		// Whole-card allocation: the NVIDIA plugin's split count is discarded.
-		assert.Equal(t, d.Count, int64(1))
+		// The NVIDIA plugin's split count bounds how many pods share a card.
+		assert.Equal(t, d.Count, int64(10))
 	}
 	assert.Assert(t, ids["gpu-a/GPU-1"])
 	assert.Assert(t, ids["gpu-b/GPU-3"])
@@ -218,14 +220,14 @@ func TestPool_KeepsServerReportedUsageAcrossNotReadyRecovery(t *testing.T) {
 	prevNodes, prevPods, prevBusy := listLupineNodes, listPods, fetchBusyDevices
 	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nil }
 	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, nil }
-	fetchBusyDevices = func(_ context.Context, _ string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(_ context.Context, _ string) (map[string][]string, error) {
 		switch phase {
 		case "reported-busy":
-			return map[string]struct{}{"GPU-1": {}}, nil
+			return map[string][]string{"GPU-1": {"10.0.0.9:host:4026531836:7"}}, nil
 		case "metrics-error":
 			return nil, errNoServerMetrics
 		default:
-			return map[string]struct{}{}, nil
+			return map[string][]string{}, nil
 		}
 	}
 	t.Cleanup(func() { listLupineNodes, listPods, fetchBusyDevices = prevNodes, prevPods, prevBusy })
@@ -381,7 +383,7 @@ func TestPool_FailedPodListKeepsKnownFreeServer(t *testing.T) {
 	}
 	owner := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{{{
-			UUID: "gpu-owned/GPU-5", Type: RemoteGPUCommonWord,
+			UUID: "gpu-owned/GPU-5", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100,
 		}}})}},
 		Spec: corev1.PodSpec{NodeName: "cpu-1"},
 	}
@@ -395,14 +397,16 @@ func TestPool_FailedPodListKeepsKnownFreeServer(t *testing.T) {
 	// successful list, but never connects to CUDA, so metrics cannot protect it.
 	bound := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "new-owner"}}
 	allocation := device.PodDevices{RemoteGPUCommonWord: device.PodSingleDevice{{
-		{UUID: "gpu-booked/GPU-3", Type: RemoteGPUCommonWord},
-		{UUID: "gpu-booked/GPU-4", Type: RemoteGPUCommonWord},
+		{UUID: "gpu-booked/GPU-3", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100},
+		{UUID: "gpu-booked/GPU-4", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100},
 	}}}
 	annos := map[string]string{}
 	dev.PatchAnnotations(bound, &annos, allocation)
-	for id, b := range dev.pool.held {
-		b.at = time.Now().Add(-heldTTL - time.Second)
-		dev.pool.held[id] = b
+	for _, pods := range dev.pool.held {
+		for pod, b := range pods {
+			b.at = time.Now().Add(-heldTTL - time.Second)
+			pods[pod] = b
+		}
 	}
 	nodes = append(nodes, lupineNode("gpu-new", "10.0.0.8", "", []*device.DeviceInfo{gpu("GPU-6", 40000)}))
 	listLupineNodes = func(context.Context) ([]corev1.Node, error) { return nodes, nil }
@@ -426,7 +430,7 @@ func TestPool_FailedPodListKeepsKnownFreeServer(t *testing.T) {
 				fit, allocated, reason := dev.Fit(usage, request(1, 1000), &corev1.Pod{}, &device.NodeInfo{ID: "cpu-2"}, nil)
 				assert.Check(t, fit == (server == "gpu-free"), "server %s: fit=%v, reason=%s", server, fit, reason)
 				if fit {
-					assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 2, "the free server must be allocated whole")
+					assert.Equal(t, len(allocated[RemoteGPUCommonWord]), 1, "the free server hands out the card asked for")
 				}
 			}
 		}
@@ -607,7 +611,7 @@ func TestPool_FailedPodListDoesNotExpireABooking(t *testing.T) {
 	listPods = func(context.Context) ([]corev1.Pod, error) { return nil, errors.New("apiserver unavailable") }
 	t.Cleanup(func() { listPods = prev })
 	p.mu.Lock()
-	p.held["gpu-a/GPU-1"] = booking{at: time.Now().Add(-heldTTL - time.Second), pod: "uid-p"}
+	p.held["gpu-a/GPU-1"]["uid-p"] = booking{at: time.Now().Add(-heldTTL - time.Second), share: share{users: 1, mem: -1}}
 	p.mu.Unlock()
 	p.fetchedAt = p.fetchedAt.Add(-poolTTL)
 	p.snapshot(context.Background())
@@ -666,7 +670,7 @@ func TestPatchAnnotations_BooksCardBeforePodListCatchesUp(t *testing.T) {
 			device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 40000, Usedcores: 100}},
 		},
 	})
-	assert.Equal(t, annos[LupineServerAnno], "10.0.0.5:14833")
+	assert.Equal(t, annos[LupineServerAnno], "10.0.0.5:14834", "the pod's own server listens above the node's port")
 	assert.Assert(t, dev.pool.reserved("gpu-a/GPU-1"), "allocating the card books it right away")
 
 	// The pod list still does not show the pod, so the booking has to survive.
@@ -675,7 +679,7 @@ func TestPatchAnnotations_BooksCardBeforePodListCatchesUp(t *testing.T) {
 	assert.Assert(t, dev.pool.reserved("gpu-a/GPU-1"), "booking outlives a refresh that has not seen the pod")
 
 	// A pod that never appears must not hold the card forever.
-	dev.pool.held["gpu-a/GPU-1"] = booking{at: time.Now().Add(-heldTTL - time.Second)}
+	dev.pool.held["gpu-a/GPU-1"][""] = booking{at: time.Now().Add(-heldTTL - time.Second), share: share{users: 1, mem: 40000}}
 	dev.pool.fetchedAt = dev.pool.fetchedAt.Add(-poolTTL)
 	dev.pool.snapshot(context.Background())
 	assert.Assert(t, !dev.pool.reserved("gpu-a/GPU-1"), "a booking whose pod never showed up expires")
@@ -773,8 +777,7 @@ lupine_client_device_utilization_percent{client_id="10.0.0.9:pod-a:4026532:7",cl
 	busy, err := parseBusyDevices(strings.NewReader(body))
 	assert.NilError(t, err)
 	assert.Equal(t, len(busy), 1, "only the client memory metric names a busy card")
-	_, ok := busy["GPU-1"]
-	assert.Assert(t, ok)
+	assert.DeepEqual(t, busy["GPU-1"], []string{"10.0.0.9:pod-a:4026532:7"})
 }
 
 // A body that breaks part way through is not a shorter list of busy cards: the
@@ -810,7 +813,7 @@ func TestPool_FailedMetricsRefreshKeepsTheLastReportedUsage(t *testing.T) {
 
 	// The server goes quiet on the next round.
 	prev := fetchBusyDevices
-	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) {
 		return nil, errNoServerMetrics
 	}
 	t.Cleanup(func() { fetchBusyDevices = prev })
@@ -849,7 +852,7 @@ func TestPool_RefreshDoesNotBlockReservedDuringAServerFetch(t *testing.T) {
 	entered := make(chan struct{})
 	var once sync.Once
 	prevBusy := fetchBusyDevices
-	fetchBusyDevices = func(context.Context, string) (map[string]struct{}, error) {
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) {
 		once.Do(func() { close(entered) })
 		<-release
 		return nil, errNoServerMetrics
@@ -997,4 +1000,226 @@ func TestPool_NudgesPodRefusedOnStaleFleet(t *testing.T) {
 		t.Fatal("pod refused on a stale fleet was not nudged")
 	}
 	assert.Equal(t, len(p.waiting), 0)
+}
+
+// A pod's bookings add up per container, and a new booking for the same pod
+// replaces the old one rather than piling onto it.
+func TestPool_BookingsAddUpPerPod(t *testing.T) {
+	p := newPool(DefaultLupinePort)
+	p.book("uid-p", "", device.ContainerDevices{{UUID: "gpu-a/GPU-1", Usedmem: 1000}, {UUID: "gpu-a/GPU-1", Usedmem: 500}})
+	p.book("uid-q", "", device.ContainerDevices{{UUID: "gpu-a/GPU-1", Usedmem: 2000}})
+
+	assert.Equal(t, p.usage("gpu-a/GPU-1", ""), cardUsage{users: 3, mem: 3500})
+	assert.Equal(t, p.usage("gpu-a/GPU-1", "uid-p"), cardUsage{users: 1, mem: 2000})
+
+	p.book("uid-p", "", device.ContainerDevices{{UUID: "gpu-a/GPU-1", Usedmem: 100}})
+	assert.Equal(t, p.usage("gpu-a/GPU-1", ""), cardUsage{users: 2, mem: 2100})
+
+	p.release("uid-p")
+	assert.Equal(t, p.usage("gpu-a/GPU-1", ""), cardUsage{users: 1, mem: 2000})
+}
+
+// Pods sharing a card each count for their own memory.
+func TestPool_ReservationsAddUpSharedCards(t *testing.T) {
+	shared := func(uid string, mem ...int64) corev1.Pod {
+		ctrs := device.PodSingleDevice{}
+		for _, m := range mem {
+			ctrs = append(ctrs, device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: m}})
+		}
+		return corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: uid, UID: types.UID(uid), Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(ctrs)}},
+			Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+		}
+	}
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})},
+		[]corev1.Pod{shared("uid-a", 1000, 2000), shared("uid-b", 4000)}, nil)
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	assert.Equal(t, p.usage("gpu-a/GPU-1", ""), cardUsage{users: 3, mem: 7000})
+	assert.Equal(t, p.usage("gpu-a/GPU-1", "uid-a"), cardUsage{users: 1, mem: 4000})
+}
+
+// The server reports every client on a card, the pods HAMi put there among
+// them. Only a client no allocation accounts for keeps others off the card.
+func TestPool_ClientsTheServerReportsAreMatchedToHolders(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})},
+		[]corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Name: "a", UID: "uid-a", Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{
+				device.ContainerDevices{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 1000}},
+			})}},
+			Spec: corev1.PodSpec{NodeName: "cpu-1"},
+		}}, nil)
+	report := map[string][]string{}
+	prev := fetchBusyDevices
+	fetchBusyDevices = func(context.Context, string) (map[string][]string, error) { return report, nil }
+	t.Cleanup(func() { fetchBusyDevices = prev })
+	p := newPool(DefaultLupinePort)
+	read := func() {
+		p.fetchedAt = time.Time{}
+		p.snapshot(context.Background())
+	}
+
+	report = map[string][]string{"GPU-1": {"uid-a/app"}}
+	read()
+	assert.Assert(t, !p.usage("gpu-a/GPU-1", "").foreign, "the holder itself")
+
+	report = map[string][]string{"GPU-1": {"uid-a/app", "uid-gone/app"}}
+	read()
+	assert.Assert(t, p.usage("gpu-a/GPU-1", "").foreign, "a workload that holds nothing here")
+
+	// A released server names a client by address and hostname, and a pod's
+	// hostname is its name. Another hostname on a held card is foreign, as is
+	// any client on a card nobody holds.
+	report = map[string][]string{"GPU-1": {"10.0.0.9:a:4026531836:7"}, "GPU-2": {"10.0.0.9:a:4026531836:8"}}
+	read()
+	assert.Assert(t, !p.usage("gpu-a/GPU-1", "").foreign, "the holder's own client")
+	assert.Assert(t, p.usage("gpu-a/GPU-2", "").foreign, "the holder's name on a card it does not hold")
+
+	report = map[string][]string{"GPU-1": {"10.0.0.9:a:4026531836:7", "10.0.0.9:by-hand:4026531836:9"}}
+	read()
+	assert.Assert(t, p.usage("gpu-a/GPU-1", "").foreign, "a client run by hand next to the holder")
+
+	report = map[string][]string{"GPU-1": {"fd00::9:a:4026531836:7"}}
+	read()
+	assert.Assert(t, !p.usage("gpu-a/GPU-1", "").foreign, "an IPv6 address")
+}
+
+// A pod booked but not yet listed is matched by its hostname too, the way
+// kubelet sets it.
+func TestPool_BookedPodsClientIsMatchedByHostname(t *testing.T) {
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	stubServerUsage(t, map[string][]string{"10.0.0.5:14833": {"GPU-1"}})
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	p.mu.Lock()
+	p.busy = map[string][]string{"gpu-a/GPU-1": {"10.0.0.9:worker:4026531836:7"}}
+	p.mu.Unlock()
+	assert.Assert(t, p.usage("gpu-a/GPU-1", "").foreign)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "w", UID: "uid-w"}, Spec: corev1.PodSpec{Hostname: "worker"}}
+	p.book(podKey(pod), podHostname(pod), device.ContainerDevices{{UUID: "gpu-a/GPU-1", Usedmem: 1000}})
+	assert.Assert(t, !p.usage("gpu-a/GPU-1", "").foreign)
+
+	long := strings.Repeat("a", 62) + "-b"
+	assert.Equal(t, podHostname(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: long}}), strings.Repeat("a", 62))
+	assert.Equal(t, podHostname(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "n"}, Spec: corev1.PodSpec{HostNetwork: true}}), "")
+}
+
+// A pod holds each card at its peak for as long as it lives. An ordinary init
+// container runs alone, beside the sidecars before it, but kubelet runs it
+// again when it recreates the sandbox, so its share stays held after it has
+// succeeded.
+func TestPool_PodHoldsEachCardAtItsPeakForItsLifetime(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", UID: "uid-p", Annotations: map[string]string{AllocatedAnnos: device.EncodePodSingleDevice(device.PodSingleDevice{
+			{{UUID: "gpu-a/GPU-2", Type: RemoteGPUCommonWord, Usedmem: 1000}},
+			{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 30000}},
+			{{UUID: "gpu-a/GPU-1", Type: RemoteGPUCommonWord, Usedmem: 5000}, {UUID: "gpu-a/GPU-2", Type: RemoteGPUCommonWord, Usedmem: 2000}},
+		})}},
+		Spec: corev1.PodSpec{
+			NodeName:       "cpu-1",
+			InitContainers: []corev1.Container{{Name: "side", RestartPolicy: &always}, {Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+	}
+	nodes := []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000), gpu("GPU-2", 40000)})}
+	for _, done := range []bool{false, true} {
+		if done {
+			pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "init", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{}}}}
+		}
+		stubFleet(t, nodes, []corev1.Pod{pod}, nil)
+		p := newPool(DefaultLupinePort)
+		p.snapshot(context.Background())
+		// The init container's 30000 is more than the app's 5000.
+		u := p.usage("gpu-a/GPU-1", "")
+		assert.Equal(t, u.mem, int64(30000), "init done=%v", done)
+		assert.Equal(t, u.users, 1)
+		// The sidecar and the app hold GPU-2 together.
+		u = p.usage("gpu-a/GPU-2", "")
+		assert.Equal(t, u.mem, int64(3000), "init done=%v", done)
+		assert.Equal(t, u.users, 2)
+	}
+}
+
+// With setHostnameAsFQDN, kubelet sets the pod's FQDN as its hostname, and
+// the cluster domain at its end is the kubelet's, not known here.
+func TestPool_HolderWithAnFQDNHostnameIsMatched(t *testing.T) {
+	yes := true
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns", UID: "uid-p"},
+		Spec:       corev1.PodSpec{Hostname: "worker", Subdomain: "svc", SetHostnameAsFQDN: &yes},
+	}
+	holders := map[string]share{"uid-p": {users: 1, host: podHostname(pod)}}
+	assert.Assert(t, accountedFor("10.0.0.9:worker.svc.ns.svc.cluster.local:4026531836:7", holders))
+	assert.Assert(t, accountedFor("10.0.0.9:worker.svc.ns.svc.example.org:4026531836:7", holders))
+	assert.Assert(t, !accountedFor("10.0.0.9:worker:4026531836:7", holders))
+	assert.Assert(t, !accountedFor("10.0.0.9:worker.svc.other.svc.cluster.local:4026531836:7", holders))
+
+	// A pod name may contain dots, and hostnameOverride wins over the rest.
+	dotted := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "worker.v1", Namespace: "ns"}, Spec: corev1.PodSpec{Subdomain: "svc", SetHostnameAsFQDN: &yes}}
+	assert.Assert(t, accountedFor("10.0.0.9:worker.v1.svc.ns.svc.cluster.local:4026531836:7", map[string]share{"uid-d": {users: 1, host: podHostname(dotted)}}))
+	name := "gpu-client"
+	pod.Spec.HostnameOverride = &name
+	holders = map[string]share{"uid-p": {users: 1, host: podHostname(pod)}}
+	assert.Assert(t, accountedFor("10.0.0.9:gpu-client:4026531836:7", holders))
+	assert.Assert(t, !accountedFor("10.0.0.9:worker.svc.ns.svc.cluster.local:4026531836:7", holders))
+}
+
+// Each pod's server gets a port of its own above the node's one: not one a
+// placed client or a running server holds, nor one booked for another pod.
+func TestPool_AssignsEachServerAFreePort(t *testing.T) {
+	endpoint := func(name, ep, node string, phase corev1.PodPhase) corev1.Pod {
+		return corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name), Annotations: map[string]string{LupineServerAnno: ep}},
+			Spec:       corev1.PodSpec{NodeName: node},
+			Status:     corev1.PodStatus{Phase: phase},
+		}
+	}
+	stubFleet(t, []corev1.Node{
+		lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)}),
+		lupineNode("gpu-b", "10.0.0.6", "24000", []*device.DeviceInfo{gpu("GPU-2", 40000)}),
+	}, []corev1.Pod{
+		endpoint("client", "10.0.0.5:14834", "cpu-1", corev1.PodRunning),
+		endpoint("server", "10.0.0.5:14835", "gpu-a", corev1.PodRunning),
+		endpoint("finished", "10.0.0.5:14836", "cpu-1", corev1.PodSucceeded),
+		endpoint("unbound", "10.0.0.5:14837", "", corev1.PodPending),
+	}, nil)
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+
+	assign := func(server, pod string) string {
+		ep, ok := p.assignEndpoint(server, pod)
+		assert.Assert(t, ok)
+		return ep
+	}
+	assert.Equal(t, assign("gpu-a", "x"), "10.0.0.5:14836", "a finished pod gives its port back")
+	assert.Equal(t, assign("gpu-a", "y"), "10.0.0.5:14837", "an unplaced pod holds none")
+	assert.Equal(t, assign("gpu-a", "x"), "10.0.0.5:14836", "a pod's new booking replaces its last")
+	p.release("x")
+	assert.Equal(t, assign("gpu-a", "z"), "10.0.0.5:14836", "a released booking frees its port")
+	assert.Equal(t, assign("gpu-b", "x"), "10.0.0.6:24001", "the node's label moves the range")
+	_, ok := p.assignEndpoint("gpu-c", "x")
+	assert.Assert(t, !ok, "an unknown server has no endpoint")
+}
+
+// A booking lasts until the pod list shows the port held, or heldTTL passes.
+func TestPool_EndpointBookingLastsUntilThePodListHasIt(t *testing.T) {
+	pods := []corev1.Pod{}
+	stubFleet(t, []corev1.Node{lupineNode("gpu-a", "10.0.0.5", "", []*device.DeviceInfo{gpu("GPU-1", 40000)})}, nil, nil)
+	listPods = func(context.Context) ([]corev1.Pod, error) { return pods, nil }
+	p := newPool(DefaultLupinePort)
+	p.snapshot(context.Background())
+	ep, _ := p.assignEndpoint("gpu-a", "x")
+
+	p.refreshNow(context.Background())
+	assert.Equal(t, len(p.heldEndpoints), 1, "the pod list has not caught up")
+	pods = []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "x", Annotations: map[string]string{LupineServerAnno: ep}},
+		Spec:       corev1.PodSpec{NodeName: "cpu-1"},
+	}}
+	p.forcedAt = time.Time{}
+	p.refreshNow(context.Background())
+	assert.Equal(t, len(p.heldEndpoints), 0)
+	other, _ := p.assignEndpoint("gpu-a", "y")
+	assert.Assert(t, other != ep, "the listed pod holds it")
 }
