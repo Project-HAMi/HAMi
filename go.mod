@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/NVIDIA/go-dcgm v1.4801.0
+	github.com/NVIDIA/go-dcgm v1.4801.1
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.13.0
 	github.com/NVIDIA/go-nvml v0.13.4-1
@@ -52,7 +52,7 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.29.0 // indirect
+	github.com/bits-and-blooms/bitset v1.30.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
