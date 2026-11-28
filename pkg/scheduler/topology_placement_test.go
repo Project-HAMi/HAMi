@@ -136,6 +136,19 @@ func TestTopologyRequirement(t *testing.T) {
 			assert.Equal(t, tt.wantTier, tier)
 		})
 	}
+
+	t.Run("invalid tier with configured hard mode stays node-only", func(t *testing.T) {
+		original := config.TopologyMode
+		t.Cleanup(func() { config.TopologyMode = original })
+		config.TopologyMode = util.TopologyModeHard
+
+		tier, mode, ok := topologyRequirement(topologyPod(map[string]string{
+			util.TopologyHighestTierAnnotationKey: "edge",
+		}, nil))
+		assert.True(t, ok)
+		assert.Equal(t, util.TopologyModeHard, mode)
+		assert.Equal(t, 0, tier)
+	})
 }
 
 // TestTopologyGroupKey covers how the set of Pods that has to stay together is
