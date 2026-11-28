@@ -1154,8 +1154,11 @@ func TestDevices_ScoreNode(t *testing.T) {
 				{
 					{UUID: "dev-0", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": 1}},
 				},
+				{
+					{UUID: "dev-1", CustomInfo: map[string]any{"DeviceStrategy": "die", "AIC": "1"}},
+				},
 			},
-			want: 0,
+			want: 1.0,
 		},
 		{
 			name: "non-string AIC value is ignored alongside valid AIC",
