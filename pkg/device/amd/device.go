@@ -44,6 +44,7 @@ type AMDDevices struct {
 	defaultGPUNum                int64
 	defaultMemory                int64
 	defaultCores                 int64
+	computeSharing               bool
 }
 
 const (
@@ -78,6 +79,10 @@ type AMDConfig struct {
 	DefaultMemory int64 `yaml:"defaultMemory"`
 	// DefaultCores (percent, 1-100) is the cores of a container that asks for none; 0 leaves it all of them.
 	DefaultCores int64 `yaml:"defaultCores"`
+	// ComputeSharing gives a container that asks for memory but no cores no CUs
+	// of its own: the device plugin sets no HSA_CU_MASK, so it runs on all CUs
+	// of the GPU next to the other pods there. It takes precedence over DefaultCores.
+	ComputeSharing bool `yaml:"computeSharing"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -95,6 +100,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 		defaultGPUNum:                max(config.DefaultGPUNum, 1),
 		defaultMemory:                max(config.DefaultMemory, 0),
 		defaultCores:                 min(max(config.DefaultCores, 0), 100),
+		computeSharing:               config.ComputeSharing,
 	}
 }
 
@@ -366,9 +372,12 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) (device.C
 
 			// An omitted core limit means the container receives all CUs on each
 			// allocated GPU (or the configured default). This also keeps memory-only
-			// AMD requests valid.
+			// AMD requests valid. With compute sharing it receives none of its own:
+			// a memory slice runs on every CU, and Fit still gives a whole GPU all.
 			corePercentageNum := int64(100)
-			if dev.defaultCores > 0 {
+			if dev.computeSharing {
+				corePercentageNum = 0
+			} else if dev.defaultCores > 0 {
 				corePercentageNum = dev.defaultCores
 			}
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]

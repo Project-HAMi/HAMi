@@ -641,6 +641,8 @@ devices:
     defaultMemory: 0
     # -- Default core percentage per requested GPU. Used when no core request is specified; 0 uses all cores. Values are clamped to 0-100.
     defaultCores: 0
+    # -- A container that requests memory but no cores gets no CUs of its own: the device plugin sets no `HSA_CU_MASK`, so it runs on every CU of its GPU next to the other pods there. Containers that request cores keep their own CUs. Takes precedence over `defaultCores`.
+    computeSharing: false
     # -- Resource names managed by the scheduler extender. Include `resourceCountName`, `resourceMemoryName`, and `resourceCoreName`; they are not added automatically.
     # `resourceMemoryPercentageName` is added automatically.
     customresources:
