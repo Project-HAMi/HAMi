@@ -307,6 +307,11 @@ func TestCheckCandidateAndLocality(t *testing.T) {
 	assert.Equal(t, &Violation{Tier: 2, Peer: "node1"}, tree.CheckCandidate("node2", []string{"node1"}, 1))
 	assert.Equal(t, &Violation{Tier: 4, Peer: "node0", Unknown: true},
 		tree.CheckCandidate("absent", []string{"node0"}, 0))
+	assert.Equal(t, &Violation{Tier: 4, Peer: "node0", Unknown: true},
+		tree.CheckCandidate("absent", []string{"node0"}, tree.UnknownTier()),
+		"unknown domains stay rejected even when the numeric cap is UnknownTier or higher")
+	assert.Equal(t, &Violation{Tier: 4, Peer: "node0", Unknown: true},
+		tree.CheckCandidate("absent", []string{"node0"}, 100))
 
 	assert.InDelta(t, 1.0, tree.Locality("node1", []string{"node1"}), 0.0001)
 	assert.InDelta(t, 0.75, tree.Locality("node1", []string{"node0"}), 0.0001)

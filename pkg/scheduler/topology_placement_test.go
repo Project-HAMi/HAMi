@@ -172,10 +172,11 @@ func TestTopologyGroupKey(t *testing.T) {
 	assert.Empty(t, topologyGroupKey(nil))
 }
 
-// TestRebuildTopologyFromTierLabels covers the flag that turns the feature on.
-// An unset flag, and a flag that does not parse, both leave the scheduler
-// without a hierarchy, so the placement path is exactly the one it had before.
-func TestRebuildTopologyFromTierLabels(t *testing.T) {
+// TestRebuildTopologyFromTierLabelsForPlacement covers the flag that turns the
+// feature on for the placement path. An unset flag, and a flag that does not
+// parse, both leave the scheduler without a hierarchy. Named distinctly from
+// TestRebuildTopologyFromTierLabels in topology_model_test.go.
+func TestRebuildTopologyFromTierLabelsForPlacement(t *testing.T) {
 	nodes := cceTopologyNodes()
 	originalLabels := config.TopologyTierLabels
 	t.Cleanup(func() { config.TopologyTierLabels = originalLabels })
@@ -243,7 +244,7 @@ func TestApplyTopologyFilter(t *testing.T) {
 	t.Run("hard mode keeps only the domains within the allowed tier", func(t *testing.T) {
 		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 2, "only the two nodes of the tier 1 domain of the group survive")
 		assert.Contains(t, candidates, "node0")
@@ -261,7 +262,7 @@ func TestApplyTopologyFilter(t *testing.T) {
 	t.Run("a wider tier keeps the nodes inside it", func(t *testing.T) {
 		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 3, "node0"), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 3, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 8)
 		assert.Empty(t, failedNodes)
@@ -270,16 +271,40 @@ func TestApplyTopologyFilter(t *testing.T) {
 	t.Run("soft mode rejects nothing", func(t *testing.T) {
 		candidates := candidateNodes("node0", "node1", "node2", "node3", "node4", "node5", "node6", "node7")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeSoft, 1, "node0"), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeSoft, 1, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 8)
 		assert.Empty(t, failedNodes)
 	})
 
-	t.Run("the first pod of a group is never rejected", func(t *testing.T) {
+	t.Run("an uncapped hard request rejects nothing", func(t *testing.T) {
+		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
+		candidates := candidateNodes("node0", "node4", "node-unlabeled")
+		failedNodes := map[string]string{}
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, unlimitedTier, "node0"), pod, &candidates, failedNodes, true)
+
+		assert.Len(t, candidates, 3)
+		assert.Empty(t, failedNodes)
+	})
+
+	t.Run("the first pod of a hard group stays inside the fabric", func(t *testing.T) {
+		unlabeled := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-unlabeled"}}
+		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
+		candidates := candidateNodes("node0", "node1", "node-unlabeled")
+		failedNodes := map[string]string{}
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1), pod, &candidates, failedNodes, true)
+
+		assert.Len(t, candidates, 2)
+		assert.Contains(t, candidates, "node0")
+		assert.Contains(t, candidates, "node1")
+		assert.Equal(t, 1, common.ParseReason(failedNodes["node-unlabeled"])[common.HyperNodeTierNotFit])
+	})
+
+	t.Run("the first pod is not rejected among fabric nodes", func(t *testing.T) {
 		candidates := candidateNodes("node0", "node1", "node2")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 3)
 		assert.Empty(t, failedNodes)
@@ -290,7 +315,7 @@ func TestApplyTopologyFilter(t *testing.T) {
 		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
 		candidates := candidateNodes("node0", "node2", "node-unlabeled")
 		failedNodes := map[string]string{}
-		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 1)
 		assert.Contains(t, candidates, "node0")
@@ -303,7 +328,7 @@ func TestApplyTopologyFilter(t *testing.T) {
 		schedulerWithUnlabeled := topologyTestScheduler(t, append(allNodes, unlabeled))
 		candidates := candidateNodes("node0", "node2", "node-unlabeled")
 		failedNodes := map[string]string{}
-		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node-unlabeled"), pod, &candidates, failedNodes)
+		schedulerWithUnlabeled.applyTopologyFilter(topologyPlanForTest(schedulerWithUnlabeled, util.TopologyModeHard, 1, "node-unlabeled"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 1)
 		assert.Contains(t, candidates, "node-unlabeled")
@@ -318,12 +343,25 @@ func TestApplyTopologyFilter(t *testing.T) {
 		scheduler.eventRecorder = recorder
 		candidates := candidateNodes("node4")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Empty(t, candidates)
 		assert.Len(t, failedNodes, 1)
 		require.Len(t, recorder.Events, 1)
 		assert.Contains(t, <-recorder.Events, common.HyperNodeTierNotFit)
+	})
+
+	t.Run("recordEvents false still filters but emits no event", func(t *testing.T) {
+		recorder := record.NewFakeRecorder(4)
+		scheduler := topologyTestScheduler(t, allNodes)
+		scheduler.eventRecorder = recorder
+		candidates := candidateNodes("node4")
+		failedNodes := map[string]string{}
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes, false)
+
+		assert.Empty(t, candidates)
+		assert.Len(t, failedNodes, 1)
+		assert.Empty(t, recorder.Events)
 	})
 
 	t.Run("a partial rejection reports no event", func(t *testing.T) {
@@ -332,7 +370,7 @@ func TestApplyTopologyFilter(t *testing.T) {
 		scheduler.eventRecorder = recorder
 		candidates := candidateNodes("node0", "node4")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, &candidates, failedNodes, true)
 
 		assert.Len(t, candidates, 1)
 		assert.Empty(t, recorder.Events, "the pod is still schedulable, so no warning event")
@@ -341,8 +379,8 @@ func TestApplyTopologyFilter(t *testing.T) {
 	t.Run("a nil plan and a nil candidate map are no-ops", func(t *testing.T) {
 		candidates := candidateNodes("node4")
 		failedNodes := map[string]string{}
-		scheduler.applyTopologyFilter(nil, pod, &candidates, failedNodes)
-		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, nil, failedNodes)
+		scheduler.applyTopologyFilter(nil, pod, &candidates, failedNodes, true)
+		scheduler.applyTopologyFilter(topologyPlanForTest(scheduler, util.TopologyModeHard, 1, "node0"), pod, nil, failedNodes, true)
 
 		assert.Len(t, candidates, 1)
 		assert.Empty(t, failedNodes)
@@ -449,7 +487,7 @@ func TestTopologyPlacedNodes(t *testing.T) {
 	// before the API server sees it as bound.
 	require.True(t, scheduler.podManager.AddPod(reserved, "node0", device.PodDevices{}))
 
-	require.Equal(t, []string{"node0", "node1"}, scheduler.topologyPlacedNodes(task, topologyGroupKey(task)))
+	require.Equal(t, []string{"node0", "node1"}, scheduler.topologyGroupPlacement(task, topologyGroupKey(task)))
 
 	plan := scheduler.topologyPlanFor(task)
 	require.NotNil(t, plan)
@@ -457,6 +495,14 @@ func TestTopologyPlacedNodes(t *testing.T) {
 	assert.Equal(t, util.TopologyModeHard, plan.mode)
 	assert.Equal(t, 1, plan.highest)
 	assert.Equal(t, "default/job-name/train", plan.group)
+
+	terminating := bound("train-terminating", "node2", corev1.PodRunning)
+	now := metav1.Now()
+	terminating.DeletionTimestamp = &now
+	require.NoError(t, indexer.Add(terminating))
+	require.True(t, scheduler.podManager.AddPod(terminating, "node2", device.PodDevices{}))
+	require.Equal(t, []string{"node0", "node1"}, scheduler.topologyGroupPlacement(task, topologyGroupKey(task)),
+		"terminating siblings must not constrain the group")
 }
 
 // TestTopologyPlanGating covers the cases where the plan must stay nil, which is
@@ -488,7 +534,7 @@ func TestTopologyPlanGating(t *testing.T) {
 		assert.Nil(t, scheduler.topologyPlanFor(nil))
 	})
 
-	t.Run("a mode without a tier ranks within the whole hierarchy", func(t *testing.T) {
+	t.Run("a mode without a tier stays uncapped for ranking only", func(t *testing.T) {
 		scheduler := topologyTestScheduler(t, cceTopologyNodes())
 		config.TopologyMode = util.TopologyModeHard
 		task := topologyPod(map[string]string{util.TopologyModeAnnotationKey: util.TopologyModeSoft}, map[string]string{"job-name": "train"})
@@ -496,7 +542,7 @@ func TestTopologyPlanGating(t *testing.T) {
 		plan := scheduler.topologyPlanFor(task)
 		require.NotNil(t, plan)
 		assert.Equal(t, util.TopologyModeSoft, plan.mode, "the Pod names its own mode")
-		assert.Equal(t, 3, plan.highest, "unlimited resolves to the depth of the configured hierarchy")
+		assert.Equal(t, unlimitedTier, plan.highest, "omitted tier stays uncapped; hard filtering is skipped")
 	})
 
 	t.Run("a tier without a mode takes the configured mode", func(t *testing.T) {

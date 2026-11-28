@@ -323,8 +323,8 @@ func (t *Tree) MaxTier() int {
 }
 
 // UnknownTier is the tier reported for a pair of nodes that share no configured
-// domain. It sits above every real tier, so a later hard tier limit rejects such
-// a pair.
+// domain. It sits above every real tier. Hard filtering rejects such a pair
+// even when the numeric cap is UnknownTier or higher.
 func (t *Tree) UnknownTier() int {
 	return t.MaxTier() + 1
 }
@@ -425,7 +425,8 @@ func (v *Violation) String() string {
 // CheckCandidate reports why candidate cannot host another member of a group
 // whose other members sit on placed nodes, or nil when it can. A pair is
 // rejected when its lowest common ancestor is deeper in the hierarchy than
-// highestTierAllowed, which includes pairs that share no configured domain.
+// highestTierAllowed. Pairs that share no configured domain are always
+// rejected, even when highestTierAllowed is UnknownTier or higher.
 func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllowed int) *Violation {
 	if t == nil {
 		return nil
@@ -437,11 +438,12 @@ func (t *Tree) CheckCandidate(candidate string, placed []string, highestTierAllo
 			continue
 		}
 		tier := t.TierOf(candidate, peer)
-		if tier <= highestTierAllowed {
+		unknown := tier == t.UnknownTier()
+		if !unknown && tier <= highestTierAllowed {
 			continue
 		}
 		if worst == nil || tier > worst.Tier {
-			worst = &Violation{Tier: tier, Peer: peer, Unknown: tier == t.UnknownTier()}
+			worst = &Violation{Tier: tier, Peer: peer, Unknown: unknown}
 		}
 	}
 	return worst

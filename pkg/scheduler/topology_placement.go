@@ -24,7 +24,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -35,8 +34,8 @@ import (
 
 const (
 	// unlimitedTier is the highest tier a pod can ask for when it wants
-	// topology-aware ranking without a cap. It is resolved to the depth of the
-	// configured hierarchy once the hierarchy is known.
+	// topology-aware ranking without a hard cap. Hard filtering is skipped for
+	// this state; soft locality scoring still applies.
 	unlimitedTier = -1
 )
 
@@ -126,7 +125,6 @@ func topologyGroupKey(pod *corev1.Pod) string {
 // reservation cache.
 func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) []string {
 	placed := make(map[string]struct{})
-	active := make(map[types.UID]string)
 	if s.podLister != nil {
 		pods, err := s.podLister.Pods(task.Namespace).List(labels.Everything())
 		if err != nil {
@@ -145,12 +143,14 @@ func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) []str
 			if pod.Spec.NodeName == "" {
 				continue
 			}
-			active[pod.UID] = pod.Spec.NodeName
 			placed[pod.Spec.NodeName] = struct{}{}
 		}
 	}
 	for _, info := range s.podManager.ListPodsInfo() {
 		if info.Pod == nil || info.UID == task.UID || info.Namespace != task.Namespace {
+			continue
+		}
+		if info.Pod.DeletionTimestamp != nil {
 			continue
 		}
 		if topologyGroupKey(info.Pod) != group {
@@ -159,18 +159,12 @@ func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) []str
 		if info.NodeID == "" {
 			continue
 		}
-		active[info.UID] = info.NodeID
 		placed[info.NodeID] = struct{}{}
 	}
 	if len(placed) == 0 {
 		return nil
 	}
 	return slices.Sorted(maps.Keys(placed))
-}
-
-// topologyPlacedNodes returns the nodes the group already occupies.
-func (s *Scheduler) topologyPlacedNodes(task *corev1.Pod, group string) []string {
-	return s.topologyGroupPlacement(task, group)
 }
 
 // topologyPlanFor resolves the placement rules that apply to task, or nil when
@@ -188,9 +182,6 @@ func (s *Scheduler) topologyPlanFor(task *corev1.Pod) *topologyPlan {
 	if mode == "" {
 		mode = config.TopologyMode
 	}
-	if highest == unlimitedTier {
-		highest = view.tree.MaxTier()
-	}
 
 	group := topologyGroupKey(task)
 	if group == "" {
@@ -207,15 +198,30 @@ func (s *Scheduler) topologyPlanFor(task *corev1.Pod) *topologyPlan {
 
 // applyTopologyFilter drops the candidate nodes that would place this pod
 // beyond the tier its group allows, recording the reason on each of them. The
-// first pod of a group is never rejected: with nothing placed yet there is no
-// tier to violate, so a job lands somewhere and the rest of its pods follow it.
-func (s *Scheduler) applyTopologyFilter(plan *topologyPlan, task *corev1.Pod, nodes *map[string]*NodeUsage, failedNodes map[string]string) {
-	if plan == nil || plan.mode != util.TopologyModeHard || len(plan.placed) == 0 || nodes == nil {
+// first pod of a hard group must still land inside the described fabric; with
+// siblings placed, candidates are checked against those nodes. An omitted tier
+// (unlimitedTier) is ranking-only and rejects nothing.
+func (s *Scheduler) applyTopologyFilter(plan *topologyPlan, task *corev1.Pod, nodes *map[string]*NodeUsage, failedNodes map[string]string, recordEvents bool) {
+	if plan == nil || plan.mode != util.TopologyModeHard || nodes == nil {
+		return
+	}
+	if plan.highest == unlimitedTier {
 		return
 	}
 
 	rejected := make([]string, 0, len(*nodes))
 	for nodeID := range *nodes {
+		if len(plan.placed) == 0 {
+			if plan.view.tree.InModel(nodeID) {
+				continue
+			}
+			delete(*nodes, nodeID)
+			failedNodes[nodeID] = common.GenReason(map[string]int{common.HyperNodeTierNotFit: 1}, 1)
+			rejected = append(rejected, nodeID)
+			klog.V(4).InfoS("Topology rejects node outside the described fabric",
+				"pod", klog.KObj(task), "node", nodeID)
+			continue
+		}
 		violation := plan.view.tree.CheckCandidate(nodeID, plan.placed, plan.highest)
 		if violation == nil {
 			continue
@@ -235,7 +241,7 @@ func (s *Scheduler) applyTopologyFilter(plan *topologyPlan, task *corev1.Pod, no
 	// Only a rejection that leaves nothing to schedule is worth an event: a
 	// partial one is reported through the failed node reasons and the log, and
 	// the pod is scheduled anyway.
-	if len(*nodes) == 0 {
+	if recordEvents && len(*nodes) == 0 {
 		s.recordFilteringFailures(task, map[string][]string{common.HyperNodeTierNotFit: rejected})
 	}
 }
