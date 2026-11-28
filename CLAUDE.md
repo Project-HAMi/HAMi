@@ -52,7 +52,7 @@ The memory and core limits inside a container are enforced by HAMi-core (`libvgp
 
 ### Core Package Layout
 
-- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`, `biren/`, `tecorigin/`, `remotegpu/`) is a concrete implementation.
+- **`pkg/device/`** — The device abstraction layer. `devices.go` defines the `Devices` interface that all hardware backends must implement. Each subdirectory (`nvidia/`, `cambricon/`, `hygon/`, `iluvatar/`, `metax/`, `mthreads/`, `ascend/`, `amd/`, `enflame/`, `kunlun/`, `awsneuron/`, `vastai/`, `biren/`, `tecorigin/`, `googletpu/`, `remotegpu/`) is a concrete implementation.
 
 - **`pkg/scheduler/`** — Scheduler extender logic: node filtering, scoring, webhook handling. `config/config.go` contains `InitDevicesWithConfig()` which registers all device backends into `device.DevicesMap`.
 

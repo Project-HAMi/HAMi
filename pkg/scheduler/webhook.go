@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/googletpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/remotegpu"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -101,6 +102,10 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+	// isolated is set when the pod asks for a device whose limits HAMi or its
+	// vendor enforces inside the container. Only those pods may not be
+	// privileged. GKE needs privileged TPU pods before 1.28.
+	isolated := false
 
 	// 1. Process InitContainers
 	for idx := range pod.Spec.InitContainers {
@@ -112,6 +117,7 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
 			hasResource = hasResource || found
+			isolated = isolated || found && val.CommonWord() != googletpu.GoogleTPUCommonWord
 		}
 	}
 
@@ -125,6 +131,7 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
 			hasResource = hasResource || found
+			isolated = isolated || found && val.CommonWord() != googletpu.GoogleTPUCommonWord
 		}
 	}
 	// Delivery must precede GPU-using init containers. Reorder only after all
@@ -146,7 +153,7 @@ func (h *webhook) Handle(ctx context.Context, req admission.Request) admission.R
 			return admission.Denied(err.Error())
 		}
 	}
-	if hasPrivileged && hasResource {
+	if hasPrivileged && isolated {
 		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, privilegedName)
 		return admission.Denied(fmt.Sprintf("container %s is privileged", privilegedName))
 	}

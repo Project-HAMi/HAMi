@@ -113,6 +113,10 @@ data:
       resourceCountName: {{ .Values.devices.biren.resourceCountName }}
     tecorigin:
       resourceCountName: {{ .Values.devices.tecorigin.resourceCountName }}
+    {{- if .Values.devices.googletpu.enabled }}
+    googletpu:
+      resourceCountName: {{ .Values.devices.googletpu.resourceCountName }}
+    {{- end }}
     vnpus:
       deviceSplitCount: {{ .Values.devices.ascend.deviceSplitCount | int64 }}
       hamiVnpuMode: {{ include "hami-vgpu.ascendVnpuMode" . | quote }}
