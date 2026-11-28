@@ -774,3 +774,193 @@ func TestKunlunVDevices_Fit_UUIDAnnotations(t *testing.T) {
 	assert.Equal(t, fit, false)
 	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
 }
+
+func TestKunlunDevices_GetNodeDevices(t *testing.T) {
+	prev := KunlunResourceCount
+	t.Cleanup(func() { KunlunResourceCount = prev })
+
+	dev := InitKunlunDevice(KunlunConfig{ResourceCountName: "kunlunxin.com/xpu"})
+
+	t.Run("missing capacity returns error", func(t *testing.T) {
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-empty"},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{}},
+		}
+		got, err := dev.GetNodeDevices(node)
+		assert.ErrorContains(t, err, "device not found")
+		assert.Equal(t, len(got), 0)
+	})
+
+	t.Run("zero capacity returns error", func(t *testing.T) {
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-zero"},
+			Status: corev1.NodeStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceName(KunlunResourceCount): *resource.NewQuantity(0, resource.DecimalSI),
+				},
+			},
+		}
+		got, err := dev.GetNodeDevices(node)
+		assert.ErrorContains(t, err, "device not found")
+		assert.Equal(t, len(got), 0)
+	})
+
+	t.Run("even card count splits evenly across NUMA 0 and 1", func(t *testing.T) {
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-4"},
+			Status: corev1.NodeStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceName(KunlunResourceCount): *resource.NewQuantity(4, resource.DecimalSI),
+				},
+			},
+		}
+		got, err := dev.GetNodeDevices(node)
+		assert.NilError(t, err)
+		assert.Equal(t, len(got), 4)
+
+		wantNuma := []int{0, 0, 1, 1}
+		for i, d := range got {
+			assert.Equal(t, d.Index, uint(i))
+			assert.Equal(t, d.ID, fmt.Sprintf("node-4-kunlun-%d", i))
+			assert.Equal(t, d.Count, int64(100))
+			assert.Equal(t, d.Devmem, int64(98304))
+			assert.Equal(t, d.Devcore, int64(100))
+			assert.Equal(t, d.Type, KunlunGPUDevice)
+			assert.Equal(t, d.DeviceVendor, KunlunGPUCommonWord)
+			assert.Equal(t, d.Health, true)
+			assert.Equal(t, d.Numa, wantNuma[i])
+		}
+	})
+
+	t.Run("odd card count assigns upper half to NUMA 1", func(t *testing.T) {
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-3"},
+			Status: corev1.NodeStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceName(KunlunResourceCount): *resource.NewQuantity(3, resource.DecimalSI),
+				},
+			},
+		}
+		got, err := dev.GetNodeDevices(node)
+		assert.NilError(t, err)
+		assert.Equal(t, len(got), 3)
+
+		wantNuma := []int{0, 1, 1}
+		for i, d := range got {
+			assert.Equal(t, d.Numa, wantNuma[i])
+		}
+	})
+}
+
+func TestKunlunDevices_PatchAnnotations(t *testing.T) {
+	prev := KunlunResourceCount
+	t.Cleanup(func() { KunlunResourceCount = prev })
+
+	dev := InitKunlunDevice(KunlunConfig{ResourceCountName: "kunlunxin.com/xpu"})
+
+	t.Run("no kunlun entry leaves annotations unchanged", func(t *testing.T) {
+		annos := map[string]string{"existing": "val"}
+		got := dev.PatchAnnotations(&corev1.Pod{}, &annos, device.PodDevices{})
+		assert.DeepEqual(t, got, map[string]string{"existing": "val"})
+	})
+
+	t.Run("empty kunlun slice leaves annotations unchanged", func(t *testing.T) {
+		annos := map[string]string{"existing": "val"}
+		pd := device.PodDevices{KunlunGPUDevice: device.PodSingleDevice{}}
+		got := dev.PatchAnnotations(&corev1.Pod{}, &annos, pd)
+		assert.DeepEqual(t, got, map[string]string{"existing": "val"})
+	})
+
+	t.Run("patches allocated devices and comma-separated selection indices", func(t *testing.T) {
+		devlist := device.PodSingleDevice{
+			{
+				{Idx: 1, UUID: "node-kunlun-1", Type: KunlunGPUDevice, Usedmem: 98304, Usedcores: 100},
+				{Idx: 3, UUID: "node-kunlun-3", Type: KunlunGPUDevice, Usedmem: 98304, Usedcores: 100},
+			},
+		}
+		annos := map[string]string{}
+		got := dev.PatchAnnotations(&corev1.Pod{}, &annos, device.PodDevices{KunlunGPUDevice: devlist})
+
+		assert.Equal(t, got[device.SupportDevices[KunlunGPUDevice]], device.EncodePodSingleDevice(devlist))
+		assert.Equal(t, got[KunlunDeviceSelection], "1,3")
+	})
+
+	t.Run("trailing empty container slice preserves prior selection annotation", func(t *testing.T) {
+		devlist := device.PodSingleDevice{
+			{
+				{Idx: 2, UUID: "node-kunlun-2", Type: KunlunGPUDevice, Usedmem: 98304, Usedcores: 100},
+			},
+			{},
+		}
+		annos := map[string]string{}
+		got := dev.PatchAnnotations(&corev1.Pod{}, &annos, device.PodDevices{KunlunGPUDevice: devlist})
+
+		assert.Equal(t, got[device.SupportDevices[KunlunGPUDevice]], device.EncodePodSingleDevice(devlist))
+		assert.Equal(t, got[KunlunDeviceSelection], "2")
+	})
+}
+
+func TestKunlunDevices_MutateAdmission(t *testing.T) {
+	prev := KunlunResourceCount
+	t.Cleanup(func() { KunlunResourceCount = prev })
+
+	dev := InitKunlunDevice(KunlunConfig{ResourceCountName: "kunlunxin.com/xpu"})
+
+	tests := []struct {
+		name string
+		ctr  *corev1.Container
+		want bool
+	}{
+		{
+			name: "limit present returns true",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceCount): resource.MustParse("1"),
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "limit absent returns false",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceCount): resource.MustParse("1"),
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := dev.MutateAdmission(tt.ctr, &corev1.Pod{})
+			assert.NilError(t, err)
+			assert.Equal(t, got, tt.want)
+		})
+	}
+}
+
+func TestKunlunDevices_CheckType(t *testing.T) {
+	dev := &KunlunDevices{}
+
+	matched, numa := dev.CheckType(nil, device.DeviceUsage{}, device.ContainerDeviceRequest{Type: KunlunGPUDevice})
+	assert.Equal(t, matched, true)
+	assert.Equal(t, numa, false)
+
+	matched, numa = dev.CheckType(nil, device.DeviceUsage{}, device.ContainerDeviceRequest{Type: "OtherDevice"})
+	assert.Equal(t, matched, false)
+	assert.Equal(t, numa, false)
+}
+
+func TestKunlunDevices_AddResourceUsage(t *testing.T) {
+	dev := &KunlunDevices{}
+	usage := &device.DeviceUsage{ID: "node-kunlun-0", Used: 2}
+
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, &device.ContainerDevice{UUID: "node-kunlun-0"})
+	assert.NilError(t, err)
+	assert.Equal(t, usage.Used, int64(3))
+}
