@@ -40,3 +40,7 @@ kubectl --kubeconfig "${KUBE_CONF}" patch node "${NODE}" --subresource=status --
 GINKGO_VERSION=$(go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
 AMD_E2E_MOCK=true go run "github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}" \
   run -v -r --fail-fast ./test/e2e/amd/ -- --kubeconfig="${KUBE_CONF}"
+
+# The cordon specs read the vendor from the node annotation, so the same suite runs here.
+go run "github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}" \
+  run -v -r --fail-fast ./test/e2e/cordon/ -- --kubeconfig="${KUBE_CONF}"
