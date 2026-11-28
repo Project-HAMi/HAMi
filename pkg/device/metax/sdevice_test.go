@@ -17,9 +17,11 @@ limitations under the License.
 package metax
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -1367,50 +1369,174 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 
 func TestMetaxSDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
-		name        string
-		deviceUsage *device.DeviceUsage
-		ctr         *device.ContainerDevice
-		wantErr     bool
-		wantUsage   *device.DeviceUsage
+		name          string
+		pod           *corev1.Pod
+		usage         *device.DeviceUsage
+		ctr           *device.ContainerDevice
+		wantUsed      int64
+		wantUsedcores int64
+		wantUsedmem   int64
+		wantQosExists bool
+		wantQos       any
 	}{
 		{
-			name: "test add resource usage",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-0",
-				Used:      0,
-				Usedcores: 15,
-				Usedmem:   2000,
+			name: "non-online pod updates usage and sets QosPolicy",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUQosPolicy: FixedShare,
+					},
+				},
+			},
+			usage: &device.DeviceUsage{
+				ID:        "GPU-0",
+				Used:      1,
+				Usedcores: 20,
+				Usedmem:   1024,
+				CustomInfo: map[string]any{
+					"QosPolicy": "",
+				},
 			},
 			ctr: &device.ContainerDevice{
-				UUID:      "dev-0",
+				UUID:      "GPU-0",
+				Usedcores: 30,
+				Usedmem:   2048,
+			},
+			wantUsed:      2,
+			wantUsedcores: 50,
+			wantUsedmem:   3072,
+			wantQosExists: true,
+			wantQos:       FixedShare,
+		},
+		{
+			name: "non-online exclusive pod clears QosPolicy when Usedcores is 100",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUQosPolicy: FixedShare,
+					},
+				},
+			},
+			usage: &device.DeviceUsage{
+				ID:        "GPU-1",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				CustomInfo: map[string]any{
+					"QosPolicy": BestEffort,
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "GPU-1",
+				Usedcores: 100,
+				Usedmem:   4096,
+			},
+			wantUsed:      1,
+			wantUsedcores: 100,
+			wantUsedmem:   4096,
+			wantQosExists: true,
+			wantQos:       "",
+		},
+		{
+			name: "online pod updates usage without changing QosPolicy",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass:  Online,
+						MetaxSGPUQosPolicy: FixedShare,
+					},
+				},
+			},
+			usage: &device.DeviceUsage{
+				ID:        "GPU-2",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				CustomInfo: map[string]any{
+					"QosPolicy": BestEffort,
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "GPU-2",
 				Usedcores: 50,
+				Usedmem:   2048,
+			},
+			wantUsed:      1,
+			wantUsedcores: 50,
+			wantUsedmem:   2048,
+			wantQosExists: true,
+			wantQos:       BestEffort,
+		},
+		{
+			name: "missing QosPolicy key in CustomInfo is not added",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUQosPolicy: BurstShare,
+					},
+				},
+			},
+			usage: &device.DeviceUsage{
+				ID:         "GPU-3",
+				Used:       0,
+				Usedcores:  0,
+				Usedmem:    0,
+				CustomInfo: map[string]any{},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "GPU-3",
+				Usedcores: 25,
 				Usedmem:   1024,
 			},
-			wantUsage: &device.DeviceUsage{
-				ID:        "dev-0",
-				Used:      1,
-				Usedcores: 65,
-				Usedmem:   3024,
+			wantUsed:      1,
+			wantUsedcores: 25,
+			wantUsedmem:   1024,
+			wantQosExists: false,
+		},
+		{
+			name: "non-string QosPolicy value in CustomInfo is preserved",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUQosPolicy: BurstShare,
+					},
+				},
 			},
-			wantErr: false,
+			usage: &device.DeviceUsage{
+				ID:        "GPU-4",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				CustomInfo: map[string]any{
+					"QosPolicy": 42,
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:      "GPU-4",
+				Usedcores: 25,
+				Usedmem:   1024,
+			},
+			wantUsed:      1,
+			wantUsedcores: 25,
+			wantUsedmem:   1024,
+			wantQosExists: true,
+			wantQos:       42,
 		},
 	}
+
+	sdev := &MetaxSDevices{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dev := &MetaxDevices{}
-			if err := dev.AddResourceUsage(&corev1.Pod{}, tt.deviceUsage, tt.ctr); (err != nil) != tt.wantErr {
-				t.Errorf("AddResourceUsage() error=%v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr {
-				if tt.deviceUsage.Usedcores != tt.wantUsage.Usedcores {
-					t.Errorf("expected used cores: %d, got used cores %d", tt.wantUsage.Usedcores, tt.deviceUsage.Usedcores)
-				}
-				if tt.deviceUsage.Usedmem != tt.wantUsage.Usedmem {
-					t.Errorf("expected used mem: %d, got used mem %d", tt.wantUsage.Usedmem, tt.deviceUsage.Usedmem)
-				}
-				if tt.deviceUsage.Used != tt.wantUsage.Used {
-					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
-				}
+			err := sdev.AddResourceUsage(tt.pod, tt.usage, tt.ctr)
+			assert.NilError(t, err)
+			assert.Equal(t, tt.usage.Used, tt.wantUsed)
+			assert.Equal(t, tt.usage.Usedcores, tt.wantUsedcores)
+			assert.Equal(t, tt.usage.Usedmem, tt.wantUsedmem)
+
+			gotQos, exists := tt.usage.CustomInfo["QosPolicy"]
+			assert.Equal(t, exists, tt.wantQosExists)
+			if tt.wantQosExists {
+				assert.Equal(t, gotQos, tt.wantQos)
 			}
 		})
 	}
@@ -3283,4 +3409,136 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMetaxSDevices_PatchAnnotations(t *testing.T) {
+	newSDev := func() *MetaxSDevices {
+		return InitMetaxSDevice(MetaxConfig{
+			ResourceVCountName:  "metax-tech.com/sgpu",
+			ResourceVCoreName:   "metax-tech.com/vcore",
+			ResourceVMemoryName: "metax-tech.com/vmemory",
+		})
+	}
+
+	t.Run("no metax sgpu entry leaves annotations unchanged", func(t *testing.T) {
+		sdev := newSDev()
+		annos := map[string]string{"existing": "val"}
+		got := sdev.PatchAnnotations(&corev1.Pod{}, &annos, device.PodDevices{})
+		assert.DeepEqual(t, got, map[string]string{"existing": "val"})
+	})
+
+	t.Run("empty metax sgpu device slice leaves annotations unchanged", func(t *testing.T) {
+		sdev := newSDev()
+		annos := map[string]string{"existing": "val"}
+		pd := device.PodDevices{MetaxSGPUDevice: device.PodSingleDevice{}}
+		got := sdev.PatchAnnotations(&corev1.Pod{}, &annos, pd)
+		assert.DeepEqual(t, got, map[string]string{"existing": "val"})
+	})
+
+	t.Run("non-online pod patches annotations and records qos in jqCache", func(t *testing.T) {
+		sdev := newSDev()
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					MetaxSGPUQosPolicy: FixedShare,
+				},
+			},
+		}
+		devlist := device.PodSingleDevice{
+			{
+				{
+					Idx:       0,
+					UUID:      "GPU-0",
+					Type:      MetaxSGPUDevice,
+					Usedmem:   2048,
+					Usedcores: 50,
+					CustomInfo: map[string]any{
+						"QosPolicy": "",
+					},
+				},
+			},
+		}
+		annos := map[string]string{}
+		got := sdev.PatchAnnotations(pod, &annos, device.PodDevices{MetaxSGPUDevice: devlist})
+
+		wantEncoded := device.EncodePodSingleDevice(devlist)
+		assert.Equal(t, got[device.InRequestDevices[MetaxSGPUDevice]], wantEncoded)
+		assert.Equal(t, got[device.SupportDevices[MetaxSGPUDevice]], wantEncoded)
+
+		wantMetaxBytes, err := json.Marshal(convertHAMIPodDeviceToMetaxPodDevice(devlist))
+		assert.NilError(t, err)
+		assert.Equal(t, got[MetaxAllocatedSDevices], string(wantMetaxBytes))
+
+		predTime, err := strconv.ParseInt(got[MetaxPredicateTime], 10, 64)
+		assert.NilError(t, err)
+		assert.Assert(t, predTime > 0)
+
+		qos, ok := sdev.jqCache.Get("GPU-0")
+		assert.Equal(t, ok, true)
+		assert.Equal(t, qos, FixedShare)
+	})
+
+	t.Run("non-online exclusive pod records empty qos in jqCache", func(t *testing.T) {
+		sdev := newSDev()
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					MetaxSGPUQosPolicy: FixedShare,
+				},
+			},
+		}
+		devlist := device.PodSingleDevice{
+			{
+				{
+					Idx:       1,
+					UUID:      "GPU-1",
+					Type:      MetaxSGPUDevice,
+					Usedmem:   4096,
+					Usedcores: 100,
+					CustomInfo: map[string]any{
+						"QosPolicy": BestEffort,
+					},
+				},
+			},
+		}
+		annos := map[string]string{}
+		got := sdev.PatchAnnotations(pod, &annos, device.PodDevices{MetaxSGPUDevice: devlist})
+
+		assert.Equal(t, got[device.InRequestDevices[MetaxSGPUDevice]], device.EncodePodSingleDevice(devlist))
+		qos, ok := sdev.jqCache.Get("GPU-1")
+		assert.Equal(t, ok, true)
+		assert.Equal(t, qos, "")
+	})
+
+	t.Run("online pod patches annotations without updating jqCache", func(t *testing.T) {
+		sdev := newSDev()
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					MetaxSGPUAppClass:  Online,
+					MetaxSGPUQosPolicy: FixedShare,
+				},
+			},
+		}
+		devlist := device.PodSingleDevice{
+			{
+				{
+					Idx:       2,
+					UUID:      "GPU-2",
+					Type:      MetaxSGPUDevice,
+					Usedmem:   2048,
+					Usedcores: 50,
+					CustomInfo: map[string]any{
+						"QosPolicy": "",
+					},
+				},
+			},
+		}
+		annos := map[string]string{}
+		got := sdev.PatchAnnotations(pod, &annos, device.PodDevices{MetaxSGPUDevice: devlist})
+
+		assert.Equal(t, got[device.InRequestDevices[MetaxSGPUDevice]], device.EncodePodSingleDevice(devlist))
+		_, ok := sdev.jqCache.Get("GPU-2")
+		assert.Equal(t, ok, false)
+	})
 }
