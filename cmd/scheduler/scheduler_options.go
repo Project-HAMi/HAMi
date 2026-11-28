@@ -18,11 +18,14 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"strings"
 
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/topology"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func validateSchedulerOptions() error {
@@ -39,8 +42,17 @@ func validateSchedulerOptions() error {
 }
 
 func validateTopologyConfig() error {
+	config.TopologyMode = strings.ToLower(strings.TrimSpace(config.TopologyMode))
+	if config.TopologyMode != util.TopologyModeHard && config.TopologyMode != util.TopologyModeSoft {
+		return fmt.Errorf("--topology-mode must be %q or %q, got %q",
+			util.TopologyModeHard, util.TopologyModeSoft, config.TopologyMode)
+	}
 	if _, err := topology.ParseTiers(config.TopologyTierLabels); err != nil {
 		return fmt.Errorf("invalid --topology-tier-labels: %w", err)
+	}
+	weight := float64(config.TopologyScoreWeight)
+	if math.IsNaN(weight) || math.IsInf(weight, 0) || config.TopologyScoreWeight < 0 {
+		return fmt.Errorf("--topology-score-weight must be finite and non-negative, got %v", config.TopologyScoreWeight)
 	}
 	return nil
 }

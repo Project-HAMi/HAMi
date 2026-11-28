@@ -25,8 +25,8 @@ import (
 )
 
 // topologyView is one immutable snapshot of the cluster interconnect hierarchy
-// built from node labels. Placement decisions that consume this view land in
-// later PRs; this file only keeps the cache fresh.
+// built from node labels. Soft scoring and hard filtering consume this view;
+// gang admission lands in a later PR.
 type topologyView struct {
 	tree  *topology.Tree
 	tiers []topology.Tier

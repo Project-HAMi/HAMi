@@ -86,6 +86,8 @@ func init() {
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 	rootCmd.Flags().StringVar(&config.TopologyTierLabels, "topology-tier-labels", "", "comma-separated node label keys describing the interconnect hierarchy, from the smallest domain to the largest, e.g. 'hami.io/rackid,hami.io/superpodid'. Use key=N to pin an explicit tier level. Only node labels are accepted. Empty disables the topology model.")
+	rootCmd.Flags().StringVar(&config.TopologyMode, "topology-mode", util.TopologyModeSoft, "default mode for Pods that opt into topology-aware scheduling without naming one: 'hard' rejects nodes outside the allowed tier, 'soft' only ranks closer nodes higher")
+	rootCmd.Flags().Float32Var(&config.TopologyScoreWeight, "topology-score-weight", config.DefaultTopologyScoreWeight, "weight of the locality bonus the topology scorer adds to a node's score (0 disables)")
 
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
