@@ -252,7 +252,16 @@ func (dev *AWSNeuronDevices) checkType(n device.ContainerDeviceRequest) (bool, b
 }
 
 func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	if n == nil {
+		return false, false
+	}
+	countQty := n.Status.Allocatable[corev1.ResourceName(dev.resourceCountName)]
+	count := countQty.Value()
+	// GetNodeDevices builds the device list from both capacities, so either one changing
+	// must re-register the node.
+	countCap := n.Status.Capacity[corev1.ResourceName(dev.resourceCountName)]
+	coreCap := n.Status.Capacity[corev1.ResourceName(dev.resourceCoreName)]
+	return device.AllocatableHealth(devType, n.Name, count, count, fmt.Sprintf("%d/%d", countCap.Value(), coreCap.Value()))
 }
 
 func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {

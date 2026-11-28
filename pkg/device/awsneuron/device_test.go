@@ -1112,3 +1112,54 @@ func Test_graphSelect_ReturnsMasksForCoreRequests(t *testing.T) {
 	assert.DeepEqual(t, got, []int{0, 1})
 	assert.DeepEqual(t, masks, []int64{12, 7})
 }
+
+func Test_AWSNeuronDevices_CheckHealth(t *testing.T) {
+	const countName, coreName = "aws.amazon.com/neuron", "aws.amazon.com/neuroncore"
+	dev := &AWSNeuronDevices{resourceCountName: countName, resourceCoreName: coreName}
+
+	node := func(name string, allocatable, capacity, cores int64) *corev1.Node {
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{},
+				Capacity:    corev1.ResourceList{},
+			},
+		}
+		if allocatable > 0 {
+			n.Status.Allocatable[corev1.ResourceName(countName)] = *resource.NewQuantity(allocatable, resource.DecimalSI)
+		}
+		if capacity > 0 {
+			n.Status.Capacity[corev1.ResourceName(countName)] = *resource.NewQuantity(capacity, resource.DecimalSI)
+		}
+		if cores > 0 {
+			n.Status.Capacity[corev1.ResourceName(coreName)] = *resource.NewQuantity(cores, resource.DecimalSI)
+		}
+		return n
+	}
+
+	healthy, needUpdate := dev.CheckHealth(AWSNeuronDevice, nil)
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	// Devices still in Capacity but gone from Allocatable must not stay schedulable.
+	healthy, needUpdate = dev.CheckHealth(AWSNeuronDevice, node("neuron-health-unallocatable", 0, 4, 8))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	healthy, needUpdate = dev.CheckHealth(AWSNeuronDevice, node("neuron-health-absent", 0, 0, 0))
+	assert.Equal(t, healthy, false)
+	assert.Equal(t, needUpdate, false)
+
+	present := node("neuron-health-present", 4, 4, 8)
+	healthy, needUpdate = dev.CheckHealth(AWSNeuronDevice, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+	healthy, needUpdate = dev.CheckHealth(AWSNeuronDevice, present)
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, false)
+
+	// The device list is built from both capacities, so a core-count change re-registers.
+	healthy, needUpdate = dev.CheckHealth(AWSNeuronDevice, node("neuron-health-present", 4, 4, 16))
+	assert.Equal(t, healthy, true)
+	assert.Equal(t, needUpdate, true)
+}
