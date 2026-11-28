@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -133,6 +134,19 @@ type Scheduler struct {
 	// preemptionPlans keeps the devices Preempt planned for each pod, see
 	// nominatedReservations. Guarded by allocLock.
 	preemptionPlans map[k8stypes.UID]*preemptionPlan
+
+	// releasedReservations keeps, for each unbound pod whose reservation was
+	// released after a failed scheduling cycle, the allocation released, so
+	// informer events do not add it back (#3484). Guarded by releasedMu.
+	releasedReservations map[k8stypes.UID]releasedReservation
+	releasedMu           sync.Mutex
+
+	// allocationCleanups tracks the patches that clear released allocations
+	// from their pods.
+	allocationCleanups sync.WaitGroup
+	// allocationCleanupBackoff is the first wait before such a patch is tried
+	// again; zero means releasedAllocationRetryInitial.
+	allocationCleanupBackoff time.Duration
 
 	// timedOutPods keeps the bind-time of each pod counted as an allocate
 	// timeout, so a bind is counted once. Guarded by timeoutLock.
@@ -333,6 +347,17 @@ func (s *Scheduler) onAddPodLocked(pod *corev1.Pod, assignedNodeName string) {
 		}
 	}
 
+	if s.reservationReleased(pod) {
+		// A failed scheduling cycle released this allocation (#3484); the
+		// pod keeps its annotations until they are cleared or a new Filter
+		// rewrites them.
+		klog.V(5).InfoS("Skipping a released reservation", "pod", klog.KObj(pod))
+		return
+	}
+	if pod.Spec.NodeName != "" {
+		s.forgetReleasedReservation(pod.UID)
+	}
+
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
 		if pod.Spec.NodeName != "" {
@@ -358,7 +383,8 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	if !ok {
 		return
 	}
-	if oldPod, ok := oldObj.(*corev1.Pod); ok {
+	oldPod, _ := oldObj.(*corev1.Pod)
+	if oldPod != nil {
 		s.observeAllocateResult(oldPod, newPod)
 	}
 
@@ -393,6 +419,13 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	// stale pre-release snapshot after this handler records steady-state usage.
 	s.allocLock.Lock()
 	defer s.allocLock.Unlock()
+
+	// kube-scheduler gave up this cycle after HAMi's Filter reserved
+	// devices, for example at a gang's Permit timeout. The extender API has
+	// no Unreserve, so release the reservation here (#3484).
+	if s.releaseOnSchedulingFailureLocked(oldPod, newPod) {
+		return
+	}
 
 	pi, exists := s.podManager.GetPod(newPod)
 	if !exists {
@@ -442,6 +475,7 @@ func (s *Scheduler) recordFilterWrite(uid k8stypes.UID, patch map[string]string)
 	written := map[string]string{
 		util.AssignedNodeAnnotations: patch[util.AssignedNodeAnnotations],
 		util.AssignedTimeAnnotations: patch[util.AssignedTimeAnnotations],
+		util.AllocationIDAnnotation:  patch[util.AllocationIDAnnotation],
 	}
 	for _, key := range device.SupportDevices {
 		if value, ok := patch[key]; ok {
@@ -743,6 +777,7 @@ func (s *Scheduler) onDelPod(obj any) {
 // twice and eat into other pods' usage in the namespace (#3027). Pods the
 // scheduler does not track return without waiting for the lock.
 func (s *Scheduler) removePodAllocation(pod *corev1.Pod) {
+	s.forgetReleasedReservation(pod.UID)
 	if _, tracked := s.podManager.GetPod(pod); !tracked {
 		return
 	}
@@ -2026,6 +2061,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+	annotations[util.AllocationIDAnnotation] = uuid.NewString()
 
 	for _, val := range device.GetDevices() {
 		val.PatchAnnotations(pod, &annotations, m.Devices)
@@ -2057,6 +2093,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		s.recordFilterWrite(pod.UID, annotations)
 		// The pod got devices, so drop its plan.
 		delete(s.preemptionPlans, pod.UID)
+		s.forgetReleasedReservation(pod.UID)
 	}
 
 	s.GetAllocationMetrics().ObserveAllocation("filter", deviceTypeForRequests(resourceReqs))
