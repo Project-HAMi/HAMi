@@ -89,6 +89,13 @@ func topologyRequirement(pod *corev1.Pod) (highest int, mode string, ok bool) {
 
 	tier, err := strconv.Atoi(raw)
 	if err != nil || tier < 0 {
+		// Hard mode must not fail open: keep the pod constrained to the
+		// tightest valid cap (the node itself) instead of dropping topology.
+		if mode == util.TopologyModeHard {
+			klog.ErrorS(nil, "Invalid topology highest tier; falling back to node-only hard topology",
+				"pod", klog.KObj(pod), "tier", raw)
+			return 0, util.TopologyModeHard, true
+		}
 		klog.ErrorS(nil, "Ignoring invalid topology highest tier", "pod", klog.KObj(pod), "tier", raw)
 		return 0, "", false
 	}

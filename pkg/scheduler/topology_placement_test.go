@@ -123,7 +123,8 @@ func TestTopologyRequirement(t *testing.T) {
 		{"unrecognized mode falls back to the configured one", map[string]string{util.TopologyModeAnnotationKey: "strict"}, unlimitedTier, "", true},
 		{"tier alone opts the Pod in", map[string]string{util.TopologyHighestTierAnnotationKey: "2"}, 2, "", true},
 		{"tier zero is the node itself", map[string]string{util.TopologyHighestTierAnnotationKey: "0"}, 0, "", true},
-		{"non numeric tier is ignored", map[string]string{util.TopologyModeAnnotationKey: "hard", util.TopologyHighestTierAnnotationKey: "edge"}, 0, "", false},
+		{"invalid tier with hard mode stays node-only", map[string]string{util.TopologyModeAnnotationKey: "hard", util.TopologyHighestTierAnnotationKey: "edge"}, 0, "hard", true},
+		{"invalid tier with soft mode is ignored", map[string]string{util.TopologyModeAnnotationKey: "soft", util.TopologyHighestTierAnnotationKey: "edge"}, 0, "", false},
 		{"negative tier is ignored", map[string]string{util.TopologyHighestTierAnnotationKey: "-1"}, 0, "", false},
 		{"unrelated annotation is ignored", map[string]string{"hami.io/unrelated": "hard"}, 0, "", false},
 	}
