@@ -18,11 +18,13 @@ package enflame
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
 	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -334,6 +336,89 @@ func TestFit_ProfileNotFound(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 	assert.Assert(t, strings.Contains(reason, "ModeNotFit"))
+}
+
+// TestFit_RespectsCoreQuota checks that Fit enforces a namespace ResourceQuota
+// on enflame.com/gcu-core. The 3g.20gb profile costs 50% of the card's cores.
+func TestFit_RespectsCoreQuota(t *testing.T) {
+	oldDevices := device.DevicesMap
+	oldRequests, oldSupport := maps.Clone(device.InRequestDevices), maps.Clone(device.SupportDevices)
+	t.Cleanup(func() {
+		device.DevicesMap = oldDevices
+		device.InRequestDevices, device.SupportDevices = oldRequests, oldSupport
+	})
+	dev := InitEnflameDevice(EnflameConfig{
+		ResourceNameDRSGCU: "enflame.com/drs-gcu",
+		ResourceNameMemory: "enflame.com/gcu-memory",
+		ResourceNameCore:   "enflame.com/gcu-core",
+	})
+	device.DevicesMap = map[string]device.Devices{EnflameVGCUDevice: dev}
+
+	// An earlier container of the same pod already holds a 50% profile.
+	earlierContainer := device.PodDevices{EnflameVGCUDevice: device.PodSingleDevice{
+		{{UUID: "node-a-enflame-drs-0", Type: EnflameVGCUDevice, Usedmem: 20480, Usedcores: 50}},
+	}}
+
+	tests := []struct {
+		name      string
+		coreLimit int64
+		allocated device.PodDevices
+		wantFit   bool
+	}{
+		{name: "core quota has room for the profile", coreLimit: 100, wantFit: true},
+		{name: "core quota smaller than the profile", coreLimit: 25, wantFit: false},
+		{name: "profile alone fits the core quota", coreLimit: 75, wantFit: true},
+		{name: "earlier container uses up the core quota", coreLimit: 75, allocated: earlierContainer, wantFit: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "enflame-quota-" + tt.name}}
+			quota := &corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{Name: "core-quota", Namespace: pod.Namespace},
+				Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+					corev1.ResourceName("limits." + EnflameResourceNameGCUCore): *resource.NewQuantity(tt.coreLimit, resource.DecimalSI),
+				}},
+			}
+			device.NewQuotaManager().AddQuota(quota)
+			t.Cleanup(func() { device.GetLocalCache().DelQuota(quota) })
+
+			devices := []*device.DeviceUsage{
+				{
+					ID:       "node-a-enflame-drs-0",
+					Index:    0,
+					Count:    6,
+					Totalmem: 40960,
+					Type:     EnflameVGCUDevice,
+					Health:   true,
+					CustomInfo: map[string]any{
+						"minor": "0",
+						"index": "0",
+						"profiles": map[string]string{
+							"1g.6gb":  "0",
+							"3g.20gb": "1",
+							"6g.40gb": "2",
+						},
+					},
+				},
+			}
+			req := device.ContainerDeviceRequest{Nums: 1, Type: EnflameVGCUDevice, Memreq: 3}
+
+			allocated := tt.allocated
+			if allocated == nil {
+				allocated = device.PodDevices{}
+			}
+			fit, result, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &allocated)
+			var gotCores int64
+			if len(result[EnflameVGCUDevice]) > 0 {
+				gotCores = result[EnflameVGCUDevice][0].Usedcores
+			}
+			t.Logf("core quota limit=%d, profile core cost=%d, fit=%v, reason=%q", tt.coreLimit, gotCores, fit, reason)
+			assert.Equal(t, fit, tt.wantFit, "reason: %q", reason)
+			if !tt.wantFit {
+				assert.Assert(t, strings.Contains(reason, common.ResourceQuotaNotFit), "reason: %q", reason)
+			}
+		})
+	}
 }
 
 func TestFit_MutexRejectsUsedDevice(t *testing.T) {

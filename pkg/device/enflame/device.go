@@ -503,6 +503,13 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", profileCorePercent)
 			continue
 		}
+		if !device.FitPodQuota(pod, allocated, EnflameVGCUDevice, tmpDevs[k.Type], device.ContainerDevice{
+			UUID: dev.ID, Type: EnflameVGCUDevice, Usedmem: profileMemoryMiB, Usedcores: profileCorePercent,
+		}) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", profileMemoryMiB, "coresreq", profileCorePercent)
+			continue
+		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
