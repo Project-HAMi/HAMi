@@ -61,6 +61,7 @@ const (
 	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"
 	CardMPSV3Incompatible             = "CardMPSV3Incompatible"
 	NodeInsufficientDevice            = "NodeInsufficientDevice"
+	NodeRequiresAllDevices            = "NodeRequiresAllDevices"
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"
 	NodeFitPod                        = "NodeFitPod"

@@ -36,6 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/biren"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
+	"github.com/Project-HAMi/HAMi/pkg/device/googletpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -113,6 +114,8 @@ kunlun:
   resourceCountName: "kunlunxin.com/xpu"
 tecorigin:
   resourceCountName: "tecorigin.com/gpucore"
+googletpu:
+  resourceCountName: "google.com/tpu"
 vnpus:
   hamiVnpuCore: false
   configs:
@@ -234,6 +237,7 @@ func Test_LoadConfig(t *testing.T) {
 		{"Enflame Config", createEnflameConfig(), configData.EnflameConfig},
 		{"Kunlun Config", createKunlunConfig(), configData.KunlunConfig},
 		{"Tecorigin Config", createTecoriginConfig(), configData.TecoConfig},
+		{"Google TPU Config", createGoogleTPUConfig(), configData.GoogleTPUConfig},
 	}
 
 	for _, test := range dataDrivenTests {
@@ -388,6 +392,12 @@ func createKunlunConfig() kunlun.KunlunConfig {
 func createTecoriginConfig() tecorigin.TecoConfig {
 	return tecorigin.TecoConfig{
 		ResourceCountName: "tecorigin.com/gpucore",
+	}
+}
+
+func createGoogleTPUConfig() googletpu.GoogleTPUConfig {
+	return googletpu.GoogleTPUConfig{
+		ResourceCountName: "google.com/tpu",
 	}
 }
 
@@ -546,6 +556,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		vastai.VastaiDevice:          vastai.VastaiCommonWord,
 		biren.BirenDevice:            biren.BirenCommonWord,
 		tecorigin.TecoDevice:         tecorigin.TecoCommonWord,
+		googletpu.GoogleTPUDevice:    googletpu.GoogleTPUCommonWord,
 		remotegpu.RemoteGPUDevice:    remotegpu.RemoteGPUCommonWord,
 	}
 
@@ -634,6 +645,9 @@ func Test_validateConfig(t *testing.T) {
 	tecoriginOnly := &Config{
 		TecoConfig: tecorigin.TecoConfig{ResourceCountName: "tecorigin.com/gpucore"},
 	}
+	googleTPUOnly := &Config{
+		GoogleTPUConfig: googletpu.GoogleTPUConfig{ResourceCountName: "google.com/tpu"},
+	}
 
 	coresTooHigh := &Config{
 		NvidiaConfig: nvidia.NvidiaConfig{ResourceCountName: "nvidia.com/gpu", DefaultCores: 101},
@@ -660,6 +674,7 @@ func Test_validateConfig(t *testing.T) {
 		{"Vastai only", vastaiOnly, ""},
 		{"Biren only", birenOnly, ""},
 		{"Tecorigin only", tecoriginOnly, ""},
+		{"Google TPU only", googleTPUOnly, ""},
 		{"DefaultCores above 100", coresTooHigh, "defaultCores is a percentage"},
 		{"DefaultCores negative", coresNegative, "defaultCores is a percentage"},
 		{"DefaultMemory negative", memoryNegative, "defaultMemory must not be negative"},

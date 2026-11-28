@@ -39,6 +39,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/biren"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
+	"github.com/Project-HAMi/HAMi/pkg/device/googletpu"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -128,6 +129,7 @@ type Config struct {
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	BirenConfig     biren.BirenConfig         `yaml:"biren"`
 	TecoConfig      tecorigin.TecoConfig      `yaml:"tecorigin"`
+	GoogleTPUConfig googletpu.GoogleTPUConfig `yaml:"googletpu"`
 	RemoteGPUConfig remotegpu.RemoteGPUConfig `yaml:"remotegpu"`
 	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
@@ -284,6 +286,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return tecorigin.InitTecoDevice(tecoConfig), nil
 		}, config.TecoConfig},
+		{googletpu.GoogleTPUDevice, googletpu.GoogleTPUCommonWord, func(cfg any) (device.Devices, error) {
+			googleTPUConfig, ok := cfg.(googletpu.GoogleTPUConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", googletpu.GoogleTPUCommonWord)
+			}
+			return googletpu.InitGoogleTPUDevice(googleTPUConfig), nil
+		}, config.GoogleTPUConfig},
 		{remotegpu.RemoteGPUDevice, remotegpu.RemoteGPUCommonWord, func(cfg any) (device.Devices, error) {
 			remoteGPUConfig, ok := cfg.(remotegpu.RemoteGPUConfig)
 			if !ok {
@@ -342,6 +351,7 @@ func anyDeviceConfigured(config *Config) bool {
 		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
 		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
 		!reflect.DeepEqual(config.TecoConfig, tecorigin.TecoConfig{}) ||
+		!reflect.DeepEqual(config.GoogleTPUConfig, googletpu.GoogleTPUConfig{}) ||
 		!reflect.DeepEqual(config.RemoteGPUConfig, remotegpu.RemoteGPUConfig{}) ||
 		len(config.VNPUs.Configs) > 0
 }
@@ -519,6 +529,8 @@ awsneuron:
   resourceCoreName: "aws.amazon.com/neuroncore"
 amd:
   resourceCountName: "amd.com/gpu"
+googletpu:
+  resourceCountName: "google.com/tpu"
 vnpus:
   hamiVnpuMode: template
   configs:
