@@ -150,7 +150,7 @@ func (s *Scheduler) topologyGroupPlacement(task *corev1.Pod, group string) []str
 		if info.Pod == nil || info.UID == task.UID || info.Namespace != task.Namespace {
 			continue
 		}
-		if info.Pod.DeletionTimestamp != nil {
+		if info.DeletionTimestamp != nil {
 			continue
 		}
 		if topologyGroupKey(info.Pod) != group {
