@@ -194,10 +194,20 @@ func (sdev *MetaxSDevices) checkType(annos map[string]string, d device.DeviceUsa
 	return strings.Compare(n.Type, MetaxSGPUDevice) == 0
 }
 
+// CheckHealth needs both the device annotation and the sGPU count in
+// Allocatable. The annotation stays on the node after the device plugin
+// stops, while kubelet sets the count in Allocatable to 0.
 func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	if n == nil {
+		return false, false
+	}
 	devices, _ := sdev.getMetaxSDevices(*n)
-
-	return len(devices) > 0, true
+	countQty := n.Status.Allocatable[corev1.ResourceName(MetaxResourceNameVCount)]
+	count := countQty.Value()
+	if len(devices) == 0 {
+		count = 0
+	}
+	return device.AllocatableHealth(devType, n.Name, count, int64(len(devices)), n.Annotations[MetaxSDeviceAnno])
 }
 
 func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) (device.ContainerDeviceRequest, error) {

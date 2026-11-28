@@ -126,63 +126,49 @@ func TestGCUDevices_MutateAdmission(t *testing.T) {
 }
 
 func TestGCUDevices_CheckHealth(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			devType string
-			node    *corev1.Node
+	InitGCUDevice(EnflameConfig{ResourceNameGCU: "enflame.com/gcu"})
+	dev := &GCUDevices{}
+	node := func(name string, capacity, allocatable int64) *corev1.Node {
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Capacity:    corev1.ResourceList{"enflame.com/gcu": *resource.NewQuantity(capacity, resource.DecimalSI)},
+				Allocatable: corev1.ResourceList{"enflame.com/gcu": *resource.NewQuantity(allocatable, resource.DecimalSI)},
+			},
 		}
-		wantHealthy     bool
-		wantSchedulable bool
-	}{
-		{
-			name: "Node with GCU resources",
-			args: struct {
-				devType string
-				node    *corev1.Node
-			}{
-				devType: "GCU",
-				node: &corev1.Node{
-					Status: corev1.NodeStatus{
-						Capacity: corev1.ResourceList{
-							"enflame.com/gcu": *resource.NewQuantity(2, resource.DecimalSI),
-						},
-					},
-				},
-			},
-			wantHealthy:     true,
-			wantSchedulable: true,
-		},
-		{
-			name: "Node without GCU resources",
-			args: struct {
-				devType string
-				node    *corev1.Node
-			}{
-				devType: "GCU",
-				node: &corev1.Node{
-					Status: corev1.NodeStatus{
-						Capacity: corev1.ResourceList{},
-					},
-				},
-			},
-			wantHealthy:     false,
-			wantSchedulable: true,
-		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			config := EnflameConfig{
-				ResourceNameGCU: "enflame.com/gcu",
-			}
-			InitGCUDevice(config)
-			dev := &GCUDevices{}
-			healthy, schedulable := dev.CheckHealth(test.args.devType, test.args.node)
-			assert.Equal(t, healthy, test.wantHealthy)
-			assert.Equal(t, schedulable, test.wantSchedulable)
-		})
+	// The registration state is global, so -count=N must start clean.
+	reset := func() {
+		for _, name := range []string{"gcu-health-none", "gcu-health-gone", "gcu-health-up"} {
+			device.ForgetRegisteredDevices(EnflameGCUDevice, name)
+		}
 	}
+	reset()
+	t.Cleanup(reset)
+
+	healthy, needUpdate := dev.CheckHealth(EnflameGCUDevice, nil)
+	assert.Assert(t, !healthy && !needUpdate, "a nil node is not healthy")
+
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gcu-health-none"}})
+	assert.Assert(t, !healthy && !needUpdate, "a node without the resource is not healthy")
+
+	// kubelet keeps the cards in Capacity when the plugin stops or reports
+	// them unhealthy, and sets Allocatable to 0.
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-gone", 4, 0))
+	assert.Assert(t, !healthy && !needUpdate, "a node with 0 allocatable cards is not healthy")
+
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-up", 4, 4))
+	assert.Assert(t, healthy && needUpdate, "the first healthy check reads the devices")
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-up", 4, 4))
+	assert.Assert(t, healthy && !needUpdate, "an unchanged node is not read again")
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-up", 4, 3))
+	assert.Assert(t, healthy && needUpdate, "a changed card count is read again")
+
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-up", 4, 0))
+	assert.Assert(t, !healthy && !needUpdate, "losing all cards makes the node unhealthy")
+	healthy, needUpdate = dev.CheckHealth(EnflameGCUDevice, node("gcu-health-up", 4, 4))
+	assert.Assert(t, healthy && needUpdate, "recovered cards are read again")
 }
 
 func TestGCUDevices_NodeCleanUp(t *testing.T) {
